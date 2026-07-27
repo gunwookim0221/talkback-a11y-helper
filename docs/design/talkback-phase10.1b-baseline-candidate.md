@@ -249,3 +249,29 @@ Phase 10.2는 Candidate의 canonical JSON, EnvironmentProfile, Artifact Manifest
 입력으로 사용한다. 구현 대상은 offline revalidation, manual approve/reject/supersede lifecycle,
 immutable approved revision materialization, candidate/core checksum catalog, required supporting
 artifact pinning, known-issue reviewed snapshot과 append-only audit log다.
+
+## 13. Candidate v2 Review Domain Contract
+
+새로 생성하는 Candidate는 `talkback-baseline-candidate-v2`를 사용한다. v1 문서는 수정하지
+않으며 read-only validation과 Comparator replay 대상으로 계속 지원한다.
+
+Review Generator와 Candidate Builder는 `tb_runner.review_classification`의 동일한 분류 함수를
+사용한다. 분류 domain은 `qa_accessibility`, `automation_engine`, `unknown`이다. Issue Type만
+보지 않고 최종 의미를 판정하며, `terminal_not_handled`, `move_failed`,
+`repeat_no_progress`, `target_not_found`, recovery/identity/coverage/traversal/platform/environment
+reason은 `EMPTY_VISIBLE` 같은 mismatch보다 우선하여 `automation_engine`으로 분류한다.
+
+v2의 `limitations`에는 QA가 실제 TalkBack 또는 화면 텍스트를 판정할 항목만 둔다.
+`automation_diagnostics`에는 자동화 엔진 진단을 별도로 보존한다. 각 record는 최소한 다음
+provenance를 유지한다.
+
+- `review_domain`, `classification_reason`
+- `scenario_id`, `step`, `mismatch_type`, `failure_reason`
+- `resource_id`, source row, transaction/evidence reference
+- canonical `source_signature`와 그 digest
+
+`review_requirements`는 QA reviewer record 수와 Automation acknowledgment 수를 계산한다.
+`unknown`은 자동 수락하지 않으며 승인 전에 분류를 보강해야 한다. Candidate 생성 시점에는
+reviewer disposition이 없으므로 Known Limitation snapshot 수를 고정하지 않는다. snapshot 수는
+approval 시점에 reviewer decision으로 계산한다. 이 분리는 raw FAIL/WARN, Comparator, Verdict
+또는 Run 결과를 변경하지 않는다.

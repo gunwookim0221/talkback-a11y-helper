@@ -30,6 +30,8 @@ class BaselineCandidate:
     approval_state: ApprovalState
     approval_eligibility: ApprovalEligibility
     limitations: tuple[dict[str, Any], ...]
+    automation_diagnostics: tuple[dict[str, Any], ...]
+    review_requirements: dict[str, int]
     artifact_manifest: dict[str, Any]
     comparison_contract: dict[str, Any]
     validation_report: dict[str, Any]

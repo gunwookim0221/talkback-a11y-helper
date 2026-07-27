@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from tb_runner.baseline_candidate import ApprovalEligibility, BaselineCandidate
+from tb_runner.candidate_review_issues import classify_candidate_review_issues
 from tb_runner.baseline_candidate_schema import (
     ARTIFACT_MANIFEST_SCHEMA_VERSION,
     BASELINE_CANDIDATE_SCHEMA_VERSION,
@@ -696,11 +697,15 @@ def _run_summary(summary: Mapping[str, Any], scenario_set: Mapping[str, Any]) ->
 
 
 def _limitations(
+    run_root: Path,
     summary: Mapping[str, Any],
     fingerprint: Mapping[str, Any],
     environment_profile: Mapping[str, Any],
     scenario_set: Mapping[str, Any],
-) -> tuple[dict[str, Any], ...]:
+) -> tuple[
+    tuple[dict[str, Any], ...],
+    tuple[dict[str, Any], ...],
+]:
     limitations: list[dict[str, Any]] = []
     if not environment_profile:
         limitations.append(
@@ -733,21 +738,10 @@ def _limitations(
                 "message": "Candidate covers a targeted scenario subset",
             }
         )
-    issues = summary.get("quality_issues")
-    if isinstance(issues, list):
-        for item in issues:
-            if not isinstance(item, Mapping) or not item.get("mismatch_type"):
-                continue
-            limitations.append(
-                {
-                    "code": str(item.get("mismatch_type")),
-                    "category": "OBSERVED_RESULT_LIMITATION",
-                    "scenario_id": item.get("scenario_id"),
-                    "raw_result": item.get("final_result"),
-                    "review_status": "UNREVIEWED",
-                }
-            )
-    return tuple(limitations)
+    qa, automation, unknown = classify_candidate_review_issues(run_root, summary)
+    limitations.extend(qa)
+    limitations.extend(unknown)
+    return tuple(limitations), automation
 
 
 def _candidate_reference(candidate_id: str, filename: str, state: str, eligible: bool) -> dict[str, Any]:
@@ -858,7 +852,22 @@ def build_baseline_candidate(
         "reconciliation": reconciliation,
         "profiler": profiler,
     }
-    limitations = _limitations(summary, fingerprint, profile, scenario_set)
+    limitations, automation_diagnostics = _limitations(
+        root,
+        summary,
+        fingerprint,
+        profile,
+        scenario_set,
+    )
+    qa_limitation_count = sum(
+        1
+        for item in limitations
+        if item.get("review_domain") == "qa_accessibility"
+    )
+    review_requirements = {
+        "qa_reviewer_decisions": qa_limitation_count,
+        "automation_acknowledgments": len(automation_diagnostics),
+    }
     source_run_id = _source_run_id(root)
     source_batch_id = str(batch.get("batch_id") or "") or None
     evidence_run_id = str(evidence_payload.get("run_id") or "") or None
@@ -884,6 +893,8 @@ def build_baseline_candidate(
         "environment_fingerprint": fingerprint,
         "document_digest": environment_digest,
         "limitations": list(limitations),
+        "automation_diagnostics": list(automation_diagnostics),
+        "review_requirements": review_requirements,
         "artifact_manifest": _artifact_manifest(root, source_batch_id),
         "comparison_contract": comparison_contract,
     }
@@ -932,6 +943,8 @@ def build_baseline_candidate(
             reasons=tuple(report.get("failure_reasons") or []),
         ),
         limitations=limitations,
+        automation_diagnostics=automation_diagnostics,
+        review_requirements=review_requirements,
         artifact_manifest=artifact_manifest,
         comparison_contract=comparison_contract,
         validation_report=report,
@@ -942,7 +955,7 @@ def build_baseline_candidate(
         _atomic_write_json(path, candidate.to_dict())
     reference = _candidate_reference(candidate_id, filename, approval_state.value, eligible)
     reference["document_digest"] = _digest_reference(
-        candidate_digest, "canonical-baseline-candidate-v1"
+        candidate_digest, "canonical-baseline-candidate-v2"
     )
     return CandidateBuildResult(candidate, path, candidate_digest, reference)
 

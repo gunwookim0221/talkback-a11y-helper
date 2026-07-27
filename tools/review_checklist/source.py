@@ -4,6 +4,11 @@ from pathlib import Path
 from typing import Final
 
 import openpyxl
+from tb_runner.review_signature import (
+    review_source_signature,
+    review_source_signature_digest,
+    transaction_for_review_events,
+)
 
 from .models import RunMetadata, SourceRow
 from .classification import classify_review
@@ -187,12 +192,25 @@ def read_review_rows(source: Path) -> tuple[RunMetadata, list[SourceRow], list[d
             bounds = _value(result, raw_row, "focus_bounds", "actual_focus_bounds")
             content_description = _value(result, raw_row, "focus_content_description")
             class_name = _value(result, raw_row, "class_name", "focus_class_name") or _focus_node_class(raw_row)
+            row_events = evidence_events.get((scenario, step), [])
             speech_status = classify_speech_status(
                 speech=speech,
                 visible_text=visible_text,
                 content_description=content_description,
                 class_name=class_name,
-                evidence=evidence_for_row(evidence_events.get((scenario, step), []), resource_id),
+                evidence=evidence_for_row(row_events, resource_id),
+            )
+            source_transaction_id = transaction_for_review_events(
+                row_events,
+                resource_id,
+            )
+            source_signature = review_source_signature(
+                scenario_id=scenario,
+                step=step,
+                mismatch_type=_value(result, raw_row, "mismatch_type"),
+                resource_id=resource_id,
+                transaction_id=source_transaction_id,
+                source_row=result_row,
             )
             context = focus_context(raw=raw_row, visible_text=visible_text, speech=speech, resource_id=resource_id, parent_text=parent_text, representative_text=representative_text, screen=_value(result, raw_row, "context_type", "tab_name") or scenario, bounds=bounds, crop_path=crop_path, display_width=metadata.display_width, display_height=metadata.display_height)
             if full_path is not None:
@@ -215,7 +233,8 @@ def read_review_rows(source: Path) -> tuple[RunMetadata, list[SourceRow], list[d
                 review_description = context.description
             review_description = f"{review_description}\n\n{speech_review_instruction(speech_status, speech)}"
             failure_reason = _value(result, raw_row, "failure_reason")
-            classification = classify_review(mismatch_type=_value(result, raw_row, "mismatch_type"), failure_reason=failure_reason)
+            mismatch_type = _value(result, raw_row, "mismatch_type")
+            classification = classify_review(mismatch_type=mismatch_type, failure_reason=failure_reason)
             failures.append(SourceRow(
                 result_row=result_row,
                 scenario_id=scenario,
@@ -224,7 +243,8 @@ def read_review_rows(source: Path) -> tuple[RunMetadata, list[SourceRow], list[d
                 screen=_value(result, raw_row, "context_type", "tab_name"),
                 automatic_result=status,
                 issue_type=_issue_type(result),
-                mismatch_reason=failure_reason or _value(result, raw_row, "mismatch_type"),
+                mismatch_type=mismatch_type,
+                mismatch_reason=failure_reason or mismatch_type,
                 visible_text=_qa_display_text(visible_text, context.target if context.target_source == "OCR(crop)" else "", placeholder="화면 텍스트 없음\n(실제 화면 표시 여부 확인)"),
                 speech=_qa_display_text(expected_speech, speech, context.target if context.target_source == "OCR(crop)" else "", visible_text, placeholder="예상 발화 없음\n(새로운 Focus가 실제로 발화하는지 확인)"),
                 speech_status=speech_status.label,
@@ -248,6 +268,8 @@ def read_review_rows(source: Path) -> tuple[RunMetadata, list[SourceRow], list[d
                 traversal_state=_value(result, raw_row, "move_result", "row_source"),
                 recovery_state=_value(result, raw_row, "overlay_recovery_status", "recovery_status"),
                 terminal_state=_value(result, raw_row, "stop_reason", "failure_reason", "final_result"),
+                source_transaction_id=source_transaction_id,
+                source_signature_digest=review_source_signature_digest(source_signature),
             ))
         elif status == "WARN":
             failure = _value(result, raw_row, "failure_reason", "stop_reason", "move_result") or "WARN"

@@ -55,6 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
     approve.add_argument("--acceptance", choices=("PASS", "PASS WITH LIMITATIONS"), required=True)
     approve.add_argument("--limitations-json")
     approve.add_argument("--known-limitations-json")
+    approve.add_argument("--automation-acknowledgments-json")
     approve.add_argument("--accept-limitations", action="store_true")
     approve.add_argument("--supersedes")
     approve.add_argument("--pin-optional", action="append", default=[])
@@ -122,6 +123,9 @@ def main(argv: list[str] | None = None) -> int:
                     acceptance_result=args.acceptance,
                     structured_limitations=tuple(_json_file(args.limitations_json)),
                     known_limitation_snapshot=tuple(_json_file(args.known_limitations_json)),
+                    automation_acknowledgments=tuple(
+                        _json_file(args.automation_acknowledgments_json)
+                    ),
                     limitations_explicitly_accepted=args.accept_limitations,
                     supersedes=args.supersedes,
                     artifact_pin_policy=ArtifactPinPolicy(optional_artifact_types=tuple(args.pin_optional)),
@@ -134,6 +138,7 @@ def main(argv: list[str] | None = None) -> int:
                     "package_path": result.package_path,
                     "core_checksums": result.core_checksums,
                     "warnings": result.warnings,
+                    "approval_report": result.approval_report,
                 }
             )
         elif args.command == "reject":

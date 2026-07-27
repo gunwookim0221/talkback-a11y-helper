@@ -255,3 +255,37 @@ checksum 검증을 먼저 수행한다. 입력 canonical truth는 다음이다.
 Phase 10.3은 raw XLSX를 canonical comparator input으로 사용하거나 catalog의 가장 최신 revision을
 자동 선택하지 않는다. Active package가 없거나 checksum/schema가 틀리면 INCOMPARABLE/validation
 failure로 처리해야 한다.
+
+## 17. Approval v2: QA Review와 Automation Acknowledgment 분리
+
+`talkback-baseline-candidate-v2` 승인에서는 서로 다른 두 계약을 혼합하지 않는다.
+
+- `qa_accessibility`: reviewer가 실제 TalkBack/화면을 확인한 record와, 제한을 수락하는 경우
+  reviewed known-limitation snapshot을 요구한다.
+- `automation_engine`: 별도 acknowledgment를 요구한다. acknowledgment는
+  `acknowledged_by`, `acknowledged_at`, `owner`, `review_domain`, `scenario_id`,
+  `failure_reason`, `evidence`, `disposition`을 보존한다.
+- `unknown`: 승인 blocker다.
+
+QA record는 `scenario_id + mismatch_type`만으로 연결하지 않는다. `step`, `resource_id`,
+transaction/evidence와 source signature를 포함한 one-to-one exact matching을 사용하여 같은
+Scenario에 같은 mismatch가 반복되어도 서로 대체되지 않게 한다. Automation disposition
+`requires_engine_fix`는 acknowledgment가 있어도 approval hold다. 그 밖의 disposition도 진단을
+삭제하거나 QA limitation으로 바꾸지 않고 Approved Baseline의 별도 collection에 보존한다.
+
+새 Approved Baseline은 `talkback-approved-baseline-v2`로 materialize된다. 기존 v1 Candidate와
+Flip6 v1 Baseline은 immutable하게 유지되고 기존 adapter로 replay할 수 있다. v1 승인 경로는
+기존 계약을 그대로 사용하며, v2 필드를 v1 문서에 backfill하거나 기존 package를 재작성하지
+않는다.
+
+### Reviewer disposition과 snapshot 조건
+
+모든 QA record에는 exact source signature와 `review_decision`이 필요하다. `정상 발화`,
+`False Positive`, `재현 불가`는 review complete지만 Known Limitation snapshot을 만들지 않는다.
+`실제 접근성 문제`와 `Accepted Known Limitation`만 snapshot을 요구하고
+`PASS WITH LIMITATIONS` 승인에 연결된다. `추가 조사 필요`와 `미검토`는 approval hold다.
+
+Approval report는 `qa_review_rows`, `qa_completed_rows`, `qa_snapshot_required`,
+`qa_snapshot_present`, `automation_acknowledgments_required`,
+`automation_acknowledgments_present`를 immutable approval metadata에 보존한다. QA 완료 수는
+QA review 수와 같아야 하고 snapshot present 수는 snapshot required 수와 같아야 한다.

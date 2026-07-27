@@ -5,7 +5,11 @@ from __future__ import annotations
 from enum import Enum
 
 
-BASELINE_SCHEMA_VERSION = "talkback-approved-baseline-v1"
+BASELINE_SCHEMA_VERSION_V1 = "talkback-approved-baseline-v1"
+BASELINE_SCHEMA_VERSION = "talkback-approved-baseline-v2"
+SUPPORTED_BASELINE_SCHEMA_VERSIONS = frozenset(
+    {BASELINE_SCHEMA_VERSION_V1, BASELINE_SCHEMA_VERSION}
+)
 BASELINE_KEY_SCHEMA_VERSION = "talkback-baseline-key-v1"
 APPROVED_ARTIFACT_MANIFEST_SCHEMA_VERSION = "talkback-approved-artifact-manifest-v1"
 LIFECYCLE_EVENT_SCHEMA_VERSION = "talkback-baseline-lifecycle-event-v1"
@@ -43,9 +47,11 @@ __all__ = [
     "ARTIFACT_METADATA_SCHEMA_VERSION",
     "BASELINE_KEY_SCHEMA_VERSION",
     "BASELINE_SCHEMA_VERSION",
+    "BASELINE_SCHEMA_VERSION_V1",
     "CATALOG_SCHEMA_VERSION",
     "LIFECYCLE_EVENT_SCHEMA_VERSION",
     "REPOSITORY_VERSION",
+    "SUPPORTED_BASELINE_SCHEMA_VERSIONS",
     "AcceptanceResult",
     "LifecycleEventType",
     "LifecycleState",

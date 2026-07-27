@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from tb_runner.baseline_artifact_store import sha256_file
-from tb_runner.baseline_candidate_schema import BASELINE_CANDIDATE_SCHEMA_VERSION
+from tb_runner.baseline_candidate_schema import (
+    SUPPORTED_BASELINE_CANDIDATE_SCHEMA_VERSIONS,
+)
 from tb_runner.baseline_candidate_validator import validate_baseline_candidate
 from tb_runner.canonical_json import canonical_json_bytes, canonical_sha256
 from tb_runner.environment_fingerprint import build_environment_fingerprint
@@ -117,7 +119,7 @@ def offline_revalidate_candidate(
     )
     check(
         "candidate_schema",
-        candidate.get("candidate_schema") == BASELINE_CANDIDATE_SCHEMA_VERSION,
+        candidate.get("candidate_schema") in SUPPORTED_BASELINE_CANDIDATE_SCHEMA_VERSIONS,
         "candidate schema is supported",
     )
     check(

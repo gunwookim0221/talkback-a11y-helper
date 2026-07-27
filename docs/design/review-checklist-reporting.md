@@ -113,3 +113,33 @@ Use the CLI `generate` command for a completed Run containing the source Excel. 
 `summary` command when an operator needs one progress view across OS/environment Runs. The
 combined workbook reads each detail workbook's Summary and links to each detail file; it never
 merges detailed rows across Runs.
+
+## Shared classification and approval hand-off
+
+Review Checklist와 Baseline Candidate는 하나의 review-domain contract를 사용한다. QA가 실제
+TalkBack/화면을 판정할 수 있는 항목은 `qa_accessibility`, 자동화 순회·복구·terminal·coverage
+진단은 `automation_engine`, legacy provenance만으로 안전하게 판정할 수 없는 항목은
+`unknown`이다. Automation reason은 표시 mismatch보다 우선한다. 따라서
+`EMPTY_VISIBLE + terminal_not_handled`는 QA Checklist가 아니라 Automation Diagnostic으로
+가고, 실제 speech/visible mismatch는 automation reason이 없는 한 QA에 남는다.
+
+QA sheet의 `Step`은 사람이 따라갈 순서가 아니라 숨김 provenance다. 다음 숨김 열도 함께
+기록한다.
+
+- Scenario ID
+- 원본 Mismatch Type
+- Resource ID
+- Transaction ID
+- Source Signature
+
+Source Signature는 Candidate v2가 저장하는 signature와 같은 입력으로 계산한다. QA decision을
+승인 입력으로 옮길 때 이 signature로 one-to-one matching하며, Scenario와 mismatch만 같은
+다른 Focus 항목을 대신 검토한 것으로 취급하지 않는다. Automation Diagnostic은 QA decision
+대상이 아니며 별도 developer acknowledgment 계약으로 전달한다. Review workbook 자체는
+Candidate, approval, Comparator 또는 Verdict를 변경하지 않는다.
+
+모든 QA row는 `review_decision`으로 완료되어야 한다. 그러나 Known Limitation snapshot은
+`실제 접근성 문제` 또는 `Accepted Known Limitation`으로 최종 결정된 row에만 필요하다.
+`정상 발화`, `False Positive`, `재현 불가`는 snapshot 없이 complete이며, `추가 조사 필요`와
+`미검토`는 approval hold다. 이 decision은 Source Signature로 Candidate limitation과 one-to-one
+matching하고 Automation Diagnostic에는 적용하지 않는다.

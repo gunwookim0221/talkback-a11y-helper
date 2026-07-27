@@ -12,7 +12,7 @@ from tools.review_checklist.qa_context import _resource_label
 QA_HEADERS = [
     "Review ID", "Scenario", "Focus Target", "Approximate Position", "Review Description",
     "Screenshot", "Speech Status", "Visible Text", "Validator Checklist", "Validator Comment",
-    "Step",
+    "Step", "Scenario ID", "Mismatch Type", "Resource ID", "Transaction ID", "Source Signature",
 ]
 
 
@@ -62,6 +62,7 @@ def test_generate_review_checklist_selects_failures_and_preserves_missing_eviden
     assert checklist.max_row == 2
     assert [cell.value for cell in checklist[1]] == QA_HEADERS
     assert checklist.column_dimensions["K"].hidden is True
+    assert checklist.column_dimensions["P"].hidden is True
     assert checklist.cell(2, 2).value == "Food"
     assert checklist.cell(2, 6).value == "Full screenshot not captured for this run"
     assert checklist.cell(2, 7).value == "Unknown"

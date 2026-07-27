@@ -9,6 +9,7 @@ from typing import Any, Mapping
 from tb_runner.baseline_candidate_schema import (
     BASELINE_CANDIDATE_SCHEMA_VERSION,
     COMPARISON_CONTRACT_VERSION,
+    SUPPORTED_BASELINE_CANDIDATE_SCHEMA_VERSIONS,
     ValidationStatus,
 )
 from tb_runner.environment_fingerprint import ENVIRONMENT_FINGERPRINT_SCHEMA_VERSION
@@ -106,7 +107,7 @@ def validate_baseline_candidate(candidate: Mapping[str, Any]) -> dict[str, Any]:
 
     add(
         "candidate_schema",
-        candidate.get("candidate_schema") == BASELINE_CANDIDATE_SCHEMA_VERSION,
+        candidate.get("candidate_schema") in SUPPORTED_BASELINE_CANDIDATE_SCHEMA_VERSIONS,
         "candidate schema is supported",
         actual=candidate.get("candidate_schema"),
     )
@@ -270,11 +271,47 @@ def validate_baseline_candidate(candidate: Mapping[str, Any]) -> dict[str, Any]:
 
     limitations = candidate.get("limitations")
     limitation_items = limitations if isinstance(limitations, list) else []
+    automation = candidate.get("automation_diagnostics")
+    automation_items = automation if isinstance(automation, list) else []
+    is_v2 = candidate.get("candidate_schema") == BASELINE_CANDIDATE_SCHEMA_VERSION
+    add(
+        "candidate_review_domains",
+        not is_v2
+        or (
+            isinstance(limitations, list)
+            and isinstance(automation, list)
+            and all(
+                _mapping(item).get("review_domain") in {"qa_accessibility", "unknown"}
+                for item in limitation_items
+            )
+            and all(
+                _mapping(item).get("review_domain") == "automation_engine"
+                for item in automation_items
+            )
+        ),
+        "candidate review domains are explicit and separated",
+    )
+    review_requirements = _mapping(candidate.get("review_requirements"))
+    qa_count = sum(
+        1
+        for item in limitation_items
+        if _mapping(item).get("review_domain") == "qa_accessibility"
+    )
+    add(
+        "candidate_review_requirements",
+        not is_v2
+        or review_requirements
+        == {
+            "qa_reviewer_decisions": qa_count,
+            "automation_acknowledgments": len(automation_items),
+        },
+        "candidate review requirements match classified issue counts",
+    )
     warn(
         "limitations_present",
-        bool(limitation_items),
+        bool(limitation_items or automation_items),
         "candidate contains unreviewed limitations",
-        count=len(limitation_items),
+        count=len(limitation_items) + len(automation_items),
     )
     warn(
         "historical_backfill",

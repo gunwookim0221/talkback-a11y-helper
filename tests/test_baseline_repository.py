@@ -16,7 +16,6 @@ from tb_runner.baseline_repository import (
 )
 from tb_runner.baseline_repository_validator import offline_revalidate_candidate
 from tb_runner.baseline_cli import main as baseline_cli_main
-from tb_runner.canonical_json import canonical_json_bytes
 from tb_runner.environment_fingerprint import build_environment_fingerprint
 from tests.test_baseline_candidate_builder import CAPTURED_AT, _create_run, _write_json
 
@@ -82,6 +81,21 @@ def _reviewed_limitation():
         "match_signature": {"mismatch_type": "EMPTY_VISIBLE", "node_signature": "stable-1"},
         "review_at": "2026-10-15T00:00:00Z",
         "evidence_references": ["qa-run://batch_test/device/evidence"],
+        "review_decision": "실제 접근성 문제",
+    }
+
+
+def _automation_acknowledgment():
+    return {
+        "acknowledged_by": "automation.owner",
+        "acknowledged_at": "2026-07-27T00:00:00Z",
+        "owner": "automation-team",
+        "domain": "automation_engine",
+        "scenario_id": "life_clothing_care_plugin",
+        "step": "2",
+        "failure_reason": "move_failed",
+        "evidence_references": ["qa-run://batch_test/device/evidence#transaction=tx-auto"],
+        "disposition": "tracked_backlog",
     }
 
 
@@ -176,6 +190,87 @@ def test_incomplete_and_complete_pass_with_limitations(tmp_path):
     assert baseline["acceptance_result"] == "PASS WITH LIMITATIONS"
     assert baseline["candidate_limitations"][0]["raw_result"] == "FAIL"
     assert baseline["known_limitation_snapshot"][0]["issue_id"] == "TB-KI-TEST-1"
+
+
+def test_v2_approval_separates_qa_review_from_automation_acknowledgment(tmp_path):
+    run_root = _create_run(tmp_path / "run")
+    summary_path = run_root / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["scenario_result_status"] = "warning"
+    summary["quality_issues"] = [
+        {
+            "mismatch_type": "EMPTY_VISIBLE",
+            "scenario_id": "menu_main",
+            "step": "1",
+            "final_result": "FAIL",
+            "resource_id": "settings",
+            "transaction_id": "tx-qa",
+            "evidence_reference": "qa-run://batch_test/device/evidence#transaction=tx-qa",
+        },
+        {
+            "mismatch_type": "EMPTY_VISIBLE",
+            "scenario_id": "life_clothing_care_plugin",
+            "step": "2",
+            "final_result": "FAIL",
+            "failure_reason": "move_failed",
+            "resource_id": "DASC_0127-25",
+            "transaction_id": "tx-auto",
+            "evidence_reference": "qa-run://batch_test/device/evidence#transaction=tx-auto",
+        },
+    ]
+    _write_json(summary_path, summary)
+    candidate = build_baseline_candidate(run_root, write=True, integrate=False)
+    repository = _repository(tmp_path)
+    reviewed = {
+        **_reviewed_limitation(),
+        "step": "1",
+        "resource_id": "settings",
+        "match_signature": {
+            "mismatch_type": "EMPTY_VISIBLE",
+            "step": "1",
+            "resource_id": "settings",
+        },
+        "evidence_references": [
+            "qa-run://batch_test/device/evidence#transaction=tx-qa"
+        ],
+    }
+
+    with pytest.raises(BaselineRepositoryError, match="automation_acknowledgments"):
+        repository.approve(
+            _request(
+                candidate,
+                acceptance_result="PASS WITH LIMITATIONS",
+                structured_limitations=(reviewed,),
+                known_limitation_snapshot=(reviewed,),
+                limitations_explicitly_accepted=True,
+            )
+        )
+
+    approved = repository.approve(
+        _request(
+            candidate,
+            acceptance_result="PASS WITH LIMITATIONS",
+            structured_limitations=(reviewed,),
+            known_limitation_snapshot=(reviewed,),
+            automation_acknowledgments=(_automation_acknowledgment(),),
+            limitations_explicitly_accepted=True,
+        )
+    )
+    baseline = json.loads((approved.package_path / "baseline.json").read_text(encoding="utf-8"))
+
+    assert len(baseline["structured_limitations"]) == 1
+    assert len(baseline["known_limitation_snapshot"]) == 1
+    assert len(baseline["automation_acknowledgments"]) == 1
+    assert len(baseline["automation_diagnostics"]) == 1
+    assert approved.approval_report == {
+        "qa_review_rows": 1,
+        "qa_completed_rows": 1,
+        "qa_snapshot_required": 1,
+        "qa_snapshot_present": 1,
+        "automation_acknowledgments_required": 1,
+        "automation_acknowledgments_present": 1,
+    }
+    assert baseline["approval"]["review_validation"] == approved.approval_report
 
 
 def test_approved_package_modification_and_duplicate_approval_are_detected(tmp_path):

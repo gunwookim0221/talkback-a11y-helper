@@ -15,7 +15,7 @@ from .source import deterministic_pass_sample, read_pass_rows, read_review_rows
 QA_REVIEW_COLUMNS = [
     "Review ID", "Scenario", "Focus Target", "Approximate Position", "Review Description",
     "Screenshot", "Speech Status", "Visible Text", "Validator Checklist", "Validator Comment",
-    "Step",
+    "Step", "Scenario ID", "Mismatch Type", "Resource ID", "Transaction ID", "Source Signature",
 ]
 DECISIONS = ["미검토", "정상 발화", "실제 접근성 문제", "False Positive", "재현 불가", "추가 조사 필요"]
 HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
@@ -126,7 +126,8 @@ def _write_checklist(sheet: openpyxl.worksheet.worksheet.Worksheet, rows: list[S
         values = [
             f"{metadata.run_id}-R{index:03d}", row.scenario_name, row.focus_target, row.approximate_position,
             row.review_description, row.screenshot, row.speech_status, row.visible_text, row.validator_decision,
-            row.validator_comment, row.step,
+            row.validator_comment, row.step, row.scenario_id, row.mismatch_type,
+            row.resource_id, row.source_transaction_id, row.source_signature_digest,
         ]
         sheet.append(values)
         screenshot_cell = sheet.cell(sheet.max_row, 6)
@@ -147,7 +148,8 @@ def _write_checklist(sheet: openpyxl.worksheet.worksheet.Worksheet, rows: list[S
     for row_number, row in enumerate(rows, start=2):
         if row.screenshot_annotation:
             _add_screenshot_thumbnail(sheet, row_number, row.screenshot_annotation, source)
-    sheet.column_dimensions["K"].hidden = True
+    for column in ("K", "L", "M", "N", "O", "P"):
+        sheet.column_dimensions[column].hidden = True
 
 
 def _write_additional(sheet: openpyxl.worksheet.worksheet.Worksheet, warnings: list[dict[str, str]]) -> None:

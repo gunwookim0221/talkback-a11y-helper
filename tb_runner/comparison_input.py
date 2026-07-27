@@ -9,12 +9,12 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from tb_runner.baseline_candidate_schema import (
-    BASELINE_CANDIDATE_SCHEMA_VERSION,
     COMPARISON_CONTRACT_VERSION,
+    SUPPORTED_BASELINE_CANDIDATE_SCHEMA_VERSIONS,
 )
 from tb_runner.baseline_repository_schema import (
     APPROVED_ARTIFACT_MANIFEST_SCHEMA_VERSION,
-    BASELINE_SCHEMA_VERSION,
+    SUPPORTED_BASELINE_SCHEMA_VERSIONS,
 )
 from tb_runner.canonical_json import canonical_json_bytes, canonical_sha256
 from tb_runner.comparator_schema import (
@@ -342,7 +342,7 @@ def adapt_approved_baseline(
     manifest, _ = _load_json_document(
         package / "artifact_manifest.json", label="artifact_manifest"
     )
-    if baseline.get("schema_version") != BASELINE_SCHEMA_VERSION:
+    if baseline.get("schema_version") not in SUPPORTED_BASELINE_SCHEMA_VERSIONS:
         raise ComparatorContractError(
             "UNSUPPORTED_SCHEMA",
             "approved baseline schema is unsupported",
@@ -449,7 +449,7 @@ def adapt_candidate(
     environment_profile: str | Path | Mapping[str, Any] | None = None,
 ) -> ComparatorInput:
     candidate, digest = _load_json_document(candidate_source, label="candidate")
-    if candidate.get("candidate_schema") != BASELINE_CANDIDATE_SCHEMA_VERSION:
+    if candidate.get("candidate_schema") not in SUPPORTED_BASELINE_CANDIDATE_SCHEMA_VERSIONS:
         raise ComparatorContractError(
             "UNSUPPORTED_SCHEMA",
             "baseline candidate schema is unsupported",

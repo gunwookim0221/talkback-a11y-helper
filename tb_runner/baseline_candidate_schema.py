@@ -5,7 +5,11 @@ from __future__ import annotations
 from enum import Enum
 
 
-BASELINE_CANDIDATE_SCHEMA_VERSION = "talkback-baseline-candidate-v1"
+BASELINE_CANDIDATE_SCHEMA_VERSION_V1 = "talkback-baseline-candidate-v1"
+BASELINE_CANDIDATE_SCHEMA_VERSION = "talkback-baseline-candidate-v2"
+SUPPORTED_BASELINE_CANDIDATE_SCHEMA_VERSIONS = frozenset(
+    {BASELINE_CANDIDATE_SCHEMA_VERSION_V1, BASELINE_CANDIDATE_SCHEMA_VERSION}
+)
 ARTIFACT_MANIFEST_SCHEMA_VERSION = "talkback-baseline-artifact-manifest-v1"
 COMPARISON_CONTRACT_VERSION = "talkback-comparison-input-v1"
 SCENARIO_SET_SCHEMA_VERSION = "talkback-scenario-set-v1"
@@ -26,9 +30,11 @@ class ValidationStatus(str, Enum):
 __all__ = [
     "ARTIFACT_MANIFEST_SCHEMA_VERSION",
     "BASELINE_CANDIDATE_SCHEMA_VERSION",
+    "BASELINE_CANDIDATE_SCHEMA_VERSION_V1",
     "CANDIDATE_NORMALIZER_VERSION",
     "COMPARISON_CONTRACT_VERSION",
     "SCENARIO_SET_SCHEMA_VERSION",
+    "SUPPORTED_BASELINE_CANDIDATE_SCHEMA_VERSIONS",
     "ApprovalState",
     "ValidationStatus",
 ]

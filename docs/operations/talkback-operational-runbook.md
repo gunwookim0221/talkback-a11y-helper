@@ -342,3 +342,35 @@ The legacy QA Frontend README still describes the general run APIs; Phase 10 Com
 operations are now linked to this Runbook. The root README and docs index now point to the Phase 10
 closure/Runbook. Phase 10.3 design documents remain historical contracts; this Runbook is the
 current operator procedure when an older design description and an implemented CLI/UI detail differ.
+
+## 23. Candidate v2 Review and Approval Procedure
+
+새 Full Run Candidate는 Review Checklist와 동일한 common classification contract를 사용한다.
+승인 전 `review_requirements`와 실제 collection을 비교한다.
+
+1. `qa_accessibility` record마다 QA reviewer decision을 source signature로 exact-match한다.
+2. `실제 접근성 문제` 또는 `Accepted Known Limitation`으로 결정된 QA record에만 reviewed
+   known-limitation snapshot을 별도로 제공한다.
+3. `automation_engine` record마다 owner와 evidence가 있는 automation acknowledgment를
+   제공한다. `requires_engine_fix` disposition은 approval hold다.
+4. `unknown` record가 있으면 분류 provenance를 보강하고 Candidate를 다시 생성한다. 임의로
+   QA 또는 Automation에 넣지 않는다.
+5. offline validation과 repository verification을 수행한 후에만 승인한다.
+
+Automation acknowledgment JSON은 `--automation-acknowledgments-json`으로 전달한다. QA
+known-limitation JSON과 파일을 공유하지 않는다. acknowledgment가 있다는 이유로 원본 진단을
+무시하거나 QA limitation으로 snapshot하지 않는다.
+
+QA review JSON에는 각 row의 `review_decision`을 넣는다. `정상 발화`, `False Positive`,
+`재현 불가`는 snapshot 없이 완료되고, `실제 접근성 문제` 또는 `Accepted Known Limitation`만
+`--known-limitations-json`의 exact snapshot이 필요하다. `추가 조사 필요`와 `미검토`는
+approval hold다. 승인 결과와 Approved Baseline metadata의 `approval_report`에서 QA
+review/completed, snapshot required/present, automation acknowledgment required/present 수를
+확인한다.
+
+기존 v1 Candidate와 Flip6 v1 Baseline은 read-only/replay compatible하다. 기존 v1 파일이나
+Approved Baseline을 v2로 변환하여 덮어쓰지 않는다. 완료된 Run artifact가 온전하면 분류 계약
+변경 확인을 위해 Full Run을 다시 할 필요는 없다. `build_baseline_candidate(..., write=False,
+integrate=False)`로 읽기 전용 preview를 만들고 QA/Automation count와 source signature를
+검증한다. preview는 Run root에 Candidate 파일을 쓰거나 approval/repository mutation을
+수행하지 않는다.

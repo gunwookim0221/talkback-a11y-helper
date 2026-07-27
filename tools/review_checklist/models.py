@@ -28,6 +28,7 @@ class SourceRow:
     screen: str
     automatic_result: str
     issue_type: str
+    mismatch_type: str
     mismatch_reason: str
     visible_text: str
     speech: str
@@ -52,6 +53,8 @@ class SourceRow:
     traversal_state: str
     recovery_state: str
     terminal_state: str
+    source_transaction_id: str
+    source_signature_digest: str
     validator_decision: str = "미검토"
     validator_comment: str = ""
     reviewer: str = ""

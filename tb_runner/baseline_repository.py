@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
 from tb_runner.baseline_artifact_store import ContentAddressedArtifactStore, sha256_file
+from tb_runner.approval_contract import validate_v2_approval_report
+from tb_runner.baseline_candidate_schema import BASELINE_CANDIDATE_SCHEMA_VERSION
 from tb_runner.baseline_repository_schema import (
     APPROVED_ARTIFACT_MANIFEST_SCHEMA_VERSION,
     APP_INDEX_SCHEMA_VERSION,
@@ -55,6 +57,7 @@ class ApprovalRequest:
     acceptance_result: str
     structured_limitations: tuple[dict[str, Any], ...] = ()
     known_limitation_snapshot: tuple[dict[str, Any], ...] = ()
+    automation_acknowledgments: tuple[dict[str, Any], ...] = ()
     limitations_explicitly_accepted: bool = False
     supersedes: str | None = None
     artifact_pin_policy: ArtifactPinPolicy = field(default_factory=ArtifactPinPolicy)
@@ -67,6 +70,7 @@ class ApprovalResult:
     package_path: Path
     core_checksums: dict[str, str]
     warnings: tuple[str, ...]
+    approval_report: dict[str, int]
 
 
 @dataclass(frozen=True)
@@ -371,18 +375,43 @@ class BaselineRepository:
             request.candidate_path,
             expected_candidate_digest=request.candidate_digest,
         )
-        limitation_failures = validate_reviewed_limitations(
-            initial.candidate.get("limitations"),
-            list(request.structured_limitations),
-            acceptance_result=acceptance,
-            explicitly_accepted=request.limitations_explicitly_accepted,
-        )
-        known_snapshot_failures = validate_reviewed_limitations(
-            initial.candidate.get("limitations"),
-            list(request.known_limitation_snapshot),
-            acceptance_result=acceptance,
-            explicitly_accepted=request.limitations_explicitly_accepted,
-        )
+        if initial.candidate.get("candidate_schema") == BASELINE_CANDIDATE_SCHEMA_VERSION:
+            approval_validation = validate_v2_approval_report(
+                initial.candidate,
+                structured_limitations=list(request.structured_limitations),
+                known_limitation_snapshot=list(request.known_limitation_snapshot),
+                automation_acknowledgments=list(request.automation_acknowledgments),
+                acceptance_result=acceptance,
+                explicitly_accepted=request.limitations_explicitly_accepted,
+            )
+            limitation_failures = approval_validation.failures
+            approval_report = {
+                "qa_review_rows": approval_validation.qa_review_rows,
+                "qa_completed_rows": approval_validation.qa_completed_rows,
+                "qa_snapshot_required": approval_validation.qa_snapshot_required,
+                "qa_snapshot_present": approval_validation.qa_snapshot_present,
+                "automation_acknowledgments_required": (
+                    approval_validation.automation_acknowledgments_required
+                ),
+                "automation_acknowledgments_present": (
+                    approval_validation.automation_acknowledgments_present
+                ),
+            }
+            known_snapshot_failures: tuple[str, ...] = ()
+        else:
+            limitation_failures = validate_reviewed_limitations(
+                initial.candidate.get("limitations"),
+                list(request.structured_limitations),
+                acceptance_result=acceptance,
+                explicitly_accepted=request.limitations_explicitly_accepted,
+            )
+            known_snapshot_failures = validate_reviewed_limitations(
+                initial.candidate.get("limitations"),
+                list(request.known_limitation_snapshot),
+                acceptance_result=acceptance,
+                explicitly_accepted=request.limitations_explicitly_accepted,
+            )
+            approval_report = {}
         with self._lock():
             validation = offline_revalidate_candidate(
                 request.candidate_path,
@@ -454,6 +483,7 @@ class BaselineRepository:
                 key_source,
                 key_digest,
                 approved_at,
+                approval_report,
             )
             environment = copy.deepcopy(validation.environment_profile)
             privacy_error = _contains_private_path_or_serial(
@@ -522,7 +552,14 @@ class BaselineRepository:
                     superseded_by=baseline_id,
                 )
             self.rebuild_indexes(_already_locked=True)
-            return ApprovalResult(baseline_id, key_digest, destination, core_checksums, tuple(pin_warnings))
+            return ApprovalResult(
+                baseline_id,
+                key_digest,
+                destination,
+                core_checksums,
+                tuple(pin_warnings),
+                approval_report,
+            )
 
     def _baseline_document(
         self,
@@ -536,6 +573,7 @@ class BaselineRepository:
         key_source: Mapping[str, Any],
         key_digest: str,
         approved_at: str,
+        approval_report: Mapping[str, int],
     ) -> dict[str, Any]:
         candidate = validation.candidate
         comparison = candidate["comparison_contract"]
@@ -547,7 +585,11 @@ class BaselineRepository:
             "source_candidate_id": candidate.get("candidate_id"),
             "source_candidate_digest": {
                 "algorithm": "SHA-256",
-                "scope": "canonical-baseline-candidate-v1",
+                "scope": (
+                    "canonical-baseline-candidate-v2"
+                    if candidate.get("candidate_schema") == BASELINE_CANDIDATE_SCHEMA_VERSION
+                    else "canonical-baseline-candidate-v1"
+                ),
                 "value": validation.candidate_digest,
             },
             "source_run_id": candidate.get("source_run_id"),
@@ -562,9 +604,19 @@ class BaselineRepository:
                 "reviewer": dict(actor),
                 "reason": reason,
                 "limitations_explicitly_accepted": request.limitations_explicitly_accepted,
+                "review_validation": dict(approval_report),
             },
             "structured_limitations": copy.deepcopy(list(request.structured_limitations)),
             "candidate_limitations": copy.deepcopy(candidate.get("limitations") or []),
+            "automation_diagnostics": copy.deepcopy(
+                candidate.get("automation_diagnostics") or []
+            ),
+            "automation_acknowledgments": copy.deepcopy(
+                list(request.automation_acknowledgments)
+            ),
+            "review_requirements": copy.deepcopy(
+                candidate.get("review_requirements") or {}
+            ),
             "scenario_set_contract": copy.deepcopy(comparison.get("scenario_set")),
             "comparison_contract": {
                 "contract_version": comparison.get("contract_version"),
