@@ -12992,6 +12992,159 @@ def test_has_global_nav_signals_accepts_r2_structural_bottom_nav():
     assert hits == 5
 
 
+def _life_reset_r2_nodes(*, selected=False, labels=None):
+    labels = labels or ["홈", "기기", "라이프", "자동화", "메뉴, 새 콘텐츠 사용 가능"]
+    return [
+        {
+            "text": "",
+            "contentDescription": label,
+            "className": "android.widget.LinearLayout",
+            "viewIdResourceName": None,
+            "boundsInScreen": {"l": index * 180, "t": 900, "r": index * 180 + 150, "b": 1000},
+            "clickable": True,
+            "focusable": True,
+            "visibleToUser": True,
+            "selected": selected and index == 2,
+        }
+        for index, label in enumerate(labels)
+    ]
+
+
+def test_life_reset_reuses_common_selector_after_r1_resource_id_failure(monkeypatch):
+    client = DummyClient([])
+    client.dump_tree_sequence = [_life_reset_r2_nodes(), _life_reset_r2_nodes(selected=True)]
+    select_calls = []
+
+    def select(**kwargs):
+        select_calls.append(kwargs)
+        return kwargs.get("name") not in {
+            collection_flow._LIFE_TAB_RESOURCE_ID,
+            "(?i).*life.*",
+        }
+
+    client.select = select
+    selector_calls = []
+
+    def common_selector(**kwargs):
+        selector_calls.append(kwargs)
+        return {"ok": True, "selected": True, "verify_context": {"ok": True}}
+
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", common_selector)
+    monkeypatch.setattr(collection_flow, "_verify_fresh_life_list_state", lambda *_args, **_kwargs: (True, "ready"))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_args: None)
+
+    ok, reason = collection_flow._ensure_life_plugin_list_ready(
+        client,
+        "SERIAL",
+        {"scenario_id": "life_music_sync_plugin", "back_recovery_wait_seconds": 0.2},
+    )
+
+    assert (ok, reason) == (True, "ready")
+    assert len(selector_calls) == 1
+    assert selector_calls[0]["tab_cfg"]["tab_name"] == "(?i).*life.*"
+    assert selector_calls[0]["tab_cfg"]["tab_type"] == "b"
+    assert any(call["name"] == collection_flow._LIFE_TAB_RESOURCE_ID for call in select_calls)
+    assert not any(call["type_"] == "a" for call in select_calls)
+
+
+def test_life_reset_prefers_r1_resource_id_without_common_selector(monkeypatch):
+    client = DummyClient([])
+    r1_nodes = [
+            {"viewIdResourceName": resource_id, "visibleToUser": True}
+            for resource_id in (
+                "com.samsung.android.oneconnect:id/menu_favorites",
+                "com.samsung.android.oneconnect:id/menu_devices",
+                "com.samsung.android.oneconnect:id/menu_services",
+                "com.samsung.android.oneconnect:id/menu_automations",
+                "com.samsung.android.oneconnect:id/menu_more",
+            )
+        ]
+    selected_r1_nodes = [
+        {**node, "selected": node["viewIdResourceName"].endswith("menu_services")}
+        for node in r1_nodes
+    ]
+    client.dump_tree_sequence = [r1_nodes, selected_r1_nodes]
+    selector_calls = []
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_tab_selection",
+        lambda **kwargs: selector_calls.append(kwargs) or {"ok": True},
+    )
+    monkeypatch.setattr(collection_flow, "_verify_fresh_life_list_state", lambda *_args, **_kwargs: (True, "ready"))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_args: None)
+
+    ok, reason = collection_flow._ensure_life_plugin_list_ready(
+        client,
+        "SERIAL",
+        {"scenario_id": "life_main", "back_recovery_wait_seconds": 0.2},
+    )
+
+    assert (ok, reason) == (True, "ready")
+    assert selector_calls == []
+    assert any(call["name"] == collection_flow._LIFE_TAB_RESOURCE_ID for call in client.select_calls)
+
+
+def test_life_reset_skips_selection_when_r2_life_is_already_selected(monkeypatch):
+    client = DummyClient([])
+    client.dump_tree_sequence = [_life_reset_r2_nodes(selected=True)]
+    selector_calls = []
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_tab_selection",
+        lambda **kwargs: selector_calls.append(kwargs) or {"ok": True},
+    )
+    monkeypatch.setattr(collection_flow, "_verify_fresh_life_list_state", lambda *_args, **_kwargs: (True, "ready"))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_args: None)
+
+    ok, reason = collection_flow._ensure_life_plugin_list_ready(
+        client,
+        "SERIAL",
+        {"scenario_id": "life_music_sync_plugin", "back_recovery_wait_seconds": 0.2},
+    )
+
+    assert (ok, reason) == (True, "ready")
+    assert client.select_calls == []
+    assert selector_calls == []
+
+
+def test_verify_fresh_life_list_state_uses_window_xml_selected_fallback(monkeypatch):
+    client = DummyClient([])
+    client.dump_tree_sequence = [_life_reset_r2_nodes()]
+    selected_xml_nodes = _life_reset_r2_nodes(selected=True)
+    monkeypatch.setattr(
+        collection_flow,
+        "_load_scrolltouch_xml_nodes",
+        lambda **kwargs: (selected_xml_nodes, "ok"),
+    )
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_args: None)
+
+    ok, reason = collection_flow._verify_fresh_life_list_state(client, "SERIAL", phase="life_reset")
+
+    assert (ok, reason) == (True, "life_tab_ready")
+
+
+def test_load_scrolltouch_xml_nodes_preserves_selected_state():
+    xml_text = (
+        '<hierarchy rotation="0">'
+        '<node class="android.widget.LinearLayout" text="" content-desc="Life" '
+        'resource-id="" clickable="true" focusable="true" selected="true" '
+        'visible-to-user="true" bounds="[0,900][150,1000]" />'
+        '</hierarchy>'
+    )
+
+    class XmlClient:
+        def _run(self, args, **_kwargs):
+            if args[:3] == ["shell", "cat", "/sdcard/window_dump_scrolltouch.xml"]:
+                return xml_text
+            return ""
+
+    nodes, reason = collection_flow._load_scrolltouch_xml_nodes(XmlClient(), "SERIAL")
+    flat_nodes = collection_flow._iter_tree_nodes_with_parent(nodes)
+
+    assert reason == "ok"
+    assert any(node.get("selected") is True for node, _ in flat_nodes)
+
+
 def test_life_root_state_snapshot_does_not_mark_life_selected_from_label_only():
     nodes = [
         {"text": "Life", "contentDescription": "selected", "selected": True, "visibleToUser": True},

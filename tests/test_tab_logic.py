@@ -81,6 +81,45 @@ def test_stabilize_r2_tab_uses_semantic_touch_without_legacy_header_fallback():
     client.touch.assert_not_called()
 
 
+def test_stabilize_r2_life_tab_uses_english_semantic_label_without_resource_id():
+    client = FakeTabClient()
+    client.dump_tree.return_value = [
+        {
+            "text": "",
+            "contentDescription": label,
+            "className": "android.widget.LinearLayout",
+            "viewIdResourceName": None,
+            "boundsInScreen": {"l": index * 180, "t": 900, "r": index * 180 + 150, "b": 1000},
+            "clickable": True,
+            "focusable": True,
+            "visibleToUser": True,
+        }
+        for index, label in enumerate(["Home", "Devices", "Life", "Routines", "Menu"])
+    ]
+    client.touch_point.return_value = True
+    client.collect_focus_step.return_value = {
+        "visible_label": "Life, Selected",
+        "merged_announcement": "Life, Selected",
+        "focus_node": {"text": "", "contentDescription": "Life, Selected"},
+    }
+    config = {
+        "scenario_id": "life_reset",
+        "tab_name": "(?i).*life.*",
+        "tab_type": "b",
+        "global_nav": {"labels": ["Home", "Devices", "Life", "Routines", "Menu"]},
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": r"(?i).*(selected|선택됨).*life.*",
+        },
+    }
+
+    result = tab_logic.stabilize_tab_selection(client, "SERIAL", config, max_retries=1)
+
+    assert result["ok"] is True
+    client.touch_point.assert_called_once()
+    client.touch.assert_not_called()
+
+
 def test_stabilize_tab_selection_touch_point_success(monkeypatch):
     client = FakeTabClient()
     client.dump_tree.return_value = [{"viewIdResourceName": "tab_id", "boundsInScreen": "0,0,10,10", "text": "홈"}]

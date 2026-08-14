@@ -1695,6 +1695,7 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
     flat_nodes = _iter_tree_nodes_with_parent(nodes)
     app_bar_hits = 0
     life_selected = False
+    life_selected_text = ""
     visible_card_hits = 0
     life_root_signature_present = False
     bottom_nav_life_visible = False
@@ -1724,9 +1725,16 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         normalized_label_blob = re.sub(r"\s+", " ", label_blob).strip().lower()
         resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
         normalized_resource_id = resource_id.lower()
-        selected = bool(node.get("selected"))
-        if _safe_regex_search(r"(?i)menu_services", resource_id) and selected:
+        selected_raw = node.get("selected")
+        selected = (
+            selected_raw.strip().lower() == "true"
+            if isinstance(selected_raw, str)
+            else bool(selected_raw)
+        )
+        selected_signal = bool(selected or _safe_regex_search(r"(?i)(selected|선택됨)", label_blob))
+        if _safe_regex_search(r"(?i)menu_services", resource_id) and selected_signal:
             life_selected = True
+            life_selected_text = label_blob
         if _safe_regex_search(r"(?i)menu_services", resource_id):
             bottom_nav_life_visible = True
         if _safe_regex_search(r"(?i)\b(add|more options|location|qr code)\b", label_blob):
@@ -1753,6 +1761,26 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
             structure_hits += 1
         if any(token in normalized_label_blob for token in life_description_contains):
             description_hits += 1
+    annotated_bottom_nodes = annotate_bottom_nav_candidates(
+        [node for node, _ in flat_nodes],
+        expected_count=5,
+    )
+    for node in annotated_bottom_nodes:
+        if not is_annotated_bottom_nav_candidate(node):
+            continue
+        label_blob = _node_label_blob(node)
+        if canonicalize_label(label_blob, domain="bottom_tab") != "life":
+            continue
+        bottom_nav_life_visible = True
+        selected_raw = node.get("selected")
+        selected = (
+            selected_raw.strip().lower() == "true"
+            if isinstance(selected_raw, str)
+            else bool(selected_raw)
+        )
+        if selected or _safe_regex_search(r"(?i)(selected|선택됨)", label_blob):
+            life_selected = True
+            life_selected_text = label_blob
     life_root_signature_present = bool(structure_hits > 0 or service_title_hits > 0 or description_hits > 0)
     final_score = 0
     if life_selected:
@@ -1806,6 +1834,7 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         fail_reason = "detail_residue_detected" if detail_residue_present else "life_root_not_stable"
     return {
         "life_selected": life_selected,
+        "life_selected_text": life_selected_text,
         "app_bar_hits": app_bar_hits,
         "visible_card_hits": visible_card_hits,
         "life_root_signature_present": life_root_signature_present,
@@ -1825,6 +1854,29 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         "fail_reason": fail_reason,
         "ok": ok,
     }
+
+
+def _augment_life_snapshot_with_xml_selected(
+    client: A11yAdbClient,
+    dev: str,
+    snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    if bool(snapshot.get("life_selected")) or not bool(snapshot.get("bottom_nav_life_visible")):
+        return snapshot
+    try:
+        xml_nodes, _xml_reason = _load_scrolltouch_xml_nodes(client=client, dev=dev)
+    except Exception:
+        return snapshot
+    if not xml_nodes:
+        return snapshot
+    xml_snapshot = _life_root_state_snapshot(xml_nodes)
+    if not bool(xml_snapshot.get("life_selected")):
+        return snapshot
+    merged_snapshot = dict(snapshot)
+    merged_snapshot["life_selected"] = True
+    merged_snapshot["life_selected_text"] = str(xml_snapshot.get("life_selected_text", "") or "").strip()
+    merged_snapshot["life_selected_source"] = "window_xml_selected"
+    return merged_snapshot
 
 
 def _verify_plugin_entry_root_state(
@@ -2325,7 +2377,7 @@ def _is_inside_smartthings(state: dict[str, Any]) -> bool:
 
 def _is_life_list_ready(snapshot: dict[str, Any]) -> bool:
     global_nav_visible = bool(snapshot.get("global_nav_visible"))
-    life_tab_selected = bool(snapshot.get("life_selected") or snapshot.get("bottom_nav_life_visible"))
+    life_tab_selected = bool(snapshot.get("life_selected"))
     return bool(global_nav_visible and life_tab_selected)
 
 
@@ -2346,6 +2398,7 @@ def _verify_fresh_life_list_state(
             nodes = []
             last_reason = f"dump_failed:{exc}"
         snapshot = _life_root_state_snapshot(nodes if isinstance(nodes, list) else [])
+        snapshot = _augment_life_snapshot_with_xml_selected(client, dev, snapshot)
         life_list_ready = _is_life_list_ready(snapshot)
         plugin_card_list_visible = bool(
             int(snapshot.get("visible_card_hits", 0) or 0) > 0 or bool(snapshot.get("life_root_signature_present"))
@@ -2353,7 +2406,8 @@ def _verify_fresh_life_list_state(
         log(
             f"[LIFE_RESET] verify phase='{phase}' attempt={attempt}/{_PLUGIN_ENTRY_RETRY_COUNT} "
             f"global_nav_visible={str(bool(snapshot.get('global_nav_visible'))).lower()} "
-            f"life_tab_selected={str(bool(snapshot.get('life_selected') or snapshot.get('bottom_nav_life_visible'))).lower()} "
+            f"life_tab_selected={str(bool(snapshot.get('life_selected'))).lower()} "
+            f"life_selected_source='{str(snapshot.get('life_selected_source', 'dump_tree') or 'dump_tree')}' "
             f"plugin_card_list_visible={str(plugin_card_list_visible).lower()} "
             f"life_list_ready={str(life_list_ready).lower()}"
         )
@@ -2383,6 +2437,7 @@ def _ensure_life_plugin_list_ready(client: A11yAdbClient, dev: str, tab_cfg: dic
             raw_nodes = []
         nodes = raw_nodes if isinstance(raw_nodes, list) else []
         snapshot = _life_root_state_snapshot(nodes)
+        snapshot = _augment_life_snapshot_with_xml_selected(client, dev, snapshot)
         package_signature_present = any(
             "com.samsung.android.oneconnect" in str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").lower()
             for node, _ in _iter_tree_nodes_with_parent(nodes)
@@ -2465,18 +2520,63 @@ def _ensure_life_plugin_list_ready(client: A11yAdbClient, dev: str, tab_cfg: dic
             log("[LIFE_RESET] success=false fail reason='bottom_nav_not_ready'")
             return False, "bottom_nav_not_ready"
 
+        if bool(snapshot.get("life_selected")):
+            selected_source = str(snapshot.get("life_selected_source", "dump_tree") or "dump_tree")
+            log(
+                "[LIFE_RESET][tab_reselect_attempt] "
+                f"scenario='{scenario_id}' phase='{invocation_phase}' attempt={attempt}/{max_attempts} "
+                f"package_inside={str(app_inside).lower()} "
+                f"global_nav_visible={str(bool(snapshot.get('global_nav_visible'))).lower()} "
+                "select_mode='already_selected' target='life'"
+            )
+            life_list_ready, verify_reason = _verify_fresh_life_list_state(client, dev, phase="life_reset")
+            log(
+                "[LIFE_RESET][tab_reselect_result] "
+                f"scenario='{scenario_id}' phase='{invocation_phase}' attempt={attempt}/{max_attempts} "
+                "select_mode='already_selected' target='life' select_success=true "
+                f"verify_selected_bottom_tab_ok={str(life_list_ready).lower()} "
+                f"verify_actual='{str(snapshot.get('life_selected_text', '') or '').strip()}' "
+                f"verify_source='{selected_source}' life_tab_reselected={str(life_list_ready).lower()} "
+                "basis='already_selected_verified'"
+            )
+            log(f"[LIFE_RESET] already_selected={str(life_list_ready).lower()}")
+            if life_list_ready:
+                log(f"[LIFE_RESET] success=true reason='{verify_reason}'")
+                return True, verify_reason
+
         try:
             client.select(dev=dev, name=_HOME_TAB_RESOURCE_ID, type_="r", wait_=3)
         except Exception:
             pass
         time.sleep(0.15)
+        _, snapshot, app_inside = _read_snapshot()
 
         life_tab_reselected = False
         life_tab_select_mode = "resource_id"
         life_tab_target = _LIFE_TAB_RESOURCE_ID
         life_tab_select_raw: Any = None
-        life_tab_verify_ok = bool(snapshot.get("life_selected") or snapshot.get("bottom_nav_life_visible"))
-        life_tab_verify_actual = str(snapshot.get("life_selected_text", "") or "").strip()
+        life_tab_verify_ok = False
+        life_tab_verify_actual = ""
+        life_tab_verify_source = "fresh_post_select"
+        life_tab_cfg = dict(tab_cfg)
+        life_tab_cfg.update(
+            {
+                "scenario_id": f"{scenario_id}:life_reset",
+                "tab_name": "(?i).*life.*",
+                "tab_type": "b",
+                "tab": {
+                    "resource_id_regex": re.escape(_LIFE_TAB_RESOURCE_ID),
+                    "text_regex": "(?i).*life.*",
+                    "announcement_regex": "(?i).*life.*",
+                    "tie_breaker": "bottom_nav_left_to_right",
+                    "allow_resource_id_only": True,
+                },
+                "context_verify": {
+                    "type": "selected_bottom_tab",
+                    "announcement_regex": r"(?i).*(selected|선택됨).*life.*",
+                },
+            }
+        )
         log(
             "[LIFE_RESET][tab_reselect_attempt] "
             f"scenario='{scenario_id}' phase='{invocation_phase}' attempt={attempt}/{max_attempts} "
@@ -2491,18 +2591,33 @@ def _ensure_life_plugin_list_ready(client: A11yAdbClient, dev: str, tab_cfg: dic
             life_tab_select_raw = None
             life_tab_reselected = False
         if not life_tab_reselected:
-            life_tab_select_mode = "announcement_regex_fallback"
-            life_tab_target = "(?i).*life.*"
+            life_tab_select_mode = "common_bottom_nav_selector"
+            life_tab_target = "existing_stabilize_tab_selection"
             try:
-                life_tab_select_raw = client.select(dev=dev, name="(?i).*life.*", type_="a", wait_=3)
-                life_tab_reselected = bool(life_tab_select_raw)
+                life_tab_select_raw = stabilize_tab_selection(
+                    client=client,
+                    dev=dev,
+                    tab_cfg=life_tab_cfg,
+                    max_retries=1,
+                )
+                life_tab_reselected = bool(
+                    isinstance(life_tab_select_raw, dict) and life_tab_select_raw.get("ok")
+                )
             except Exception:
                 life_tab_select_raw = None
                 life_tab_reselected = False
+        _, post_select_snapshot, post_select_inside = _read_snapshot()
+        if post_select_inside:
+            life_tab_verify_ok = bool(post_select_snapshot.get("life_selected"))
+            life_tab_verify_actual = str(post_select_snapshot.get("life_selected_text", "") or "").strip()
+            life_tab_verify_source = str(
+                post_select_snapshot.get("life_selected_source", "fresh_post_select")
+                or "fresh_post_select"
+            )
         life_tab_reselected_basis = (
-            "select_success_only"
+            "select_success_fresh_state"
             if life_tab_reselected
-            else ("select_failed_verify_ok" if life_tab_verify_ok else "select_failed_verify_failed")
+            else "select_failed_verify_failed"
         )
         log(
             "[LIFE_RESET][tab_reselect_result] "
@@ -2511,7 +2626,7 @@ def _ensure_life_plugin_list_ready(client: A11yAdbClient, dev: str, tab_cfg: dic
             f"select_raw='{life_tab_select_raw}' select_success={str(life_tab_reselected).lower()} "
             f"verify_selected_bottom_tab_ok={str(life_tab_verify_ok).lower()} "
             f"verify_actual='{life_tab_verify_actual}' "
-            "verify_source='pre_select_snapshot' "
+            f"verify_source='{life_tab_verify_source}' "
             f"life_tab_reselected={str(life_tab_reselected).lower()} basis='{life_tab_reselected_basis}'"
         )
         log(f"[LIFE_RESET] life_tab_reselected={str(life_tab_reselected).lower()}")
@@ -4702,6 +4817,7 @@ def _load_scrolltouch_xml_nodes(client: A11yAdbClient, dev: str) -> tuple[list[d
             "focusable": str(element.attrib.get("focusable", "") or "").strip().lower() == "true",
             "effectiveClickable": str(element.attrib.get("clickable", "") or "").strip().lower() == "true",
             "visibleToUser": str(element.attrib.get("visible-to-user", "") or "").strip().lower() != "false",
+            "selected": str(element.attrib.get("selected", "") or "").strip().lower() == "true",
             "boundsInScreen": f"{left},{top},{right},{bottom}",
             "children": [],
         }
