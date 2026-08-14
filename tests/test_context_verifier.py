@@ -138,6 +138,95 @@ def test_verify_context_selected_bottom_tab_accepts_korean_tab_alias_for_english
     assert result["ok"] is True
 
 
+def test_verify_context_selected_bottom_tab_accepts_r2_semantic_row_without_resource_ids():
+    labels = ["홈", "기기", "라이프", "자동화", "메뉴, 새 콘텐츠 사용 가능"]
+    nodes = [
+        {
+            "text": "",
+            "contentDescription": label,
+            "className": "android.widget.LinearLayout",
+            "viewIdResourceName": None,
+            "boundsInScreen": {"l": index * 180, "t": 900, "r": index * 180 + 150, "b": 1000},
+            "clickable": index > 0,
+            "focusable": True,
+            "visibleToUser": True,
+            "selected": index == 1,
+        }
+        for index, label in enumerate(labels)
+    ]
+    step = _step(dump_tree_nodes=nodes)
+    scenario_cfg = {
+        "global_nav": {"labels": ["Home", "Devices", "Life", "Routines", "Menu"]},
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": r"(?i).*(selected|선택됨).*(devices|기기).*",
+        },
+    }
+
+    result = verify_context(step, scenario_cfg)
+
+    assert result["ok"] is True
+    assert result["actual_source"] == "selected_candidate"
+
+
+def test_verify_context_selected_bottom_tab_uses_semantic_focus_after_r2_touch():
+    step = _step(
+        visible_label="기기 기기",
+        merged_announcement="기기 기기",
+        focus_node={"text": "기기 기기", "contentDescription": "기기 기기"},
+        dump_tree_nodes=[],
+        _selected_bottom_nav_candidate={
+            "text": "기기 기기",
+            "announcement": "기기 기기",
+            "_bottom_nav_candidate": True,
+        },
+    )
+    scenario_cfg = {
+        "global_nav": {"labels": ["Home", "Devices", "Life", "Routines", "Menu"]},
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": r"(?i).*(selected|선택됨).*(devices|기기).*",
+        },
+    }
+
+    result = verify_context(step, scenario_cfg)
+
+    assert result["ok"] is True
+    assert result["actual_source"] == "semantic_focus_candidate"
+
+
+def test_verify_context_selected_bottom_tab_reads_r2_selected_state_from_window_xml():
+    class _WindowXmlClient:
+        def dump_tree(self, **kwargs):
+            return []
+
+        def _run(self, args, **kwargs):
+            if args[:3] == ["shell", "uiautomator", "dump"]:
+                return "UI hierchary dumped to: /sdcard/tb_runner_context_verify.xml"
+            if args[:2] == ["shell", "cat"]:
+                return (
+                    '<hierarchy><node class="android.widget.LinearLayout" '
+                    'content-desc="기기" selected="true" '
+                    'bounds="[100,900][250,1000]" /></hierarchy>'
+                )
+            return ""
+
+    result = verify_context(
+        _step(),
+        {
+            "context_verify": {
+                "type": "selected_bottom_tab",
+                "announcement_regex": r"(?i).*(selected|선택됨).*(devices|기기).*",
+            }
+        },
+        client=_WindowXmlClient(),
+        dev="serial",
+    )
+
+    assert result["ok"] is True
+    assert result["actual_source"] == "window_xml_selected_bottom_tab"
+
+
 def test_verify_context_selected_bottom_tab_accepts_english_selected_after_label():
     step = _step(
         dump_tree_nodes=[

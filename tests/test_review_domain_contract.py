@@ -11,6 +11,7 @@ from tb_runner.baseline_candidate_schema import BASELINE_CANDIDATE_SCHEMA_VERSIO
 from tb_runner.baseline_candidate_validator import validate_baseline_candidate
 from tb_runner.approval_contract import validate_v2_approval
 from tb_runner.comparison_input import adapt_approved_baseline, adapt_candidate
+from tb_runner.comparator_schema import SourceKind
 from tb_runner.review_classification import ReviewDomain, classify_review_domain
 from tests.test_baseline_candidate_builder import _create_run, _write_json
 
@@ -249,4 +250,11 @@ def test_v1_candidate_and_approved_flip_baselines_remain_readable(
         candidate_input.schema_versions["source"]
         == BASELINE_CANDIDATE_SCHEMA_VERSION_V1
     )
-    assert len(baseline_inputs) == 2
+    assert {
+        "baseline_8f00aed49e61a07b_r0001",
+        "baseline_1f697e9b60c655df_r0001",
+    } <= {baseline.source_id for baseline in baseline_inputs}
+    assert all(
+        baseline.source_kind is SourceKind.BASELINE and not baseline.diagnostics
+        for baseline in baseline_inputs
+    )

@@ -417,7 +417,7 @@ def test_crash_run_stats_confirmed_repeated_is_counted():
     assert stats.counted_crash_count == 2
 
 
-def test_crash_run_stats_possible_retry_consumed_is_counted():
+def test_crash_run_stats_recovered_possible_is_not_counted_for_abort():
     stats = crash_recovery.CrashRunStats()
     signal = _signal(crash_type="POSSIBLE_CRASH")
     decision = crash_recovery.build_retry_outcome_decision(signal, recovered=True)
@@ -425,7 +425,8 @@ def test_crash_run_stats_possible_retry_consumed_is_counted():
     crash_recovery.update_crash_run_stats(stats, signal=signal, decision=decision)
 
     assert stats.possible_crash_count == 1
-    assert stats.counted_crash_count == 1
+    assert stats.crash_recovered_count == 1
+    assert stats.counted_crash_count == 0
 
 
 def test_crash_policy_threshold_reached_aborts():

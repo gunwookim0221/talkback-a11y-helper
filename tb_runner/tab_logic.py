@@ -4,6 +4,7 @@ from typing import Any
 
 from talkback_lib import A11yAdbClient
 from tb_runner.anchor_logic import _extract_candidate_from_node, _match_composite_candidate
+from tb_runner.bottom_nav import annotate_bottom_nav_candidates, is_annotated_bottom_nav_candidate
 from tb_runner.constants import MAIN_ANNOUNCEMENT_WAIT_SECONDS, MAIN_STEP_WAIT_SECONDS
 from tb_runner.context_verifier import verify_context
 from tb_runner.label_matcher import LABEL_ALIASES, canonicalize_label, normalize_label
@@ -101,21 +102,33 @@ def normalize_tab_config(tab_cfg: dict[str, Any]) -> dict[str, Any]:
     normalized_tab_cfg["_fallback_to_legacy"] = fallback_to_legacy
     return normalized_tab_cfg
 
+
+def _expected_bottom_nav_count(tab_cfg: dict[str, Any]) -> int:
+    global_nav_cfg = tab_cfg.get("global_nav", {})
+    if not isinstance(global_nav_cfg, dict):
+        return 0
+    labels = global_nav_cfg.get("labels", [])
+    return len([label for label in labels if isinstance(label, str) and label.strip()]) if isinstance(labels, list) else 0
+
 def match_tab_candidate(node: dict[str, Any], tab_cfg: dict[str, Any]) -> dict[str, Any]:
     candidate = _extract_candidate_from_node(node)
+    candidate["_bottom_nav_candidate"] = is_annotated_bottom_nav_candidate(node)
     matched = _match_composite_candidate(candidate, tab_cfg)
     if matched.get("matched"):
-        return matched
+        return {**matched, "candidate": candidate}
 
     expected_tab = str(tab_cfg.get("_expected_bottom_tab", "") or "").strip()
-    if not expected_tab or not _is_bottom_nav_resource_id(candidate.get("resource_id", "")):
+    is_known_bottom_nav = _is_bottom_nav_resource_id(candidate.get("resource_id", "")) or bool(
+        candidate.get("_bottom_nav_candidate", False)
+    )
+    if not expected_tab or not is_known_bottom_nav:
         return matched
     candidate_tab = _canonicalize_bottom_tab_candidate(candidate)
     if candidate_tab != expected_tab:
         return matched
 
     matched_fields = list(matched.get("matched_fields", []))
-    if "resource_id" not in matched_fields:
+    if candidate.get("resource_id") and "resource_id" not in matched_fields:
         matched_fields.append("resource_id")
     matched_fields.append("bottom_tab_alias")
     return {
@@ -202,6 +215,11 @@ def _attempt_tab_focus_alignment(
     best_resource = str(best_candidate.get("resource_id", "") or "").strip()
     if best_resource:
         selectors.append(("r", f"^{re.escape(best_resource)}$", "best_resource_exact"))
+    if bool(best_candidate.get("_bottom_nav_candidate", False)):
+        for key in ("announcement", "text"):
+            label = str(best_candidate.get(key, "") or "").strip()
+            if label:
+                selectors.append(("a" if key == "announcement" else "t", f"^{re.escape(label)}$", "best_bottom_nav_label"))
 
     tab_resource_regex = str(normalized_tab_cfg.get("resource_id_regex", "") or "").strip()
     if tab_resource_regex:
@@ -274,6 +292,9 @@ def _attempt_tab_focus_alignment(
                 or focus_snapshot.get("text", "")
                 or ""
             ).strip()
+            if not focus_matched and bool(best_candidate.get("_bottom_nav_candidate", False)):
+                expected_tab = str(normalized_tab_cfg.get("_expected_bottom_tab", "") or "").strip()
+                focus_matched = canonicalize_label(focus_label, domain="bottom_tab") == expected_tab
             if focus_matched and focus_flag:
                 log(
                     f"{log_tag} success scenario='{scenario_id}' attempt={attempt}/{max_retries} "
@@ -339,6 +360,10 @@ def stabilize_tab_selection(
     for attempt in range(1, max_retries + 1):
         dump_nodes = client.dump_tree(dev=dev)
         node_list = dump_nodes if isinstance(dump_nodes, list) else []
+        node_list = annotate_bottom_nav_candidates(
+            node_list,
+            expected_count=_expected_bottom_nav_count(tab_cfg),
+        )
         matches = [m for m in (match_tab_candidate(node, normalized_tab_cfg) for node in node_list) if m.get("matched")]
         best = choose_best_tab_candidate(matches, tie_breaker=tie_breaker)
         last_best = best or {}
@@ -350,9 +375,14 @@ def stabilize_tab_selection(
         selected = False
         tab_action_mode = "legacy_touch"
         tab_action_reason = ""
-        if best and best.get("candidate", {}).get("resource_id"):
+        semantic_bottom_nav = False
+        if best and (
+            best.get("candidate", {}).get("resource_id")
+            or best.get("candidate", {}).get("_bottom_nav_candidate")
+        ):
             candidate = best.get("candidate", {}) or {}
             best_resource = str(candidate.get("resource_id", "") or "")
+            semantic_bottom_nav = bool(candidate.get("_bottom_nav_candidate", False))
             raw_bounds = candidate.get("bounds", "")
             best_bounds = str(raw_bounds or "")
             parsed_bounds = parse_bounds_str(raw_bounds)
@@ -361,9 +391,9 @@ def stabilize_tab_selection(
             touch_eligible = bool(parsed_bounds)
             debug_reason = ""
             if parsed_bounds:
-                l, t, r, b = parsed_bounds
-                center_x = int((l + r) / 2)
-                center_y = int((t + b) / 2)
+                left, top, right, bottom = parsed_bounds
+                center_x = int((left + right) / 2)
+                center_y = int((top + bottom) / 2)
                 tab_action_mode = "touch"
                 log(
                     f"[TAB][action] scenario='{scenario_id}' mode='touch' "
@@ -371,7 +401,7 @@ def stabilize_tab_selection(
                     level="DEBUG",
                 )
                 selected = client.touch_point(dev=dev, x=center_x, y=center_y)
-                if not selected:
+                if not selected and best_resource:
                     tab_action_mode = "select_fallback"
                     tab_action_reason = "touch_failed"
                     debug_reason = tab_action_reason
@@ -382,7 +412,7 @@ def stabilize_tab_selection(
                         f"reason='{tab_action_reason}' resource='{best_resource}'",
                         level="DEBUG",
                     )
-            else:
+            elif best_resource:
                 tab_action_mode = "select_fallback"
                 tab_action_reason = "missing_bounds"
                 debug_reason = "bounds_parse_failed"
@@ -393,6 +423,17 @@ def stabilize_tab_selection(
                     f"reason='{tab_action_reason}' resource='{best_resource}' bounds='{best_bounds}'",
                     level="DEBUG",
                 )
+            if not selected and semantic_bottom_nav:
+                label = str(candidate.get("announcement", "") or candidate.get("text", "") or "").strip()
+                if label:
+                    selected = client.select(dev=dev, name=f"^{re.escape(label)}$", type_="a", wait_=5)
+                    tab_action_mode = "semantic_select_fallback"
+                    tab_action_reason = "touch_failed" if parsed_bounds else "missing_bounds"
+                    log(
+                        f"[TAB][action] scenario='{scenario_id}' mode='semantic_select_fallback' "
+                        f"reason='{tab_action_reason}' label='{label}'",
+                        level="DEBUG",
+                    )
             parsed_bounds_text = (
                 f"{parsed_bounds[0]},{parsed_bounds[1]},{parsed_bounds[2]},{parsed_bounds[3]}" if parsed_bounds else ""
             )
@@ -404,7 +445,7 @@ def stabilize_tab_selection(
                 level="DEBUG",
             )
 
-        if not selected:
+        if not selected and not semantic_bottom_nav:
             selected = client.touch(
                 dev=dev,
                 name=str(tab_cfg.get("tab_name", "") or ""),
@@ -423,6 +464,12 @@ def stabilize_tab_selection(
                     f"reason='fallback_after_{tab_action_mode}'",
                     level="DEBUG",
                 )
+        elif not selected and semantic_bottom_nav:
+            log(
+                f"[TAB][action] scenario='{scenario_id}' mode='legacy_touch_skipped' "
+                "reason='semantic_bottom_nav_unresolved'",
+                level="DEBUG",
+            )
 
         focus_align_result = {"attempted": False, "ok": False, "reason": "not_selected"}
         if selected:
@@ -437,16 +484,24 @@ def stabilize_tab_selection(
                     level="DEBUG",
                 )
                 time.sleep(settle_wait_seconds)
-            focus_align_result = _attempt_tab_focus_alignment(
-                client=client,
-                dev=dev,
-                scenario_id=scenario_id,
-                normalized_tab_cfg=normalized_tab_cfg,
-                best=best,
-                max_retries=focus_align_retries,
-                fast_mode=fast_focus_align,
-                select_wait_seconds=1 if fast_focus_align else 5,
-            )
+            if semantic_bottom_nav:
+                focus_align_result = {
+                    "attempted": True,
+                    "ok": True,
+                    "reason": "semantic_touch_target",
+                    "attempt": 1,
+                }
+            else:
+                focus_align_result = _attempt_tab_focus_alignment(
+                    client=client,
+                    dev=dev,
+                    scenario_id=scenario_id,
+                    normalized_tab_cfg=normalized_tab_cfg,
+                    best=best,
+                    max_retries=focus_align_retries,
+                    fast_mode=fast_focus_align,
+                    select_wait_seconds=1 if fast_focus_align else 5,
+                )
             focus_align_result["fast_mode"] = fast_focus_align
         else:
             log(f"[TAB][focus_align] skipped scenario='{scenario_id}' reason='tab_select_failed'", level="DEBUG")
@@ -477,7 +532,11 @@ def stabilize_tab_selection(
             get_focus_mode="fast" if fast_focus_align else "normal",
         )
         last_verify_row = dict(verify_row) if isinstance(verify_row, dict) else {}
-        last_context = verify_context(verify_row, tab_cfg, client=client, dev=dev)
+        context_step = dict(verify_row)
+        if best and best.get("candidate", {}).get("_bottom_nav_candidate"):
+            context_step["_selected_bottom_nav_candidate"] = best.get("candidate", {})
+            context_step["_selected_bottom_nav_touch_succeeded"] = bool(selected)
+        last_context = verify_context(context_step, tab_cfg, client=client, dev=dev)
         log(
             f"[TAB][select] scenario='{scenario_id}' selected={selected} "
             f"matched_fields={(best or {}).get('matched_fields', [])} score={(best or {}).get('score', 0)}"

@@ -1,7 +1,9 @@
 import re
+import xml.etree.ElementTree as ET
 from typing import Any
 
 from talkback_lib import A11yAdbClient
+from tb_runner.bottom_nav import annotate_bottom_nav_candidates, is_annotated_bottom_nav_candidate
 from tb_runner.label_matcher import LABEL_ALIASES, canonicalize_label, expand_verify_token_aliases, matches_alias, normalize_label
 from tb_runner.logging_utils import _should_log, log
 from tb_runner.utils import _safe_regex_search
@@ -151,6 +153,51 @@ def _is_bottom_nav_resource_id(view_id: str, scenario_cfg: dict[str, Any]) -> bo
         if known_ids and normalized_view_id in known_ids:
             return True
     return bool(_BOTTOM_GLOBAL_NAV_RESOURCE_REGEX.search(normalized_view_id))
+
+
+def _expected_bottom_nav_count(scenario_cfg: dict[str, Any]) -> int:
+    global_nav_cfg = scenario_cfg.get("global_nav", {})
+    if not isinstance(global_nav_cfg, dict):
+        return 0
+    labels = global_nav_cfg.get("labels", [])
+    return len([label for label in labels if isinstance(label, str) and label.strip()]) if isinstance(labels, list) else 0
+
+
+def _read_window_xml_selected_bottom_tab(
+    client: A11yAdbClient | None,
+    dev: str,
+    expected_tab: str | None,
+) -> str:
+    if client is None or not dev or not expected_tab:
+        return ""
+    runner = getattr(client, "_run", None)
+    if not callable(runner):
+        return ""
+    remote_path = "/sdcard/tb_runner_context_verify.xml"
+    try:
+        runner(["shell", "uiautomator", "dump", remote_path], dev=dev, timeout=8)
+        raw_xml = str(runner(["shell", "cat", remote_path], dev=dev, timeout=8) or "")
+        start = raw_xml.find("<?xml")
+        if start < 0:
+            start = raw_xml.find("<hierarchy")
+        end = raw_xml.find("</hierarchy>", start)
+        if start < 0 or end < 0:
+            return ""
+        root = ET.fromstring(raw_xml[start : end + len("</hierarchy>")])
+        for node in root.iter("node"):
+            if node.attrib.get("selected", "").strip().lower() != "true":
+                continue
+            label = str(node.attrib.get("content-desc", "") or node.attrib.get("text", "") or "").strip()
+            if _matches_bottom_tab_expectation(label, expected_tab):
+                return label
+    except (ET.ParseError, OSError, RuntimeError, TypeError, ValueError):
+        return ""
+    finally:
+        try:
+            runner(["shell", "rm", "-f", remote_path], dev=dev, timeout=5)
+        except Exception:
+            pass
+    return ""
 
 
 def _build_focus_selected_text(step: dict[str, Any]) -> str:
@@ -303,6 +350,115 @@ def verify_context(
                     dump_source = "lazy_dump"
                 else:
                     nodes = []
+        if isinstance(nodes, list):
+            nodes = annotate_bottom_nav_candidates(
+                nodes,
+                expected_count=_expected_bottom_nav_count(scenario_cfg),
+            )
+        semantic_target = step.get("_selected_bottom_nav_candidate", {})
+        if isinstance(semantic_target, dict) and is_annotated_bottom_nav_candidate(semantic_target):
+            target_label = str(
+                semantic_target.get("announcement", "") or semantic_target.get("text", "") or ""
+            ).strip()
+            semantic_touch_succeeded = bool(step.get("_selected_bottom_nav_touch_succeeded", False))
+            semantic_row_match = next(
+                (
+                    node
+                    for node in nodes
+                    if is_annotated_bottom_nav_candidate(node)
+                    and _matches_bottom_tab_expectation(
+                        str(node.get("contentDescription", "") or node.get("text", "") or ""),
+                        expected_bottom_tab,
+                    )
+                ),
+                None,
+            )
+            if semantic_touch_succeeded and semantic_row_match is not None and _matches_bottom_tab_expectation(
+                target_label, expected_bottom_tab
+            ):
+                actual_selected_text = str(
+                    semantic_row_match.get("contentDescription", "")
+                    or semantic_row_match.get("text", "")
+                    or target_label
+                ).strip()
+                return {
+                    "ok": True,
+                    "type": context_type,
+                    "expected": " | ".join(
+                        part
+                        for part in [
+                            f"text={text_regex}" if text_regex else "",
+                            f"announcement={announcement_regex}" if announcement_regex else "",
+                        ]
+                        if part
+                    ),
+                    "actual_text": actual_selected_text,
+                    "actual_announcement": actual_selected_text,
+                    "actual_selected_text": actual_selected_text,
+                    "actual_source": "semantic_touch_candidate",
+                    "selected_candidates": [],
+                    "dump_source": dump_source,
+                    "lazy_dump_node_count": lazy_dump_node_count,
+                }
+            focus_values = [
+                focus_node_map.get("talkbackLabel", ""),
+                focus_node_map.get("contentDescription", ""),
+                focus_node_map.get("text", ""),
+                step.get("visible_label", ""),
+                step.get("merged_announcement", ""),
+            ]
+            semantic_focus_ok = any(
+                _matches_bottom_tab_expectation(value, expected_bottom_tab)
+                for value in focus_values
+                if str(value or "").strip()
+            )
+            if semantic_focus_ok and _matches_bottom_tab_expectation(target_label, expected_bottom_tab):
+                actual_selected_text = next(
+                    str(value).strip()
+                    for value in focus_values
+                    if str(value or "").strip()
+                    and _matches_bottom_tab_expectation(value, expected_bottom_tab)
+                )
+                return {
+                    "ok": True,
+                    "type": context_type,
+                    "expected": " | ".join(
+                        part
+                        for part in [
+                            f"text={text_regex}" if text_regex else "",
+                            f"announcement={announcement_regex}" if announcement_regex else "",
+                        ]
+                        if part
+                    ),
+                    "actual_text": actual_selected_text,
+                    "actual_announcement": actual_selected_text,
+                    "actual_selected_text": actual_selected_text,
+                    "actual_source": "semantic_focus_candidate",
+                    "selected_candidates": [],
+                    "dump_source": dump_source,
+                    "lazy_dump_node_count": lazy_dump_node_count,
+                }
+        xml_selected_label = _read_window_xml_selected_bottom_tab(client, dev, expected_bottom_tab)
+        if xml_selected_label:
+            return {
+                "ok": True,
+                "type": context_type,
+                "expected": " | ".join(
+                    part
+                    for part in [
+                        f"text={text_regex}" if text_regex else "",
+                        f"announcement={announcement_regex}" if announcement_regex else "",
+                    ]
+                    if part
+                ),
+                "actual_text": xml_selected_label,
+                "actual_announcement": xml_selected_label,
+                "actual_selected_text": xml_selected_label,
+                "actual_source": "window_xml_selected_bottom_tab",
+                "selected_candidates": [],
+                "dump_source": dump_source,
+                "lazy_dump_node_count": lazy_dump_node_count,
+            }
         selected_candidates: list[str] = []
         selected_values: list[str] = []
         fallback_values: list[str] = []
@@ -329,6 +485,7 @@ def verify_context(
             selected_candidates.append(marker)
             is_main_bottom_nav_candidate = bool(
                 _is_bottom_nav_resource_id(view_id, scenario_cfg)
+                or is_annotated_bottom_nav_candidate(node)
             )
             if is_main_bottom_nav_candidate and combined:
                 fallback_values.append(combined)

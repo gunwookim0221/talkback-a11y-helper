@@ -378,10 +378,10 @@ def update_crash_run_stats(
     decision: RecoveryDecision,
     retry_signal: CrashTerminalSignal | None = None,
 ) -> CrashRunStats:
-    retry_consumed = int(decision.retry_count or 0) > 0
-    _record_crash_signal_for_stats(stats, signal, retry_consumed=retry_consumed)
+    count_possible = decision.result != "crash_recovered"
+    _record_crash_signal_for_stats(stats, signal, count_possible=count_possible)
     if retry_signal is not None:
-        _record_crash_signal_for_stats(stats, retry_signal, retry_consumed=retry_consumed)
+        _record_crash_signal_for_stats(stats, retry_signal, count_possible=count_possible)
 
     outcome_key = f"{decision.result}:{signal.scenario_id}:{signal.crash_event_id}"
     if outcome_key not in stats.seen_outcome_keys:
@@ -635,7 +635,7 @@ def _record_crash_signal_for_stats(
     stats: CrashRunStats,
     signal: CrashTerminalSignal,
     *,
-    retry_consumed: bool,
+    count_possible: bool,
 ) -> None:
     event_id = str(signal.crash_event_id or "").strip()
     if event_id and event_id in stats.seen_crash_event_ids:
@@ -649,7 +649,7 @@ def _record_crash_signal_for_stats(
         stats.counted_crash_count += 1
     elif crash_type == "POSSIBLE_CRASH":
         stats.possible_crash_count += 1
-        if retry_consumed:
+        if count_possible:
             stats.counted_crash_count += 1
     elif crash_type == "APP_TERMINATED":
         stats.app_terminated_count += 1

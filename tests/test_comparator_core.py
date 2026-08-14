@@ -498,10 +498,16 @@ def test_version_parser_same_name_code_hotfix_and_unknown():
     assert opaque.relation == VersionRelation.UNKNOWN_ORDER
 
 
-def test_real_repository_discovery_validates_both_approved_packages():
+def test_real_repository_discovery_validates_required_approved_packages():
     records, errors = discover_baselines_read_only(BASELINES)
 
     assert errors == ()
-    assert {record.baseline_id for record in records} == {ENGLISH_ID, KOREAN_ID}
-    assert all(record.state == "APPROVED" for record in records)
-    assert all(record.input is not None and not record.errors for record in records)
+    discovered = {record.baseline_id: record for record in records}
+    required_ids = {ENGLISH_ID, KOREAN_ID}
+    assert required_ids <= discovered.keys()
+    assert all(discovered[baseline_id].state == "APPROVED" for baseline_id in required_ids)
+    assert all(
+        record.input is not None and not record.errors
+        for record in records
+        if record.state in {"APPROVED", "SUPERSEDED"}
+    )

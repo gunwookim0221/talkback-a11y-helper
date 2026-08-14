@@ -1,6 +1,7 @@
 from unittest.mock import Mock
 
 from tb_runner import tab_logic
+from tb_runner.bottom_nav import annotate_bottom_nav_candidates
 
 
 class FakeTabClient:
@@ -20,6 +21,64 @@ def _tab_cfg():
         "tab_type": "t",
         "tab": {"resource_id_regex": "tab_id", "text_regex": "홈"},
     }
+
+
+def _r2_bottom_nav_nodes():
+    labels = ["홈", "기기", "라이프", "자동화", "메뉴, 새 콘텐츠 사용 가능"]
+    return [
+        {
+            "text": "",
+            "contentDescription": label,
+            "className": "android.widget.LinearLayout",
+            "viewIdResourceName": None,
+            "boundsInScreen": {"l": index * 180, "t": 900, "r": index * 180 + 150, "b": 1000},
+            "clickable": index > 0,
+            "focusable": True,
+            "visibleToUser": True,
+        }
+        for index, label in enumerate(labels)
+    ]
+
+
+def test_r2_bottom_nav_row_is_discovered_without_resource_ids():
+    nodes = annotate_bottom_nav_candidates(_r2_bottom_nav_nodes(), expected_count=5)
+
+    assert [node["_bottom_nav_candidate"] for node in nodes] == [True] * 5
+    tab_cfg = tab_logic.normalize_tab_config({"tab_name": "(?i).*devices.*", "tab_type": "b"})
+
+    result = tab_logic.match_tab_candidate(nodes[1], tab_cfg)
+
+    assert result["matched"] is True
+    assert "bottom_tab_alias" in result["matched_fields"]
+    assert result["candidate"]["resource_id"] == ""
+
+
+def test_stabilize_r2_tab_uses_semantic_touch_without_legacy_header_fallback():
+    client = FakeTabClient()
+    client.dump_tree.return_value = _r2_bottom_nav_nodes()
+    client.touch_point.return_value = True
+    client.select.return_value = True
+    client.collect_focus_step.return_value = {
+        "visible_label": "기기 기기",
+        "merged_announcement": "기기 기기",
+        "focus_node": {"text": "기기 기기", "contentDescription": "기기 기기"},
+    }
+    config = {
+        "scenario_id": "devices_main",
+        "tab_name": "(?i).*devices.*",
+        "tab_type": "b",
+        "global_nav": {"labels": ["Home", "Devices", "Life", "Routines", "Menu"]},
+        "context_verify": {
+            "type": "selected_bottom_tab",
+            "announcement_regex": r"(?i).*(selected|선택됨).*(devices|기기).*",
+        },
+    }
+
+    result = tab_logic.stabilize_tab_selection(client, "SERIAL", config, max_retries=1)
+
+    assert result["ok"] is True
+    client.touch_point.assert_called_once()
+    client.touch.assert_not_called()
 
 
 def test_stabilize_tab_selection_touch_point_success(monkeypatch):
