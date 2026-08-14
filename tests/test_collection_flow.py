@@ -12971,6 +12971,27 @@ def test_has_global_nav_signals_requires_multiple_main_menu_resource_ids():
     assert hits_strong == 2
 
 
+def test_has_global_nav_signals_accepts_r2_structural_bottom_nav():
+    labels = ["홈", "기기", "라이프", "자동화", "메뉴, 새 콘텐츠 사용 가능"]
+    r2_nodes = [
+        {
+            "text": label,
+            "contentDescription": label,
+            "className": "android.widget.LinearLayout",
+            "viewIdResourceName": None,
+            "boundsInScreen": {"l": index * 180, "t": 900, "r": index * 180 + 150, "b": 1000},
+            "focusable": True,
+            "visibleToUser": True,
+        }
+        for index, label in enumerate(labels)
+    ]
+
+    visible, hits = collection_flow._has_global_nav_signals(r2_nodes)
+
+    assert visible is True
+    assert hits == 5
+
+
 def test_life_root_state_snapshot_does_not_mark_life_selected_from_label_only():
     nodes = [
         {"text": "Life", "contentDescription": "selected", "selected": True, "visibleToUser": True},

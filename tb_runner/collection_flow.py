@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from talkback_lib import A11yAdbClient
 from tb_runner.anchor_logic import build_landing_surface_signature, stabilize_anchor
+from tb_runner.bottom_nav import annotate_bottom_nav_candidates, is_annotated_bottom_nav_candidate
 from tb_runner.constants import (
     CHECKPOINT_SAVE_EVERY_STEPS,
     LOG_LEVEL,
@@ -1676,7 +1677,16 @@ def _has_global_nav_signals(state: list[dict[str, Any]]) -> tuple[bool, int]:
                 nav_hits_by_token.add(token)
                 break
     nav_hits = len(nav_hits_by_token)
-    return nav_hits >= 2, nav_hits
+    if nav_hits >= 2:
+        return True, nav_hits
+
+    annotated_nodes = annotate_bottom_nav_candidates(state, expected_count=len(nav_id_tokens))
+    structural_hits = sum(
+        1 for node in annotated_nodes if is_annotated_bottom_nav_candidate(node)
+    )
+    if structural_hits >= 3:
+        return True, structural_hits
+    return False, nav_hits
 
 
 def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
