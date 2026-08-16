@@ -18,6 +18,7 @@ ALL_DEVICES_LABELS = {
 DEVICE_STATE_SUFFIXES = (
     "움직임 감지됨",
     "물기 없음",
+    "물기 있음",
     "감지 안 됨",
     "진동 감지됨",
     "최근 감지",

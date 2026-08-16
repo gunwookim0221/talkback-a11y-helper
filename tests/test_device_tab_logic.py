@@ -576,7 +576,7 @@ def test_find_collapsed_room_sections_marks_only_explicit_collapsed_as_actionabl
 def test_find_device_card_by_stable_label_matches_observed_device_labels():
     nodes = [
         _device_card("연기 감지 안 됨", 42, 628),
-        _device_card("누수 물기 없음", 561, 628),
+        _device_card("누수 물기 있음", 561, 628),
         _device_card("모션센서 움직임 감지됨", 42, 1015),
         _device_card("Door Lock 잠김", 561, 1015),
         _device_card("공기청정기 켜짐", 42, 1479),
