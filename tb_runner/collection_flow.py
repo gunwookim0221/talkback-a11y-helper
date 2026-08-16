@@ -18,6 +18,7 @@ from tb_runner.constants import (
     MAIN_ANNOUNCEMENT_WAIT_SECONDS,
     MAIN_STEP_WAIT_SECONDS,
 )
+from tb_runner.core_preflight import ensure_smartthings_foreground
 from tb_runner.diagnostics import classify_step_result, detect_step_mismatch, normalize_move_result, should_stop
 from tb_runner.diagnostics import is_global_nav_row
 from tb_runner.excel_report import save_excel
@@ -2298,6 +2299,22 @@ def _ensure_global_nav_start_focus(
         log(f"[GLOBAL_NAV][start_gate] passed scenario='{scenario_id}'")
         return True, {}
 
+    tab_trace = getattr(client, "last_tab_stabilization_result", {})
+    if isinstance(tab_trace, dict) and bool(tab_trace.get("ok")) and bool(tab_trace.get("selected")):
+        context_payload = tab_trace.get("context")
+        if not isinstance(context_payload, dict) or not bool(context_payload.get("ok")):
+            context_payload = tab_trace.get("verify_context")
+        best = tab_trace.get("best")
+        candidate = best.get("candidate") if isinstance(best, dict) else None
+        semantic_bottom_nav = isinstance(candidate, dict) and bool(candidate.get("_bottom_nav_candidate"))
+        if isinstance(context_payload, dict) and bool(context_payload.get("ok")) and semantic_bottom_nav:
+            log(
+                f"[GLOBAL_NAV][start_gate] passed scenario='{scenario_id}' "
+                "basis='verified_r2_semantic_bottom_nav_contract' "
+                f"context_type='{str(context_payload.get('type', '') or '')}'"
+            )
+            return True, {}
+
     log(
         f"[GLOBAL_NAV][start_gate] retry_align scenario='{scenario_id}' "
         f"reason='focused_node_not_bottom_tab' focused_view_id='{focused_view_id}'"
@@ -2484,6 +2501,20 @@ def _ensure_life_plugin_list_ready(client: A11yAdbClient, dev: str, tab_cfg: dic
             )
             pre_reset_state_logged = True
         log(f"[LIFE_RESET] app_inside={str(app_inside).lower()}")
+        if not app_inside:
+            try:
+                foreground_result = ensure_smartthings_foreground(serial=dev)
+            except Exception as exc:
+                foreground_result = {"status": "FAIL", "message": str(exc)}
+            foreground_status = str(foreground_result.get("status", "") or "") if isinstance(foreground_result, dict) else ""
+            foreground_package = str(foreground_result.get("package", "") or "") if isinstance(foreground_result, dict) else ""
+            log(
+                "[LIFE_RESET][foreground_recovery] "
+                f"status='{foreground_status}' package='{foreground_package}'"
+            )
+            if foreground_status == "PASS":
+                _, snapshot, app_inside = _read_snapshot()
+                log(f"[LIFE_RESET] app_inside={str(app_inside).lower()} source='foreground_recovery'")
         for _ in range(2):
             if app_inside:
                 break

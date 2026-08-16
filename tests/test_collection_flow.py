@@ -2321,6 +2321,36 @@ def test_collect_tab_rows_global_nav_start_gate_allows_bottom_focus(monkeypatch)
     assert len(client.select_calls) == 0
 
 
+def test_global_nav_start_gate_accepts_verified_r2_semantic_tab_with_empty_focus(monkeypatch):
+    client = DummyClient([])
+    client.last_tab_stabilization_result = {
+        "ok": True,
+        "selected": True,
+        "context": {"ok": True, "type": "selected_bottom_tab"},
+        "verify_context": {"ok": True, "type": "selected_bottom_tab"},
+        "best": {
+            "candidate": {
+                "_bottom_nav_candidate": True,
+                "announcement": "홈",
+            }
+        },
+    }
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_args: None)
+
+    ok, focus = collection_flow._ensure_global_nav_start_focus(
+        client,
+        "SERIAL",
+        _global_nav_tab_cfg(),
+        scenario_id="global_nav_main",
+        focused_view_id="",
+        wait_seconds=0.2,
+    )
+
+    assert ok is True
+    assert focus == {}
+    assert client.select_calls == []
+
+
 def test_recover_to_start_state_skips_when_already_target(monkeypatch):
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
     client = DummyClient([_anchor_row()])
@@ -13105,6 +13135,39 @@ def test_life_reset_skips_selection_when_r2_life_is_already_selected(monkeypatch
     assert (ok, reason) == (True, "ready")
     assert client.select_calls == []
     assert selector_calls == []
+
+
+def test_life_reset_launches_smartthings_when_app_is_outside(monkeypatch):
+    client = DummyClient([])
+    foreground_calls = []
+    foreground_done = False
+
+    def dump_tree(**_kwargs):
+        if not foreground_done:
+            return []
+        return _life_reset_r2_nodes(selected=True)
+
+    client.dump_tree = dump_tree
+
+    def ensure_foreground(**kwargs):
+        nonlocal foreground_done
+        foreground_calls.append(kwargs)
+        foreground_done = True
+        return {"status": "PASS", "package": "com.samsung.android.oneconnect"}
+
+    monkeypatch.setattr(collection_flow, "ensure_smartthings_foreground", ensure_foreground)
+    monkeypatch.setattr(collection_flow, "_verify_fresh_life_list_state", lambda *_args, **_kwargs: (True, "ready"))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_args: None)
+
+    ok, reason = collection_flow._ensure_life_plugin_list_ready(
+        client,
+        "SERIAL",
+        {"scenario_id": "life_music_sync_plugin", "back_recovery_wait_seconds": 0.2},
+    )
+
+    assert (ok, reason) == (True, "ready")
+    assert len(foreground_calls) == 1
+    assert foreground_calls[0]["serial"] == "SERIAL"
 
 
 def test_verify_fresh_life_list_state_uses_window_xml_selected_fallback(monkeypatch):
