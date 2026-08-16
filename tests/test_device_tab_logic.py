@@ -96,6 +96,20 @@ def test_collect_visible_device_cards_accepts_home_camera_card_resource_id():
     assert cards[0]["stable_label"] == "홈카메라 360"
 
 
+def test_collect_visible_device_cards_accepts_runtime_frame_layout_card():
+    card = _device_card(
+        "Camera",
+        42,
+        628,
+        class_name="android.widget.FrameLayout",
+    )
+
+    cards = device_tab_logic.collect_visible_device_cards([card])
+
+    assert len(cards) == 1
+    assert cards[0]["stable_label"] == "Camera"
+
+
 def test_promote_device_card_target_uses_ancestor_card_not_action_button():
     card = _device_card(
         "TV 꺼짐",

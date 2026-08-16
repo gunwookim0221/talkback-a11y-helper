@@ -108,6 +108,90 @@ def _room_none(label="지정된 방 없음 지정된 방 없음", *, focusable=T
     )
 
 
+def test_ensure_all_devices_location_selected_uses_window_xml_selected_fallback(monkeypatch):
+    helper_all_devices = _all_devices()
+    helper_all_devices.pop("selected", None)
+    helper_anywhere = _node(
+        "\uC5B4\uB514\uC11C\uB098 \uC0AC\uC6A9 \uC5B4\uB514\uC11C\uB098 \uC0AC\uC6A9",
+        "com.samsung.android.oneconnect:id/title",
+        {"l": 60, "t": 165, "r": 942, "b": 220},
+        class_name="android.widget.TextView",
+        clickable=False,
+        focusable=False,
+        effective_clickable=False,
+    )
+    helper_anywhere.pop("selected", None)
+    helper_nodes = [helper_anywhere, helper_all_devices, _room_none(focusable=False)]
+    xml_all_devices = dict(helper_all_devices)
+    xml_all_devices["selected"] = True
+    client = DummyDeviceClient([[]])
+    monkeypatch.setattr(
+        collection_flow,
+        "_load_scrolltouch_xml_nodes",
+        lambda **_kwargs: ([xml_all_devices], "ok"),
+    )
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_args: None)
+    monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
+
+    ok, nodes, reason = collection_flow._ensure_all_devices_location_selected(
+        client=client,
+        dev="SERIAL",
+        nodes=helper_nodes,
+        dump_tree_fn=client.dump_tree,
+        step_wait_seconds=0,
+    )
+
+    assert ok is True
+    assert reason == "all_devices_already_selected_window_xml"
+    assert nodes == helper_nodes
+    assert client.tap_xy_adb_calls == []
+
+
+def test_device_list_scroll_uses_window_xml_selected_fallback(monkeypatch):
+    helper_all_devices = _all_devices()
+    helper_all_devices.pop("selected", None)
+    helper_anywhere = _node(
+        "\uC5B4\uB514\uC11C\uB098 \uC0AC\uC6A9 \uC5B4\uB514\uC11C\uB098 \uC0AC\uC6A9",
+        "com.samsung.android.oneconnect:id/title",
+        {"l": 60, "t": 165, "r": 942, "b": 220},
+        class_name="android.widget.TextView",
+        clickable=False,
+        focusable=False,
+        effective_clickable=False,
+    )
+    helper_anywhere.pop("selected", None)
+    nodes_before = [
+        helper_anywhere,
+        helper_all_devices,
+        _room_none(focusable=False),
+        _device_card("Camera", 42, 628),
+    ]
+    xml_all_devices = dict(helper_all_devices)
+    xml_all_devices["selected"] = True
+    client = DummyDeviceClient([nodes_before])
+    monkeypatch.setattr(
+        collection_flow,
+        "_load_scrolltouch_xml_nodes",
+        lambda **_kwargs: ([xml_all_devices], "ok"),
+    )
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_args: None)
+    monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
+
+    ok, nodes, reason, inventory_changed = collection_flow._scroll_device_list_for_card_search(
+        client,
+        "SERIAL",
+        nodes_before=nodes_before,
+        dump_tree_fn=client.dump_tree,
+        step_wait_seconds=0,
+    )
+
+    assert ok is True
+    assert nodes == nodes_before
+    assert reason == "device_list_scrolled"
+    assert inventory_changed is False
+    assert len(client.swipe_calls) == 1
+
+
 def test_enter_device_card_plugin_opens_smoke_card_by_stable_label(monkeypatch):
     client = DummyDeviceClient([[_all_devices(), _device_card("연기 감지 안 됨", 42, 628)]])
     monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **_kwargs: (True, "screen_text"))

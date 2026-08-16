@@ -522,7 +522,7 @@ def _is_device_card_node(node: dict[str, Any]) -> bool:
     if not _visible(node):
         return False
     class_name = _text(node.get("className"))
-    if "ViewGroup" not in class_name:
+    if "ViewGroup" not in class_name and "FrameLayout" not in class_name:
         return False
     return bool(
         _bool_value(node.get("clickable"))

@@ -5610,6 +5610,31 @@ def _device_location_label(state: dict[str, Any]) -> str:
     return ""
 
 
+def _detect_selected_device_location_with_xml_fallback(
+    client: A11yAdbClient,
+    dev: str,
+    nodes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    state = device_tab_logic.detect_selected_device_location(nodes)
+    if bool(state.get("selected")):
+        return state
+    try:
+        xml_nodes, xml_reason = _load_scrolltouch_xml_nodes(client=client, dev=dev)
+    except Exception as exc:
+        xml_nodes, xml_reason = [], f"xml_fallback_failed:{type(exc).__name__}"
+    if not xml_nodes:
+        return state
+    flat_xml_nodes = [node for node, _parent in _iter_tree_nodes_with_parent(xml_nodes)]
+    xml_state = device_tab_logic.detect_selected_device_location(flat_xml_nodes)
+    if not bool(xml_state.get("selected")):
+        return state
+    merged_state = dict(xml_state)
+    merged_state["reason"] = "window_xml_selected"
+    merged_state["verification_source"] = "window_xml_selected"
+    merged_state["xml_reason"] = xml_reason
+    return merged_state
+
+
 def _device_inventory_signature(nodes: list[dict[str, Any]]) -> str:
     cards = device_tab_logic.collect_visible_device_cards(nodes)
     parts = [
@@ -5762,7 +5787,7 @@ def _scroll_device_list_for_card_search(
     dump_tree_fn: Any,
     step_wait_seconds: float,
 ) -> tuple[bool, list[dict[str, Any]], str, bool]:
-    state_before = device_tab_logic.detect_selected_device_location(nodes_before)
+    state_before = _detect_selected_device_location_with_xml_fallback(client, dev, nodes_before)
     selected_before = _device_location_label(state_before)
     log(f"[DEVICE][scroll] selected_before='{selected_before}'")
     if not bool(state_before.get("selected")):
@@ -5807,7 +5832,7 @@ def _scroll_device_list_for_card_search(
         return False, nodes_before, f"device_list_post_scroll_dump_failed:{exc}", False
     nodes_after = nodes_after if isinstance(nodes_after, list) else []
 
-    state_after = device_tab_logic.detect_selected_device_location(nodes_after)
+    state_after = _detect_selected_device_location_with_xml_fallback(client, dev, nodes_after)
     selected_after = _device_location_label(state_after)
     log(f"[DEVICE][scroll] selected_after='{selected_after}'")
     if not bool(state_after.get("selected")):
@@ -5839,7 +5864,7 @@ def _ensure_all_devices_location_selected(
     *,
     step_wait_seconds: float,
 ) -> tuple[bool, list[dict[str, Any]], str]:
-    state = device_tab_logic.detect_selected_device_location(nodes)
+    state = _detect_selected_device_location_with_xml_fallback(client, dev, nodes)
     selected_before = _device_location_label(state)
     log(f"[DEVICE][location] selected_before='{selected_before}' reason='{state.get('reason', '')}'")
     candidate = state.get("candidate")
@@ -5851,7 +5876,11 @@ def _ensure_all_devices_location_selected(
             f"bounds='{candidate.get('bounds', '')}'"
         )
     if bool(state.get("selected")):
-        return True, nodes, "all_devices_already_selected"
+        return True, nodes, (
+            "all_devices_already_selected_window_xml"
+            if state.get("verification_source") == "window_xml_selected"
+            else "all_devices_already_selected"
+        )
 
     last_actual = selected_before
     for attempt in range(1, 3):
@@ -5876,12 +5905,16 @@ def _ensure_all_devices_location_selected(
         except Exception as exc:
             return False, nodes, f"all_devices_verify_dump_failed:{exc}"
         nodes = refreshed if isinstance(refreshed, list) else []
-        state = device_tab_logic.detect_selected_device_location(nodes)
+        state = _detect_selected_device_location_with_xml_fallback(client, dev, nodes)
         selected_after = _device_location_label(state)
         last_actual = selected_after
         log(f"[DEVICE][location] selected_after='{selected_after}' reason='{state.get('reason', '')}' attempt={attempt}")
         if bool(state.get("selected")):
-            return True, nodes, "all_devices_selected"
+            return True, nodes, (
+                "all_devices_already_selected_window_xml"
+                if state.get("verification_source") == "window_xml_selected"
+                else "all_devices_selected"
+            )
         if attempt == 1:
             log(
                 f"[DEVICE][location] retry=1 expected='모든 기기|All devices' actual='{selected_after}'"
