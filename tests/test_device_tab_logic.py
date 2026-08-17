@@ -672,6 +672,33 @@ def test_find_device_card_by_stable_label_matches_english_observed_state_suffix_
     assert air_purifier["stable_label"] == "공기청정기"
 
 
+def test_find_device_card_by_stable_label_matches_r2_composite_state_action_labels():
+    nodes = [
+        _device_card("Door Lock 잠김 스위치", 42, 628),
+        _device_card("공기청정기 켜짐 끄기", 561, 628),
+        _device_card("TV 꺼짐 켜기", 42, 1015),
+        _device_card("세탁기 켜짐 끄기", 561, 1015),
+        _device_card("습도센서 진동 없음", 42, 1479),
+        _device_card("홈카메라 360 마지막 업데이트: 08/17 9:08 AM", 561, 1479),
+        _device_card("Audio 일시중지 재생", 42, 1866),
+    ]
+
+    expected_targets = (
+        ("Door Lock", "Door Lock"),
+        ("공기청정기", "공기청정기"),
+        ("TV", "TV"),
+        ("세탁기", "세탁기"),
+        ("습도센서", "습도센서"),
+        ("홈카메라 360", "홈카메라 360"),
+        ("Audio", "Audio"),
+    )
+
+    for observed_label, target_label in expected_targets:
+        card = device_tab_logic.find_device_card_by_stable_label(nodes, [target_label])
+        assert card is not None, f"r2 device label did not match: {observed_label}"
+        assert card["stable_label"] == target_label
+
+
 def test_label_contains_state_text_detects_clear_and_dry_suffixes():
     assert device_tab_logic.label_contains_state_text("Clear") is True
     assert device_tab_logic.label_contains_state_text("Dry") is True

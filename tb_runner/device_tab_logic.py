@@ -16,6 +16,11 @@ ALL_DEVICES_LABELS = {
 }
 
 DEVICE_STATE_SUFFIXES = (
+    "잠김 스위치",
+    "켜짐 끄기",
+    "꺼짐 켜기",
+    "진동 없음",
+    "일시중지 재생",
     "움직임 감지됨",
     "물기 없음",
     "물기 있음",
@@ -169,7 +174,12 @@ def _strip_device_state_suffixes(label: str) -> str:
 
 def normalize_device_stable_label(label: str) -> str:
     stable = _dedupe_repeated_words(_text(label))
-    stable = re.sub(r"\s+last\s+updated\s*:\s*.+$", "", stable, flags=re.IGNORECASE).strip()
+    stable = re.sub(
+        r"\s+(?:last\s+updated|마지막\s+업데이트|최근\s+업데이트)\s*:\s*.+$",
+        "",
+        stable,
+        flags=re.IGNORECASE,
+    ).strip()
     return _strip_device_state_suffixes(stable)
 
 
