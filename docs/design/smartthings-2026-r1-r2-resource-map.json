@@ -1,0 +1,332 @@
+{
+  "schema": "smartthings-ui-contract-diff-v1",
+  "comparison": {
+    "year": 2026,
+    "from": "r1",
+    "to": "r2",
+    "scope": "SmartThings Home UI navigation, selected-state verification, Devices location/cards, Life card boundaries, and Menu Settings entry",
+    "confidence_legend": {
+      "CONFIRMED": "Directly present in raw XML, artifact log payload, or matching current source and historical evidence.",
+      "SUPPORTED": "Supported by source history and multiple indirect historical observations; one raw side may be absent.",
+      "INFERRED": "Narrow interpretation explicitly marked as inference.",
+      "UNKNOWN": "Evidence is absent or insufficient; no value is guessed."
+    }
+  },
+  "provenance": {
+    "r1": {
+      "run_ids": ["batch_20260608_233133"],
+      "device_model": "SM-F741N",
+      "locale": "UNKNOWN",
+      "smartthings_version_name": "UNKNOWN",
+      "smartthings_version_code": null,
+      "android_major": "UNKNOWN",
+      "one_ui_major": "UNKNOWN",
+      "talkback_version_name": "UNKNOWN",
+      "repository_commit": "UNKNOWN",
+      "status": "completed historical batch; device summary passed with scenario warnings",
+      "confidence": "SUPPORTED"
+    },
+    "r2": {
+      "run_ids": ["batch_20260817_021109", "batch_20260817_102013"],
+      "primary_contract_run": "batch_20260817_102013",
+      "device_model": "SM-F741N",
+      "locale": "ko-KR",
+      "smartthings_version_name": "1.8.51.14",
+      "smartthings_version_code": 185114010,
+      "android_major": 15,
+      "one_ui_major": 7,
+      "talkback_version_name": "15.1.01.1",
+      "repository_commit": "ad442c02ed047a90000bff40ecae4562fd48ae46",
+      "status": "completed historical batch; primary contract run contains direct raw XML and logs",
+      "confidence": "CONFIRMED"
+    },
+    "current_repository_head": "ab7f03092b4b5baa2f1ca9ddcb35a4dbd7bf74c2"
+  },
+  "evidence": {
+    "r1_batch_summary": "qa_frontend_runs/batch_20260608_233133/batch_summary.json",
+    "r1_device_summary": "qa_frontend_runs/batch_20260608_233133/device_SM-F741N_R3CX40QFDBP/summary.json",
+    "r1_runtime_config": "qa_frontend_runs/batch_20260608_233133/device_SM-F741N_R3CX40QFDBP/runtime_config.json",
+    "r1_normal_log": "qa_frontend_runs/batch_20260608_233133/device_SM-F741N_R3CX40QFDBP/talkback_compare_20260608_233145.normal.log",
+    "r1_runner_log": "qa_frontend_runs/batch_20260608_233133/device_SM-F741N_R3CX40QFDBP/runner.log",
+    "r2_batch_summary": "qa_frontend_runs/batch_20260817_102013/batch_summary.json",
+    "r2_device_summary": "qa_frontend_runs/batch_20260817_102013/device_SM-F741N_R3CX40QFDBP/summary.json",
+    "r2_environment_profile": "qa_frontend_runs/batch_20260817_102013/device_SM-F741N_R3CX40QFDBP/talkback_compare_20260817_102024.environment_profile.json",
+    "r2_normal_log": "qa_frontend_runs/batch_20260817_102013/device_SM-F741N_R3CX40QFDBP/talkback_compare_20260817_102024.normal.log",
+    "r2_runner_log": "qa_frontend_runs/batch_20260817_102013/device_SM-F741N_R3CX40QFDBP/runner.log",
+    "r2_devices_xml": "qa_frontend_runs/batch_20260817_102013/device_SM-F741N_R3CX40QFDBP/talkback_compare_20260817_102024/devices_main/xml_dumps/000_step_001_entry.xml",
+    "r2_menu_xml": "qa_frontend_runs/batch_20260817_102013/device_SM-F741N_R3CX40QFDBP/talkback_compare_20260817_102024/menu_main/xml_dumps/000_step_001_entry.xml",
+    "r2_life_xml_samples": [
+      "qa_frontend_runs/batch_20260817_102013/device_SM-F741N_R3CX40QFDBP/talkback_compare_20260817_102024/life_energy_plugin/xml_dumps/000_step_001_entry.xml",
+      "qa_frontend_runs/batch_20260817_102013/device_SM-F741N_R3CX40QFDBP/talkback_compare_20260817_102024/life_home_care_plugin/xml_dumps/000_step_001_entry.xml",
+      "qa_frontend_runs/batch_20260817_102013/device_SM-F741N_R3CX40QFDBP/talkback_compare_20260817_102024/life_home_monitor_plugin/xml_dumps/000_step_001_entry.xml"
+    ],
+    "source_contracts": [
+      "config/runtime_config.json",
+      "tb_runner/bottom_nav.py",
+      "tb_runner/context_verifier.py",
+      "tb_runner/tab_logic.py",
+      "tb_runner/device_tab_logic.py",
+      "tb_runner/collection_flow.py",
+      "tb_runner/scenario_config.py"
+    ],
+    "relevant_commits": [
+      "114050a Support SmartThings r2 bottom navigation",
+      "8b492a2 Fix SmartThings r2 device filter verification",
+      "ad442c0 Fix r2 device composite label matching",
+      "ab7f030 Fix r2 tab and settings entry verification"
+    ]
+  },
+  "areas": {
+    "bottom_navigation": {
+      "logical_order": ["home", "devices", "life", "routines", "menu"],
+      "r1": {
+        "resource_ids": {
+          "home": "com.samsung.android.oneconnect:id/menu_favorites",
+          "devices": "com.samsung.android.oneconnect:id/menu_devices",
+          "life": "com.samsung.android.oneconnect:id/menu_services",
+          "routines": "com.samsung.android.oneconnect:id/menu_automations",
+          "menu": "com.samsung.android.oneconnect:id/menu_more"
+        },
+        "class": "android.widget.Button",
+        "hierarchy_signature": "resource-id addressable bottom item; complete historical raw parent hierarchy not retained",
+        "labels": {
+          "ko": null,
+          "en": ["Home", "Devices", "Life", "Routines", "Menu"]
+        },
+        "selected_state_owner": "TalkBack announcement containing Selected and tab label",
+        "confidence": "CONFIRMED",
+        "evidence_refs": ["r1_runtime_config", "r1_normal_log", "r1_runner_log"]
+      },
+      "r2": {
+        "resource_ids": null,
+        "class": "android.widget.LinearLayout",
+        "parent_hierarchy": "bottom row LinearLayout > item LinearLayout > ViewGroup > icon ImageView + title TextView; Menu may include sesl_badge_dot",
+        "hierarchy_signature": "five same-row semantic items around y=2316..2460 with no item resource-id",
+        "labels": {
+          "ko": ["홈", "기기", "라이프", "자동화", "메뉴, 새 콘텐츠 사용 가능"],
+          "en": null
+        },
+        "compatibility_aliases": {
+          "en": ["Home", "Devices", "Life", "Routines", "Menu"]
+        },
+        "selected_state_owner": "semantic item or descendant selected=true in raw XML; helper dump may omit the selected flag",
+        "confidence": "CONFIRMED",
+        "evidence_refs": ["r2_devices_xml", "r2_menu_xml", "r2_normal_log", "r2_runner_log"]
+      },
+      "change_types": ["REMOVED_IN_R2", "CHANGED_IN_R2", "SEMANTIC_ONLY_IN_R2"],
+      "automation_strategy": "resource-id-first for r1; annotated same-row semantic label fallback for r2; raw XML selected=true verification fallback",
+      "confidence": "CONFIRMED",
+      "evidence_refs": ["r1_normal_log", "r2_devices_xml", "r2_menu_xml", "source_contracts"]
+    },
+    "bottom_navigation_items": {
+      "home": {
+        "r1_resource_id": "com.samsung.android.oneconnect:id/menu_favorites",
+        "r2_resource_id": null,
+        "r1_label_en": "Home",
+        "r2_label_ko": "홈",
+        "r2_class": "android.widget.LinearLayout",
+        "r2_selected_state": "UNKNOWN for the retained Devices capture; raw XML selected=true is confirmed on selected items in the same contract",
+        "change_types": ["REMOVED_IN_R2", "SEMANTIC_ONLY_IN_R2"],
+        "confidence": "CONFIRMED",
+        "evidence_refs": ["r1_normal_log", "r2_devices_xml"]
+      },
+      "devices": {
+        "r1_resource_id": "com.samsung.android.oneconnect:id/menu_devices",
+        "r2_resource_id": null,
+        "r1_label_en": "Devices",
+        "r2_label_ko": "기기",
+        "r2_class": "android.widget.LinearLayout",
+        "r2_selected_state": "selected=true on the item and descendants in Devices XML",
+        "change_types": ["REMOVED_IN_R2", "SEMANTIC_ONLY_IN_R2"],
+        "confidence": "CONFIRMED",
+        "evidence_refs": ["r1_normal_log", "r2_devices_xml"]
+      },
+      "life": {
+        "r1_resource_id": "com.samsung.android.oneconnect:id/menu_services",
+        "r2_resource_id": null,
+        "r1_label_en": "Life",
+        "r2_label_ko": "라이프",
+        "r2_class": "android.widget.LinearLayout",
+        "r2_selected_state": "selected=true when selected; Life reset logs use window_xml_selected",
+        "change_types": ["REMOVED_IN_R2", "SEMANTIC_ONLY_IN_R2"],
+        "confidence": "CONFIRMED",
+        "evidence_refs": ["r1_normal_log", "r2_runner_log", "r2_devices_xml"]
+      },
+      "routines": {
+        "r1_resource_id": "com.samsung.android.oneconnect:id/menu_automations",
+        "r2_resource_id": null,
+        "r1_label_en": "Routines",
+        "r2_label_ko": "자동화",
+        "r2_class": "android.widget.LinearLayout",
+        "r2_selected_state": "UNKNOWN for the retained Devices capture; selected=true is confirmed on selected r2 items",
+        "change_types": ["REMOVED_IN_R2", "SEMANTIC_ONLY_IN_R2"],
+        "confidence": "CONFIRMED",
+        "evidence_refs": ["r1_normal_log", "r2_normal_log"]
+      },
+      "menu": {
+        "r1_resource_id": "com.samsung.android.oneconnect:id/menu_more",
+        "r2_resource_id": null,
+        "r1_label_en": "Menu, New content available",
+        "r2_label_ko": "메뉴, 새 콘텐츠 사용 가능",
+        "r2_class": "android.widget.LinearLayout",
+        "r2_selected_state": "selected=true on the item and descendants in Menu XML",
+        "change_types": ["REMOVED_IN_R2", "SEMANTIC_ONLY_IN_R2"],
+        "confidence": "CONFIRMED",
+        "evidence_refs": ["r1_normal_log", "r2_menu_xml"]
+      }
+    },
+    "selected_state": {
+      "r1": {
+        "helper_or_focus_signal": "TalkBack Selected announcement and resource-addressed focus",
+        "raw_xml": "UNKNOWN",
+        "confidence": "SUPPORTED"
+      },
+      "r2": {
+        "helper_or_focus_signal": "semantic touch/focus candidate when the helper exposes it",
+        "raw_xml": "selected=true on expected bottom item or descendant",
+        "fallback_helper": "_read_window_xml_selected_bottom_tab and XML selected parsing",
+        "confidence": "CONFIRMED"
+      },
+      "change_types": ["CHANGED_IN_R2", "SEMANTIC_ONLY_IN_R2"],
+      "automation_strategy": "require expected destination match; do not accept a selected content/header node",
+      "evidence_refs": ["r1_normal_log", "r2_runner_log", "r2_devices_xml", "r2_menu_xml", "source_contracts"]
+    },
+    "devices": {
+      "location_filters": {
+        "all_devices": {
+          "r1_resource_id": null,
+          "r1_label": "UNKNOWN",
+          "r2_resource_id": null,
+          "r2_label": "모든 기기",
+          "r2_class": "android.widget.LinearLayout",
+          "r2_selected": true,
+          "automation_strategy": "normalized label plus explicit selected/checked/state-description signal",
+          "confidence": "CONFIRMED",
+          "evidence_refs": ["r2_devices_xml", "source_contracts"]
+        },
+        "anywhere_use": {
+          "r1_resource_id": null,
+          "r1_label": "UNKNOWN",
+          "r2_resource_id": null,
+          "r2_label": "어디서나 사용",
+          "r2_class": "android.widget.LinearLayout",
+          "r2_selected": false,
+          "automation_strategy": "semantic location candidate; do not confuse section header with device card",
+          "confidence": "CONFIRMED",
+          "evidence_refs": ["r2_devices_xml", "r2_normal_log"]
+        }
+      },
+      "cards": {
+        "resource_ids": [
+          "com.samsung.android.oneconnect:id/device_card",
+          "com.samsung.android.oneconnect:id/device_card_camera"
+        ],
+        "r1_class": "UNKNOWN in retained raw artifact; IDs are present in pre-r2 source history",
+        "r2_class": "android.widget.FrameLayout",
+        "r2_actionable": true,
+        "descendant_name_ids": ["com.samsung.android.oneconnect:id/device_name"],
+        "descendant_status_ids": ["com.samsung.android.oneconnect:id/device_status"],
+        "observed_r2_names": ["연기", "누수"],
+        "observed_r2_statuses": ["연기 감지됨"],
+        "stable_label_rule": "deduplicate merged words; remove state suffixes and update metadata; match the actionable parent",
+        "change_types": ["UNCHANGED"],
+        "confidence": "SUPPORTED",
+        "evidence_refs": ["r1_device_summary", "r2_devices_xml", "source_contracts", "relevant_commits"]
+      },
+      "observed_labels": {
+        "r1_en": ["Smoke", "Leaks", "거실 홈카메라 360 Offline"],
+        "r2_ko": ["연기", "연기 감지됨", "누수", "모든 기기", "어디서나 사용"],
+        "confidence": "CONFIRMED",
+        "evidence_refs": ["r1_normal_log", "r2_devices_xml", "r2_runner_log"]
+      }
+    },
+    "life": {
+      "global_tab": {
+        "r1_resource_id": "com.samsung.android.oneconnect:id/menu_services",
+        "r2_resource_id": null,
+        "r1_label_en": "Life",
+        "r2_label_ko": "라이프",
+        "r2_selected_source": "window_xml_selected in completed r2 reset logs",
+        "change_types": ["REMOVED_IN_R2", "SEMANTIC_ONLY_IN_R2"],
+        "confidence": "CONFIRMED",
+        "evidence_refs": ["r1_normal_log", "r2_runner_log"]
+      },
+      "generic_card_hierarchy": {
+        "r1_samples": ["com.samsung.android.oneconnect:id/llCard", "com.samsung.android.oneconnect:id/containerNameLayout"],
+        "r2_samples": ["DynamicSummaryCard", "DynamicSummaryCardView", "dashboard_devicelist_unit", "dashboard_upgrade_unit", "com.samsung.android.oneconnect:id/llCard"],
+        "r2_actionable_parent_strategy": "semantic title/descendant match promoted to containing actionable parent",
+        "confidence": "SUPPORTED",
+        "evidence_refs": ["r1_normal_log", "r2_life_xml_samples", "source_contracts"]
+      },
+      "plugin_specific": {
+        "air_care": {
+          "observed_label_ko": "에어 케어",
+          "stable_plugin_entry_contract": "UNKNOWN",
+          "confidence": "SUPPORTED",
+          "evidence_refs": ["r2_life_xml_samples"]
+        },
+        "pet_care": {
+          "observed_label_ko": null,
+          "stable_plugin_entry_contract": "UNKNOWN",
+          "confidence": "UNKNOWN",
+          "evidence_refs": ["r2_device_summary"]
+        },
+        "smart_find": {
+          "observed_label_ko": "파인드",
+          "stable_plugin_entry_contract": "UNKNOWN",
+          "confidence": "SUPPORTED",
+          "evidence_refs": ["r2_life_xml_samples", "r2_device_summary"]
+        }
+      }
+    },
+    "settings_menu": {
+      "settings_target": {
+        "r1": {
+          "resource_id": "com.samsung.android.oneconnect:id/setting_button_layout",
+          "class": "android.widget.RelativeLayout",
+          "label": "Settings, New content available, Button Settings",
+          "actionable_parent": true,
+          "confidence": "CONFIRMED"
+        },
+        "r2": {
+          "resource_id": "com.samsung.android.oneconnect:id/badge_container",
+          "class": "android.widget.ImageButton",
+          "label": "설정",
+          "child_resource_id": "com.samsung.android.oneconnect:id/settings_image",
+          "child_class": "android.widget.ImageButton",
+          "child_label": "설정",
+          "actionable_parent": true,
+          "confidence": "CONFIRMED"
+        },
+        "change_types": ["REMOVED_IN_R2", "NEW_IN_R2", "CHANGED_IN_R2"],
+        "automation_strategy": "legacy resource-id first; stable labels Settings/설정; promote matching child to actionable parent",
+        "evidence_refs": ["r1_runner_log", "r1_runtime_config", "r2_menu_xml", "r2_normal_log", "source_contracts"]
+      },
+      "legacy_header": {
+        "resource_id": "com.samsung.android.oneconnect:id/tab_title",
+        "r1_class": "android.widget.Spinner",
+        "r2_class": "android.widget.Spinner",
+        "r2_label": "talkback test room, , Double tap to open menu",
+        "role": "header chrome, not global bottom Menu",
+        "change_types": ["UNCHANGED", "CHANGED_IN_R2"],
+        "automation_strategy": "reject generic menu/more match unless bottom-nav resource or annotated semantic row proves it",
+        "confidence": "CONFIRMED",
+        "evidence_refs": ["r1_runner_log", "r2_normal_log", "source_contracts"]
+      }
+    },
+    "r1_compatibility": {
+      "resource_id_first": true,
+      "semantic_fallback_only_when_bounded": true,
+      "legacy_settings_target_retained": true,
+      "confirmed_crash_policy_changed": false,
+      "confidence": "CONFIRMED",
+      "evidence_refs": ["source_contracts", "relevant_commits"]
+    }
+  },
+  "limitations": [
+    "r1 SmartThings target-app version is UNKNOWN because the selected r1 artifact has no target-app version field.",
+    "r1 raw XML for bottom navigation, Devices filters, and Settings is not retained in the selected artifact.",
+    "r2 plugin-specific stable entry contracts for Air Care, Pet Care, and Smart Find are not established by the selected completed artifacts.",
+    "This document does not read or mutate any current/in-progress Full Run surface."
+  ]
+}
