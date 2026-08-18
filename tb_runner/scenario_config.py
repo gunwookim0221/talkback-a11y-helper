@@ -1083,6 +1083,7 @@ TAB_CONFIGS = [
                 "action": "select_and_click_focused_or_tap_bounds_center_adb",
                 "target": "com.samsung.android.oneconnect:id/setting_button_layout",
                 "type": "r",
+                "target_stable_labels": ["Settings", "설정"],
             }
         ],
         "anchor_name": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",

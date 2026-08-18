@@ -88,7 +88,8 @@
       {
         "action": "select_and_click_focused_or_tap_bounds_center_adb",
         "target": "com.samsung.android.oneconnect:id/setting_button_layout",
-        "type": "r"
+        "type": "r",
+        "target_stable_labels": ["Settings", "설정"]
       }
     ]
   },

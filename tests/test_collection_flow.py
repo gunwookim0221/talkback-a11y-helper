@@ -11068,6 +11068,59 @@ def test_run_pre_navigation_steps_transition_fast_path_uses_bounded_waits(monkey
     assert client.select_calls[0]["wait_"] == 2
     assert client.collect_focus_step_calls[0]["wait_seconds"] == 0.25
     assert client.collect_focus_step_calls[0]["announcement_wait_seconds"] == 0.2
+
+
+def test_pre_navigation_stable_labels_resolve_actionable_container_from_fresh_tree(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **kwargs: (True, "stable_label_target"))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    client = DummyClient([_anchor_row()])
+    client.select = lambda **kwargs: False
+    client.dump_tree_sequence = [
+        [
+            {
+                "contentDescription": "설정, 새 콘텐츠 사용 가능",
+                "className": "android.widget.FrameLayout",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/badge_container",
+                "boundsInScreen": "[40,400][1040,560]",
+                "clickable": True,
+                "focusable": True,
+                "visibleToUser": True,
+                "children": [
+                    {
+                        "contentDescription": "설정",
+                        "className": "android.widget.ImageView",
+                        "viewIdResourceName": "com.samsung.android.oneconnect:id/settings_image",
+                        "boundsInScreen": "[80,430][180,530]",
+                        "clickable": False,
+                        "focusable": False,
+                        "visibleToUser": True,
+                    }
+                ],
+            }
+        ]
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "screen_context_mode": "new_screen",
+        "pre_navigation": [
+            {
+                "action": "select_and_click_focused_or_tap_bounds_center_adb",
+                "target": "com.test:id/legacy_settings_container",
+                "type": "r",
+                "target_stable_labels": ["Settings", "설정"],
+            }
+        ],
+        "pre_navigation_retry_count": 1,
+    }
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert len(client.tap_bounds_center_adb_calls) == 1
+    assert client.tap_bounds_center_adb_calls[0]["name"] == "com.samsung.android.oneconnect:id/badge_container"
     assert client.collect_focus_step_calls[0]["allow_get_focus_fallback_dump"] is False
     assert client.collect_focus_step_calls[0]["get_focus_mode"] == "fast"
 

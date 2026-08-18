@@ -1,5 +1,6 @@
 import re
 import time
+import xml.etree.ElementTree as ET
 from typing import Any
 
 from talkback_lib import A11yAdbClient
@@ -103,6 +104,54 @@ def normalize_tab_config(tab_cfg: dict[str, Any]) -> dict[str, Any]:
     return normalized_tab_cfg
 
 
+def _read_window_xml_nodes(client: A11yAdbClient, dev: str) -> list[dict[str, Any]]:
+    runner = getattr(client, "_run", None)
+    if not callable(runner) or not dev:
+        return []
+    remote_path = "/sdcard/tb_runner_tab_selection.xml"
+    try:
+        runner(["shell", "uiautomator", "dump", remote_path], dev=dev, timeout=8)
+        raw_xml = str(runner(["shell", "cat", remote_path], dev=dev, timeout=8) or "")
+        start = raw_xml.find("<?xml")
+        if start < 0:
+            start = raw_xml.find("<hierarchy")
+        end = raw_xml.find("</hierarchy>", start)
+        if start < 0 or end < 0:
+            return []
+        root = ET.fromstring(raw_xml[start : end + len("</hierarchy>")])
+    except (ET.ParseError, OSError, RuntimeError, TypeError, ValueError):
+        return []
+    finally:
+        try:
+            runner(["shell", "rm", "-f", remote_path], dev=dev, timeout=5)
+        except Exception:
+            pass
+
+    nodes: list[dict[str, Any]] = []
+    for xml_node in root.iter("node"):
+        attrs = xml_node.attrib
+        def xml_bool(name: str, default: bool = False) -> bool:
+            value = attrs.get(name)
+            if value is None:
+                return default
+            return str(value).strip().lower() == "true"
+
+        nodes.append(
+            {
+                "text": attrs.get("text", ""),
+                "contentDescription": attrs.get("content-desc", ""),
+                "className": attrs.get("class", ""),
+                "viewIdResourceName": attrs.get("resource-id", ""),
+                "boundsInScreen": attrs.get("bounds", ""),
+                "clickable": xml_bool("clickable"),
+                "focusable": xml_bool("focusable"),
+                "selected": xml_bool("selected"),
+                "visibleToUser": xml_bool("visible-to-user", default=True),
+            }
+        )
+    return nodes
+
+
 def _expected_bottom_nav_count(tab_cfg: dict[str, Any]) -> int:
     global_nav_cfg = tab_cfg.get("global_nav", {})
     if not isinstance(global_nav_cfg, dict):
@@ -113,14 +162,22 @@ def _expected_bottom_nav_count(tab_cfg: dict[str, Any]) -> int:
 def match_tab_candidate(node: dict[str, Any], tab_cfg: dict[str, Any]) -> dict[str, Any]:
     candidate = _extract_candidate_from_node(node)
     candidate["_bottom_nav_candidate"] = is_annotated_bottom_nav_candidate(node)
-    matched = _match_composite_candidate(candidate, tab_cfg)
-    if matched.get("matched"):
-        return {**matched, "candidate": candidate}
-
     expected_tab = str(tab_cfg.get("_expected_bottom_tab", "") or "").strip()
     is_known_bottom_nav = _is_bottom_nav_resource_id(candidate.get("resource_id", "")) or bool(
         candidate.get("_bottom_nav_candidate", False)
     )
+    resource_pattern = str(tab_cfg.get("resource_id_regex", "") or "").strip()
+    explicit_resource_match = bool(
+        resource_pattern
+        and candidate.get("resource_id")
+        and re.search(resource_pattern, str(candidate.get("resource_id", "")), re.IGNORECASE)
+    )
+    matched = _match_composite_candidate(candidate, tab_cfg)
+    if expected_tab and not is_known_bottom_nav and not explicit_resource_match:
+        return {**matched, "matched": False, "candidate": candidate, "matched_fields": [], "score": 0}
+    if matched.get("matched"):
+        return {**matched, "candidate": candidate}
+
     if not expected_tab or not is_known_bottom_nav:
         return matched
     candidate_tab = _canonicalize_bottom_tab_candidate(candidate)
@@ -365,6 +422,24 @@ def stabilize_tab_selection(
             expected_count=_expected_bottom_nav_count(tab_cfg),
         )
         matches = [m for m in (match_tab_candidate(node, normalized_tab_cfg) for node in node_list) if m.get("matched")]
+        if not matches:
+            xml_nodes = _read_window_xml_nodes(client, dev)
+            if xml_nodes:
+                xml_node_list = annotate_bottom_nav_candidates(
+                    xml_nodes,
+                    expected_count=_expected_bottom_nav_count(tab_cfg),
+                )
+                xml_matches = [
+                    m for m in (match_tab_candidate(node, normalized_tab_cfg) for node in xml_node_list) if m.get("matched")
+                ]
+                if xml_matches:
+                    node_list = xml_node_list
+                    matches = xml_matches
+                    log(
+                        f"[TAB][select] scenario='{scenario_id}' source='window_xml' "
+                        f"candidate_count={len(matches)}",
+                        level="DEBUG",
+                    )
         best = choose_best_tab_candidate(matches, tie_breaker=tie_breaker)
         last_best = best or {}
         log(
@@ -445,7 +520,17 @@ def stabilize_tab_selection(
                 level="DEBUG",
             )
 
-        if not selected and not semantic_bottom_nav:
+        expected_bottom_tab = str(normalized_tab_cfg.get("_expected_bottom_tab", "") or "").strip()
+        explicit_resource_match = bool(
+            best
+            and normalized_tab_cfg.get("resource_id_regex")
+            and re.search(
+                str(normalized_tab_cfg.get("resource_id_regex") or ""),
+                str((best.get("candidate", {}) or {}).get("resource_id", "") or ""),
+                re.IGNORECASE,
+            )
+        )
+        if not selected and not semantic_bottom_nav and (not expected_bottom_tab or explicit_resource_match):
             selected = client.touch(
                 dev=dev,
                 name=str(tab_cfg.get("tab_name", "") or ""),

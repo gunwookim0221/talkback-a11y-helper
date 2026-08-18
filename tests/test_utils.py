@@ -57,6 +57,17 @@ def test_runtime_config_does_not_downgrade_life_food_xml_entry():
     assert "pre_navigation_ref" not in food_cfg
 
 
+def test_runtime_config_preserves_settings_stable_label_fallback():
+    bundle = load_runtime_bundle(TAB_CONFIGS, config_path="config/runtime_config.json")
+    settings_cfg = next(
+        cfg for cfg in bundle["tab_configs"] if cfg.get("scenario_id") == "settings_entry_example"
+    )
+
+    settings_step = settings_cfg["pre_navigation"][0]
+    assert settings_step["target"] == "com.samsung.android.oneconnect:id/setting_button_layout"
+    assert settings_step["target_stable_labels"] == ["Settings", "설정"]
+
+
 def test_life_home_care_plugin_uses_landing_section_anchor_tokens():
     home_care_cfg = next(cfg for cfg in TAB_CONFIGS if cfg.get("scenario_id") == "life_home_care_plugin")
 

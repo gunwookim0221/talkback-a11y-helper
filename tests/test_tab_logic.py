@@ -178,13 +178,91 @@ def test_stabilize_tab_selection_legacy_touch_when_no_best_candidate(monkeypatch
     client.collect_focus_step.return_value = {"visible_label": "ok"}
     monkeypatch.setattr(tab_logic, "verify_context", lambda *a, **k: {"ok": True})
 
-    result = tab_logic.stabilize_tab_selection(client, "SERIAL", _tab_cfg(), max_retries=1)
+    result = tab_logic.stabilize_tab_selection(
+        client,
+        "SERIAL",
+        {
+            **_tab_cfg(),
+            "tab_name": "Other",
+            "tab": {"resource_id_regex": "tab_id", "text_regex": "Other"},
+        },
+        max_retries=1,
+    )
 
     assert result["ok"] is True
     assert result["focus_align"]["ok"] is True
     client.touch.assert_called_once()
     client.select.assert_called_once()
     client.touch_point.assert_not_called()
+
+
+def test_stabilize_tab_selection_skips_legacy_touch_for_missing_bottom_nav_candidate(monkeypatch):
+    client = FakeTabClient()
+    client.dump_tree.return_value = [
+        {
+            "text": "",
+            "contentDescription": "talkback test room, , Double tap to open menu",
+            "className": "android.widget.Spinner",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/tab_title",
+            "boundsInScreen": {"l": 0, "t": 0, "r": 400, "b": 120},
+            "clickable": True,
+            "focusable": True,
+            "visibleToUser": True,
+        }
+    ]
+    client.touch.return_value = True
+    client.select.return_value = False
+    monkeypatch.setattr(tab_logic, "verify_context", lambda *a, **k: {"ok": False})
+
+    result = tab_logic.stabilize_tab_selection(
+        client,
+        "SERIAL",
+        {
+            "scenario_id": "settings_entry_example",
+            "tab_name": "(?i).*menu.*",
+            "tab_type": "b",
+            "tab": {
+                "resource_id_regex": r"com\.samsung\.android\.oneconnect:id/menu_more",
+                "text_regex": r"(?i).*menu.*",
+            },
+        },
+        max_retries=1,
+    )
+
+    assert result["ok"] is False
+    client.touch.assert_not_called()
+
+
+def test_read_window_xml_nodes_parses_boolean_attributes(monkeypatch):
+    client = FakeTabClient()
+    client._run = Mock(
+        side_effect=[
+            "UI hierchary dumped to: /sdcard/tb_runner_tab_selection.xml",
+            (
+                '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>'
+                '<hierarchy><node text="Menu" content-desc="Menu" class="android.view.View" '
+                'resource-id="id/menu_more" bounds="[0,0][100,100]" clickable="true" '
+                'focusable="false" selected="true" visible-to-user="false" /></hierarchy>'
+            ),
+            "",
+        ]
+    )
+
+    nodes = tab_logic._read_window_xml_nodes(client, "SERIAL")
+
+    assert nodes == [
+        {
+            "text": "Menu",
+            "contentDescription": "Menu",
+            "className": "android.view.View",
+            "viewIdResourceName": "id/menu_more",
+            "boundsInScreen": "[0,0][100,100]",
+            "clickable": True,
+            "focusable": False,
+            "selected": True,
+            "visibleToUser": False,
+        }
+    ]
 
 
 def test_stabilize_tab_selection_success_when_selected_and_context_ok(monkeypatch):

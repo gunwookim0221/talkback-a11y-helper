@@ -3083,7 +3083,8 @@ def _find_visible_node_by_regex(
 
 
 def _tap_node_center(client: A11yAdbClient, dev: str, node: dict[str, Any]) -> bool:
-    bounds = parse_bounds_str(str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip())
+    raw_bounds = str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip()
+    bounds = parse_bounds_str(raw_bounds) or _parse_uiautomator_bounds(raw_bounds)
     if not bounds:
         return False
     center_x = (bounds[0] + bounds[2]) // 2
@@ -3099,6 +3100,118 @@ def _tap_node_center(client: A11yAdbClient, dev: str, node: dict[str, Any]) -> b
         except Exception:
             return False
     return False
+
+
+def _find_visible_node_by_stable_labels(
+    nodes: list[dict[str, Any]] | None,
+    stable_labels: list[str] | tuple[str, ...],
+) -> dict[str, Any] | None:
+    if not isinstance(nodes, list) or not stable_labels:
+        return None
+    normalized_labels = tuple(
+        normalize_label(label) for label in stable_labels if normalize_label(label)
+    )
+    if not normalized_labels:
+        return None
+
+    candidates: list[tuple[tuple[int, int, int, int], dict[str, Any], str]] = []
+    for node, parent in _iter_tree_nodes_with_parent(nodes):
+        if not _node_is_visible(node):
+            continue
+        matched_label = next(
+            (
+                label
+                for label in normalized_labels
+                if label in normalize_label(_node_label_blob(node))
+            ),
+            "",
+        )
+        if not matched_label:
+            continue
+        raw_node_bounds = node.get("boundsInScreen", node.get("bounds", ""))
+        node_bounds = parse_bounds_str(raw_node_bounds) or _parse_uiautomator_bounds(str(raw_node_bounds or ""))
+        if not node_bounds:
+            continue
+
+        action_node = node
+        if not bool(
+            node.get("clickable") or node.get("focusable") or node.get("effectiveClickable")
+        ) and isinstance(parent, dict):
+            if bool(parent.get("clickable") or parent.get("focusable") or parent.get("effectiveClickable")):
+                raw_parent_bounds = parent.get("boundsInScreen", parent.get("bounds", ""))
+                parent_bounds = parse_bounds_str(raw_parent_bounds) or _parse_uiautomator_bounds(
+                    str(raw_parent_bounds or "")
+                )
+                if parent_bounds:
+                    action_node = parent
+
+        action_resource = str(
+            action_node.get("viewIdResourceName", "") or action_node.get("resourceId", "") or ""
+        ).strip()
+        action_score = int(
+            bool(
+                action_node.get("clickable")
+                or action_node.get("focusable")
+                or action_node.get("effectiveClickable")
+            )
+        )
+        exact_score = int(normalize_label(_node_label_blob(node)) == matched_label)
+        resource_score = int(bool(action_resource))
+        candidates.append(((action_score, resource_score, exact_score, -len(action_resource)), action_node, matched_label))
+
+    if not candidates:
+        return None
+    _, action_node, matched_label = max(candidates, key=lambda item: item[0])
+    return {
+        "node": action_node,
+        "matched_label": matched_label,
+        "resource_id": str(
+            action_node.get("viewIdResourceName", "") or action_node.get("resourceId", "") or ""
+        ).strip(),
+        "bounds": str(
+            action_node.get("boundsInScreen", "") or action_node.get("bounds", "") or ""
+        ).strip(),
+    }
+
+
+def _resolve_stable_label_target(
+    client: A11yAdbClient,
+    dev: str,
+    stable_labels: list[str] | tuple[str, ...],
+) -> tuple[bool, str, dict[str, Any] | None]:
+    dump_tree_fn = getattr(client, "dump_tree", None)
+    if not callable(dump_tree_fn):
+        return False, "dump_tree_unavailable", None
+    try:
+        nodes = dump_tree_fn(dev=dev)
+    except Exception as exc:
+        return False, f"dump_tree_failed:{type(exc).__name__}", None
+    nodes = nodes if isinstance(nodes, list) else []
+    target = _find_visible_node_by_stable_labels(nodes, stable_labels)
+    if target is None:
+        return False, "stable_label_target_not_found", None
+
+    resource_id = str(target.get("resource_id", "") or "").strip()
+    tap_ok = False
+    if resource_id:
+        tap_bounds_fn = getattr(client, "tap_bounds_center_adb", None)
+        if callable(tap_bounds_fn):
+            tap_ok = bool(
+                tap_bounds_fn(
+                    dev=dev,
+                    name=resource_id,
+                    type_="r",
+                    dump_nodes=nodes,
+                )
+            )
+    if not tap_ok:
+        tap_ok = _tap_node_center(client, dev, target.get("node", {}))
+    log(
+        f"[SCENARIO][pre_nav][stable_label] labels='{','.join(stable_labels)}' "
+        f"matched='{target.get('matched_label', '')}' resource='{resource_id}' "
+        f"bounds='{target.get('bounds', '')}' success={str(tap_ok).lower()}"
+    )
+    return tap_ok, ("stable_label_target_tapped" if tap_ok else "stable_label_target_tap_failed"), target
 
 
 def _food_onboarding_source_text(snapshot: dict[str, Any]) -> str:
@@ -8420,12 +8533,50 @@ def _run_pre_navigation_steps(
                             client.tap_bounds_center_adb(dev=dev, name=tap_target, type_=tap_type, dump_nodes=dump_nodes)
                         )
                 else:
-                    log(
-                        f"[SCENARIO][pre_nav] focus_first_failed fallback='tap_bounds_center_adb' step={index} "
-                        f"target='{target}' tap_target='{tap_target}'"
-                    )
-                    dump_nodes = step.get("dump_tree_nodes", [])
-                    step_ok = bool(client.tap_bounds_center_adb(dev=dev, name=tap_target, type_=tap_type, dump_nodes=dump_nodes))
+                    stable_labels_raw = step.get("target_stable_labels", [])
+                    if isinstance(stable_labels_raw, str):
+                        stable_labels = [stable_labels_raw]
+                    elif isinstance(stable_labels_raw, list):
+                        stable_labels = [str(label) for label in stable_labels_raw if str(label).strip()]
+                    else:
+                        stable_labels = []
+                    stable_target_attempted = False
+                    if stable_labels:
+                        stable_ok, stable_reason, stable_target = _resolve_stable_label_target(
+                            client,
+                            dev,
+                            stable_labels,
+                        )
+                        stable_target_attempted = isinstance(stable_target, dict)
+                        actual_reason = stable_reason
+                        if stable_ok:
+                            confirm_ok, confirm_signal = _confirm_click_focused_transition(
+                                client=client,
+                                dev=dev,
+                                tab_cfg=tab_cfg,
+                                transition_fast_path=transition_fast_path,
+                            )
+                            setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
+                            setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
+                            log(
+                                f"[SCENARIO][pre_nav][confirm] method='stable_label_target' signal='{confirm_signal}' "
+                                f"success={str(confirm_ok).lower()} step={index}"
+                            )
+                            step_ok = confirm_ok
+                            actual_reason = str(confirm_signal or stable_reason)
+                    if stable_target_attempted:
+                        if not step_ok:
+                            log(
+                                f"[SCENARIO][pre_nav] stable_label_target failed reason='{actual_reason}' "
+                                f"step={index}"
+                            )
+                    else:
+                        log(
+                            f"[SCENARIO][pre_nav] focus_first_failed fallback='tap_bounds_center_adb' step={index} "
+                            f"target='{target}' tap_target='{tap_target}'"
+                        )
+                        dump_nodes = step.get("dump_tree_nodes", [])
+                        step_ok = bool(client.tap_bounds_center_adb(dev=dev, name=tap_target, type_=tap_type, dump_nodes=dump_nodes))
             else:
                 select_ok = bool(client.select(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
                 focus_confirmed = False
