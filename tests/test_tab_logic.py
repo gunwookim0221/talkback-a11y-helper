@@ -10,6 +10,7 @@ class FakeTabClient:
         self.touch_point = Mock(return_value=False)
         self.select = Mock(return_value=False)
         self.touch = Mock(return_value=False)
+        self.touch_bounds_center = Mock(return_value=False)
         self.get_focus = Mock(return_value={})
         self.collect_focus_step = Mock(return_value={})
 
@@ -79,6 +80,37 @@ def test_stabilize_r2_tab_uses_semantic_touch_without_legacy_header_fallback():
     assert result["ok"] is True
     client.touch_point.assert_called_once()
     client.touch.assert_not_called()
+
+
+def test_stabilize_r2_semantic_fallback_activates_after_coordinate_touch_fails(monkeypatch):
+    client = FakeTabClient()
+    client.dump_tree.return_value = _r2_bottom_nav_nodes()
+    client.touch_point.return_value = False
+    client.select.return_value = {
+        "success": True,
+        "detail": "ACTION_ACCESSIBILITY_FOCUS success",
+    }
+    client.touch_bounds_center.return_value = True
+    client.collect_focus_step.return_value = {"visible_label": "기기 기기"}
+    monkeypatch.setattr(tab_logic, "verify_context", lambda *a, **k: {"ok": True})
+    config = {
+        "scenario_id": "devices_main",
+        "tab_name": "(?i).*devices.*",
+        "tab_type": "b",
+        "global_nav": {"labels": ["Home", "Devices", "Life", "Routines", "Menu"]},
+        "context_verify": {"type": "selected_bottom_tab"},
+    }
+
+    result = tab_logic.stabilize_tab_selection(client, "SERIAL", config, max_retries=1)
+
+    assert result["ok"] is True
+    client.touch_bounds_center.assert_called_once_with(
+        dev="SERIAL",
+        name="^기기$",
+        type_="a",
+        wait_=5,
+    )
+    client.select.assert_not_called()
 
 
 def test_stabilize_r2_life_tab_uses_english_semantic_label_without_resource_id():

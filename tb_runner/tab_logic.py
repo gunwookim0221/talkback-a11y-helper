@@ -501,11 +501,16 @@ def stabilize_tab_selection(
             if not selected and semantic_bottom_nav:
                 label = str(candidate.get("announcement", "") or candidate.get("text", "") or "").strip()
                 if label:
-                    selected = client.select(dev=dev, name=f"^{re.escape(label)}$", type_="a", wait_=5)
-                    tab_action_mode = "semantic_select_fallback"
+                    selected = client.touch_bounds_center(
+                        dev=dev,
+                        name=f"^{re.escape(label)}$",
+                        type_="a",
+                        wait_=5,
+                    )
+                    tab_action_mode = "semantic_touch_bounds_fallback"
                     tab_action_reason = "touch_failed" if parsed_bounds else "missing_bounds"
                     log(
-                        f"[TAB][action] scenario='{scenario_id}' mode='semantic_select_fallback' "
+                        f"[TAB][action] scenario='{scenario_id}' mode='semantic_touch_bounds_fallback' "
                         f"reason='{tab_action_reason}' label='{label}'",
                         level="DEBUG",
                     )
