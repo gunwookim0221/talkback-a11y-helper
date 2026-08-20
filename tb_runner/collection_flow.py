@@ -103,6 +103,7 @@ _LIFE_ROOT_SCORE_THRESHOLD = 3
 _LIFE_ROOT_TRANSIENT_RECHECK_COUNT = 2
 _LIFE_ROOT_TRANSIENT_RECHECK_SLEEP_SECONDS = 0.12
 _PLUGIN_SCROLL_SEARCH_MAX_STEPS = 5
+_XML_ENTRY_BOTTOM_OVERLAY_ID_TOKENS = ("floating_bottom_container", "bottom_navigation")
 _LIFE_ENERGY_SCENARIO_ID = "life_energy_plugin"
 _LIFE_ENERGY_FAMILY_CARE_REGEX = r"(?i)\b(family\s*care|add\s*family\s*member|me)\b"
 _LIFE_ENERGY_NAVIGATE_UP_REGEX = r"(?i)^navigate\s*up$"
@@ -1660,6 +1661,30 @@ def _iter_tree_nodes_with_parent(nodes: list[dict[str, Any]]) -> list[tuple[dict
             for child in reversed(children):
                 stack.append((child, node))
     return flat
+
+
+def _xml_entry_candidate_obstruction_reason(
+    candidate_bounds: tuple[int, int, int, int] | None,
+    nodes: list[dict[str, Any]],
+) -> str:
+    if not candidate_bounds:
+        return ""
+    candidate_left, candidate_top, candidate_right, candidate_bottom = candidate_bounds
+    for node, _ in _iter_tree_nodes_with_parent(nodes):
+        if not _node_is_visible(node):
+            continue
+        resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip().lower()
+        if not any(token in resource_id for token in _XML_ENTRY_BOTTOM_OVERLAY_ID_TOKENS):
+            continue
+        overlay_bounds = parse_bounds_str(str(node.get("boundsInScreen", "") or "").strip())
+        if not overlay_bounds:
+            continue
+        overlay_left, overlay_top, overlay_right, overlay_bottom = overlay_bounds
+        overlap_width = min(candidate_right, overlay_right) - max(candidate_left, overlay_left)
+        overlap_height = min(candidate_bottom, overlay_bottom) - max(candidate_top, overlay_top)
+        if overlap_width > 0 and overlap_height > 0:
+            return resource_id
+    return ""
 
 
 def _has_global_nav_signals(state: list[dict[str, Any]]) -> tuple[bool, int]:
@@ -5309,6 +5334,22 @@ def _run_xml_scroll_search_tap(
             )
         candidate_samples.sort(key=lambda item: int(item.get("score", 0)), reverse=True)
         target_candidates = [sample for sample in candidate_samples if bool(sample.get("target_match"))]
+        unobstructed_target_candidates: list[dict[str, Any]] = []
+        for sample in target_candidates:
+            sample_node = sample.get("node", {})
+            sample_bounds = parse_bounds_str(str(sample_node.get("boundsInScreen", "") or "").strip())
+            obstruction_reason = _xml_entry_candidate_obstruction_reason(sample_bounds, xml_nodes)
+            if obstruction_reason:
+                log(
+                    "[XMLENTRY][defer] "
+                    f"reason='target_obstructed_by_bottom_overlay' overlay='{obstruction_reason}' "
+                    f"bounds='{str(sample_node.get('boundsInScreen', '') or '').strip()}' "
+                    f"matched_phrase='{str(sample.get('matched_phrase', '') or '')[:80]}'"
+                )
+                failure_reason = "target_obstructed_by_bottom_overlay"
+                continue
+            unobstructed_target_candidates.append(sample)
+        target_candidates = unobstructed_target_candidates
         log(
             f"[XMLENTRY][search] step={scroll_step}/{max_scroll_search_steps} "
             f"visible_candidates={len(candidate_samples)} target_candidates={len(target_candidates)}"

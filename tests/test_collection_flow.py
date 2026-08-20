@@ -18403,3 +18403,88 @@ def test_local_tab_revisit_guard_detects_successful_reentry():
     assert state.local_tab_revisit_guard_state.successful_transition_count == 3
     assert state.local_tab_revisit_guard_state.revisit_active is True
     assert state.local_tab_revisit_guard_state.revisit_tab_id == "control"
+
+
+def test_xml_entry_defers_target_under_bottom_navigation_until_next_scroll(monkeypatch):
+    class XmlClient:
+        def __init__(self):
+            self.scroll_calls = []
+            self.tap_calls = []
+
+        def scroll(self, dev, direction, step_=50, time_=1000, bounds_=None):
+            _ = (dev, step_, time_, bounds_)
+            self.scroll_calls.append(direction)
+            return True
+
+        def tap_xy_adb(self, dev, x, y):
+            self.tap_calls.append((dev, x, y))
+            return True
+
+    def card(bounds):
+        return {
+            "text": "",
+            "contentDescription": "",
+            "viewIdResourceName": "",
+            "className": "android.widget.FrameLayout",
+            "clickable": True,
+            "focusable": True,
+            "effectiveClickable": True,
+            "visibleToUser": True,
+            "boundsInScreen": bounds,
+            "children": [
+                {
+                    "text": "Pet Care",
+                    "contentDescription": "",
+                    "viewIdResourceName": "",
+                    "className": "android.widget.TextView",
+                    "clickable": False,
+                    "focusable": False,
+                    "effectiveClickable": False,
+                    "visibleToUser": True,
+                    "boundsInScreen": bounds,
+                    "children": [],
+                }
+            ],
+        }
+
+    bottom_overlay = {
+        "text": "",
+        "contentDescription": "",
+        "viewIdResourceName": "com.samsung.android.oneconnect:id/floating_bottom_container",
+        "className": "android.widget.FrameLayout",
+        "clickable": False,
+        "focusable": False,
+        "effectiveClickable": False,
+        "visibleToUser": True,
+        "boundsInScreen": "0,2292,1080,2640",
+        "children": [],
+    }
+    dumps = iter(
+        [
+            ([card("30,2437,1050,2640"), bottom_overlay], "ok"),
+            ([card("30,1104,1050,1608"), bottom_overlay], "ok"),
+        ]
+    )
+    logs = []
+    monkeypatch.setattr(collection_flow, "_load_scrolltouch_xml_nodes", lambda **kwargs: next(dumps))
+    monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **kwargs: (True, "transition_confirmed"))
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    client = XmlClient()
+    ok, reason = collection_flow._run_xml_scroll_search_tap(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_id": "life_pet_care_plugin"},
+        target=r"(?i)\b(pet\s*care|펫\s*케어)\b",
+        type_="card",
+        max_scroll_search_steps=2,
+        step_wait_seconds=0.2,
+        transition_fast_path=False,
+    )
+
+    assert ok is True
+    assert reason == "xml_entry_success"
+    assert client.scroll_calls == ["down"]
+    assert client.tap_calls == [("SERIAL", 540, 1356)]
+    assert any("target_obstructed_by_bottom_overlay" in line for line in logs)
