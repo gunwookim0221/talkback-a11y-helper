@@ -578,6 +578,51 @@ def test_recent_batches_include_duration_for_finished_batch(tmp_path, monkeypatc
     assert batches[0]["devices"][0]["feature_flags"]["traversal_identity_v2"] is True
 
 
+def test_recent_batches_keeps_legacy_quality_issue_unclassified(tmp_path, monkeypatch):
+    run_log_dir = tmp_path / "qa_frontend_runs"
+    batch_dir = run_log_dir / "batch_20260606_184841"
+    output_dir = batch_dir / "device_Model_SERIAL1"
+    output_dir.mkdir(parents=True)
+    (batch_dir / "batch_summary.json").write_text(
+        """{
+  "batch_id": "batch_20260606_184841",
+  "mode": "full",
+  "created_at": "2026-06-06T18:48:41+09:00",
+  "state": "finished",
+  "devices": [{
+    "serial": "SERIAL1",
+    "model": "Model",
+    "state": "passed",
+    "return_code": 0,
+    "output_dir": "qa_frontend_runs/batch_20260606_184841/device_Model_SERIAL1"
+  }]
+}
+""",
+        encoding="utf-8",
+    )
+    (output_dir / "summary.json").write_text(
+        """{
+  "quality_issues": [{
+    "scenario_id": "legacy_scenario",
+    "step": "1",
+    "final_result": "FAIL",
+    "mismatch_type": "EMPTY_VISIBLE"
+  }]
+}
+""",
+        encoding="utf-8",
+    )
+    _set_batch_runner_paths(monkeypatch, run_log_dir, tmp_path)
+
+    batches = get_recent_batches()
+
+    issue = batches[0]["devices"][0]["quality_issues"][0]
+    assert issue["validator_status"] == "CLASSIFICATION_UNAVAILABLE"
+    assert issue["review_domain"] == "unknown"
+    assert issue["raw_final_result"] == "FAIL"
+    assert batches[0]["devices"][0]["quality_issues_contract"]["classification_available"] is False
+
+
 def test_recent_batches_expose_coverage_probe_from_reporting_summary(tmp_path, monkeypatch):
     run_log_dir = tmp_path / "qa_frontend_runs"
     batch_dir = run_log_dir / "batch_20260627_182220"

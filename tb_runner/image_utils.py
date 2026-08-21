@@ -112,11 +112,11 @@ def maybe_capture_focus_crop(
     step_index = row.get("step_index", -1)
     visible_label = sanitize_filename(str(row.get("visible_label", "") or "")[:40])
 
-    crop_path = Path(output_base_dir) / "crops" / f"{tab_name}_step_{step_index}_{visible_label}.png"
     scenario_id = sanitize_filename(str(row.get("scenario_id", "unknown")))
     context_type = sanitize_filename(str(row.get("context_type", "main")))
     correlation_seed = f"{scenario_id}:{context_type}:{step_index}:{row.get('parent_step_index', '')}"
     correlation_id = hashlib.sha256(correlation_seed.encode("utf-8")).hexdigest()[:12]
+    crop_path = Path(output_base_dir) / "crops" / f"{scenario_id}_{tab_name}_step_{step_index}_{visible_label}_{correlation_id}.png"
     full_path = Path(output_base_dir) / "screens" / f"{scenario_id}_{context_type}_{step_index}_{correlation_id}.full.png"
 
     capture_started = time.perf_counter()

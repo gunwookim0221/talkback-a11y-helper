@@ -203,6 +203,12 @@ export function RecentRunsPanel({
         ? 'Runtime Probe: ON, but no V8 probe artifacts were generated.'
         : 'Runtime Probe appears to be OFF for this run, or no V8 probe artifacts were generated.';
     const focusableIssues = runData?.focusable_issues || focusableCoverage?.issues || [];
+    const validatorQualityIssues = (runData?.quality_issues || []).filter(
+      (issue: any) => (
+        issue.review_domain !== 'automation_engine'
+        && issue.validator_status !== 'AUTOMATION_DIAGNOSTIC'
+      ),
+    );
     const focusableScenarioById = new Map(
       (focusableCoverage?.scenarios || runData?.shadow_scenarios || [])
         .filter((item: any) => item?.scenario_id)
@@ -636,21 +642,31 @@ export function RecentRunsPanel({
           )}
         </details>
 
-        {runData?.quality_issues && runData.quality_issues.length > 0 && (
+        {validatorQualityIssues.length > 0 && (
           <details open style={{ marginTop: '16px' }}>
-            <summary style={{ fontSize: '14px', fontWeight: 'bold' }}>Quality Issues</summary>
+            <summary style={{ fontSize: '14px', fontWeight: 'bold' }}>QA Review Issues</summary>
             <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', marginTop: '4px', fontStyle: 'italic' }}>
-              Shows user-impacting TalkBack text/speech issues only.
+              Validator-facing rows classified by the review workbook contract. Raw FAIL is evidence, not a confirmed accessibility verdict.
             </div>
             <div className="scenarioDetailList" style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {runData.quality_issues.map((issue: any, i: number) => (
+              {validatorQualityIssues.map((issue: any, i: number) => {
+                const validatorStatus = issue.validator_status || 'CLASSIFICATION_UNAVAILABLE';
+                const legacy = validatorStatus === 'CLASSIFICATION_UNAVAILABLE';
+                const qaReview = issue.review_domain === 'qa_accessibility'
+                  && validatorStatus === 'QA_REVIEW';
+                const badgeLabel = qaReview
+                  ? 'QA REVIEW'
+                  : legacy
+                    ? 'LEGACY UNCLASSIFIED'
+                    : 'UNCLASSIFIED';
+                return (
                 <div key={i} className="scenarioDetailRow" style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start', padding: '12px' }}>
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center', width: '100%' }}>
-                    <span className={`statusBadge ${issue.final_result.toLowerCase()}`} style={{ 
-                        backgroundColor: issue.final_result === 'FAIL' ? 'var(--color-danger)' : (issue.final_result === 'WARN' ? 'var(--color-warning)' : 'var(--color-neutral)'),
+                    <span className="statusBadge qa-review" style={{
+                        backgroundColor: legacy ? 'var(--color-neutral)' : 'var(--color-warning)',
                         color: '#fff', padding: '2px 6px', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold'
                     }}>
-                      {issue.final_result === 'WARN' ? 'ISSUE' : (issue.final_result === 'PASS' ? 'CLEAN' : issue.final_result)}
+                      {badgeLabel}
                     </span>
                     <strong style={{ fontSize: '13px', wordBreak: 'break-all' }}>
                       {issue.scenario_id} step {issue.step}
@@ -661,6 +677,16 @@ export function RecentRunsPanel({
                   <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', width: '100%' }}>
                     <strong>Mismatch:</strong> {issue.mismatch_type}
                   </div>
+                  {issue.raw_final_result && (
+                    <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', width: '100%' }}>
+                      <strong>Raw result:</strong> {issue.raw_final_result}
+                    </div>
+                  )}
+                  {issue.classification_reason && (
+                    <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', width: '100%' }}>
+                      <strong>Classification:</strong> {issue.classification_reason}
+                    </div>
+                  )}
                   {issue.shadow_verdict && (
                     <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', width: '100%' }}>
                       <strong>Shadow:</strong> {issue.shadow_verdict}
@@ -705,7 +731,8 @@ export function RecentRunsPanel({
                     </div>
                   ) : null}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </details>
         )}

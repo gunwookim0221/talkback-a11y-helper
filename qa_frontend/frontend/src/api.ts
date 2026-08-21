@@ -298,6 +298,11 @@ export type QualityIssue = {
   review_note?: string;
   focus_confidence?: string;
   crop_path?: string | null;
+  review_domain?: 'qa_accessibility' | 'automation_engine' | 'unknown' | string;
+  classification_reason?: string;
+  classification_source?: string;
+  validator_status?: 'QA_REVIEW' | 'AUTOMATION_DIAGNOSTIC' | 'CLASSIFICATION_UNAVAILABLE' | string;
+  raw_final_result?: string;
 };
 
 export type FocusableCoverageIssue = {
@@ -431,6 +436,15 @@ export type RecentBatchDevice = {
     focusable_coverage_rate?: number | null;
   }>;
   quality_issues?: QualityIssue[];
+  automation_diagnostics?: QualityIssue[];
+  quality_issues_contract?: {
+    schema_version?: string;
+    classification_source?: string;
+    qa_review_count?: number;
+    automation_diagnostic_count?: number;
+    classification_unavailable_count?: number;
+    classification_available?: boolean;
+  };
   focusable_coverage?: FocusableCoverage | null;
   focusable_issues?: FocusableCoverageIssue[];
   coverage_probe_summary?: CoverageProbeSummary | null;

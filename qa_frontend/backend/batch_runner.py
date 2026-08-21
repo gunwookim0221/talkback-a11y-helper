@@ -39,6 +39,7 @@ from .sleep_prevention import (
 )
 from .shadow_pipeline import run_shadow_validation_pipeline
 from .shadow_reporting import load_shadow_validation_summary
+from .quality_issues import classify_quality_signals, normalize_legacy_quality_issues
 
 logger = logging.getLogger(__name__)
 
@@ -831,18 +832,19 @@ class BatchRunManager:
                         print(f"Failed to parse log for summary: {e}")
 
             quality = parsed_summary.get("quality")
-            if quality is None and xlsx_path:
+            if xlsx_path:
                 try:
                     from .mismatch_viewer import get_mismatch_summary_from_xlsx
                     mismatch_res = get_mismatch_summary_from_xlsx(ROOT_DIR / xlsx_path)
                     if "error" not in mismatch_res and "summary" in mismatch_res:
                         msummary = mismatch_res["summary"]
-                        quality = {
-                            "fail": msummary.get("fail_count", 0),
-                            "issue": msummary.get("issue_count", 0),
-                            "review": msummary.get("review_count", 0),
-                            "clean": msummary.get("clean_count", 0)
-                        }
+                        if quality is None:
+                            quality = {
+                                "fail": msummary.get("fail_count", 0),
+                                "issue": msummary.get("issue_count", 0),
+                                "review": msummary.get("review_count", 0),
+                                "clean": msummary.get("clean_count", 0)
+                            }
                         data["shadow_quality"] = {
                             "pass": msummary.get("shadow_pass_count", 0),
                             "review": msummary.get("shadow_review_count", 0),
@@ -869,8 +871,9 @@ class BatchRunManager:
                         data["coverage_probe_summary"] = coverage_probe_summary
                         data["coverage_probe"] = coverage_probe_summary
                         
+                        classified_quality = classify_quality_signals(mismatch_res.get("signals", []))
                         quality_issues = []
-                        for sig in mismatch_res.get("signals", []):
+                        for sig in classified_quality.quality_issues:
                             crop_thumb = sig.get("crop_thumbnail")
                             crop_path = None
                             if crop_thumb and xlsx_path:
@@ -896,9 +899,26 @@ class BatchRunManager:
                                 "shadow_verdict_reason": sig.get("shadow_verdict_reason", ""),
                                 "shadow_verdict_source": sig.get("shadow_verdict_source", ""),
                                 "scenario_shadow_verdict": sig.get("scenario_shadow_verdict", ""),
-                                "crop_path": crop_path
+                                "crop_path": crop_path,
+                                "review_domain": sig.get("review_domain", ""),
+                                "classification_reason": sig.get("classification_reason", ""),
+                                "classification_source": sig.get("classification_source", ""),
+                                "validator_status": sig.get("validator_status", ""),
+                                "raw_final_result": sig.get("raw_final_result", ""),
                             })
                         data["quality_issues"] = quality_issues
+                        data["automation_diagnostics"] = [
+                            {
+                                **sig,
+                                "crop_path": (
+                                    f"{Path(xlsx_path).with_suffix('').as_posix()}/crops/{sig.get('crop_thumbnail')}"
+                                    if sig.get("crop_thumbnail") and xlsx_path
+                                    else None
+                                ),
+                            }
+                            for sig in classified_quality.automation_diagnostics
+                        ]
+                        data["quality_issues_contract"] = classified_quality.contract
                         
                 except Exception as e:
                     print(f"Failed to extract quality from xlsx: {e}")
@@ -1589,7 +1609,21 @@ def get_recent_batches() -> list[dict]:
                                 dev_info["quality"] = dev_data.get("quality")
                                 dev_info["shadow_quality"] = dev_data.get("shadow_quality")
                                 dev_info["shadow_scenarios"] = dev_data.get("shadow_scenarios")
-                                dev_info["quality_issues"] = dev_data.get("quality_issues")
+                                if isinstance(dev_data.get("quality_issues_contract"), dict):
+                                    dev_info["quality_issues"] = dev_data.get("quality_issues")
+                                    dev_info["quality_issues_contract"] = dev_data["quality_issues_contract"]
+                                else:
+                                    dev_info["quality_issues"] = normalize_legacy_quality_issues(
+                                        dev_data.get("quality_issues")
+                                    )
+                                    dev_info["quality_issues_contract"] = {
+                                        "schema_version": "legacy",
+                                        "classification_source": "legacy_summary_raw_signal",
+                                        "classification_available": False,
+                                    }
+                                dev_info["automation_diagnostics"] = dev_data.get(
+                                    "automation_diagnostics", []
+                                )
                                 dev_info["focusable_coverage"] = dev_data.get("focusable_coverage")
                                 dev_info["focusable_issues"] = dev_data.get("focusable_issues")
                                 coverage_probe_summary = dev_data.get(
