@@ -91,6 +91,7 @@ _TRANSITION_FAST_STEP_WAIT_SECONDS = 0.25
 _TRANSITION_FAST_ANNOUNCEMENT_WAIT_SECONDS = 0.2
 _TRANSITION_FAST_FOCUS_WAIT_SECONDS = 0.8
 _TRANSITION_FAST_ACTION_WAIT_SECONDS = 2
+_RECOVERABLE_PRECONDITION_STABILITY_WAIT_SECONDS = 12.0
 _PRE_NAV_CONFIRM_POLL_SLEEP_SECONDS = 0.12
 _RECENT_DUPLICATE_WINDOW = 5
 _STALL_ESCAPE_SAME_LIKE_THRESHOLD = 6
@@ -1661,6 +1662,557 @@ def _iter_tree_nodes_with_parent(nodes: list[dict[str, Any]]) -> list[tuple[dict
             for child in reversed(children):
                 stack.append((child, node))
     return flat
+
+
+def _recoverable_precondition_resource_id(node: dict[str, Any]) -> str:
+    return str(
+        node.get("viewIdResourceName", "")
+        or node.get("resourceId", "")
+        or ""
+    ).strip()
+
+
+def _recoverable_precondition_rule(tab_cfg: dict[str, Any]) -> dict[str, tuple[str, ...]]:
+    raw_rule = tab_cfg.get("recoverable_precondition")
+    if not isinstance(raw_rule, dict):
+        return {}
+    rule: dict[str, tuple[str, ...]] = {}
+    for key in ("error_resource_ids", "action_resource_ids", "target_resource_ids"):
+        raw_values = raw_rule.get(key, [])
+        if not isinstance(raw_values, list):
+            continue
+        values = tuple(
+            str(value or "").strip().lower()
+            for value in raw_values
+            if str(value or "").strip()
+        )
+        if values:
+            rule[key] = values
+    if not rule.get("error_resource_ids") or not rule.get("action_resource_ids"):
+        return {}
+    return rule
+
+
+def _recoverable_precondition_actionable(node: dict[str, Any]) -> bool:
+    if not _node_is_visible(node):
+        return False
+    if node.get("enabled") is False or node.get("isEnabled") is False:
+        return False
+    return bool(
+        node.get("actionable")
+        or node.get("clickable")
+        or node.get("effectiveClickable")
+    )
+
+
+def _recoverable_precondition_observation(
+    target_node: dict[str, Any] | None,
+    rule: dict[str, tuple[str, ...]],
+) -> dict[str, Any]:
+    if not isinstance(target_node, dict):
+        return {
+            "target_present": False,
+            "target_visible": False,
+            "error_resource_ids": [],
+            "action_resource_ids": [],
+            "actionable_resource_ids": [],
+            "visible_text": "",
+        }
+    target_nodes = _iter_tree_nodes_with_parent([target_node])
+    error_ids = rule.get("error_resource_ids", ())
+    action_ids = rule.get("action_resource_ids", ())
+    error_hits: list[str] = []
+    action_hits: list[str] = []
+    actionable_hits: list[str] = []
+    visible_text: list[str] = []
+    for node, _parent in target_nodes:
+        if not _node_is_visible(node):
+            continue
+        resource_id = _recoverable_precondition_resource_id(node)
+        normalized_resource_id = resource_id.lower()
+        label = _node_label_blob(node).strip()
+        if label:
+            visible_text.append(label)
+        if normalized_resource_id in error_ids and resource_id not in error_hits:
+            error_hits.append(resource_id)
+        if normalized_resource_id in action_ids and resource_id not in action_hits:
+            action_hits.append(resource_id)
+            if _recoverable_precondition_actionable(node):
+                actionable_hits.append(resource_id)
+    return {
+        "target_present": True,
+        "target_visible": _node_is_visible(target_node),
+        "target_resource_id": _recoverable_precondition_resource_id(target_node),
+        "target_label": _node_label_blob(target_node).strip(),
+        "error_resource_ids": error_hits,
+        "action_resource_ids": action_hits,
+        "actionable_resource_ids": actionable_hits,
+        "visible_text": " ".join(visible_text)[:400],
+    }
+
+
+def _recoverable_precondition_scope_node(
+    target_node: dict[str, Any],
+    _nodes: list[dict[str, Any]],
+    _rule: dict[str, tuple[str, ...]],
+) -> dict[str, Any]:
+    return target_node
+
+
+def _recoverable_precondition_action_index(
+    nodes: list[dict[str, Any]],
+    target_node: dict[str, Any],
+    action_resource_id: str,
+) -> int | None:
+    normalized_action_resource_id = action_resource_id.lower()
+    target_actions = [
+        node
+        for node, _parent in _iter_tree_nodes_with_parent([target_node])
+        if _node_is_visible(node)
+        and _recoverable_precondition_resource_id(node).lower()
+        == normalized_action_resource_id
+        and _recoverable_precondition_actionable(node)
+    ]
+    if len(target_actions) != 1:
+        return None
+    target_action = target_actions[0]
+    matching_index = 0
+    for node, _parent in _iter_tree_nodes_with_parent(nodes):
+        if not _node_is_visible(node):
+            continue
+        if _recoverable_precondition_resource_id(node).lower() != normalized_action_resource_id:
+            continue
+        if node is target_action:
+            return matching_index
+        matching_index += 1
+    return None
+
+
+def _find_recoverable_precondition_target(
+    nodes: list[dict[str, Any]],
+    *,
+    target_resource_id: str,
+    target_bounds: str,
+    target_resource_ids: tuple[str, ...],
+) -> dict[str, Any] | None:
+    normalized_target_resource_id = str(target_resource_id or "").strip().lower()
+    normalized_target_bounds = str(target_bounds or "").strip()
+    allowed_resource_ids = {resource_id.lower() for resource_id in target_resource_ids}
+    candidates = [
+        node
+        for node, _parent in _iter_tree_nodes_with_parent(nodes)
+        if _node_is_visible(node)
+        and _recoverable_precondition_resource_id(node).lower() in allowed_resource_ids
+    ]
+
+    def _unique(matches: list[dict[str, Any]]) -> dict[str, Any] | None:
+        return matches[0] if len(matches) == 1 else None
+
+    if normalized_target_resource_id and normalized_target_bounds:
+        exact_matches = [
+            candidate
+            for candidate in candidates
+            if _recoverable_precondition_resource_id(candidate).lower()
+            == normalized_target_resource_id
+            and str(candidate.get("boundsInScreen", "") or "").strip()
+            == normalized_target_bounds
+        ]
+        exact_match = _unique(exact_matches)
+        if exact_match is not None:
+            return exact_match
+        if len(exact_matches) > 1:
+            return None
+
+    target_bounds_tuple = parse_bounds_str(normalized_target_bounds)
+    if target_bounds_tuple:
+        target_left, target_top, target_right, target_bottom = target_bounds_tuple
+        containing_matches = []
+        for candidate in candidates:
+            candidate_bounds = parse_bounds_str(
+                str(candidate.get("boundsInScreen", "") or "").strip()
+            )
+            if not candidate_bounds:
+                continue
+            candidate_left, candidate_top, candidate_right, candidate_bottom = candidate_bounds
+            if (
+                candidate_left <= target_left
+                and candidate_top <= target_top
+                and candidate_right >= target_right
+                and candidate_bottom >= target_bottom
+            ):
+                containing_matches.append(candidate)
+        containing_match = _unique(containing_matches)
+        if containing_match is not None:
+            return containing_match
+        if len(containing_matches) > 1:
+            return None
+
+    if normalized_target_resource_id:
+        same_resource_matches = [
+            candidate
+            for candidate in candidates
+            if _recoverable_precondition_resource_id(candidate).lower()
+            == normalized_target_resource_id
+        ]
+        same_resource_match = _unique(same_resource_matches)
+        if same_resource_match is not None:
+            return same_resource_match
+        if len(same_resource_matches) > 1:
+            return None
+
+    return _unique(candidates)
+
+
+def _recoverable_precondition_result(
+    *,
+    outcome: str,
+    detected: bool,
+    attempted: bool,
+    attempt_count: int,
+    reason: str,
+    initial_observation: dict[str, Any],
+    final_observation: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    initial_observation = dict(initial_observation)
+    result = {
+        "outcome": outcome,
+        "initial_outcome": (
+            "RECOVERABLE_ERROR_DETECTED" if detected else "NO_RECOVERY_NEEDED"
+        ),
+        "detected": detected,
+        "attempted": attempted,
+        "attempt_count": min(max(attempt_count, 0), 1),
+        "action_dispatched": False,
+        "reason": reason,
+        "detection_basis": (
+            "target_associated_resource_ids" if detected else "none"
+        ),
+        "error_resource_ids": list(initial_observation.get("error_resource_ids", [])),
+        "action_resource_id": next(
+            iter(initial_observation.get("actionable_resource_ids", [])),
+            "",
+        ),
+        "initial_snapshot": {
+            "target_resource_id": initial_observation.get("target_resource_id", ""),
+            "target_label": initial_observation.get("target_label", ""),
+            "error_resource_ids": list(initial_observation.get("error_resource_ids", [])),
+            "action_resource_ids": list(initial_observation.get("action_resource_ids", [])),
+            "visible_text": initial_observation.get("visible_text", ""),
+        },
+    }
+    if isinstance(final_observation, dict):
+        result["final_snapshot"] = {
+            "target_present": bool(final_observation.get("target_present")),
+            "target_visible": bool(final_observation.get("target_visible")),
+            "error_resource_ids": list(final_observation.get("error_resource_ids", [])),
+            "visible_text": final_observation.get("visible_text", ""),
+        }
+    return result
+
+
+def _run_recoverable_precondition_gate(
+    *,
+    client: Any,
+    dev: str,
+    tab_cfg: dict[str, Any],
+    target_node: dict[str, Any] | None,
+    initial_nodes: list[dict[str, Any]],
+    wait_seconds: float,
+) -> dict[str, Any]:
+    rule = _recoverable_precondition_rule(tab_cfg)
+    empty_observation = {
+        "target_present": isinstance(target_node, dict),
+        "target_visible": _node_is_visible(target_node) if isinstance(target_node, dict) else False,
+        "target_resource_id": (
+            _recoverable_precondition_resource_id(target_node)
+            if isinstance(target_node, dict)
+            else ""
+        ),
+        "target_label": (
+            _node_label_blob(target_node).strip()
+            if isinstance(target_node, dict)
+            else ""
+        ),
+        "error_resource_ids": [],
+        "action_resource_ids": [],
+        "actionable_resource_ids": [],
+        "visible_text": "",
+    }
+    if not rule or not isinstance(target_node, dict):
+        result = _recoverable_precondition_result(
+            outcome="NO_RECOVERY_NEEDED",
+            detected=False,
+            attempted=False,
+            attempt_count=0,
+            reason="rule_not_configured",
+            initial_observation=empty_observation,
+        )
+        setattr(client, "last_recoverable_precondition", dict(result))
+        return result
+
+    initial_scope_node = _recoverable_precondition_scope_node(
+        target_node,
+        initial_nodes,
+        rule,
+    )
+    initial_observation = _recoverable_precondition_observation(initial_scope_node, rule)
+    initial_observation["source_node_count"] = len(initial_nodes)
+    target_resource_ids = rule.get("target_resource_ids", ())
+    selected_target_resource_id = _recoverable_precondition_resource_id(target_node).lower()
+    if (
+        target_resource_ids
+        and selected_target_resource_id
+        and selected_target_resource_id not in set(target_resource_ids)
+    ):
+        result = _recoverable_precondition_result(
+            outcome="NO_RECOVERY_NEEDED",
+            detected=False,
+            attempted=False,
+            attempt_count=0,
+            reason="target_resource_not_configured",
+            initial_observation=initial_observation,
+        )
+        setattr(client, "last_recoverable_precondition", dict(result))
+        return result
+    previous_attempt_count = int(
+        getattr(client, "last_recoverable_precondition_attempt_count", 0) or 0
+    )
+    previous_attempt_result = getattr(
+        client,
+        "last_recoverable_precondition_attempt_result",
+        {},
+    )
+    if not isinstance(previous_attempt_result, dict):
+        previous_attempt_result = {}
+    if not previous_attempt_result and previous_attempt_count >= 1:
+        previous_attempt_result = getattr(client, "last_recoverable_precondition", {})
+        if not isinstance(previous_attempt_result, dict):
+            previous_attempt_result = {}
+    if not initial_observation.get("error_resource_ids"):
+        if previous_attempt_count >= 1 and previous_attempt_result:
+            result = dict(previous_attempt_result)
+            setattr(client, "last_recoverable_precondition", dict(result))
+            return result
+        result = _recoverable_precondition_result(
+            outcome="NO_RECOVERY_NEEDED",
+            detected=False,
+            attempted=False,
+            attempt_count=0,
+            reason="normal_target_state",
+            initial_observation=initial_observation,
+        )
+        setattr(client, "last_recoverable_precondition", dict(result))
+        return result
+
+    if (
+        previous_attempt_count >= 1
+        or int(previous_attempt_result.get("attempt_count", 0) or 0) >= 1
+    ):
+        previous_result = previous_attempt_result
+        previous_outcome = str(previous_result.get("outcome", "") or "")
+        if previous_outcome == "RECOVERED_STABLE":
+            result = _recoverable_precondition_result(
+                outcome="RECOVERED_THEN_REGRESSED",
+                detected=True,
+                attempted=True,
+                attempt_count=1,
+                reason="error_state_returned_after_recovery",
+                initial_observation=initial_observation,
+            )
+            result["action_resource_id"] = str(
+                previous_result.get("action_resource_id", "") or ""
+            )
+            result["action_dispatched"] = True
+            setattr(client, "last_recoverable_precondition", dict(result))
+            setattr(client, "last_recoverable_precondition_attempt_result", dict(result))
+            return result
+        result = dict(previous_result)
+        setattr(client, "last_recoverable_precondition", dict(result))
+        return result
+
+    log(
+        "[RECOVERABLE_PRECONDITION][detected] "
+        f"scenario='{str(tab_cfg.get('scenario_id', '') or '')}' "
+        f"error_resource_ids='{','.join(initial_observation['error_resource_ids'])}' "
+        f"action_resource_ids='{','.join(initial_observation['action_resource_ids'])}' "
+        f"target_resource_id='{initial_observation.get('target_resource_id', '')}' "
+        f"visible_text='{initial_observation.get('visible_text', '')}'"
+    )
+    initial_observation = dict(initial_observation)
+    action_resource_id = next(
+        iter(initial_observation.get("actionable_resource_ids", [])),
+        "",
+    )
+    if not action_resource_id:
+        reason = (
+            "recovery_control_missing"
+            if not initial_observation.get("action_resource_ids")
+            else "recovery_control_not_actionable"
+        )
+        result = _recoverable_precondition_result(
+            outcome="RECOVERY_FAILED",
+            detected=True,
+            attempted=False,
+            attempt_count=0,
+            reason=reason,
+            initial_observation=initial_observation,
+        )
+        setattr(client, "last_recoverable_precondition", dict(result))
+        return result
+
+    action_index = _recoverable_precondition_action_index(
+        initial_nodes,
+        initial_scope_node,
+        action_resource_id,
+    )
+    if action_index is None:
+        result = _recoverable_precondition_result(
+            outcome="RECOVERY_FAILED",
+            detected=True,
+            attempted=False,
+            attempt_count=0,
+            reason="recovery_control_scope_ambiguous",
+            initial_observation=initial_observation,
+        )
+        result["action_resource_id"] = action_resource_id
+        result["action_dispatched"] = False
+        setattr(client, "last_recoverable_precondition", dict(result))
+        return result
+
+    attempt_count = 1
+    setattr(client, "last_recoverable_precondition_attempt_count", attempt_count)
+    select_fn = getattr(client, "select", None)
+    click_focused_fn = getattr(client, "click_focused", None)
+    select_ok = False
+    if callable(select_fn):
+        try:
+            select_ok = bool(
+                select_fn(
+                    dev=dev,
+                    name=action_resource_id,
+                    type_="r",
+                    index_=action_index,
+                    wait_=min(max(wait_seconds, 0.2), 1.5),
+                )
+            )
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            select_ok = False
+    click_ok = False
+    if select_ok and callable(click_focused_fn):
+        try:
+            click_ok = bool(
+                click_focused_fn(
+                    dev=dev,
+                    wait_=min(max(wait_seconds, 0.2), _TRANSITION_FAST_ACTION_WAIT_SECONDS),
+                )
+            )
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            click_ok = False
+    if not select_ok or not click_ok:
+        result = _recoverable_precondition_result(
+            outcome="RECOVERY_FAILED",
+            detected=True,
+            attempted=True,
+            attempt_count=attempt_count,
+            reason="recovery_action_failed",
+            initial_observation=initial_observation,
+        )
+        result["action_resource_id"] = action_resource_id
+        result["action_dispatched"] = False
+        setattr(client, "last_recoverable_precondition", dict(result))
+        setattr(client, "last_recoverable_precondition_attempt_result", dict(result))
+        return result
+
+    dump_tree_fn = getattr(client, "dump_tree", None)
+    target_resource_id = _recoverable_precondition_resource_id(target_node)
+    if not target_resource_id:
+        target_resource_id = str(
+            initial_observation.get("target_resource_id", "") or ""
+        )
+    target_bounds = str(target_node.get("boundsInScreen", "") or "").strip()
+    target_resource_ids = rule.get("target_resource_ids", ())
+
+    def _read_recovery_snapshot() -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        if not callable(dump_tree_fn):
+            return None, {
+                "target_present": False,
+                "target_visible": False,
+                "error_resource_ids": [],
+                "action_resource_ids": [],
+                "actionable_resource_ids": [],
+                "visible_text": "",
+            }
+        try:
+            raw_nodes = dump_tree_fn(dev=dev)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            raw_nodes = []
+        nodes = raw_nodes if isinstance(raw_nodes, list) else []
+        current_target = _find_recoverable_precondition_target(
+            nodes,
+            target_resource_id=target_resource_id,
+            target_bounds=target_bounds,
+            target_resource_ids=target_resource_ids,
+        )
+        current_scope_node = (
+            _recoverable_precondition_scope_node(current_target, nodes, rule)
+            if isinstance(current_target, dict)
+            else None
+        )
+        return current_target, _recoverable_precondition_observation(
+            current_scope_node,
+            rule,
+        )
+
+    first_target, first_observation = _read_recovery_snapshot()
+    time.sleep(_RECOVERABLE_PRECONDITION_STABILITY_WAIT_SECONDS)
+    second_target, second_observation = _read_recovery_snapshot()
+
+    def _is_normal_snapshot(
+        snapshot_target: dict[str, Any] | None,
+        observation: dict[str, Any],
+    ) -> bool:
+        return bool(
+            snapshot_target
+            and observation.get("target_present")
+            and observation.get("target_visible")
+            and not observation.get("error_resource_ids")
+        )
+
+    first_is_normal = _is_normal_snapshot(first_target, first_observation)
+    second_is_normal = _is_normal_snapshot(second_target, second_observation)
+    if first_is_normal and second_is_normal:
+        reason = "stable_normal_state"
+        outcome = "RECOVERED_STABLE"
+    elif second_observation.get("error_resource_ids") and first_is_normal:
+        reason = "error_state_returned_during_stability"
+        outcome = "RECOVERED_THEN_REGRESSED"
+    elif second_observation.get("error_resource_ids"):
+        reason = "error_state_remains"
+        outcome = "RECOVERY_FAILED"
+    else:
+        reason = "normal_state_not_stable"
+        outcome = "RECOVERY_FAILED"
+    result = _recoverable_precondition_result(
+        outcome=outcome,
+        detected=True,
+        attempted=True,
+        attempt_count=attempt_count,
+        reason=reason,
+        initial_observation=initial_observation,
+        final_observation=second_observation,
+    )
+    result["action_resource_id"] = action_resource_id
+    result["action_dispatched"] = True
+    if isinstance(second_target, dict):
+        setattr(client, "last_recoverable_precondition_target", second_target)
+    setattr(client, "last_recoverable_precondition", dict(result))
+    setattr(client, "last_recoverable_precondition_attempt_result", dict(result))
+    log(
+        "[RECOVERABLE_PRECONDITION][result] "
+        f"scenario='{str(tab_cfg.get('scenario_id', '') or '')}' "
+        f"outcome='{outcome}' attempt_count={attempt_count} reason='{reason}'"
+    )
+    return result
 
 
 def _xml_entry_candidate_obstruction_reason(
@@ -5434,6 +5986,57 @@ def _run_xml_scroll_search_tap(
                 f"representative_visible_label='{str(selected.get('representative_label', '') or '')[:80]}' "
                 f"representative_label_source='{str(selected.get('representative_label_source', '') or '')}'"
             )
+            setattr(client, "last_recoverable_precondition_target", selected_node)
+            recovery_result = _run_recoverable_precondition_gate(
+                client=client,
+                dev=dev,
+                tab_cfg=tab_cfg,
+                target_node=selected_node,
+                initial_nodes=xml_nodes,
+                wait_seconds=step_wait_seconds,
+            )
+            recovery_outcome = str(recovery_result.get("outcome", "") or "")
+            if recovery_outcome in {
+                "RECOVERY_FAILED",
+                "RECOVERED_THEN_REGRESSED",
+            }:
+                failure_reason = (
+                    "recoverable_precondition:"
+                    f"{str(recovery_result.get('reason', '') or recovery_outcome).strip()}"
+                )
+                setattr(client, "last_pre_nav_failure_reason", failure_reason)
+                log(
+                    "[XMLENTRY][recoverable_precondition] "
+                    f"success=false outcome='{recovery_outcome}' "
+                    f"reason='{str(recovery_result.get('reason', '') or '')}'"
+                )
+                break
+            if recovery_outcome == "RECOVERED_STABLE":
+                refreshed_target = getattr(
+                    client,
+                    "last_recoverable_precondition_target",
+                    selected_node,
+                )
+                if isinstance(refreshed_target, dict):
+                    refreshed_bounds = parse_bounds_str(
+                        str(refreshed_target.get("boundsInScreen", "") or "").strip()
+                    )
+                    if not refreshed_bounds:
+                        failure_reason = (
+                            "recoverable_precondition:"
+                            "normal_state_target_bounds_missing"
+                        )
+                        setattr(client, "last_pre_nav_failure_reason", failure_reason)
+                        break
+                    selected_node = refreshed_target
+                    selected_bounds = refreshed_bounds
+                    center_x = int((selected_bounds[0] + selected_bounds[2]) / 2)
+                    center_y = int((selected_bounds[1] + selected_bounds[3]) / 2)
+                log(
+                    "[XMLENTRY][recoverable_precondition] "
+                    "success=true outcome='RECOVERED_STABLE' "
+                    "continue='existing_target_entry'"
+                )
             tap_ok = False
             if hasattr(client, "tap_xy_adb"):
                 tap_ok = bool(client.tap_xy_adb(dev=dev, x=center_x, y=center_y))
@@ -8034,19 +8637,38 @@ def _run_pre_navigation_steps(
                     transition_fast_path=transition_fast_path,
                 )
                 if not step_ok:
-                    fallback_reason = f"xml_entry_failed:{xml_reason}"
-                    log(f"[SCENARIO][pre_nav][xmlentry] fallback='helper_scrollTouch' reason='{fallback_reason}'")
-                    step_ok = bool(client.scrollTouch(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
-                    if step_ok:
-                        confirm_ok, confirm_signal = _confirm_click_focused_transition(
-                            client=client,
-                            dev=dev,
-                            tab_cfg=tab_cfg,
-                            transition_fast_path=transition_fast_path,
+                    recovery_result = getattr(client, "last_recoverable_precondition", {})
+                    recovery_outcome = (
+                        str(recovery_result.get("outcome", "") or "")
+                        if isinstance(recovery_result, dict)
+                        else ""
+                    )
+                    if recovery_outcome in {
+                        "RECOVERY_FAILED",
+                        "RECOVERED_THEN_REGRESSED",
+                    }:
+                        actual_reason = (
+                            "recoverable_precondition:"
+                            f"{str(recovery_result.get('reason', '') or recovery_outcome)}"
                         )
-                        setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
-                        setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
-                        step_ok = bool(confirm_ok)
+                        log(
+                            "[SCENARIO][pre_nav][xmlentry] "
+                            f"abort='recoverable_precondition' reason='{actual_reason}'"
+                        )
+                    else:
+                        fallback_reason = f"xml_entry_failed:{xml_reason}"
+                        log(f"[SCENARIO][pre_nav][xmlentry] fallback='helper_scrollTouch' reason='{fallback_reason}'")
+                        step_ok = bool(client.scrollTouch(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
+                        if step_ok:
+                            confirm_ok, confirm_signal = _confirm_click_focused_transition(
+                                client=client,
+                                dev=dev,
+                                tab_cfg=tab_cfg,
+                                transition_fast_path=transition_fast_path,
+                            )
+                            setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
+                            setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
+                            step_ok = bool(confirm_ok)
                 local_match_failed = not step_ok
             elif action == "enter_device_card_plugin":
                 max_scroll_search_steps = max(
@@ -8655,7 +9277,26 @@ def _run_pre_navigation_steps(
         if not step_ok:
             failure_reason_for_capture = "action_failed"
             normalized_actual_reason = str(actual_reason or "").strip().lower()
-            if local_match_failed:
+            recovery_result = getattr(client, "last_recoverable_precondition", {})
+            recovery_outcome = (
+                str(recovery_result.get("outcome", "") or "")
+                if isinstance(recovery_result, dict)
+                else ""
+            )
+            if recovery_outcome in {
+                "RECOVERY_FAILED",
+                "RECOVERED_THEN_REGRESSED",
+            }:
+                failure_reason_for_capture = (
+                    "recoverable_precondition:"
+                    f"{str(recovery_result.get('reason', '') or recovery_outcome)}"
+                )
+            if recovery_outcome in {
+                "RECOVERY_FAILED",
+                "RECOVERED_THEN_REGRESSED",
+            }:
+                pass
+            elif local_match_failed:
                 failure_reason_for_capture = "no_local_match"
             elif normalized_actual_reason == "target node not found":
                 failure_reason_for_capture = "Target node not found"
@@ -9115,6 +9756,9 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict, *, output_base
         start_open_summary["focus_align_ok"] = focus_align_ok
         start_open_summary["focus_align_reason"] = str(focus_align_result.get("reason", "") or "")
         start_open_summary["pre_navigation_success"] = bool(pre_nav_ok)
+        recovery_summary = getattr(client, "last_recoverable_precondition", {})
+        if isinstance(recovery_summary, dict) and recovery_summary:
+            start_open_summary["recoverable_precondition"] = dict(recovery_summary)
         setattr(client, "last_start_open_summary", start_open_summary)
     if not pre_nav_ok:
         start_open_summary = getattr(client, "last_start_open_summary", {})
@@ -9320,6 +9964,143 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict, *, output_base
         air_post_nodes,
         extra_blobs=[post_view_id, post_label, post_speech],
     ) if str(scenario_id or "").strip().lower() == _LIFE_AIR_CARE_SCENARIO_ID else {}
+    if str(scenario_id or "").strip().lower() == _LIFE_AIR_CARE_SCENARIO_ID:
+        recovery_target = getattr(client, "last_recoverable_precondition_target", None)
+        recovery_rule = _recoverable_precondition_rule(tab_cfg)
+        if isinstance(recovery_target, dict) and recovery_rule:
+            recovery_target = _find_recoverable_precondition_target(
+                air_post_nodes,
+                target_resource_id=_recoverable_precondition_resource_id(recovery_target),
+                target_bounds=str(recovery_target.get("boundsInScreen", "") or ""),
+                target_resource_ids=recovery_rule.get("target_resource_ids", ()),
+            )
+            if isinstance(recovery_target, dict):
+                recovery_result = _run_recoverable_precondition_gate(
+                    client=client,
+                    dev=dev,
+                    tab_cfg=tab_cfg,
+                    target_node=recovery_target,
+                    initial_nodes=air_post_nodes,
+                    wait_seconds=main_step_wait_seconds,
+                )
+                recovery_outcome = str(recovery_result.get("outcome", "") or "")
+                start_open_summary = getattr(client, "last_start_open_summary", {})
+                if isinstance(start_open_summary, dict):
+                    start_open_summary["recoverable_precondition"] = dict(recovery_result)
+                    setattr(client, "last_start_open_summary", start_open_summary)
+                if recovery_outcome in {
+                    "RECOVERY_FAILED",
+                    "RECOVERED_THEN_REGRESSED",
+                }:
+                    recovery_reason = str(
+                        recovery_result.get("reason", "") or recovery_outcome
+                    )
+                    if isinstance(start_open_summary, dict):
+                        start_open_summary["entry_contract_reason"] = _ENTRY_REASON_VERIFY_FAILED
+                        start_open_summary["entry_contract_detail"] = (
+                            f"recoverable_precondition:{recovery_reason}"
+                        )
+                        setattr(client, "last_start_open_summary", start_open_summary)
+                    log(
+                        "[ENTRY][recoverable_precondition] "
+                        f"success=false outcome='{recovery_outcome}' "
+                        f"reason='{recovery_reason}'"
+                    )
+                    return False
+                if recovery_outcome == "RECOVERED_STABLE":
+                    try:
+                        recovered_nodes = dump_tree_fn(dev=dev)
+                    except (AttributeError, RuntimeError, TypeError, ValueError):
+                        recovered_nodes = []
+                    if isinstance(recovered_nodes, list):
+                        air_post_nodes = recovered_nodes
+                        air_list_screen_evidence = _collect_air_list_screen_evidence(
+                            air_post_nodes,
+                            extra_blobs=[post_view_id, post_label, post_speech],
+                        )
+                        identity_mismatch, identity_actual = _detect_life_plugin_identity_mismatch(
+                            scenario_id=scenario_id,
+                            post_view_id=post_view_id,
+                            post_label=post_label,
+                            post_speech=post_speech,
+                            nodes=identity_nodes,
+                        )
+                    if bool(air_list_screen_evidence.get("has_list_screen_evidence")):
+                        reentry_ok = _run_pre_navigation_steps(
+                            client=client,
+                            dev=dev,
+                            tab_cfg=tab_cfg,
+                            transition_fast_path=is_transition_entry_fast_path
+                            and not is_strict_main_tab_scenario,
+                        )
+                        if not reentry_ok:
+                            recovery_reason = str(
+                                getattr(
+                                    client,
+                                    "last_pre_nav_failure_reason",
+                                    "",
+                                )
+                                or "reentry_after_recovery_failed"
+                            )
+                            if isinstance(start_open_summary, dict):
+                                start_open_summary["entry_contract_reason"] = _ENTRY_REASON_VERIFY_FAILED
+                                start_open_summary["entry_contract_detail"] = (
+                                    "recoverable_precondition:"
+                                    f"{recovery_reason}"
+                                )
+                                setattr(client, "last_start_open_summary", start_open_summary)
+                            return False
+                        pre_navigation_success = True
+                        if isinstance(start_open_summary, dict):
+                            start_open_summary["pre_navigation_success"] = True
+                            setattr(client, "last_start_open_summary", start_open_summary)
+                        post_click_transition_same_screen = bool(
+                            getattr(
+                                client,
+                                "last_post_click_transition_same_screen",
+                                True,
+                            )
+                        )
+                        post_click_transition_signal = str(
+                            getattr(
+                                client,
+                                "last_post_click_transition_signal",
+                                "",
+                            )
+                            or ""
+                        ).strip()
+                        post_focus = client.get_focus(
+                            dev=dev,
+                            wait_seconds=min(main_step_wait_seconds, 0.8),
+                            allow_fallback_dump=False,
+                            mode="fast",
+                        )
+                        post_view_id, post_label, post_speech = _extract_post_open_focus_fields(
+                            post_focus,
+                        )
+                        try:
+                            identity_nodes = dump_tree_fn(dev=dev)
+                        except (AttributeError, RuntimeError, TypeError, ValueError):
+                            identity_nodes = []
+                        try:
+                            air_post_nodes = dump_tree_fn(dev=dev)
+                        except (AttributeError, RuntimeError, TypeError, ValueError):
+                            air_post_nodes = []
+                        if not isinstance(identity_nodes, list):
+                            identity_nodes = []
+                        if not isinstance(air_post_nodes, list):
+                            air_post_nodes = []
+                        air_list_screen_evidence = _collect_air_list_screen_evidence(
+                            air_post_nodes,
+                            extra_blobs=[post_view_id, post_label, post_speech],
+                        )
+                        identity_mismatch, identity_actual = _detect_life_plugin_identity_mismatch(
+                            scenario_id=scenario_id,
+                            post_view_id=post_view_id,
+                            post_label=post_label,
+                            post_speech=post_speech,
+                            nodes=identity_nodes,
+                        )
     air_verified_entry_context, air_verified_entry_reason = _is_air_verified_entry_context(
         scenario_id=scenario_id,
         pre_navigation_success=pre_navigation_success,
@@ -17256,6 +18037,10 @@ def _collect_tab_rows_impl(
     rows: list[dict] = []
     _ensure_focusable_inventory(client, output_path)
     scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    setattr(client, "last_recoverable_precondition", {})
+    setattr(client, "last_recoverable_precondition_target", None)
+    setattr(client, "last_recoverable_precondition_attempt_count", 0)
+    setattr(client, "last_recoverable_precondition_attempt_result", {})
     evidence_runtime = getattr(client, "evidence_runtime", None)
     if bool(getattr(evidence_runtime, "is_enabled", False)):
         try:

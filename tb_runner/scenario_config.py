@@ -261,6 +261,19 @@ TAB_CONFIGS = [
         "screen_context_mode": "new_screen",
         "stabilization_mode": "anchor_only",
 
+        "recoverable_precondition": {
+            "target_resource_ids": [
+                "com.samsung.android.oneconnect:id/service_card",
+                "com.samsung.android.oneconnect:id/containerNameLayout",
+                "com.samsung.android.oneconnect:id/frameLayout",
+            ],
+            "error_resource_ids": [
+                "com.samsung.android.oneconnect:id/errorMessage",
+            ],
+            "action_resource_ids": [
+                "com.samsung.android.oneconnect:id/btTextButton",
+            ],
+        },
         "pre_navigation": [
             {
                 "action": "xml_scroll_search_tap",
