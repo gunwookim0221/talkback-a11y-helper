@@ -24,6 +24,8 @@ debug_window.xml
 qa_frontend_debug.png
 
 .pytest_cache/
+.ruff_cache/
+.codegraph/
 
 artifacts/
 
