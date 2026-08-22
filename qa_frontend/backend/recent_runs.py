@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import re
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,7 @@ from .run_summary import (
 from .runtime_dashboard import parse_runtime_log
 
 RUN_LOG_PATTERN = re.compile(r"^(?P<run_id>\d{8}_\d{6})_(?P<mode>smoke|full)\.log$")
+SCENARIO_IDS_PATTERN = re.compile(r"scenario_ids=(?P<ids>\[[^\n]*?\])")
 START_PATTERN = "%Y%m%d_%H%M%S"
 
 
@@ -90,6 +92,7 @@ def parse_recent_run(path: Path, *, current_status: dict[str, object] | None = N
     runtime_summary = parse_runtime_log(log_text)
     scenario_result_status = resolve_scenario_result_status(process_status, runtime_summary)
     scenarios = _recent_scenarios_from_runtime_summary(runtime_summary)
+    scenario_ids = _scenario_ids_from_log(path) or [str(item.get("id")) for item in scenarios if item.get("id")]
     completed_scenarios = int(runtime_summary.get("completed_scenarios") or 0)
     executed_scenarios = int(runtime_summary.get("executed_scenarios") or 0)
     not_available_scenarios = int(runtime_summary.get("not_available_scenarios") or 0)
@@ -110,6 +113,7 @@ def parse_recent_run(path: Path, *, current_status: dict[str, object] | None = N
     return {
         "run_id": run_id,
         "mode": mode,
+        "scenario_ids": scenario_ids,
         "feature_flags": current_feature_flags,
         "traversal_identity_v2_diagnostics": None,
         "language_mode": _string_or_none(runtime_summary.get("language_mode")) or "current",
@@ -161,10 +165,17 @@ def _recent_run_from_summary(
     started_text = _string_or_none(summary.get("started_at")) or started_at.isoformat(timespec="seconds")
     duration_seconds = int(summary.get("elapsed_seconds") or max(0, int((modified_at - started_at).total_seconds())))
     scenarios = _recent_scenarios_from_summary(summary)
+    raw_scenario_ids = summary.get("scenario_ids")
+    scenario_ids = (
+        [str(item) for item in raw_scenario_ids if item]
+        if isinstance(raw_scenario_ids, list)
+        else _scenario_ids_from_log(path) or [str(item.get("id")) for item in scenarios if item.get("id")]
+    )
 
     return {
         "run_id": _string_or_none(summary.get("run_id")) or run_id,
         "mode": _string_or_none(summary.get("mode")) or mode,
+        "scenario_ids": scenario_ids,
         "feature_flags": summary.get("feature_flags") if isinstance(summary.get("feature_flags"), dict) else None,
         "traversal_identity_v2_diagnostics": (
             summary.get("traversal_identity_v2_diagnostics")
@@ -308,3 +319,18 @@ def _scenario_reason(*, status: str, stop_reason: str | None, traversal_result: 
 
 def _string_or_none(value: object) -> str | None:
     return str(value) if value else None
+
+
+def _scenario_ids_from_log(path: Path) -> list[str]:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    matches = list(SCENARIO_IDS_PATTERN.finditer(text))
+    if not matches:
+        return []
+    try:
+        values = ast.literal_eval(matches[-1].group("ids"))
+    except (SyntaxError, ValueError):
+        return []
+    return [str(item) for item in values if item] if isinstance(values, list) else []

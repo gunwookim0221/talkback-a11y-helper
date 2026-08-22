@@ -775,6 +775,7 @@ class BatchRunManager:
         data = {
             "batch_id": self._batch_id,
             "mode": self._mode,
+            "scenario_ids": [str(item) for item in (self._scenario_ids or [])],
             "created_at": self._created_at,
             "state": self._state,
             "enable_coverage_probe": self._enable_coverage_probe,
@@ -1693,6 +1694,15 @@ def get_recent_batches() -> list[dict]:
                 "batch_id": data.get("batch_id", batch_dir.name),
                 "state": data.get("state", "unknown"),
                 "mode": data.get("mode", "unknown"),
+                "scenario_ids": [
+                    str(item)
+                    for item in (
+                        data.get("scenario_ids")
+                        or (devices_info[0].get("scenario_ids") if devices_info else [])
+                        or []
+                    )
+                    if item
+                ],
                 "created_at": data.get("created_at"),
                 "duration_seconds": _batch_duration_seconds(
                     data.get("created_at"),

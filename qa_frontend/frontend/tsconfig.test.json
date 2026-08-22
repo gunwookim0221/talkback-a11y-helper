@@ -14,6 +14,10 @@
     "src/selection.ts",
     "src/presets.ts",
     "src/runProfiles.ts",
+    "src/reviewPresentation.ts",
+    "src/utils/formatters.ts",
+    "src/utils/devicePluginMeta.ts",
+    "src/utils/lifePluginMeta.ts",
     "src/utils/navigationMeta.ts",
     "src/utils/scenarioGrouping.ts",
     "src/utils/scenarioIds.ts"

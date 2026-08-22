@@ -7,6 +7,7 @@ import { ADBPanel } from './components/ADBPanel';
 import { HelperPanel } from './components/HelperPanel';
 import { RunPanel } from './components/RunPanel';
 import { CurrentRunPanel } from './components/CurrentRunPanel';
+import { ReviewRequiredPanel } from './components/ReviewRequiredPanel';
 import { RuntimeDashboardPanel } from './components/RuntimeDashboard';
 import { PluginDiscoveryPanel } from './components/PluginDiscoveryPanel';
 
@@ -33,6 +34,7 @@ export default function App() {
   const [outputs, setOutputs] = useState<OutputFile[]>([]);
   const [recentRuns, setRecentRuns] = useState<RecentRun[]>([]);
   const [selectedRecentRunId, setSelectedRecentRunId] = useState<string | null>(null);
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
   const [launchMode, setLaunchMode] = useState<'warm' | 'clean'>(DEFAULT_RUN_PROFILE.launchMode);
   const [languageMode, setLanguageMode] = useState<LanguageMode>('current');
   const [plannedMode, setPlannedMode] = useState<'smoke' | 'full'>(DEFAULT_RUN_PROFILE.plannedMode);
@@ -87,12 +89,13 @@ export default function App() {
     [recentRuns, status?.run_id],
   );
   const selectedRecentRun = useMemo(
-    () =>
-      recentRuns.find((run) => run.run_id === selectedRecentRunId) ??
-      currentRunSummary ??
-      recentRuns[0] ??
-      null,
-    [currentRunSummary, recentRuns, selectedRecentRunId],
+    () => selectedBatchId
+      ? null
+      : recentRuns.find((run) => run.run_id === selectedRecentRunId) ??
+        currentRunSummary ??
+        recentRuns[0] ??
+        null,
+    [currentRunSummary, recentRuns, selectedBatchId, selectedRecentRunId],
   );
   const selectedRunScenarios = selectedRecentRun?.scenarios ?? [];
   const selectedFailedScenarios = selectedRunScenarios.filter((scenario) => scenario.status === 'failed');
@@ -384,6 +387,10 @@ export default function App() {
       </section>
 
       <section style={{ marginTop: '14px' }}>
+        <ReviewRequiredPanel run={selectedRecentRun} batchId={selectedBatchId} />
+      </section>
+
+      <section style={{ marginTop: '14px' }}>
         <RunPanel
           launchMode={launchMode}
           setLaunchMode={setLaunchMode}
@@ -607,6 +614,9 @@ export default function App() {
           <CorpusReadinessPanel />
           <RecentRunsPanel
             recentRuns={recentRuns}
+            fullValidationScenarioIds={fullValidationIds}
+            selectedBatchId={selectedBatchId}
+            setSelectedBatchId={setSelectedBatchId}
             selectedRecentRunId={selectedRecentRunId}
             setSelectedRecentRunId={setSelectedRecentRunId}
             selectedRecentRun={selectedRecentRun}

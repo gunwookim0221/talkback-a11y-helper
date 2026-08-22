@@ -67,6 +67,63 @@ def _write_probe_workbook(path):
     workbook.close()
 
 
+def test_mismatch_projection_reuses_qa_review_contract_and_keeps_crop_paths_distinct(tmp_path):
+    output_path = tmp_path / "talkback_compare.xlsx"
+    _write_result_workbook(
+        output_path,
+        [
+            [
+                "device_water_leak_sensor_plugin",
+                "Water Leak Sensor",
+                2,
+                "",
+                "",
+                "EMPTY_VISIBLE",
+                "FAIL",
+                "speech_visible_diverged",
+                "HIGH",
+                "main",
+                "",
+                "water-leak-step-2.png",
+                1,
+                2,
+                2,
+                "2",
+                False,
+            ],
+            [
+                "life_clothing_care_plugin",
+                "Clothing Care",
+                3,
+                "",
+                "",
+                "EMPTY_VISIBLE",
+                "FAIL",
+                "terminal_not_handled",
+                "HIGH",
+                "main",
+                "",
+                "clothing-step-3.png",
+                1,
+                3,
+                3,
+                "3",
+                False,
+            ],
+        ],
+    )
+
+    response = get_mismatch_summary_from_xlsx(output_path)
+
+    assert response["quality_issues_contract"]["qa_review_count"] == 1
+    assert len(response["quality_issues"]) == 1
+    assert response["quality_issues"][0]["scenario_id"] == "device_water_leak_sensor_plugin"
+    assert response["quality_issues"][0]["crop_path"].endswith("/crops/water-leak-step-2.png")
+    assert len(response["automation_diagnostics"]) == 1
+    assert response["automation_diagnostics"][0]["scenario_id"] == "life_clothing_care_plugin"
+    assert response["automation_diagnostics"][0]["crop_path"].endswith("/crops/clothing-step-3.png")
+
+
 def test_coverage_probe_summary_prefers_aggregate_artifacts(tmp_path):
     output_path = tmp_path / "result.xlsx"
     _write_probe_workbook(output_path)

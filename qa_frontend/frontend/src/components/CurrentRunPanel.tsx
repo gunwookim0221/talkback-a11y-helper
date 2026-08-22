@@ -149,7 +149,7 @@ export function CurrentRunPanel({ batchStatus, status, dashboard, runLabel, full
           {!projection.active && (
             <p className="currentRunCompletion">
               {projection.state === 'finished'
-                ? 'Execution completed. Review the results in Run History below.'
+                ? 'Execution completed. Review the Review Required summary and Run History below.'
                 : 'Execution did not complete. Review the run diagnostics and history below.'}
             </p>
           )}

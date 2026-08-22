@@ -39,6 +39,13 @@ button:disabled {
   opacity: 0.55;
 }
 
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible {
+  outline: 3px solid #2b6cb0;
+  outline-offset: 2px;
+}
+
 button.danger {
   border-color: #c85050;
   color: #9f2323;
@@ -1008,6 +1015,231 @@ small {
 
 .scenarioDetailRow small {
   color: #667480;
+}
+
+.reviewRequiredPanel {
+  min-width: 0;
+}
+
+.reviewRequiredHeader,
+.reviewRequiredCardHeader {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.reviewRequiredHeader small,
+.reviewRequiredCardHeader p,
+.historyHint,
+.reviewCountExplanation,
+.automationDiagnosticsDetails p {
+  color: #667480;
+  font-size: 12px;
+}
+
+.reviewRequiredHeader small {
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.reviewEmptyState,
+.reviewUnavailable {
+  background: #f6f8fa;
+  border: 1px solid #dce3e9;
+  border-radius: 6px;
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.reviewUnavailable {
+  background: #fff8e8;
+  border-color: #ead38d;
+}
+
+.reviewUnavailable p,
+.reviewUnavailable small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.reviewRequiredList {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.reviewRequiredCard {
+  border: 1px solid #d7e0e7;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.reviewRequiredCard h3 {
+  font-size: 15px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.reviewRequiredCardHeader p {
+  margin: 4px 0 0;
+}
+
+.reviewItemCounter {
+  background: #eef3f7;
+  border-radius: 999px;
+  color: #526a7c;
+  flex: 0 0 auto;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.reviewEvidence {
+  align-items: start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 180px);
+}
+
+.reviewEvidenceFields,
+.reviewRequiredSummary {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.reviewEvidenceFields > div {
+  border-left: 3px solid #dce3e9;
+  min-width: 0;
+  padding-left: 9px;
+}
+
+.reviewEvidence dt,
+.reviewRequiredSummary dt,
+.reviewTechnicalDetails dt {
+  color: #667480;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.reviewEvidence dd,
+.reviewRequiredSummary dd,
+.reviewTechnicalDetails dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.reviewScreenshot,
+.reviewScreenshotMissing {
+  align-items: center;
+  background: #f6f8fa;
+  border: 1px solid #dce3e9;
+  border-radius: 6px;
+  display: flex;
+  justify-content: center;
+  min-height: 92px;
+  overflow: hidden;
+  padding: 4px;
+}
+
+.reviewScreenshot img {
+  display: block;
+  height: auto;
+  max-height: 150px;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.reviewScreenshotMissing {
+  color: #667480;
+  font-size: 12px;
+  text-align: center;
+}
+
+.reviewActionButton {
+  justify-self: start;
+}
+
+.reviewTechnicalDetails,
+.automationDiagnosticsDetails,
+.technicalHistoryDetails {
+  border-top: 1px solid #edf1f4;
+  margin-top: 4px;
+  padding-top: 8px;
+}
+
+.reviewTechnicalDetails summary,
+.automationDiagnosticsDetails summary,
+.technicalHistoryDetails summary {
+  color: #526a7c;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.reviewTechnicalDetails dl {
+  display: grid;
+  gap: 5px 10px;
+  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
+  margin: 10px 0 0;
+}
+
+.validatorHistorySummary {
+  min-width: 0;
+}
+
+.validatorHistoryList {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.validatorHistoryRow {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #dce3e9;
+  border-radius: 7px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, auto);
+  min-width: 0;
+  padding: 11px 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.validatorHistoryRow:hover,
+.validatorHistoryRow.selected,
+.validatorHistoryRow[aria-pressed="true"] {
+  border-color: #7a9fbd;
+  box-shadow: 0 0 0 2px rgba(54, 102, 139, 0.1);
+}
+
+.historyRowMain,
+.historyRowResult {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.historyRowMain > span,
+.historyRowResult > span:not(.statusBadge) {
+  color: #5e6c78;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.historyRowResult {
+  align-items: end;
+  justify-items: end;
+}
+
+.historyRowResult .statusBadge {
+  justify-self: end;
 }
 
 .crashIssuesBody {
@@ -2227,6 +2459,43 @@ h3 {
 
   .currentRunDeviceHeader {
     flex-direction: column;
+  }
+
+  .reviewRequiredHeader,
+  .reviewRequiredCardHeader {
+    flex-direction: column;
+  }
+
+  .reviewRequiredHeader small {
+    text-align: left;
+  }
+
+  .reviewEvidence {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .reviewScreenshot,
+  .reviewScreenshotMissing {
+    justify-self: start;
+    max-width: 180px;
+    width: 100%;
+  }
+
+  .validatorHistoryRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .historyRowResult {
+    align-items: start;
+    justify-items: start;
+  }
+
+  .historyRowResult .statusBadge {
+    justify-self: start;
+  }
+
+  .reviewTechnicalDetails dl {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

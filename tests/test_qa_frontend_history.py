@@ -343,6 +343,22 @@ def test_run_summary_and_recent_runs_preserve_availability_counts(tmp_path):
     assert run["scenarios"][1]["availability_status"] == "NO_TARGET_CANDIDATE"
 
 
+def test_recent_runs_recovers_selected_scenario_ids_for_history_scope(tmp_path):
+    log_path = tmp_path / "20260528_120050_full.log"
+    _write_log(
+        log_path,
+        body="[QA_FRONTEND] start mode='full' scenario_ids=['global_nav_main', 'life_food_plugin']\n[MAIN] script end\n",
+    )
+    summary_path_for_log(log_path).write_text(
+        "{\"schema_version\": 1, \"run_id\": \"20260528_120050\", \"mode\": \"full\", \"process_status\": \"success\", \"scenario_result_status\": \"passed\", \"total_scenarios\": 2, \"started_at\": \"2026-05-28T12:00:50\", \"elapsed_seconds\": 10, \"scenarios\": []}",
+        encoding="utf-8",
+    )
+
+    run = list_recent_runs(run_log_dir=tmp_path)[0]
+
+    assert run["scenario_ids"] == ["global_nav_main", "life_food_plugin"]
+
+
 def test_recent_runs_uses_summary_fast_path_when_available(tmp_path):
     log_path = tmp_path / "20260528_120100_smoke.log"
     _write_log(log_path, body="unstructured log only\n")

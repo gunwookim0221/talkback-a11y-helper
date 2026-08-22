@@ -60,6 +60,13 @@ def build_run_summary(
     event_counts = _event_counts(parsed)
     warnings = _warnings_from_events(parsed)
     scenarios = _scenario_summaries(parsed)
+    selected_scenario_ids = [str(item) for item in (scenario_ids or []) if str(item)]
+    if not selected_scenario_ids:
+        selected_scenario_ids = [
+            str(item.get("id"))
+            for item in scenarios
+            if isinstance(item, dict) and item.get("id")
+        ]
     started_at = _string_or_none(status.get("started_at"))
     finished_at = _string_or_none(status.get("finished_at"))
     run_id, mode = _run_identity(status=status, log_path=log_path)
@@ -79,6 +86,7 @@ def build_run_summary(
         "schema_version": SUMMARY_SCHEMA_VERSION,
         "run_id": run_id,
         "mode": _string_or_none(status.get("mode")) or mode,
+        "scenario_ids": selected_scenario_ids,
         "feature_flags": feature_flags,
         "environment_profile": environment_profile,
         "traversal_identity_v2_diagnostics": traversal_identity_diagnostics,

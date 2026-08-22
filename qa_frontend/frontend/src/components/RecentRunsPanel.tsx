@@ -3,7 +3,22 @@ import { RecentRun, api, RecentBatch, RecentBatchDevice, CoverageProbeSummary, S
 import { CrashIssuesPanel } from './CrashIssuesPanel';
 import { IdentityShadowCard } from './IdentityShadowCard';
 import { TraversalIdentityV2Card } from './TraversalIdentityV2Card';
-import { formatTime, formatDuration, healthClass, scenarioRunText, languageLabel, scenarioReasonText } from '../utils/formatters';
+import {
+  formatTime,
+  formatDuration,
+  formatValidatorDateTime,
+  formatValidatorDuration,
+  healthClass,
+  scenarioRunText,
+  languageLabel,
+  scenarioReasonText,
+} from '../utils/formatters';
+import {
+  historyDeviceLabel,
+  historyExecutionClass,
+  historyExecutionLabel,
+  historyScopeLabel,
+} from '../reviewPresentation';
 
 type MismatchSummary = {
   summary: {
@@ -96,6 +111,9 @@ type MismatchSummary = {
 
 export interface RecentRunsPanelProps {
   recentRuns: RecentRun[];
+  fullValidationScenarioIds?: readonly string[];
+  selectedBatchId?: string | null;
+  setSelectedBatchId?: (id: string | null) => void;
   selectedRecentRunId: string | null;
   setSelectedRecentRunId: (id: string | null) => void;
   selectedRecentRun: RecentRun | null;
@@ -106,6 +124,9 @@ export interface RecentRunsPanelProps {
 
 export function RecentRunsPanel({
   recentRuns,
+  fullValidationScenarioIds = [],
+  selectedBatchId: controlledSelectedBatchId,
+  setSelectedBatchId: setControlledSelectedBatchId,
   selectedRecentRunId,
   setSelectedRecentRunId,
   selectedRecentRun,
@@ -115,7 +136,12 @@ export function RecentRunsPanel({
 }: RecentRunsPanelProps) {
   const [mismatchSummaries, setMismatchSummaries] = useState<Record<string, MismatchSummary | null>>({});
   const [recentBatches, setRecentBatches] = useState<RecentBatch[]>([]);
-  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
+  const [internalSelectedBatchId, setInternalSelectedBatchId] = useState<string | null>(null);
+  const selectedBatchId = controlledSelectedBatchId ?? internalSelectedBatchId;
+  const selectBatch = (id: string | null) => {
+    setInternalSelectedBatchId(id);
+    setControlledSelectedBatchId?.(id);
+  };
 
   useEffect(() => {
     let timer: number;
@@ -165,6 +191,7 @@ export function RecentRunsPanel({
         );
       }
     });
+    Promise.all(logFetches).then(() => setBatchLogPreviews({ ...newPreviews }));
   }, [selectedBatch]);
 
   const renderDeviceDetails = (runData: any, crashContext?: { runId: string; deviceId: string }) => {
@@ -788,27 +815,109 @@ export function RecentRunsPanel({
     return () => { ignore = true; };
   }, [recentRuns, selectedRecentRun?.run_id]);
 
-  function renderTalkBackBadge(runId: string) {
-    const summary = mismatchSummaries[runId];
-    if (summary === undefined) return null;
-    if (summary === null) return null;
+  function singleReviewLabel(run: RecentRun) {
+    const summary = mismatchSummaries[run.run_id] as (MismatchSummary & {
+      quality_issues?: unknown[];
+      quality_issues_contract?: { schema_version?: string; qa_review_count?: number; classification_available?: boolean };
+    }) | null | undefined;
+    if (summary === undefined) return '검토 상태 확인 중';
+    if (!summary || !summary.quality_issues_contract || summary.quality_issues_contract.classification_available === false || summary.quality_issues_contract.schema_version === 'legacy') {
+      return '검토 상태 확인 불가';
+    }
+    const count = summary.quality_issues_contract.qa_review_count ?? summary.quality_issues?.length ?? 0;
+    return count > 0 ? `검토 필요 ${count}건` : '검토할 항목 없음';
+  }
 
-    const counts = summary.summary;
-    if (counts.fail_count > 0) {
-      return <span className="statusBadge healthBad">ROW FAIL ({counts.fail_count})</span>;
+  function batchReviewLabel(batch: RecentBatch) {
+    const devices = batch.devices ?? [];
+    if (devices.length === 0) return '검토 상태 확인 불가';
+    let count = 0;
+    for (const device of devices) {
+      const contract = device.quality_issues_contract;
+      if (!contract || contract.classification_available === false || contract.schema_version === 'legacy') {
+        return '검토 상태 확인 불가';
+      }
+      count += contract.qa_review_count ?? device.quality_issues?.length ?? 0;
     }
-    if (counts.issue_count > 0) {
-      return <span className="statusBadge healthWarn">ROW ISSUE ({counts.issue_count})</span>;
-    }
-    if (counts.review_count > 0) {
-      return <span className="statusBadge" style={{ background: 'var(--color-neutral)', color: '#fff' }}>ROW REVIEW ({counts.review_count})</span>;
-    }
-    return <span className="statusBadge healthOk">ROW CLEAN</span>;
+    return count > 0 ? `검토 필요 ${count}건` : '검토할 항목 없음';
+  }
+
+  function renderValidatorHistorySummary() {
+    return (
+      <div className="validatorHistorySummary">
+        <p className="historyHint">실행 결과와 검토 필요 항목을 기준으로 열어볼 실행을 선택하세요.</p>
+        {recentRuns.length > 0 && (
+          <div className="validatorHistoryList" aria-label="Recent single-device runs">
+            {recentRuns.map((run) => {
+              const selected = selectedRecentRunId === run.run_id && selectedBatchId === null;
+              const state = run.process_status || run.status;
+              return (
+                <button
+                  type="button"
+                  key={run.run_id}
+                  className={`validatorHistoryRow ${selected ? 'selected' : ''}`}
+                  aria-pressed={selected}
+                  onClick={() => { selectBatch(null); setSelectedRecentRunId(run.run_id); }}
+                >
+                  <span className="historyRowMain">
+                    <strong>{formatValidatorDateTime(run.started_at)}</strong>
+                    <span>{historyDeviceLabel([])}</span>
+                    <span>{historyScopeLabel(run.mode, run.total_scenarios, run.scenario_ids, fullValidationScenarioIds)}</span>
+                  </span>
+                  <span className="historyRowResult">
+                    <span className={`statusBadge ${historyExecutionClass(state)}`}>{historyExecutionLabel(state)}</span>
+                    <span>{singleReviewLabel(run)}</span>
+                    <span>{formatValidatorDuration(run.duration_seconds)}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {recentBatches.length > 0 && (
+          <div className="validatorHistoryList" aria-label="Recent multi-device runs">
+            {recentBatches.map((batch) => {
+              const selected = selectedBatchId === batch.batch_id;
+              const models = (batch.devices ?? []).map((device) => device.model);
+              const totalScenarios = batch.scenario_ids?.length
+                || batch.devices?.[0]?.total_scenarios
+                || 0;
+              return (
+                <button
+                  type="button"
+                  key={batch.batch_id}
+                  className={`validatorHistoryRow ${selected ? 'selected' : ''}`}
+                  aria-pressed={selected}
+                  onClick={() => { selectBatch(batch.batch_id); setSelectedRecentRunId(null); }}
+                >
+                  <span className="historyRowMain">
+                    <strong>{formatValidatorDateTime(batch.created_at)}</strong>
+                    <span>{historyDeviceLabel(models)}</span>
+                    <span>{historyScopeLabel(batch.mode, totalScenarios, batch.scenario_ids, fullValidationScenarioIds)}</span>
+                  </span>
+                  <span className="historyRowResult">
+                    <span className={`statusBadge ${historyExecutionClass(batch.state)}`}>{historyExecutionLabel(batch.state)}</span>
+                    <span>{batchReviewLabel(batch)}</span>
+                    <span>{formatValidatorDuration(batch.duration_seconds)}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {recentRuns.length === 0 && recentBatches.length === 0 && (
+          <p className="reviewEmptyState">최근 실행 기록이 없습니다.</p>
+        )}
+      </div>
+    );
   }
 
   return (
     <article className="panel">
       <h2>Run History</h2>
+      {renderValidatorHistorySummary()}
+      <details className="technicalHistoryDetails">
+        <summary>Technical history details</summary>
       <p style={{ fontSize: '12px', color: 'var(--color-text-dim)', marginBottom: '16px' }}>
         <strong>Batch Runs:</strong> Multi-device or sequential batch executions.<br/>
         <strong>Single Runs:</strong> Legacy single-device direct executions.
@@ -820,17 +929,7 @@ export function RecentRunsPanel({
             {recentBatches.map(batch => (
               <div
                 key={batch.batch_id}
-                role="button"
-                tabIndex={0}
                 className={`recentRunRow ${selectedBatchId === batch.batch_id ? 'selected' : ''}`}
-                onClick={() => { setSelectedBatchId(batch.batch_id); setSelectedRecentRunId(null); }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    setSelectedBatchId(batch.batch_id);
-                    setSelectedRecentRunId(null);
-                  }
-                }}
               >
                 <div>
                   <strong>{batch.batch_id}</strong>
@@ -916,7 +1015,7 @@ export function RecentRunsPanel({
           </div>
         </div>
       )}
-
+      </details>
     </article>
   );
 }

@@ -4,6 +4,7 @@ import openpyxl
 import json
 from pathlib import Path
 from .paths import OUTPUT_DIR
+from .quality_issues import classify_quality_signals
 from .recent_runs import safe_recent_run_log_path
 from .run_summary import read_summary_file, summary_path_for_log
 
@@ -292,6 +293,26 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
         all_previews.sort(key=lambda x: priority_map.get(x["top_category"], 99))
         previews = all_previews[:20]
 
+        # Keep the single-run endpoint on the same authoritative QA Review
+        # projection used by batch summaries. This is presentation data only;
+        # the existing review classification contract remains the source of truth.
+        classified_quality = classify_quality_signals(previews)
+        compare_dir = xlsx_path.with_suffix("")
+
+        def _with_crop_path(signal: dict[str, object]) -> dict[str, object]:
+            crop_thumbnail = str(signal.get("crop_thumbnail") or "").strip()
+            crop_path = (
+                f"{compare_dir.as_posix()}/crops/{crop_thumbnail}"
+                if crop_thumbnail
+                else None
+            )
+            return {**signal, "crop_path": crop_path}
+
+        quality_issues = [_with_crop_path(signal) for signal in classified_quality.quality_issues]
+        automation_diagnostics = [
+            _with_crop_path(signal) for signal in classified_quality.automation_diagnostics
+        ]
+
         focusable_coverage = _read_focusable_coverage_for_xlsx(xlsx_path)
         coverage_probe_summary = _read_coverage_probe_summary_for_xlsx(xlsx_path, sheet, headers)
         focusable_summary = focusable_coverage.get("summary", {})
@@ -380,6 +401,9 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
             },
             "scenario_summary": scenario_summary,
             "signals": previews,
+            "quality_issues": quality_issues,
+            "automation_diagnostics": automation_diagnostics,
+            "quality_issues_contract": classified_quality.contract,
             "focusable_coverage": focusable_coverage,
             "coverage_probe_summary": coverage_probe_summary,
             "coverage_probe": coverage_probe_summary,

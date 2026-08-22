@@ -243,6 +243,7 @@ export type ComparisonHistoryEntry = { comparison_id: string; baseline_id: strin
 export type RecentRun = {
   run_id: string;
   mode: 'smoke' | 'full';
+  scenario_ids?: string[];
   language_mode?: string;
   device_locale?: string | null;
   status: string;
@@ -303,6 +304,47 @@ export type QualityIssue = {
   classification_source?: string;
   validator_status?: 'QA_REVIEW' | 'AUTOMATION_DIAGNOSTIC' | 'CLASSIFICATION_UNAVAILABLE' | string;
   raw_final_result?: string;
+  failure_reason?: string;
+  category?: string;
+  top_category?: string;
+  repeat_count?: number;
+  first_step?: string;
+  last_step?: string;
+  steps?: string;
+  is_repeated_issue_group?: boolean;
+  plugin_name?: string;
+  crop_thumbnail?: string | null;
+};
+
+export type MismatchSummary = {
+  summary: {
+    fail_count: number;
+    issue_count: number;
+    review_count: number;
+    clean_count: number;
+    matched: number;
+    true_mismatch: number;
+    empty_speech: number;
+    empty_visible: number;
+    review: number;
+    runtime_warning: number;
+    [key: string]: number | null | undefined;
+  };
+  scenario_summary: Array<Record<string, unknown>>;
+  signals: QualityIssue[];
+  quality_issues?: QualityIssue[];
+  automation_diagnostics?: QualityIssue[];
+  quality_issues_contract?: {
+    schema_version?: string;
+    classification_source?: string;
+    qa_review_count?: number;
+    automation_diagnostic_count?: number;
+    classification_unavailable_count?: number;
+    classification_available?: boolean;
+  };
+  focusable_coverage?: FocusableCoverage;
+  coverage_probe_summary?: CoverageProbeSummary;
+  coverage_probe?: CoverageProbeSummary | null;
 };
 
 export type FocusableCoverageIssue = {
@@ -482,8 +524,9 @@ export type RecentBatch = {
   batch_id: string;
   state: string;
   mode: string;
-  created_at: string;
+  created_at?: string | null;
   duration_seconds?: number | null;
+  scenario_ids?: string[];
   device_count: number;
   passed_count: number;
   failed_count: number;
@@ -1161,78 +1204,6 @@ export const api = {
     `/api/runs/${encodeURIComponent(runId)}/devices/${encodeURIComponent(deviceId)}/crashes/${encodeURIComponent(crashEventId)}/screenshot`,
   getRunDeviceCrashDownloadUrl: (runId: string, deviceId: string, crashEventId: string) =>
     `/api/runs/${encodeURIComponent(runId)}/devices/${encodeURIComponent(deviceId)}/crashes/${encodeURIComponent(crashEventId)}/download`,
-  runMismatch: (runId: string) => request<{
-    summary: {
-      fail_count: number;
-      issue_count: number;
-      review_count: number;
-      clean_count: number;
-      matched: number;
-      true_mismatch: number;
-      empty_speech: number;
-      empty_visible: number;
-      review: number;
-      runtime_warning: number;
-      shadow_pass_count?: number;
-      shadow_review_count?: number;
-      shadow_warn_count?: number;
-      shadow_fail_count?: number;
-      focusable_required_expected_count?: number;
-      focusable_required_covered_count?: number;
-      focusable_required_missed_count?: number;
-      focusable_review_expected_count?: number;
-      focusable_review_unknown_count?: number;
-      focusable_optional_expected_count?: number;
-      focusable_coverage_rate?: number | null;
-    };
-    scenario_summary: Array<{
-      scenario_id: string;
-      plugin_name: string;
-      fail_count: number;
-      issue_count: number;
-      review_count: number;
-      clean_count: number;
-      matched: number;
-      true_mismatch: number;
-      empty_speech: number;
-      empty_visible: number;
-      review: number;
-      runtime_warning: number;
-      shadow_pass_count?: number;
-      shadow_review_count?: number;
-      shadow_warn_count?: number;
-      shadow_fail_count?: number;
-      scenario_shadow_verdict?: string;
-      focusable_required_missed?: number;
-      focusable_review_unknown?: number;
-      focusable_coverage_rate?: number | null;
-      status: 'fail' | 'issue' | 'review' | 'clean';
-    }>;
-    signals: Array<{ 
-      scenario: string; 
-      plugin_name: string;
-      step: string;
-      visible: string; 
-      spoken: string; 
-      mismatch_type: string; 
-      final_result: string;
-      shadow_verdict?: string;
-      shadow_verdict_reason?: string;
-      shadow_verdict_source?: string;
-      scenario_shadow_verdict?: string;
-      failure_reason: string;
-      focus_confidence: string;
-      repeat_count?: number;
-      first_step?: string;
-      last_step?: string;
-      steps?: string;
-      is_repeated_issue_group?: boolean;
-      category: string; 
-      top_category: string;
-    }>;
-    focusable_coverage?: FocusableCoverage;
-    coverage_probe_summary?: CoverageProbeSummary;
-    coverage_probe?: CoverageProbeSummary | null;
-  }>(`/api/runs/recent/${encodeURIComponent(runId)}/mismatch`),
+  runMismatch: (runId: string) => request<MismatchSummary>(`/api/runs/recent/${encodeURIComponent(runId)}/mismatch`),
   outputs: () => request<{ outputs: OutputFile[] }>('/api/outputs'),
 };

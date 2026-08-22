@@ -1,4 +1,7 @@
 import { RecentRun, Scenario } from '../api';
+import { getDevicePluginName } from './devicePluginMeta';
+import { getLifePluginName } from './lifePluginMeta';
+import { getNavigationName } from './navigationMeta';
 
 export function formatTime(value: number) {
   return new Date(value * 1000).toLocaleString();
@@ -14,6 +17,43 @@ export function formatDuration(seconds: number) {
     return `${remaining}s`;
   }
   return `${minutes}m ${remaining}s`;
+}
+
+export function formatValidatorDuration(seconds: number | null | undefined) {
+  if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) {
+    return '0분';
+  }
+  const totalMinutes = Math.floor(seconds / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}시간 ${minutes}분` : `${hours}시간`;
+  }
+  return `${Math.max(1, minutes)}분`;
+}
+
+export function formatValidatorDateTime(value: string | null | undefined, now = new Date()) {
+  if (!value) {
+    return '시간 확인 불가';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '시간 확인 불가';
+  }
+  const sameDay = date.toDateString() === now.toDateString();
+  const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(date);
+  if (sameDay) {
+    return `오늘 ${time}`;
+  }
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  return `${month}/${day} ${time}`;
+}
+
+export function friendlyScenarioName(scenarioId: string | null | undefined, pluginName?: string | null) {
+  const id = String(scenarioId ?? '').trim();
+  if (!id) return pluginName || 'Scenario';
+  return getDevicePluginName(id) || getLifePluginName(id) || getNavigationName(id) || pluginName || id;
 }
 
 export function formatBytes(value: number) {
