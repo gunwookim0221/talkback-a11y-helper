@@ -10,6 +10,7 @@
   },
   "include": [
     "src/api.ts",
+    "src/readiness.ts",
     "src/currentRun.ts",
     "src/selection.ts",
     "src/presets.ts",

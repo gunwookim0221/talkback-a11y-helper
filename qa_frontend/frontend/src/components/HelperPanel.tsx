@@ -1,10 +1,13 @@
 import React from 'react';
 import { helperBadgeText } from '../utils/formatters';
-import type { HelperStatus } from '../api';
+import type { DeviceInfo, HelperStatus } from '../api';
+import { projectTalkBackReadiness } from '../readiness';
 
 export interface HelperPanelProps {
   helper: HelperStatus | null;
-  talkbackState?: string | null;
+  selectedDevices: readonly DeviceInfo[];
+  deviceReadinessLoaded: boolean;
+  runScopedTalkbackState?: string | null;
   running: boolean;
   installHelper: () => void;
   enableHelper: () => void;
@@ -13,13 +16,20 @@ export interface HelperPanelProps {
 
 export function HelperPanel({
   helper,
-  talkbackState,
+  selectedDevices,
+  deviceReadinessLoaded,
+  runScopedTalkbackState,
   running,
   installHelper,
   enableHelper,
   openAccessibilitySettings,
 }: HelperPanelProps) {
   const helperReady = helper?.status === 'ok';
+  const talkbackState = projectTalkBackReadiness({
+    selectedDevices,
+    deviceReadinessLoaded,
+    runScopedState: runScopedTalkbackState,
+  });
   const talkbackReady = talkbackState === 'enabled';
   const talkbackLabel = talkbackReady ? 'Enabled' : talkbackState === 'disabled' ? 'Disabled' : 'Unknown';
   const overallReady = helperReady && talkbackReady;

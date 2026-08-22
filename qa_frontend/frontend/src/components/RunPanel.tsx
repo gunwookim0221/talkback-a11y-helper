@@ -42,6 +42,7 @@ export interface RunPanelProps {
   setTraversalIdentityV2: (enabled: boolean) => void;
   traversalProfiler: boolean;
   setTraversalProfiler: (enabled: boolean) => void;
+  onSelectedDeviceReadinessChange?: (devices: readonly DeviceInfo[], loaded: boolean) => void;
 }
 
 function isReadyDevice(device: DeviceInfo): boolean {
@@ -91,8 +92,10 @@ export function RunPanel({
   evidenceLedger, setEvidenceLedger, identityShadowV2, setIdentityShadowV2,
   traversalIdentityV2, setTraversalIdentityV2,
   traversalProfiler, setTraversalProfiler,
+  onSelectedDeviceReadinessChange,
 }: RunPanelProps) {
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
+  const [devicesLoaded, setDevicesLoaded] = useState(false);
   const [loadingDevices, setLoadingDevices] = useState(false);
   const [selectedDevices, setSelectedDevices] = useState<Set<string>>(new Set());
   const [runProfile, setRunProfile] = useState<RunProfileId>('full-validation');
@@ -109,6 +112,7 @@ export function RunPanel({
       const list = await api.devices();
       setDevices(list);
       setSelectedDevices(readyDeviceSerials(list));
+      setDevicesLoaded(true);
     } catch (err) {
       console.error('Failed to fetch devices', err);
       try {
@@ -122,8 +126,10 @@ export function RunPanel({
         }));
         setDevices(fallback);
         setSelectedDevices(readyDeviceSerials(fallback));
+        setDevicesLoaded(true);
       } catch (fallbackErr) {
         console.error('Failed to fetch fallback ADB devices', fallbackErr);
+        setDevicesLoaded(true);
       }
     } finally {
       setLoadingDevices(false);
@@ -149,6 +155,11 @@ export function RunPanel({
     () => devices.filter((device) => selectedDevices.has(device.serial)),
     [devices, selectedDevices],
   );
+
+  useEffect(() => {
+    onSelectedDeviceReadinessChange?.(selectedDeviceRecords, devicesLoaded);
+  }, [devicesLoaded, onSelectedDeviceReadinessChange, selectedDeviceRecords]);
+
   const selectedReadyDeviceCount = selectedDeviceRecords.filter(isReadyDevice).length;
   const selectedHelperReady = selectedDeviceRecords.length > 0
     ? selectedDeviceRecords.every((device) => device.helper_ready === true)

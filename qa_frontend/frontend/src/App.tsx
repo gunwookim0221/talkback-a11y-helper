@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
-import type { HelperStatus, OutputFile, RecentRun, RunStatus, Scenario, RuntimeDashboard } from './api';
+import type { DeviceInfo, HelperStatus, OutputFile, RecentRun, RunStatus, Scenario, RuntimeDashboard } from './api';
 import { applyPresetSelection, PRESETS, ScenarioPresetId } from './presets';
 import { getFullValidationScenarioIds, initialScenarioSelection } from './selection';
 import { ADBPanel } from './components/ADBPanel';
@@ -32,6 +32,8 @@ const DEFAULT_RUN_PROFILE = RUN_PROFILES['full-validation'];
 export default function App() {
   const [adb, setAdb] = useState<Record<string, unknown> | null>(null);
   const [helper, setHelper] = useState<HelperStatus | null>(null);
+  const [selectedValidatorDevices, setSelectedValidatorDevices] = useState<DeviceInfo[]>([]);
+  const [validatorDevicesLoaded, setValidatorDevicesLoaded] = useState(false);
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [outputs, setOutputs] = useState<OutputFile[]>([]);
@@ -51,6 +53,14 @@ export default function App() {
   const [fixTalkBackMessage, setFixTalkBackMessage] = useState<string | null>(null);
   const preflightRef = useRef<HTMLElement | null>(null);
   const scrolledBlockedRunRef = useRef<string | null>(null);
+
+  const handleSelectedDeviceReadinessChange = useCallback(
+    (devices: readonly DeviceInfo[], loaded: boolean) => {
+      setSelectedValidatorDevices([...devices]);
+      setValidatorDevicesLoaded(loaded);
+    },
+    [],
+  );
 
   const {
     status,
@@ -370,7 +380,9 @@ export default function App() {
 
         <HelperPanel
           helper={helper}
-          talkbackState={status?.talkback_state}
+          selectedDevices={selectedValidatorDevices}
+          deviceReadinessLoaded={validatorDevicesLoaded}
+          runScopedTalkbackState={status?.talkback_state}
           running={running}
           installHelper={installHelper}
           enableHelper={enableHelper}
@@ -425,6 +437,7 @@ export default function App() {
           setTraversalIdentityV2={setTraversalIdentityV2}
           traversalProfiler={traversalProfiler}
           setTraversalProfiler={setTraversalProfiler}
+          onSelectedDeviceReadinessChange={handleSelectedDeviceReadinessChange}
         />
       </section>
 
