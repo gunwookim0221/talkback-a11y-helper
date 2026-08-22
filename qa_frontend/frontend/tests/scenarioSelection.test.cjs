@@ -2,12 +2,18 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { applyPresetSelection } = require('../.test-dist/presets.js');
+const {
+  getFullValidationScenarioIds,
+  initialScenarioSelection,
+  isFullValidationSelection,
+} = require('../.test-dist/selection.js');
 const { getNavigationName } = require('../.test-dist/utils/navigationMeta.js');
 const { groupScenarios } = require('../.test-dist/utils/scenarioGrouping.js');
 const {
   RUN_PROFILES,
   currentLanguageLabel,
   getValidationReadiness,
+  getRunSafety,
   resolveRunProfile,
 } = require('../.test-dist/runProfiles.js');
 
@@ -73,6 +79,24 @@ test('navigation labels include routines and menu', () => {
   assert.equal(getNavigationName('menu_main'), 'Menu');
 });
 
+test('Full Validation selection is derived from enabled registry entries', () => {
+  const fullValidationIds = getFullValidationScenarioIds(scenarios);
+  const initial = initialScenarioSelection(scenarios);
+
+  assert.deepEqual([...initial].sort(), fullValidationIds.sort());
+  assert.ok(initial.has('home_main'));
+  assert.ok(!initial.has('home_safe_plugin'));
+  assert.ok(isFullValidationSelection(initial, fullValidationIds));
+});
+
+test('new enabled registry entries are included without changing the frontend', () => {
+  const extended = [...scenarios, { id: 'future_validation', enabled: true, max_steps: 20 }];
+  const fullValidationIds = getFullValidationScenarioIds(extended);
+
+  assert.equal(fullValidationIds.includes('future_validation'), true);
+  assert.equal(initialScenarioSelection(extended).has('future_validation'), true);
+});
+
 test('Full Validation profile is the approval-oriented default contract', () => {
   assert.deepEqual(RUN_PROFILES['full-validation'], {
     launchMode: 'clean',
@@ -91,7 +115,7 @@ test('Quick Smoke retains diagnostics but is not validation ready', () => {
   const readiness = getValidationReadiness({
     ...profile,
     selectedScenarioCount: 32,
-    registryScenarioCount: 32,
+    fullValidationScenarioCount: 32,
   });
 
   assert.equal(profile.launchMode, 'clean');
@@ -116,7 +140,7 @@ test('readiness reports only candidate-impacting missing inputs', () => {
   const readiness = getValidationReadiness({
     ...RUN_PROFILES['full-validation'],
     selectedScenarioCount: 31,
-    registryScenarioCount: 32,
+    fullValidationScenarioCount: 32,
     traversalProfiler: false,
     identityShadowV2: false,
   });
@@ -131,10 +155,63 @@ test('readiness reports only candidate-impacting missing inputs', () => {
     getValidationReadiness({
       ...RUN_PROFILES['full-validation'],
       selectedScenarioCount: 32,
-      registryScenarioCount: 32,
+      fullValidationScenarioCount: 32,
     }).ready,
     true,
   );
+});
+
+test('partial scenario selection is a custom run, not a failed full run', () => {
+  const fullIds = ['home_main', 'devices_main', 'life_main'];
+  const selected = new Set(['home_main', 'devices_main']);
+  const safety = getRunSafety({
+    selectedScenarioIds: selected,
+    fullValidationScenarioIds: fullIds,
+    selectedDeviceCount: 1,
+    selectedReadyDeviceCount: 1,
+    controlsLocked: false,
+    helperReady: true,
+    talkbackEnabled: true,
+  });
+
+  assert.equal(safety.runKind, 'custom');
+  assert.equal(safety.ready, true);
+  assert.deepEqual(safety.reasons, []);
+});
+
+test('zero scenarios and zero devices cannot start a validator run', () => {
+  const safety = getRunSafety({
+    selectedScenarioIds: new Set(),
+    fullValidationScenarioIds: ['home_main'],
+    selectedDeviceCount: 0,
+    selectedReadyDeviceCount: 0,
+    controlsLocked: false,
+    helperReady: true,
+    talkbackEnabled: true,
+  });
+
+  assert.equal(safety.ready, false);
+  assert.deepEqual(safety.reasons, ['Select at least one scenario', 'Select at least one ready device']);
+});
+
+test('not-ready devices and active runs remain blocked', () => {
+  const safety = getRunSafety({
+    selectedScenarioIds: new Set(['home_main']),
+    fullValidationScenarioIds: ['home_main'],
+    selectedDeviceCount: 1,
+    selectedReadyDeviceCount: 0,
+    controlsLocked: true,
+    helperReady: false,
+    talkbackEnabled: false,
+  });
+
+  assert.equal(safety.ready, false);
+  assert.deepEqual(safety.reasons, [
+    'Selected device is not ready',
+    'Helper is not ready',
+    'TalkBack is not enabled',
+    'A run is already active',
+  ]);
 });
 
 test('Current language label includes an effective locale when available', () => {

@@ -12,6 +12,11 @@ body {
   margin: 0;
 }
 
+#root {
+  max-width: 100%;
+  min-width: 0;
+}
+
 button {
   border: 1px solid #b8c2cc;
   border-radius: 6px;
@@ -86,6 +91,175 @@ p {
   gap: 14px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
+}
+
+.readinessGrid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+.readinessPanel {
+  min-width: 0;
+}
+
+.readinessSummary {
+  display: grid;
+  gap: 5px;
+  margin-top: 12px;
+}
+
+.readinessSummary span,
+.readinessRows span,
+.developerRun p {
+  color: #5e6c78;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.readinessRows {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.readinessRows > div {
+  align-items: center;
+  border-top: 1px solid #edf1f4;
+  display: flex;
+  justify-content: space-between;
+  padding-top: 8px;
+}
+
+.technicalDetails {
+  margin-top: 12px;
+}
+
+.technicalDetails summary,
+.deviceTechnicalDetails summary,
+.advancedRunOptions summary {
+  color: #526a7c;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.runProfilePrimary {
+  margin-top: 10px;
+  min-height: 64px;
+  text-align: left;
+  width: 100%;
+}
+
+.advancedRunOptions {
+  border-top: 1px solid #edf1f4;
+  margin-top: 12px;
+  padding-top: 10px;
+}
+
+.developerRun {
+  border-top: 1px solid #edf1f4;
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.developerRun p {
+  margin: 0;
+}
+
+.deviceActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.deviceActions button {
+  font-size: 11px;
+  min-width: auto;
+  padding: 4px 8px;
+}
+
+.deviceHeader {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.deviceSelectionGrid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.deviceSelectionGrid.deviceCountOne {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.deviceSelectionGrid.deviceCountMany {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.deviceCard {
+  align-items: flex-start;
+  border: 1px solid #d9e0e7;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.deviceCardReady {
+  background: #f2faf4;
+}
+
+.deviceCardUnavailable {
+  background: #f6f8fa;
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.deviceIdentity {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.deviceIdentity > span {
+  color: #5e6c78;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.deviceStatusReady,
+.deviceStatusUnavailable {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.deviceStatusReady {
+  color: #21633b;
+}
+
+.deviceStatusUnavailable {
+  color: #8d1e1e;
+}
+
+.deviceTechnicalDetails {
+  display: grid;
+  gap: 3px;
+  margin-top: 3px;
+}
+
+.deviceTechnicalDetails span {
+  color: #6a7885;
+  font-size: 10px;
+  overflow-wrap: anywhere;
 }
 
 .runGrid {
@@ -229,6 +403,7 @@ p {
   background: #ffffff;
   border: 1px solid #d9e0e7;
   border-radius: 8px;
+  min-width: 0;
   padding: 16px;
 }
 
@@ -1564,9 +1739,10 @@ h3 {
 
 .comparePanel { border-top: 4px solid #526f87; }
 .compareHeader, .compareResultHeader { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
-.compareSelectors { align-items: end; display: grid; gap: 12px; grid-template-columns: 1fr 1fr auto; margin-top: 14px; }
+.compareSelectors { align-items: end; display: grid; gap: 12px; grid-template-columns: 1fr 1fr auto; margin-top: 14px; min-width: 0; }
+.compareSelectors > *, .compareSelectors label { min-width: 0; }
 .compareSelectors label { color: #5e6c78; display: grid; font-size: 12px; gap: 5px; }
-.compareSelectors select { background: #fff; border: 1px solid #b8c2cc; border-radius: 6px; color: #172026; min-height: 36px; max-width: 100%; overflow: hidden; padding: 6px; text-overflow: ellipsis; white-space: nowrap; }
+.compareSelectors select { background: #fff; border: 1px solid #b8c2cc; border-radius: 6px; color: #172026; min-height: 36px; min-width: 0; max-width: 100%; overflow: hidden; padding: 6px; text-overflow: ellipsis; white-space: nowrap; width: 100%; }
 .compareAction { background: #245f82; border-color: #245f82; color: #fff; min-height: 36px; }
 .compareInputHint { font-size: 12px; margin-top: 8px; }.compareCandidateDetail { background: #f6f8fa; border: 1px solid #dce3e9; border-radius: 6px; color: #5e6c78; font-size: 12px; margin-top: 8px; padding: 8px 10px; }.compareCandidateDetail strong { color: #172026; }
 .environmentCards { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 12px; }
@@ -1591,8 +1767,134 @@ h3 {
 .compareHistory { display: grid; gap: 7px; }.compareHistory button { align-items: center; display: grid; gap: 8px; grid-template-columns: auto minmax(0, 1fr) auto; text-align: left; }.compareHistory button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 900px) {
+  .shell {
+    max-width: 100%;
+    padding: 16px;
+    width: 100%;
+  }
+
+  .shell,
+  .shell > *,
+  .shell .panel,
+  .shell .panel > *,
+  .split > *,
+  .stack > * {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .shell * {
+    min-width: 0;
+  }
+
+  .shell > section,
+  .shell > .panel,
+  .shell article.panel {
+    width: 100%;
+  }
+
+  .shell .tableWrap,
+  .shell .corpusTableWrap {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .shell .pluginDiscoveryTable {
+    max-width: none;
+    min-width: 760px;
+  }
+
+  .shell .corpusTable {
+    max-width: none;
+    min-width: 1040px;
+  }
+
+  .shell h1,
+  .shell h2,
+  .shell h3,
+  .shell h4,
+  .shell p,
+  .shell small,
+  .shell span,
+  .shell strong {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .shell p,
+  .shell button small {
+    max-width: 100%;
+    white-space: normal;
+  }
+
+  .shell button,
+  .shell select {
+    max-width: 100%;
+  }
+
+  .shell .panelHeader,
+  .shell .compareHeader,
+  .shell .compareResultHeader {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .shell .panelHeader > *,
+  .shell .compareHeader > *,
+  .shell .compareResultHeader > * {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .topbar > div {
+    min-width: 0;
+    width: 100%;
+  }
+
+  h1 {
+    font-size: 24px;
+    overflow-wrap: anywhere;
+  }
+
   .runProfileChoices {
     grid-template-columns: 1fr;
+  }
+
+  .runGrid,
+  .grid2,
+  .onboardingSessionPanel,
+  .onboardingRecommendation {
+    grid-template-columns: 1fr;
+  }
+
+  .compareSelectors,
+  .compareSelectors > *,
+  .compareSelectors label,
+  .compareSelectors select,
+  .compareSelectors button {
+    max-width: 100%;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .compareSelectors {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  dl,
+  .compactDefinitionList {
+    grid-template-columns: minmax(0, 120px) minmax(0, 1fr);
+  }
+
+  .shadowFamilyGroup {
+    grid-template-columns: minmax(0, 92px) minmax(0, 1fr);
+  }
+
+  .scenarioList label {
+    grid-template-columns: auto minmax(0, 1fr) auto;
   }
 
   .runProfilesHeader,
@@ -1601,11 +1903,30 @@ h3 {
     flex-direction: column;
   }
 
+  .runProfilesHeader > div,
+  .runFooter > div,
+  .deviceHeader {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .deviceHeader {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .topbar p,
+  .runFooter > div {
+    overflow-wrap: anywhere;
+  }
+
   .profileDefault {
     align-self: flex-start;
   }
 
   .grid,
+  .readinessGrid,
   .split,
   .dashboardGrid,
   .metricGrid,
@@ -1620,7 +1941,11 @@ h3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .compareSelectors, .compareMetrics, .environmentCards { grid-template-columns: 1fr; }
+  .compareSelectors,
+  .compareMetrics,
+  .environmentCards {
+    grid-template-columns: minmax(0, 1fr);
+  }
 
   .readinessCountGrid,
   .readinessFamilyRow {
@@ -1639,5 +1964,51 @@ h3 {
 
   .actionBannerActions {
     justify-content: flex-start;
+  }
+
+  .helperActions button {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .deviceActions button {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .deviceActions {
+    display: grid;
+    gap: 6px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .deviceActions button {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .runFooter .buttonRow {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .runFooter .buttonRow button {
+    flex: 1 1 0;
+    min-width: 0 !important;
+    width: 100%;
+  }
+
+  .deviceSelectionGrid,
+  .deviceSelectionGrid.deviceCountMany {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 901px) and (max-width: 1180px) {
+  .deviceSelectionGrid.deviceCountFew,
+  .deviceSelectionGrid.deviceCountMany {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

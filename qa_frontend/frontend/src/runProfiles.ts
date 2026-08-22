@@ -1,3 +1,5 @@
+import { isFullValidationSelection } from './selection';
+
 export type RunProfileId = 'full-validation' | 'quick-smoke' | 'custom-debug';
 
 export type RunProfileSettings = {
@@ -43,7 +45,7 @@ export function resolveRunProfile(
 
 export type ValidationReadinessInput = RunProfileSettings & {
   selectedScenarioCount: number;
-  registryScenarioCount: number;
+  fullValidationScenarioCount: number;
 };
 
 export type ValidationReadiness = {
@@ -55,8 +57,8 @@ export function getValidationReadiness(input: ValidationReadinessInput): Validat
   const reasons: string[] = [];
   if (input.plannedMode !== 'full') reasons.push('Mode is Smoke');
   if (
-    input.registryScenarioCount === 0 ||
-    input.selectedScenarioCount !== input.registryScenarioCount
+    input.fullValidationScenarioCount === 0 ||
+    input.selectedScenarioCount !== input.fullValidationScenarioCount
   ) {
     reasons.push('Full scenario set not selected');
   }
@@ -66,6 +68,43 @@ export function getValidationReadiness(input: ValidationReadinessInput): Validat
   if (!input.identityShadowV2) reasons.push('Identity disabled');
   if (!input.traversalIdentityV2) reasons.push('Traversal Engine disabled');
   return { ready: reasons.length === 0, reasons };
+}
+
+export type ScenarioRunKind = 'full-validation' | 'custom';
+
+export type RunSafetyInput = {
+  selectedScenarioIds: ReadonlySet<string>;
+  fullValidationScenarioIds: readonly string[];
+  selectedDeviceCount: number;
+  selectedReadyDeviceCount: number;
+  controlsLocked: boolean;
+  helperReady: boolean | null;
+  talkbackEnabled: boolean | null;
+};
+
+export type RunSafety = {
+  ready: boolean;
+  runKind: ScenarioRunKind;
+  reasons: string[];
+};
+
+export function getRunSafety(input: RunSafetyInput): RunSafety {
+  const reasons: string[] = [];
+  const runKind = isFullValidationSelection(input.selectedScenarioIds, input.fullValidationScenarioIds)
+    ? 'full-validation'
+    : 'custom';
+
+  if (input.selectedScenarioIds.size === 0) reasons.push('Select at least one scenario');
+  if (input.selectedDeviceCount === 0) {
+    reasons.push('Select at least one ready device');
+  } else if (input.selectedReadyDeviceCount !== input.selectedDeviceCount) {
+    reasons.push('Selected device is not ready');
+  }
+  if (input.helperReady === false) reasons.push('Helper is not ready');
+  if (input.talkbackEnabled === false) reasons.push('TalkBack is not enabled');
+  if (input.controlsLocked) reasons.push('A run is already active');
+
+  return { ready: reasons.length === 0, runKind, reasons };
 }
 
 export function currentLanguageLabel(deviceLocale: string | null | undefined): string {

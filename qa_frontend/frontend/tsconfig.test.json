@@ -10,6 +10,7 @@
   },
   "include": [
     "src/api.ts",
+    "src/selection.ts",
     "src/presets.ts",
     "src/runProfiles.ts",
     "src/utils/navigationMeta.ts",

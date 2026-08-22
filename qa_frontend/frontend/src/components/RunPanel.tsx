@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { RunStatus, api, DeviceInfo, BatchStatus } from '../api';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { api } from '../api';
+import type { RunStatus, DeviceInfo, BatchStatus } from '../api';
 import {
-  RunProfileId,
   currentLanguageLabel,
   getValidationReadiness,
+  getRunSafety,
   resolveRunProfile,
 } from '../runProfiles';
+import type { RunProfileId } from '../runProfiles';
 
 type LanguageMode = 'current' | 'ko-KR' | 'en-US';
 
@@ -23,7 +25,8 @@ export interface RunPanelProps {
   status: RunStatus | null;
   stepPolicyText: string;
   selectedCount: number;
-  registryScenarioCount: number;
+  fullValidationScenarioIds: readonly string[];
+  onSelectFullValidation: () => void;
   selectedScenarios: Set<string>;
   effectiveLocale?: string | null;
   enableCoverageProbe: boolean;
@@ -40,6 +43,27 @@ export interface RunPanelProps {
   setTraversalProfiler: (enabled: boolean) => void;
 }
 
+function isReadyDevice(device: DeviceInfo): boolean {
+  return device.state === 'device' && device.helper_ready === true && device.talkback_enabled === true;
+}
+
+function readyDeviceSerials(devices: readonly DeviceInfo[]): Set<string> {
+  return new Set(
+    [...devices]
+      .filter(isReadyDevice)
+      .sort((left, right) => left.serial.localeCompare(right.serial))
+      .map((device) => device.serial),
+  );
+}
+
+function shortDeviceId(serial: string): string {
+  return serial.length > 12 ? `${serial.slice(0, 4)}…${serial.slice(-4)}` : serial;
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 export function RunPanel({
   launchMode,
   setLaunchMode,
@@ -54,7 +78,8 @@ export function RunPanel({
   status,
   stepPolicyText,
   selectedCount,
-  registryScenarioCount,
+  fullValidationScenarioIds,
+  onSelectFullValidation,
   selectedScenarios,
   effectiveLocale,
   enableCoverageProbe,
@@ -69,15 +94,19 @@ export function RunPanel({
   const [loadingDevices, setLoadingDevices] = useState(false);
   const [selectedDevices, setSelectedDevices] = useState<Set<string>>(new Set());
   const [runProfile, setRunProfile] = useState<RunProfileId>('full-validation');
-  const [showSmokeConfirmation, setShowSmokeConfirmation] = useState(false);
+  const [pendingConfirmation, setPendingConfirmation] = useState<'smoke' | 'custom' | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [launchInFlight, setLaunchInFlight] = useState(false);
+  const confirmationRef = useRef<HTMLDivElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const launchInFlightRef = useRef(false);
 
   const fetchDevices = async () => {
     setLoadingDevices(true);
     try {
       const list = await api.devices();
       setDevices(list);
-      // Auto-select ready devices
-      setSelectedDevices(new Set(list.filter(d => d.state === 'device').map(d => d.serial)));
+      setSelectedDevices(readyDeviceSerials(list));
     } catch (err) {
       console.error('Failed to fetch devices', err);
       try {
@@ -90,7 +119,7 @@ export function RunPanel({
           foreground_package: null,
         }));
         setDevices(fallback);
-        setSelectedDevices(new Set(fallback.filter(d => d.state === 'device').map(d => d.serial)));
+        setSelectedDevices(readyDeviceSerials(fallback));
       } catch (fallbackErr) {
         console.error('Failed to fetch fallback ADB devices', fallbackErr);
       }
@@ -113,8 +142,19 @@ export function RunPanel({
   };
 
   const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null);
-  const controlsLocked = running || batchStatus?.state === 'running';
+  const controlsLocked = running || batchStatus?.state === 'running' || launchInFlight;
   const customOptionsEnabled = runProfile === 'custom-debug' && !controlsLocked;
+  const selectedDeviceRecords = useMemo(
+    () => devices.filter((device) => selectedDevices.has(device.serial)),
+    [devices, selectedDevices],
+  );
+  const selectedReadyDeviceCount = selectedDeviceRecords.filter(isReadyDevice).length;
+  const selectedHelperReady = selectedDeviceRecords.length > 0
+    ? selectedDeviceRecords.every((device) => device.helper_ready === true)
+    : null;
+  const selectedTalkBackEnabled = selectedDeviceRecords.length > 0
+    ? selectedDeviceRecords.every((device) => device.talkback_enabled === true)
+    : null;
   const showLegacyShadowValidation =
     import.meta.env.DEV || import.meta.env.VITE_SHOW_LEGACY_SHADOW_VALIDATION === 'true';
   const readiness = getValidationReadiness({
@@ -127,8 +167,31 @@ export function RunPanel({
     traversalIdentityV2,
     traversalProfiler,
     selectedScenarioCount: selectedCount,
-    registryScenarioCount,
+    fullValidationScenarioCount: fullValidationScenarioIds.length,
   });
+  const runSafety = getRunSafety({
+    selectedScenarioIds: selectedScenarios,
+    fullValidationScenarioIds,
+    selectedDeviceCount: selectedDevices.size,
+    selectedReadyDeviceCount,
+    controlsLocked,
+    helperReady: selectedHelperReady,
+    talkbackEnabled: selectedTalkBackEnabled,
+  });
+  const profileBlockers =
+    runSafety.runKind === 'full-validation' && plannedMode === 'full' && runProfile === 'full-validation'
+      ? readiness.reasons
+      : [];
+  const runBlockers = [...runSafety.reasons, ...profileBlockers];
+  const runDisabled = controlsLocked || !runSafety.ready || profileBlockers.length > 0;
+  const runLabel = plannedMode === 'smoke'
+    ? 'Quick Smoke'
+    : runSafety.runKind === 'full-validation'
+      ? 'Full Validation'
+      : 'Custom Run';
+  const fullProfileActive =
+    runProfile === 'full-validation' && plannedMode === 'full' && runSafety.runKind === 'full-validation';
+  const deviceCountClass = devices.length === 1 ? 'deviceCountOne' : devices.length <= 5 ? 'deviceCountFew' : 'deviceCountMany';
 
   useEffect(() => {
     let timer: number;
@@ -149,9 +212,45 @@ export function RunPanel({
     return () => window.clearTimeout(timer);
   }, []);
 
+  useEffect(() => {
+    if (!pendingConfirmation) return undefined;
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = confirmationRef.current;
+    const focusable = dialog?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled])',
+    );
+    focusable?.[0]?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setPendingConfirmation(null);
+        return;
+      }
+      if (event.key !== 'Tab' || !focusable || focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      previousFocusRef.current?.focus();
+      previousFocusRef.current = null;
+    };
+  }, [pendingConfirmation]);
+
   const applyRunProfile = (profile: RunProfileId) => {
     if (controlsLocked) return;
     setRunProfile(profile);
+    if (profile === 'full-validation') onSelectFullValidation();
     const settings = resolveRunProfile(profile, {
       launchMode,
       plannedMode,
@@ -173,51 +272,62 @@ export function RunPanel({
   };
 
   const executeRun = async () => {
-    if (selectedDevices.size > 0) {
-      const selected = devices.filter(d => selectedDevices.has(d.serial) && d.state === 'device');
-      if (selected.length === 0) {
-         alert('No valid devices selected.');
-         return;
-      }
-      try {
-        const scenario_ids = selectedScenarios ? Array.from(selectedScenarios) : [];
-        if (scenario_ids.length === 0) {
-          alert('Please select at least one scenario before running.');
-          return;
-        }
+    if (launchInFlightRef.current) return;
+    setRunError(null);
+    if (!runSafety.ready || profileBlockers.length > 0) return;
 
-        const res = await api.startBatch({
-          mode: plannedMode,
-          devices: selected.map(d => ({ serial: d.serial, model: d.model })),
-          launch_mode: launchMode,
-          language_mode: languageMode,
-          scenario_ids,
-          enable_coverage_probe: enableCoverageProbe,
-          shadow_validation: plannedMode === 'full' && shadowValidation,
-          evidence_ledger: evidenceLedger,
-          identity_shadow_v2: identityShadowV2,
-          traversal_identity_v2: traversalIdentityV2,
-          traversal_profiler: traversalProfiler,
-        });
-        setBatchStatus(res);
-      } catch (err: any) {
-        alert(err.message || 'Failed to start batch');
-      }
-    } else {
-      start(plannedMode);
+    const selected = selectedDeviceRecords;
+    if (selected.length !== selectedDevices.size || selected.some((device) => !isReadyDevice(device))) {
+      setRunError('Selected devices changed readiness. Refresh and select ready devices before running.');
+      return;
+    }
+    const scenario_ids = Array.from(selectedScenarios);
+
+    launchInFlightRef.current = true;
+    setLaunchInFlight(true);
+    try {
+      const res = await api.startBatch({
+        mode: plannedMode,
+        devices: selected.map(d => ({ serial: d.serial, model: d.model })),
+        launch_mode: launchMode,
+        language_mode: languageMode,
+        scenario_ids,
+        enable_coverage_probe: enableCoverageProbe,
+        shadow_validation: plannedMode === 'full' && shadowValidation,
+        evidence_ledger: evidenceLedger,
+        identity_shadow_v2: identityShadowV2,
+        traversal_identity_v2: traversalIdentityV2,
+        traversal_profiler: traversalProfiler,
+      });
+      setBatchStatus(res);
+    } catch (err) {
+      setRunError(errorMessage(err, 'Failed to start batch'));
+    } finally {
+      launchInFlightRef.current = false;
+      setLaunchInFlight(false);
     }
   };
 
   const handleRunClick = () => {
+    if (!runSafety.ready || profileBlockers.length > 0) return;
     if (plannedMode === 'smoke') {
-      setShowSmokeConfirmation(true);
+      setPendingConfirmation('smoke');
+      return;
+    }
+    if (runSafety.runKind === 'custom') {
+      setPendingConfirmation('custom');
       return;
     }
     void executeRun();
   };
 
   const confirmSmokeRun = () => {
-    setShowSmokeConfirmation(false);
+    setPendingConfirmation(null);
+    void executeRun();
+  };
+
+  const confirmCustomRun = () => {
+    setPendingConfirmation(null);
     void executeRun();
   };
 
@@ -242,17 +352,19 @@ export function RunPanel({
           </div>
           <span className="profileDefault">Full Validation is default</span>
         </div>
-        <div className="runProfileChoices">
-          <button
-            type="button"
-            className={runProfile === 'full-validation' ? 'runProfileActive' : ''}
-            aria-pressed={runProfile === 'full-validation'}
-            onClick={() => applyRunProfile('full-validation')}
-            disabled={controlsLocked}
-          >
-            Full Validation
-            <small>Clean · Selected Full · approval diagnostics on</small>
-          </button>
+        <button
+          type="button"
+          className={fullProfileActive ? 'runProfileActive runProfilePrimary' : 'runProfilePrimary'}
+          aria-pressed={fullProfileActive}
+          onClick={() => applyRunProfile('full-validation')}
+          disabled={controlsLocked}
+        >
+          Full Validation
+          <small>Clean · {fullValidationScenarioIds.length} enabled registry scenarios · approval diagnostics on</small>
+        </button>
+        <details className="advancedRunOptions">
+          <summary>Additional run profiles</summary>
+          <div className="runProfileChoices">
           <button
             type="button"
             className={runProfile === 'quick-smoke' ? 'runProfileActive' : ''}
@@ -273,50 +385,65 @@ export function RunPanel({
             Custom / Debug
             <small>Unlock all run options</small>
           </button>
-        </div>
+          </div>
+          <div className="developerRun">
+            <strong>Developer compatibility path</strong>
+            <p>Runs the existing single-device API explicitly. It is not the normal multi-device validator path.</p>
+            <button type="button" onClick={() => start(plannedMode)} disabled={controlsLocked}>
+              Run single-device compatibility path
+            </button>
+          </div>
+        </details>
       </section>
 
       <div style={{ marginBottom: '20px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+        <div className="deviceHeader">
           <h3 style={{ margin: 0, fontSize: '12px', color: 'var(--color-text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Devices</h3>
-          <button onClick={fetchDevices} disabled={loadingDevices || controlsLocked} style={{ fontSize: '11px', padding: '2px 8px', minWidth: 'auto' }}>
+          <div className="deviceActions">
+          <button type="button" onClick={() => setSelectedDevices(readyDeviceSerials(devices))} disabled={loadingDevices || controlsLocked}>
+            Select all ready
+          </button>
+          <button type="button" onClick={() => setSelectedDevices(new Set())} disabled={loadingDevices || controlsLocked}>
+            Clear
+          </button>
+          <button type="button" onClick={fetchDevices} disabled={loadingDevices || controlsLocked}>
             {loadingDevices ? '...' : 'Refresh'}
           </button>
+          </div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div className={`deviceSelectionGrid ${deviceCountClass}`}>
           {devices.length === 0 && !loadingDevices ? (
             <div style={{ fontSize: '13px', color: 'var(--color-text-dim)' }}>No devices connected.</div>
           ) : (
             devices.map(d => {
               let statusText = '';
               if (d.state !== 'device') statusText = d.state === 'offline' ? 'Offline' : 'Error';
-              else if (d.helper_ready === null || d.talkback_enabled === null) statusText = 'Connected';
-              else if (!d.helper_ready) statusText = 'Helper missing';
-              else if (!d.talkback_enabled) statusText = 'TalkBack disabled';
+              else if (d.helper_ready === null || d.talkback_enabled === null) statusText = 'Readiness unknown';
+              else if (!d.helper_ready) statusText = 'Helper not ready';
+              else if (!d.talkback_enabled) statusText = 'TalkBack not ready';
               else statusText = 'Ready';
 
-              const isSelectable = d.state === 'device';
+              const isSelectable = isReadyDevice(d);
 
               return (
-                <label key={d.serial} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '8px 12px', background: 'var(--color-bg-dim)', borderRadius: '6px', opacity: isSelectable ? 1 : 0.6, cursor: isSelectable && !controlsLocked ? 'pointer' : 'not-allowed', border: '1px solid var(--color-border)' }}>
+                <label key={d.serial} className={`deviceCard ${isSelectable ? 'deviceCardReady' : 'deviceCardUnavailable'}`}>
                   <input 
                     type="checkbox" 
-                    checked={selectedDevices.has(d.serial)} 
+                    checked={selectedDevices.has(d.serial)}
                     onChange={() => toggleDevice(d.serial)}
                     disabled={!isSelectable || controlsLocked}
                     style={{ marginTop: '3px' }}
                   />
-                  <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ fontWeight: 500, fontSize: '14px' }}>
-                      {d.model} <span style={{ color: 'var(--color-text-dim)', fontSize: '12px', fontWeight: 'normal' }}>({d.serial})</span>
-                    </div>
-                    <div style={{ fontSize: '12px', color: statusText === 'Ready' ? 'var(--color-success)' : 'var(--color-danger)', marginTop: '2px' }}>
-                      {statusText}
-                    </div>
+                  <div className="deviceIdentity">
+                    <strong>{d.model || 'Android device'}</strong>
+                    <span>{shortDeviceId(d.serial)}</span>
+                    <span className={statusText === 'Ready' ? 'deviceStatusReady' : 'deviceStatusUnavailable'}>{statusText}</span>
                     {d.foreground_package && (
-                      <div style={{ fontSize: '11px', color: 'var(--color-text-dim)', marginTop: '2px', wordBreak: 'break-all' }}>
-                        pkg: {d.foreground_package}
-                      </div>
+                      <details className="deviceTechnicalDetails">
+                        <summary>Technical details</summary>
+                        <span>Serial: {d.serial}</span>
+                        <span>Foreground: {d.foreground_package}</span>
+                      </details>
                     )}
                   </div>
                 </label>
@@ -326,7 +453,7 @@ export function RunPanel({
         </div>
         {devices.length > 0 && (
           <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--color-text-dim)', textAlign: 'right' }}>
-            Selected devices: {selectedDevices.size}
+            Selected devices: {selectedDevices.size} / {devices.filter(isReadyDevice).length} ready
           </div>
         )}
         {batchStatus && batchStatus.state !== 'idle' && (
@@ -346,6 +473,8 @@ export function RunPanel({
         )}
       </div>
 
+      <details className="advancedRunOptions">
+        <summary>Advanced run options</summary>
       <div className="runGrid">
         <div>
           <h3 style={{ margin: '0 0 6px', fontSize: '12px', color: 'var(--color-text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Launch</h3>
@@ -500,48 +629,71 @@ export function RunPanel({
         </div>
       </div>
 
+      </details>
+
       <div className="runFooter">
         <div>
           <div style={{ fontSize: '13px', color: 'var(--color-text-dim)' }}>
-            <strong>Current:</strong> {effectiveMode === 'smoke' ? 'Selected Smoke' : 'Selected Full'} &middot; {String(status?.launch_mode ?? launchMode).replace(/^\w/, c => c.toUpperCase())} &middot; {languageMode === 'current' ? currentLanguageLabel(effectiveLocale) : String(status?.language_mode ?? languageMode).replace(/^\w/, c => c.toUpperCase())} &middot; Selected {selectedCount}
+            <strong>Current:</strong> {runLabel} &middot; {String(status?.launch_mode ?? launchMode).replace(/^\w/, c => c.toUpperCase())} &middot; {languageMode === 'current' ? currentLanguageLabel(effectiveLocale) : String(status?.language_mode ?? languageMode).replace(/^\w/, c => c.toUpperCase())} &middot; Selected {selectedCount} / {fullValidationScenarioIds.length}
           </div>
-          <div className={`validationReadiness ${readiness.ready ? 'validationReady' : 'validationNotReady'}`} aria-live="polite">
-            <strong>{readiness.ready ? 'READY' : 'NOT READY'}</strong>
+          <div className={`validationReadiness ${runBlockers.length === 0 ? 'validationReady' : 'validationNotReady'}`} aria-live="polite">
+            <strong>{runBlockers.length === 0 ? 'READY' : 'NOT READY'}</strong>
             <span>
-              {readiness.ready
-                ? 'Candidate-impacting run inputs are enabled.'
-                : readiness.reasons.join(' · ')}
+              {runBlockers.length > 0
+                ? runBlockers.join(' · ')
+                : plannedMode === 'smoke'
+                  ? 'Quick Smoke is ready for a fast check; it is not Full Validation.'
+                : runSafety.runKind === 'custom'
+                  ? 'Custom Run scope selected. Confirmation is required before start.'
+                  : 'Full Validation inputs are enabled.'}
             </span>
           </div>
+          {runError && <div className="notice" role="alert">{runError}</div>}
         </div>
         <div className="buttonRow" style={{ marginBottom: '0', justifyContent: 'flex-end', gap: '12px' }}>
-          <button onClick={handleRunClick} disabled={controlsLocked} style={{ minWidth: '100px' }}>
-            Run
+          <button type="button" onClick={handleRunClick} disabled={runDisabled} style={{ minWidth: '130px' }}>
+            {runLabel}
           </button>
-          <button className="danger" onClick={stop} disabled={!controlsLocked} style={{ minWidth: '100px' }}>
+          <button type="button" className="danger" onClick={stop} disabled={!controlsLocked} style={{ minWidth: '100px' }}>
             Stop
           </button>
         </div>
       </div>
 
-      {showSmokeConfirmation && (
-        <div className="confirmationBackdrop" role="presentation" onClick={() => setShowSmokeConfirmation(false)}>
+      {pendingConfirmation && (
+        <div className="confirmationBackdrop" role="presentation" onClick={() => setPendingConfirmation(null)}>
           <div
             className="confirmationDialog"
+            ref={confirmationRef}
             role="dialog"
             aria-modal="true"
-            aria-labelledby="smoke-confirmation-title"
+            aria-labelledby="run-confirmation-title"
             onClick={event => event.stopPropagation()}
           >
-            <h2 id="smoke-confirmation-title">Quick Smoke</h2>
-            <p>
-              Smoke Run은 빠른 확인을 위한 실행이며<br />
-              정식 검증 결과로 사용되지 않습니다.
-            </p>
-            <p>계속 실행하시겠습니까?</p>
+            <h2 id="run-confirmation-title">{pendingConfirmation === 'custom' ? 'Custom Run' : 'Quick Smoke'}</h2>
+            {pendingConfirmation === 'custom' ? (
+              <>
+                <p>{selectedCount} / {fullValidationScenarioIds.length} scenarios are selected.</p>
+                <p>This is an explicit Custom Run and is not the complete Full Validation scope.</p>
+              </>
+            ) : (
+              <>
+                <p>
+                  Smoke Run은 빠른 확인을 위한 실행이며<br />
+                  정식 검증 결과로 사용되지 않습니다.
+                </p>
+                <p>계속 실행하시겠습니까?</p>
+              </>
+            )}
             <div className="buttonRow">
-              <button type="button" onClick={() => setShowSmokeConfirmation(false)}>Cancel</button>
-              <button type="button" className="primary" onClick={confirmSmokeRun}>Run Smoke</button>
+              <button type="button" onClick={() => setPendingConfirmation(null)}>Cancel</button>
+              <button
+                type="button"
+                className="primary"
+                onClick={pendingConfirmation === 'custom' ? confirmCustomRun : confirmSmokeRun}
+              >
+                {pendingConfirmation === 'custom' ? 'Start Custom Run' : 'Run Smoke'}
+              </button>
             </div>
           </div>
         </div>

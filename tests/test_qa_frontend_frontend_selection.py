@@ -6,22 +6,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_frontend_initial_selection_defaults_to_global_nav_not_source_enabled():
+def test_frontend_initial_selection_uses_enabled_registry_and_safe_validator_defaults():
     selection_ts = (ROOT / "qa_frontend" / "frontend" / "src" / "selection.ts").read_text(encoding="utf-8")
     app_tsx = (ROOT / "qa_frontend" / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
     run_panel_tsx = (ROOT / "qa_frontend" / "frontend" / "src" / "components" / "RunPanel.tsx").read_text(encoding="utf-8")
     presets_ts = (ROOT / "qa_frontend" / "frontend" / "src" / "presets.ts").read_text(encoding="utf-8")
     api_ts = (ROOT / "qa_frontend" / "frontend" / "src" / "api.ts").read_text(encoding="utf-8")
 
-    assert "DEFAULT_SCENARIO_ID = 'global_nav_main'" in selection_ts
-    assert "new Set([DEFAULT_SCENARIO_ID])" in selection_ts
-    assert "scenario.enabled" not in selection_ts
+    assert "getFullValidationScenarioIds" in selection_ts
+    assert "scenario.enabled" in selection_ts
+    assert "new Set(getFullValidationScenarioIds(scenarios))" in selection_ts
     assert "setSelected(initialScenarioSelection(response.scenarios))" in app_tsx
     assert "const DEFAULT_RUN_PROFILE = RUN_PROFILES['full-validation']" in app_tsx
     assert "useState<'smoke' | 'full'>(DEFAULT_RUN_PROFILE.plannedMode)" in app_tsx
     assert "useState(DEFAULT_RUN_PROFILE.enableCoverageProbe)" in app_tsx
     assert "useState(DEFAULT_RUN_PROFILE.traversalProfiler)" in app_tsx
-    assert "filter((scenario) => scenario.enabled).map((scenario) => scenario.id)" not in app_tsx
+    assert "getFullValidationScenarioIds(scenarios)" in app_tsx
     assert "useState<'warm' | 'clean'>(DEFAULT_RUN_PROFILE.launchMode)" in app_tsx
     assert "Run blocked: language change required" in app_tsx
     assert "Open Language Settings" in app_tsx
@@ -39,9 +39,8 @@ def test_frontend_initial_selection_defaults_to_global_nav_not_source_enabled():
     assert "id.startsWith('device_') || (id.startsWith('life_') && id.endsWith('_plugin'))" in presets_ts
     assert "presetId === 'select_all'" in presets_ts
     assert "new Set(scenarios.map((scenario) => scenario.id))" in presets_ts
-    assert "Selected Full does not mean all plugins" in app_tsx
-    assert "Use All Plugins to run every plugin scenario" in app_tsx
-    assert "All Scenarios to" in app_tsx
+    assert "The default set is derived" in app_tsx
+    assert "selected for Full Validation" in app_tsx
     assert "Selected Smoke" in run_panel_tsx
     assert "selected scenarios with reduced max_steps" in run_panel_tsx
     assert "Selected Full" in run_panel_tsx
@@ -113,7 +112,22 @@ def test_run_profiles_readiness_smoke_confirmation_and_locale_are_wired():
     assert "Run Smoke" in run_panel_tsx
     assert "currentLanguageLabel(effectiveLocale)" in run_panel_tsx
     assert "status?.state === 'running' || batchStatus?.state === 'running'" in app_tsx
-    assert "disabled={controlsLocked}" in run_panel_tsx
+    assert "const runDisabled = controlsLocked || !runSafety.ready" in run_panel_tsx
+    assert "disabled={runDisabled}" in run_panel_tsx
+    assert "const [launchInFlight, setLaunchInFlight] = useState(false)" in run_panel_tsx
+    assert "const launchInFlightRef = useRef(false)" in run_panel_tsx
+    assert "const controlsLocked = running || batchStatus?.state === 'running' || launchInFlight" in run_panel_tsx
+    assert "if (launchInFlightRef.current) return;" in run_panel_tsx
+    assert "launchInFlightRef.current = true;" in run_panel_tsx
+    assert "setLaunchInFlight(false);" in run_panel_tsx
+    assert "Select at least one ready device" in profiles_ts
+    assert "start(plannedMode)" in run_panel_tsx
+    assert "else {\n      start(plannedMode);" not in run_panel_tsx
+    assert "const fullProfileActive" in run_panel_tsx
+    assert "const confirmationRef" in run_panel_tsx
+    assert "event.key === 'Escape'" in run_panel_tsx
+    assert "previousFocusRef.current?.focus()" in run_panel_tsx
+    assert "Quick Smoke is ready for a fast check; it is not Full Validation." in run_panel_tsx
 
 
 def test_compare_verdict_badge_normalizes_string_object_and_null_payloads():

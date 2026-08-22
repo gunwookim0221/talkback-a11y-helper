@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, HelperStatus, OutputFile, RecentRun, RunStatus, Scenario, RuntimeDashboard } from './api';
+import { api } from './api';
+import type { HelperStatus, OutputFile, RecentRun, RunStatus, Scenario, RuntimeDashboard } from './api';
 import { applyPresetSelection, PRESETS, ScenarioPresetId } from './presets';
-import { DEFAULT_SCENARIO_ID, initialScenarioSelection } from './selection';
+import { getFullValidationScenarioIds, initialScenarioSelection } from './selection';
 import { ADBPanel } from './components/ADBPanel';
 import { HelperPanel } from './components/HelperPanel';
 import { RunPanel } from './components/RunPanel';
@@ -69,7 +70,8 @@ export default function App() {
   });
 
   const running = status?.state === 'running' || batchStatus?.state === 'running';
-  const enabledCount = useMemo(() => scenarios.filter((scenario) => scenario.enabled).length, [scenarios]);
+  const fullValidationIds = useMemo(() => getFullValidationScenarioIds(scenarios), [scenarios]);
+  const fullValidationScenarioCount = fullValidationIds.length;
   const selectedCount = selected.size;
   const effectiveMode = status?.state === 'running' ? ((status.mode as 'smoke' | 'full' | null) ?? plannedMode) : plannedMode;
   const stepPolicyText =
@@ -351,11 +353,12 @@ export default function App() {
       {error && <div className="error">{error}</div>}
       {fixTalkBackMessage && <div className="notice">{fixTalkBackMessage}</div>}
 
-      <section className="grid2">
+      <section className="readinessGrid">
         <ADBPanel adb={adb} />
 
         <HelperPanel
           helper={helper}
+          talkbackState={status?.talkback_state}
           running={running}
           installHelper={installHelper}
           enableHelper={enableHelper}
@@ -378,7 +381,8 @@ export default function App() {
           status={status}
           stepPolicyText={stepPolicyText}
           selectedCount={selectedCount}
-          registryScenarioCount={scenarios.length}
+          fullValidationScenarioIds={fullValidationIds}
+          onSelectFullValidation={() => setSelected(new Set(fullValidationIds))}
           selectedScenarios={selected}
           effectiveLocale={status?.device_locale ?? dashboard?.device_locale}
           enableCoverageProbe={enableCoverageProbe}
@@ -466,12 +470,12 @@ export default function App() {
         <article className="panel scenarios">
           <h2>Scenarios</h2>
           <p>
-            {selectedCount} selected for this run. Source runtime_config has {enabledCount} enabled; source enabled is shown
-            for reference and does not define the initial run selection.
+            {selectedCount} / {fullValidationScenarioCount} scenarios selected for Full Validation. The default set is derived
+            from the enabled scenarios in the current runtime_config registry.
           </p>
           <p className="scenarioHint">
-            global_nav_main is selected by default for a predictable sanity check. The source enabled flags are display-only;
-            this run uses your current checkbox selection.
+            Selecting fewer or additional scenarios changes this to Custom Run. Disabled or optional scenarios remain available
+            for explicit custom selection.
           </p>
           <p className="scenarioHint">
             Presets only change scenario checkboxes. Use Selected Smoke or Selected Full above to choose the execution mode.
@@ -488,8 +492,8 @@ export default function App() {
               </button>
             ))}
           </div>
-          {!scenarios.some((scenario) => scenario.id === DEFAULT_SCENARIO_ID) && (
-            <div className="notice">Default scenario global_nav_main is not available. Select a scenario before running.</div>
+          {fullValidationScenarioCount === 0 && (
+            <div className="notice">No enabled scenarios are available for Full Validation. Select an explicit custom scenario before running.</div>
           )}
           <div className="scenarioGroupsContainer">
             {groupScenarios(scenarios).map((group) => (
