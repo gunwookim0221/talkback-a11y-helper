@@ -38,6 +38,7 @@ export default function App() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [outputs, setOutputs] = useState<OutputFile[]>([]);
   const [recentRuns, setRecentRuns] = useState<RecentRun[]>([]);
+  const [historyRefreshToken, setHistoryRefreshToken] = useState(0);
   const [selectedRecentRunId, setSelectedRecentRunId] = useState<string | null>(null);
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
   const [launchMode, setLaunchMode] = useState<'warm' | 'clean'>(DEFAULT_RUN_PROFILE.launchMode);
@@ -79,6 +80,7 @@ export default function App() {
         .catch((err) => console.warn('Outputs poll failed:', err));
     },
     onRunFinished: () => {
+      setHistoryRefreshToken((token) => token + 1);
       api.recentRuns()
         .then((res) => setRecentRuns(res.runs))
         .catch((err) => console.warn('Recent runs poll failed:', err));
@@ -558,6 +560,7 @@ export default function App() {
         <div className="stack">
           <RecentRunsPanel
             recentRuns={recentRuns}
+            historyRefreshToken={historyRefreshToken}
             fullValidationScenarioIds={fullValidationIds}
             selectedBatchId={selectedBatchId}
             setSelectedBatchId={setSelectedBatchId}

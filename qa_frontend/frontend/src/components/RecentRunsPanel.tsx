@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useState, useMemo } from 'react';
 import { RecentRun, api, RecentBatch, RecentBatchDevice, CoverageProbeSummary, ShadowValidationSummary } from '../api';
 import { CrashIssuesPanel } from './CrashIssuesPanel';
 import { IdentityShadowCard } from './IdentityShadowCard';
@@ -115,6 +115,7 @@ type MismatchSummary = {
 
 export interface RecentRunsPanelProps {
   recentRuns: RecentRun[];
+  historyRefreshToken?: number;
   fullValidationScenarioIds?: readonly string[];
   selectedBatchId?: string | null;
   setSelectedBatchId?: (id: string | null) => void;
@@ -128,6 +129,7 @@ export interface RecentRunsPanelProps {
 
 export function RecentRunsPanel({
   recentRuns,
+  historyRefreshToken = 0,
   fullValidationScenarioIds = [],
   selectedBatchId: controlledSelectedBatchId,
   setSelectedBatchId: setControlledSelectedBatchId,
@@ -147,20 +149,30 @@ export function RecentRunsPanel({
     setControlledSelectedBatchId?.(id);
   };
 
-  useEffect(() => {
-    let timer: number;
-    const fetchBatches = async () => {
-      try {
-        const res = await api.recentBatches();
-        setRecentBatches(res);
-      } catch (err) {
-        // ignore
-      }
-      timer = window.setTimeout(fetchBatches, 5000);
-    };
-    fetchBatches();
-    return () => window.clearTimeout(timer);
+  const loadBatches = useCallback(async (): Promise<RecentBatch[] | null> => {
+    try {
+      return await api.recentBatches();
+    } catch (err) {
+      console.warn('Recent batch history poll failed:', err);
+      return null;
+    }
   }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let timer: number | undefined;
+    const refreshAndSchedule = async () => {
+      const res = await loadBatches();
+      if (disposed) return;
+      if (res) setRecentBatches(res);
+      timer = window.setTimeout(refreshAndSchedule, 5000);
+    };
+    void refreshAndSchedule();
+    return () => {
+      disposed = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [historyRefreshToken, loadBatches]);
 
   const mismatchSummary = selectedRecentRun?.run_id ? mismatchSummaries[selectedRecentRun.run_id] : null;
   const selectedBatch = useMemo(() => recentBatches.find(b => b.batch_id === selectedBatchId), [recentBatches, selectedBatchId]);
