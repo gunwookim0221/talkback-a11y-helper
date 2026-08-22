@@ -204,12 +204,6 @@ export function ReviewRequiredPanel({ run, batchId = null }: ReviewRequiredPanel
         </>
       )}
 
-      {projection.available && projection.automationDiagnosticCount > 0 && (
-        <details className="automationDiagnosticsDetails">
-          <summary>Automation Diagnostics {projection.automationDiagnosticCount}건</summary>
-          <p>자동화 진단은 validator QA Review 항목과 별도로 표시됩니다.</p>
-        </details>
-      )}
     </section>
   );
 }

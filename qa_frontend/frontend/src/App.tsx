@@ -8,12 +8,15 @@ import { HelperPanel } from './components/HelperPanel';
 import { RunPanel } from './components/RunPanel';
 import { CurrentRunPanel } from './components/CurrentRunPanel';
 import { ReviewRequiredPanel } from './components/ReviewRequiredPanel';
+import { AdvancedSection } from './components/AdvancedSection';
+import { AutomationDiagnosticsPanel } from './components/AutomationDiagnosticsPanel';
 import { RuntimeDashboardPanel } from './components/RuntimeDashboard';
 import { PluginDiscoveryPanel } from './components/PluginDiscoveryPanel';
 
 import { RecentRunsPanel } from './components/RecentRunsPanel';
 import { CorpusReadinessPanel } from './components/CorpusReadinessPanel';
 import { ComparePanel } from './components/ComparePanel';
+import { OutputsPanel } from './components/OutputsPanel';
 
 import { formatTime, formatDuration, formatBytes, healthClass, helperBadgeText, scenarioRunText, resolveSmokeSteps, describeScenarioSteps, languageLabel, scenarioReasonText } from './utils/formatters';
 import { useRunPolling } from './hooks/useRunPolling';
@@ -425,77 +428,6 @@ export default function App() {
         />
       </section>
 
-      <section style={{ marginTop: '14px' }}>
-        <PluginDiscoveryPanel running={running} reportError={reportError} />
-      </section>
-
-      <section style={{ marginTop: '14px' }}>
-        <ComparePanel />
-      </section>
-
-      <details className="panel preflightDetails">
-        <summary>Runtime Preflight details</summary>
-        <section className="preflightPanel" ref={preflightRef}>
-        {status?.error && <div className="notice">{status.error}</div>}
-        {manualLanguageChangeRequired && (
-          <div className="notice">
-            <p>
-              The device locale did not verify as {requestedLocale}. Open Language Settings and change the language
-              manually, then run again with Current device language.
-            </p>
-            <div className="helperActions">
-              <button onClick={openLanguageSettings} disabled={running}>Open Language Settings</button>
-            </div>
-          </div>
-        )}
-        {status?.talkback_state === 'disabled' && (
-          <div className="notice">
-            <p>TalkBack A11y Helper is enabled, but Samsung/Google TalkBack is disabled. Enable TalkBack and retry.</p>
-            <p>TalkBack will be enabled on the connected device.</p>
-            <div className="helperActions">
-              <button onClick={fixTalkBack} disabled={running || fixTalkBackRunning}>
-                {fixTalkBackRunning ? 'Fixing TalkBack...' : 'Fix TalkBack'}
-              </button>
-              <button onClick={enableTalkBack} disabled={running}>Enable TalkBack via ADB</button>
-              <button onClick={openAccessibilitySettings} disabled={running}>Open Accessibility Settings</button>
-            </div>
-          </div>
-        )}
-        <dl>
-          <dt>Preflight</dt>
-          <dd>{status?.preflight_state ?? '-'}</dd>
-          <dt>Reason</dt>
-          <dd>{status?.preflight_reason ?? '-'}</dd>
-          <dt>Helper</dt>
-          <dd>{status?.helper_state ?? String(helper?.status ?? '-')}</dd>
-          <dt>TalkBack</dt>
-          <dd>{status?.talkback_state ?? '-'}</dd>
-          <dt>Foreground</dt>
-          <dd>{status?.foreground_package ?? '-'}</dd>
-          <dt>Popup</dt>
-          <dd>
-            {status?.popup_detected
-              ? `${status.popup_package ?? 'external'} · ${status.popup_result ?? status.popup_preflight_state ?? 'detected'}`
-              : status?.popup_result ?? '-'}
-          </dd>
-          <dt>Settings</dt>
-          <dd>{status?.accessibility_settings_opened ? 'opened on device' : '-'}</dd>
-        </dl>
-        </section>
-      </details>
-
-      <details className="panel runDiagnostics">
-        <summary>Run diagnostics</summary>
-        <RuntimeDashboardPanel
-          dashboard={dashboard}
-          batchStatus={batchStatus}
-          status={status}
-          helper={helper}
-          adb={adb}
-          pollingLatencyMs={pollingLatencyMs}
-        />
-      </details>
-
       <section className="split">
         <article className="panel scenarios">
           <h2>Scenarios</h2>
@@ -611,7 +543,6 @@ export default function App() {
         </article>
 
         <div className="stack">
-          <CorpusReadinessPanel />
           <RecentRunsPanel
             recentRuns={recentRuns}
             fullValidationScenarioIds={fullValidationIds}
@@ -627,10 +558,121 @@ export default function App() {
         </div>
       </section>
 
-      <section className="panel logPanel">
-        <h2>Log Tail</h2>
-        <pre>{log || 'No log yet.'}</pre>
-      </section>
+      <AdvancedSection>
+        <div className="advancedGrid">
+          <section className="advancedGroup">
+            <h3>Plugin Discovery</h3>
+            <p className="advancedGroupHint">Discovery, probe, draft, apply and rollback remain available here.</p>
+            <PluginDiscoveryPanel running={running} reportError={reportError} />
+          </section>
+
+          <section className="advancedGroup">
+            <h3>Baseline / Candidate Management</h3>
+            <p className="advancedGroupHint">Comparator operations remain separate from starting a validation run.</p>
+            <ComparePanel />
+          </section>
+
+          <section className="advancedGroup">
+            <h3>Automation Diagnostics</h3>
+            <AutomationDiagnosticsPanel run={selectedRecentRun} batchId={selectedBatchId} />
+          </section>
+
+          <section className="advancedGroup">
+            <h3>Runtime / Live Details</h3>
+            <details className="panel preflightDetails">
+              <summary>Runtime Preflight details</summary>
+              <section className="preflightPanel" ref={preflightRef}>
+              {status?.error && <div className="notice">{status.error}</div>}
+              {manualLanguageChangeRequired && (
+                <div className="notice">
+                  <p>
+                    The device locale did not verify as {requestedLocale}. Open Language Settings and change the language
+                    manually, then run again with Current device language.
+                  </p>
+                  <div className="helperActions">
+                    <button onClick={openLanguageSettings} disabled={running}>Open Language Settings</button>
+                  </div>
+                </div>
+              )}
+              {status?.talkback_state === 'disabled' && (
+                <div className="notice">
+                  <p>TalkBack A11y Helper is enabled, but Samsung/Google TalkBack is disabled. Enable TalkBack and retry.</p>
+                  <p>TalkBack will be enabled on the connected device.</p>
+                  <div className="helperActions">
+                    <button onClick={fixTalkBack} disabled={running || fixTalkBackRunning}>
+                      {fixTalkBackRunning ? 'Fixing TalkBack...' : 'Fix TalkBack'}
+                    </button>
+                    <button onClick={enableTalkBack} disabled={running}>Enable TalkBack via ADB</button>
+                    <button onClick={openAccessibilitySettings} disabled={running}>Open Accessibility Settings</button>
+                  </div>
+                </div>
+              )}
+              <dl>
+                <dt>Preflight</dt>
+                <dd>{status?.preflight_state ?? '-'}</dd>
+                <dt>Reason</dt>
+                <dd>{status?.preflight_reason ?? '-'}</dd>
+                <dt>Helper</dt>
+                <dd>{status?.helper_state ?? String(helper?.status ?? '-')}</dd>
+                <dt>TalkBack</dt>
+                <dd>{status?.talkback_state ?? '-'}</dd>
+                <dt>Foreground</dt>
+                <dd>{status?.foreground_package ?? '-'}</dd>
+                <dt>Popup</dt>
+                <dd>
+                  {status?.popup_detected
+                    ? `${status.popup_package ?? 'external'} · ${status.popup_result ?? status.popup_preflight_state ?? 'detected'}`
+                    : status?.popup_result ?? '-'}
+                </dd>
+                <dt>Settings</dt>
+                <dd>{status?.accessibility_settings_opened ? 'opened on device' : '-'}</dd>
+              </dl>
+              </section>
+            </details>
+            <details className="panel runDiagnostics">
+              <summary>Run diagnostics</summary>
+              <RuntimeDashboardPanel
+                dashboard={dashboard}
+                batchStatus={batchStatus}
+                status={status}
+                helper={helper}
+                adb={adb}
+                pollingLatencyMs={pollingLatencyMs}
+              />
+            </details>
+          </section>
+
+          <section className="advancedGroup">
+            <h3>Evidence / Reconciliation</h3>
+            <p className="advancedGroupHint">Evidence paths, reconciliation internals and technical history remain available from the selected run.</p>
+            <OutputsPanel
+              outputs={outputs}
+              currentRunSummary={currentRunSummary}
+              currentRunReadyForDownload={currentRunReadyForDownload}
+            />
+          </section>
+
+          <section className="advancedGroup">
+            <h3>Environment / Fingerprint</h3>
+            <p className="advancedGroupHint">Device, locale, package and fingerprint details remain in Comparator and technical run details.</p>
+            <ADBPanel adb={adb} />
+          </section>
+
+          <section className="advancedGroup">
+            <h3>Analytics / Aggregate History</h3>
+            <CorpusReadinessPanel />
+          </section>
+
+          <section className="advancedGroup">
+            <h3>Developer Tools / Raw Logs</h3>
+            <section className="panel logPanel">
+              <h4>Log Tail</h4>
+              <pre>{log || 'No log yet.'}</pre>
+            </section>
+            <p className="advancedGroupHint">Identity Shadow, Traversal Identity and raw per-run diagnostics remain available under Run History technical details.</p>
+          </section>
+        </div>
+      </AdvancedSection>
     </main>
   );
 }
