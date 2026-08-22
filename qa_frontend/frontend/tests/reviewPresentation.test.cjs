@@ -7,10 +7,15 @@ const {
   historyDeviceLabel,
   historyExecutionLabel,
   historyScopeLabel,
+  reviewLabelForRun,
   reviewReason,
   reviewScenarioName,
+  reviewStateFromError,
+  reviewStateFromSummary,
+  reviewStateLabel,
   reviewStatus,
 } = require('../.test-dist/reviewPresentation.js');
+const { formatValidatorDuration } = require('../.test-dist/utils/formatters.js');
 
 function payload(overrides = {}) {
   return {
@@ -107,6 +112,12 @@ test('friendly names, evidence fallbacks, status, and reason stay validator-faci
 
 test('history labels distinguish execution state, scope, and multi-device summaries', () => {
   assert.equal(historyExecutionLabel('success'), '완료');
+  assert.equal(historyExecutionLabel('failed'), '실행 오류');
+  assert.equal(historyExecutionLabel('finished'), '완료');
+  assert.equal(
+    historyExecutionLabel({ state: 'finished', scenario_result_status: 'failed', return_code: 0 }.state),
+    '완료',
+  );
   assert.equal(historyExecutionLabel('stopped'), '실행 중단');
   assert.equal(historyExecutionLabel('error'), '실행 오류');
   assert.equal(
@@ -118,4 +129,44 @@ test('history labels distinguish execution state, scope, and multi-device summar
     'Custom Run · 1 scenarios',
   );
   assert.equal(historyDeviceLabel(['Galaxy Z Flip6', 'Fold8', 'S25', 'A55']), 'Galaxy Z Flip6 + Fold8 + 2');
+});
+
+test('review state distinguishes active loading from unavailable artifacts and errors', () => {
+  assert.equal(reviewStateLabel({ kind: 'loading' }), '검토 상태 확인 중');
+  assert.equal(reviewLabelForRun(false, undefined), '검토 상태 확인 불가');
+  assert.equal(reviewLabelForRun(false, { kind: 'loading' }), '검토 상태 확인 불가');
+  assert.equal(reviewLabelForRun(true, undefined), '검토 상태 확인 중');
+  assert.equal(
+    reviewStateLabel(reviewStateFromError(new Error('404: xlsx output not available'))),
+    '검토 상태 확인 불가',
+  );
+  assert.equal(reviewStateLabel(reviewStateFromError(new Error('network unavailable'))), '검토 상태 오류');
+});
+
+test('review state preserves authoritative available counts and legacy fallback', () => {
+  assert.equal(reviewStateLabel(reviewStateFromSummary(payload())), '검토 필요 1건');
+  assert.equal(
+    reviewStateLabel(reviewStateFromSummary(payload({
+      quality_issues: [],
+      quality_issues_contract: { schema_version: 'quality-issues-v1', qa_review_count: 0 },
+    }))),
+    '검토할 항목 없음',
+  );
+  assert.equal(
+    reviewStateLabel(reviewStateFromSummary(payload({
+      quality_issues_contract: { schema_version: 'legacy', classification_available: false },
+    }))),
+    '검토 상태 확인 불가',
+  );
+});
+
+test('validator duration keeps zero, seconds, minutes, hours, and unknown distinct', () => {
+  assert.equal(formatValidatorDuration(0), '0초');
+  assert.equal(formatValidatorDuration(32), '32초');
+  assert.equal(formatValidatorDuration(59), '59초');
+  assert.equal(formatValidatorDuration(60), '1분');
+  assert.equal(formatValidatorDuration(125), '2분');
+  assert.equal(formatValidatorDuration(9780), '2시간 43분');
+  assert.equal(formatValidatorDuration(null), '시간 확인 불가');
+  assert.equal(formatValidatorDuration(undefined), '시간 확인 불가');
 });

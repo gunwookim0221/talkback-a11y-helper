@@ -9,6 +9,49 @@ export type ReviewProjection = {
   reason?: string;
 };
 
+export type ReviewRequestState =
+  | { kind: 'loading' }
+  | { kind: 'available'; summary: MismatchSummary }
+  | { kind: 'unavailable' }
+  | { kind: 'classification_unavailable' }
+  | { kind: 'error'; message: string };
+
+export function reviewStateFromSummary(summary: MismatchSummary): ReviewRequestState {
+  const contract = summary.quality_issues_contract;
+  if (!contract || contract.classification_available === false || contract.schema_version === 'legacy') {
+    return { kind: 'classification_unavailable' };
+  }
+  return { kind: 'available', summary };
+}
+
+export function reviewStateFromError(error: unknown): ReviewRequestState {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const normalized = message.trim().toLowerCase();
+  if (normalized === 'xlsx output not available' || normalized.endsWith(': xlsx output not available')) {
+    return { kind: 'unavailable' };
+  }
+  return { kind: 'error', message: message || 'Review request failed' };
+}
+
+export function reviewStateLabel(state: ReviewRequestState | undefined): string {
+  if (!state || state.kind === 'loading') return '검토 상태 확인 중';
+  if (state.kind === 'unavailable' || state.kind === 'classification_unavailable') {
+    return '검토 상태 확인 불가';
+  }
+  if (state.kind === 'error') return '검토 상태 오류';
+  const contract = state.summary.quality_issues_contract;
+  const count = contract?.qa_review_count ?? state.summary.quality_issues?.length ?? 0;
+  return count > 0 ? `검토 필요 ${count}건` : '검토할 항목 없음';
+}
+
+export function reviewLabelForRun(
+  reviewArtifactAvailable: boolean,
+  state: ReviewRequestState | undefined,
+): string {
+  if (!reviewArtifactAvailable) return '검토 상태 확인 불가';
+  return reviewStateLabel(state);
+}
+
 export function getReviewProjection(payload: MismatchSummary | null | undefined): ReviewProjection {
   if (!payload) {
     return {

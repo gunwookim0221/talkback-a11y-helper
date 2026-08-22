@@ -17,8 +17,12 @@ import {
   historyDeviceLabel,
   historyExecutionClass,
   historyExecutionLabel,
+  reviewLabelForRun,
+  reviewStateFromError,
+  reviewStateFromSummary,
   historyScopeLabel,
 } from '../reviewPresentation';
+import type { ReviewRequestState } from '../reviewPresentation';
 
 type MismatchSummary = {
   summary: {
@@ -134,7 +138,7 @@ export function RecentRunsPanel({
   selectedWarningScenarios,
   selectedPassedScenarios,
 }: RecentRunsPanelProps) {
-  const [mismatchSummaries, setMismatchSummaries] = useState<Record<string, MismatchSummary | null>>({});
+  const [mismatchSummaries, setMismatchSummaries] = useState<Record<string, ReviewRequestState>>({});
   const [recentBatches, setRecentBatches] = useState<RecentBatch[]>([]);
   const [internalSelectedBatchId, setInternalSelectedBatchId] = useState<string | null>(null);
   const selectedBatchId = controlledSelectedBatchId ?? internalSelectedBatchId;
@@ -795,37 +799,33 @@ export function RecentRunsPanel({
     if (toFetch.length === 0) return;
     
     let ignore = false;
+    setMismatchSummaries(prev => {
+      const next = { ...prev };
+      toFetch.forEach(run => {
+        next[run.run_id] = { kind: 'loading' };
+      });
+      return next;
+    });
     Promise.all(
       toFetch.map(r => 
         api.runMismatch(r.run_id)
-          .then(summary => ({ run_id: r.run_id, summary }))
-          .catch(() => ({ run_id: r.run_id, summary: null }))
+          .then(summary => ({ run_id: r.run_id, state: reviewStateFromSummary(summary) }))
+          .catch(error => ({ run_id: r.run_id, state: reviewStateFromError(error) }))
       )
     ).then(results => {
       if (ignore) return;
       setMismatchSummaries(prev => {
         const next = { ...prev };
-        results.forEach(res => {
-          next[res.run_id] = res.summary as MismatchSummary | null;
-        });
+        results.forEach(res => { next[res.run_id] = res.state; });
         return next;
       });
     });
     
     return () => { ignore = true; };
-  }, [recentRuns, selectedRecentRun?.run_id]);
+  }, [mismatchSummaries, recentRuns, selectedRecentRun?.run_id]);
 
   function singleReviewLabel(run: RecentRun) {
-    const summary = mismatchSummaries[run.run_id] as (MismatchSummary & {
-      quality_issues?: unknown[];
-      quality_issues_contract?: { schema_version?: string; qa_review_count?: number; classification_available?: boolean };
-    }) | null | undefined;
-    if (summary === undefined) return '검토 상태 확인 중';
-    if (!summary || !summary.quality_issues_contract || summary.quality_issues_contract.classification_available === false || summary.quality_issues_contract.schema_version === 'legacy') {
-      return '검토 상태 확인 불가';
-    }
-    const count = summary.quality_issues_contract.qa_review_count ?? summary.quality_issues?.length ?? 0;
-    return count > 0 ? `검토 필요 ${count}건` : '검토할 항목 없음';
+    return reviewLabelForRun(run.xlsx_exists, mismatchSummaries[run.run_id]);
   }
 
   function batchReviewLabel(batch: RecentBatch) {

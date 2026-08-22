@@ -20,8 +20,14 @@ export function formatDuration(seconds: number) {
 }
 
 export function formatValidatorDuration(seconds: number | null | undefined) {
-  if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) {
-    return '0분';
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) {
+    return '시간 확인 불가';
+  }
+  if (seconds === 0) {
+    return '0초';
+  }
+  if (seconds < 60) {
+    return `${Math.floor(seconds)}초`;
   }
   const totalMinutes = Math.floor(seconds / 60);
   const hours = Math.floor(totalMinutes / 60);

@@ -1009,6 +1009,7 @@ function formatApiPayloadError(payload: unknown) {
   const lines = [
     data.error,
     data.message,
+    data.detail,
     data.build_command ? `Build command: ${data.build_command}` : null,
     Array.isArray(data.apk_searched) ? `Searched: ${data.apk_searched.join(', ')}` : null,
   ].filter(Boolean);
