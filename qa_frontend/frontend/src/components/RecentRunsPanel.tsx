@@ -21,6 +21,7 @@ import {
   reviewStateFromError,
   reviewStateFromSummary,
   historyScopeLabel,
+  normalizeUnifiedHistory,
 } from '../reviewPresentation';
 import type { ReviewRequestState } from '../reviewPresentation';
 
@@ -176,6 +177,10 @@ export function RecentRunsPanel({
 
   const mismatchSummary = selectedRecentRun?.run_id ? mismatchSummaries[selectedRecentRun.run_id] : null;
   const selectedBatch = useMemo(() => recentBatches.find(b => b.batch_id === selectedBatchId), [recentBatches, selectedBatchId]);
+  const unifiedHistory = useMemo(
+    () => normalizeUnifiedHistory(recentRuns, recentBatches),
+    [recentRuns, recentBatches],
+  );
   const [batchLogPreviews, setBatchLogPreviews] = useState<Record<string, string>>({});
   const [batchMismatchSummaries, setBatchMismatchSummaries] = useState<Record<string, MismatchSummary | null>>({});
 
@@ -858,66 +863,49 @@ export function RecentRunsPanel({
     return (
       <div className="validatorHistorySummary">
         <p className="historyHint">실행 결과와 검토 필요 항목을 기준으로 열어볼 실행을 선택하세요.</p>
-        {recentRuns.length > 0 && (
-          <div className="validatorHistoryList" aria-label="Recent single-device runs">
-            {recentRuns.map((run) => {
-              const selected = selectedRecentRunId === run.run_id && selectedBatchId === null;
-              const state = run.process_status || run.status;
+        {unifiedHistory.length > 0 && (
+          <div className="validatorHistoryList" aria-label="Recent runs">
+            {unifiedHistory.map((item) => {
+              const selected = item.source === 'standalone'
+                ? selectedRecentRunId === item.raw.run_id && selectedBatchId === null
+                : selectedBatchId === item.raw.batch_id;
+              const reviewLabel = item.source === 'standalone'
+                ? singleReviewLabel(item.raw)
+                : batchReviewLabel(item.raw);
               return (
                 <button
                   type="button"
-                  key={run.run_id}
+                  key={item.key}
                   className={`validatorHistoryRow ${selected ? 'selected' : ''}`}
                   aria-pressed={selected}
-                  onClick={() => { selectBatch(null); setSelectedRecentRunId(run.run_id); }}
+                  data-history-source={item.source}
+                  data-history-key={item.key}
+                  onClick={() => {
+                    if (item.source === 'standalone') {
+                      selectBatch(null);
+                      setSelectedRecentRunId(item.raw.run_id);
+                    } else {
+                      selectBatch(item.raw.batch_id);
+                      setSelectedRecentRunId(null);
+                    }
+                  }}
                 >
                   <span className="historyRowMain">
-                    <strong>{formatValidatorDateTime(run.started_at)}</strong>
-                    <span>{historyDeviceLabel([])}</span>
-                    <span>{historyScopeLabel(run.mode, run.total_scenarios, run.scenario_ids, fullValidationScenarioIds)}</span>
+                    <strong>{formatValidatorDateTime(item.timestamp)}</strong>
+                    <span>{historyDeviceLabel(item.deviceModels)}</span>
+                    <span>{historyScopeLabel(item.mode, item.totalScenarios, item.scenarioIds, fullValidationScenarioIds)}</span>
                   </span>
                   <span className="historyRowResult">
-                    <span className={`statusBadge ${historyExecutionClass(state)}`}>{historyExecutionLabel(state)}</span>
-                    <span>{singleReviewLabel(run)}</span>
-                    <span>{formatValidatorDuration(run.duration_seconds)}</span>
+                    <span className={`statusBadge ${historyExecutionClass(item.state)}`}>{historyExecutionLabel(item.state)}</span>
+                    <span>{reviewLabel}</span>
+                    <span>{formatValidatorDuration(item.durationSeconds)}</span>
                   </span>
                 </button>
               );
             })}
           </div>
         )}
-        {recentBatches.length > 0 && (
-          <div className="validatorHistoryList" aria-label="Recent multi-device runs">
-            {recentBatches.map((batch) => {
-              const selected = selectedBatchId === batch.batch_id;
-              const models = (batch.devices ?? []).map((device) => device.model);
-              const totalScenarios = batch.scenario_ids?.length
-                || batch.devices?.[0]?.total_scenarios
-                || 0;
-              return (
-                <button
-                  type="button"
-                  key={batch.batch_id}
-                  className={`validatorHistoryRow ${selected ? 'selected' : ''}`}
-                  aria-pressed={selected}
-                  onClick={() => { selectBatch(batch.batch_id); setSelectedRecentRunId(null); }}
-                >
-                  <span className="historyRowMain">
-                    <strong>{formatValidatorDateTime(batch.created_at)}</strong>
-                    <span>{historyDeviceLabel(models)}</span>
-                    <span>{historyScopeLabel(batch.mode, totalScenarios, batch.scenario_ids, fullValidationScenarioIds)}</span>
-                  </span>
-                  <span className="historyRowResult">
-                    <span className={`statusBadge ${historyExecutionClass(batch.state)}`}>{historyExecutionLabel(batch.state)}</span>
-                    <span>{batchReviewLabel(batch)}</span>
-                    <span>{formatValidatorDuration(batch.duration_seconds)}</span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-        {recentRuns.length === 0 && recentBatches.length === 0 && (
+        {unifiedHistory.length === 0 && (
           <p className="reviewEmptyState">최근 실행 기록이 없습니다.</p>
         )}
       </div>

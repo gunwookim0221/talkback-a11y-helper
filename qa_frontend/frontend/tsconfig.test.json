@@ -16,6 +16,7 @@
     "src/presets.ts",
     "src/runProfiles.ts",
     "src/reviewPresentation.ts",
+    "src/terminalNotification.ts",
     "src/utils/formatters.ts",
     "src/utils/devicePluginMeta.ts",
     "src/utils/lifePluginMeta.ts",

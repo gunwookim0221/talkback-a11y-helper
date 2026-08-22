@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { api, BatchStatus, RunStatus, RuntimeDashboard } from '../api';
 import { shouldUseBatch } from '../currentRun';
+import { TerminalNotificationTracker } from '../terminalNotification';
 
 export interface UseRunPollingProps {
   onOutputsChanged: () => void;
@@ -17,6 +18,11 @@ export function useRunPolling({ onOutputsChanged, onRunFinished }: UseRunPolling
 
   const pollingRef = useRef(false);
   const lastStateRef = useRef<string | null>(null);
+  const lastIdentityRef = useRef<string | null>(null);
+  const terminalTrackerRef = useRef<TerminalNotificationTracker | null>(null);
+  if (terminalTrackerRef.current === null) {
+    terminalTrackerRef.current = new TerminalNotificationTracker();
+  }
 
   const onOutputsChangedRef = useRef(onOutputsChanged);
   const onRunFinishedRef = useRef(onRunFinished);
@@ -67,8 +73,10 @@ export function useRunPolling({ onOutputsChanged, onRunFinished }: UseRunPolling
       let finalStatus = snapshot.status;
       let finalDashboard = snapshot.dashboard;
       let currentStateForEffect = snapshot.state;
+      let usesBatchState = false;
 
       if (batchStatusRef && batchStatusRef.state && batchStatusRef.state !== 'idle' && shouldUseBatch(batchStatusRef, snapshot.status)) {
+        usesBatchState = true;
         const unifiedState = batchStatusRef.state === 'running' ? 'running'
           : batchStatusRef.state === 'error' || batchStatusRef.state === 'failed' ? 'error'
           : batchStatusRef.state === 'stopped' ? 'stopped'
@@ -100,12 +108,30 @@ export function useRunPolling({ onOutputsChanged, onRunFinished }: UseRunPolling
       }
 
       const previousState = lastStateRef.current;
+      const previousIdentity = lastIdentityRef.current;
+      const currentIdentityValue = usesBatchState
+        ? batchStatusRef?.batch_id ?? batchStatusRef?.batch?.batch_id
+        : snapshot.run_id ?? snapshot.status?.run_id;
+      const currentIdentity = currentIdentityValue
+        ? `${usesBatchState ? 'batch' : 'run'}:${currentIdentityValue}`
+        : null;
+      const startedAt = usesBatchState
+        ? batchStatusRef?.batch?.started_at ?? batchStatusRef?.devices?.[0]?.started_at
+        : snapshot.status?.started_at;
+      const finishedAt = usesBatchState
+        ? batchStatusRef?.batch?.finished_at ?? batchStatusRef?.devices?.[0]?.finished_at
+        : snapshot.status?.finished_at;
       lastStateRef.current = currentStateForEffect;
+      lastIdentityRef.current = currentIdentity;
 
-      if (
-        previousState === 'running' &&
-        (currentStateForEffect === 'finished' || currentStateForEffect === 'stopped' || currentStateForEffect === 'error')
-      ) {
+      if (currentIdentity && terminalTrackerRef.current.shouldNotify({
+        previousState,
+        currentState: currentStateForEffect,
+        previousIdentity,
+        currentIdentity,
+        startedAt,
+        finishedAt,
+      })) {
         onRunFinishedRef.current();
       }
     }

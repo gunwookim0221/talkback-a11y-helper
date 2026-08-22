@@ -37,13 +37,16 @@ def test_batch_refresh_failure_is_non_fatal_and_does_not_change_execution_state(
     assert "setStatus" not in load_block
 
 
-def test_standalone_history_compatibility_and_batch_history_are_separate() -> None:
+def test_standalone_and_batch_sources_feed_one_unified_history_view() -> None:
     app = (FRONTEND / "App.tsx").read_text(encoding="utf-8")
     panel = (FRONTEND / "components" / "RecentRunsPanel.tsx").read_text(encoding="utf-8")
+    presentation = (FRONTEND / "reviewPresentation.ts").read_text(encoding="utf-8")
 
     assert "recentRuns: RecentRun[]" in panel
     assert "const [recentBatches, setRecentBatches]" in panel
     assert "api.recentRuns()" in app
     assert "api.recentBatches()" in panel
-    assert "recentRuns.map" in panel
-    assert "recentBatches.map" in panel
+    assert "normalizeUnifiedHistory(recentRuns, recentBatches)" in panel
+    assert "unifiedHistory.map" in panel
+    assert "source: 'standalone'" in presentation
+    assert "source: 'batch'" in presentation

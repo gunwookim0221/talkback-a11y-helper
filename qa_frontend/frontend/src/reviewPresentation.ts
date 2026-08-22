@@ -1,4 +1,4 @@
-import type { MismatchSummary, QualityIssue, RecentBatch } from './api';
+import type { MismatchSummary, QualityIssue, RecentBatch, RecentRun } from './api';
 import { friendlyScenarioName } from './utils/formatters';
 
 export type ReviewProjection = {
@@ -196,4 +196,120 @@ export function historyDeviceLabel(models: readonly string[] | null | undefined)
   if (labels.length === 0) return 'Current device';
   if (labels.length <= 2) return labels.join(' + ');
   return `${labels.slice(0, 2).join(' + ')} + ${labels.length - 2}`;
+}
+
+export type UnifiedHistoryItem =
+  | {
+      key: string;
+      source: 'standalone';
+      timestamp: string | null;
+      timestampMs: number | null;
+      state: string;
+      mode: string;
+      scenarioIds: string[];
+      totalScenarios: number;
+      deviceModels: string[];
+      durationSeconds: number | null;
+      raw: RecentRun;
+    }
+  | {
+      key: string;
+      source: 'batch';
+      timestamp: string | null;
+      timestampMs: number | null;
+      state: string;
+      mode: string;
+      scenarioIds: string[];
+      totalScenarios: number;
+      deviceModels: string[];
+      durationSeconds: number | null;
+      raw: RecentBatch;
+    };
+
+const UNIFIED_HISTORY_LIMIT = 20;
+
+function parseStableHistoryTimestamp(value: string | null | undefined): number | null {
+  const match = String(value ?? '').match(/(?:^|_)(\d{8})_(\d{6})$/);
+  if (!match) return null;
+  const [, datePart, timePart] = match;
+  const year = Number(datePart.slice(0, 4));
+  const month = Number(datePart.slice(4, 6));
+  const day = Number(datePart.slice(6, 8));
+  const hour = Number(timePart.slice(0, 2));
+  const minute = Number(timePart.slice(2, 4));
+  const second = Number(timePart.slice(4, 6));
+  const date = new Date(year, month - 1, day, hour, minute, second);
+  if (
+    date.getFullYear() !== year
+    || date.getMonth() !== month - 1
+    || date.getDate() !== day
+    || date.getHours() !== hour
+    || date.getMinutes() !== minute
+    || date.getSeconds() !== second
+  ) return null;
+  const timestamp = date.getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function parseHistoryTimestamp(value: string | null | undefined, fallback?: string | null): number | null {
+  const parsed = value ? Date.parse(value) : Number.NaN;
+  if (Number.isFinite(parsed)) return parsed;
+  return parseStableHistoryTimestamp(fallback);
+}
+
+export function normalizeUnifiedHistory(
+  recentRuns: readonly RecentRun[] = [],
+  recentBatches: readonly RecentBatch[] = [],
+  limit = UNIFIED_HISTORY_LIMIT,
+): UnifiedHistoryItem[] {
+  const standaloneItems: UnifiedHistoryItem[] = recentRuns.map((run) => ({
+    key: `standalone:${run.run_id}`,
+    source: 'standalone' as const,
+    timestamp: run.started_at || null,
+    timestampMs: parseHistoryTimestamp(run.started_at, run.run_id),
+    state: run.process_status || run.status || 'unknown',
+    mode: run.mode,
+    scenarioIds: [...(run.scenario_ids ?? [])],
+    totalScenarios: Number(run.total_scenarios ?? run.scenario_ids?.length ?? 0),
+    deviceModels: [],
+    durationSeconds: Number.isFinite(run.duration_seconds) ? run.duration_seconds : null,
+    raw: run,
+  }));
+  const batchItems: UnifiedHistoryItem[] = recentBatches.map((batch) => ({
+    key: `batch:${batch.batch_id}`,
+    source: 'batch' as const,
+    timestamp: batch.created_at || null,
+    timestampMs: parseHistoryTimestamp(batch.created_at, batch.batch_id),
+    state: batch.state || 'unknown',
+    mode: batch.mode || 'unknown',
+    scenarioIds: [...(batch.scenario_ids ?? [])],
+    totalScenarios: Number(
+      batch.scenario_ids?.length
+        || batch.devices?.[0]?.total_scenarios
+        || 0,
+    ),
+    deviceModels: (batch.devices ?? []).map((device) => device.model).filter(Boolean),
+    durationSeconds: typeof batch.duration_seconds === 'number' && Number.isFinite(batch.duration_seconds)
+      ? batch.duration_seconds
+      : null,
+    raw: batch,
+  }));
+
+  const unique = new Map<string, UnifiedHistoryItem>();
+  [...standaloneItems, ...batchItems].forEach((item) => {
+    if (!unique.has(item.key)) unique.set(item.key, item);
+  });
+
+  return [...unique.values()]
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const leftTimestamp = left.item.timestampMs;
+      const rightTimestamp = right.item.timestampMs;
+      if (leftTimestamp === null && rightTimestamp === null) return left.index - right.index;
+      if (leftTimestamp === null) return 1;
+      if (rightTimestamp === null) return -1;
+      return rightTimestamp - leftTimestamp || left.index - right.index;
+    })
+    .slice(0, Math.max(0, limit))
+    .map(({ item }) => item);
 }

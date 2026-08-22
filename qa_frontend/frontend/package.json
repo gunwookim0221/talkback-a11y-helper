@@ -2,7 +2,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test:frontend": "tsc -p tsconfig.test.json && node --test tests/scenarioSelection.test.cjs tests/currentRun.test.cjs tests/reviewPresentation.test.cjs tests/readinessProjection.test.cjs",
+    "test:frontend": "tsc -p tsconfig.test.json && node --test tests/scenarioSelection.test.cjs tests/currentRun.test.cjs tests/reviewPresentation.test.cjs tests/readinessProjection.test.cjs tests/unifiedHistory.test.cjs tests/terminalNotification.test.cjs",
     "test:selection": "tsc -p tsconfig.test.json && node --test tests/scenarioSelection.test.cjs",
     "preview": "vite preview"
   },
