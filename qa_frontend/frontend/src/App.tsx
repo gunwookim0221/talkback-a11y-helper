@@ -6,6 +6,7 @@ import { getFullValidationScenarioIds, initialScenarioSelection } from './select
 import { ADBPanel } from './components/ADBPanel';
 import { HelperPanel } from './components/HelperPanel';
 import { RunPanel } from './components/RunPanel';
+import { CurrentRunPanel } from './components/CurrentRunPanel';
 import { RuntimeDashboardPanel } from './components/RuntimeDashboard';
 import { PluginDiscoveryPanel } from './components/PluginDiscoveryPanel';
 
@@ -74,6 +75,11 @@ export default function App() {
   const fullValidationScenarioCount = fullValidationIds.length;
   const selectedCount = selected.size;
   const effectiveMode = status?.state === 'running' ? ((status.mode as 'smoke' | 'full' | null) ?? plannedMode) : plannedMode;
+  const currentRunLabel = effectiveMode === 'smoke'
+    ? 'Quick Smoke'
+    : selectedCount > 0 && selectedCount === fullValidationScenarioCount
+      ? 'Full Validation'
+      : 'Custom Run';
   const stepPolicyText =
     effectiveMode === 'smoke' ? 'reduced max_steps for selected scenarios' : 'source runtime_config max_steps';
   const currentRunSummary = useMemo(
@@ -367,6 +373,17 @@ export default function App() {
       </section>
 
       <section style={{ marginTop: '14px' }}>
+        <CurrentRunPanel
+          batchStatus={batchStatus}
+          status={status}
+          dashboard={dashboard}
+          runLabel={currentRunLabel}
+          fullValidationScenarioIds={fullValidationIds}
+          stop={stop}
+        />
+      </section>
+
+      <section style={{ marginTop: '14px' }}>
         <RunPanel
           launchMode={launchMode}
           setLaunchMode={setLaunchMode}
@@ -379,6 +396,7 @@ export default function App() {
           stop={stop}
           effectiveMode={effectiveMode}
           status={status}
+          batchStatus={batchStatus}
           stepPolicyText={stepPolicyText}
           selectedCount={selectedCount}
           fullValidationScenarioIds={fullValidationIds}
@@ -408,8 +426,9 @@ export default function App() {
         <ComparePanel />
       </section>
 
-      <section className="panel preflightPanel" ref={preflightRef}>
-        <h2>Runtime Preflight</h2>
+      <details className="panel preflightDetails">
+        <summary>Runtime Preflight details</summary>
+        <section className="preflightPanel" ref={preflightRef}>
         {status?.error && <div className="notice">{status.error}</div>}
         {manualLanguageChangeRequired && (
           <div className="notice">
@@ -455,16 +474,20 @@ export default function App() {
           <dt>Settings</dt>
           <dd>{status?.accessibility_settings_opened ? 'opened on device' : '-'}</dd>
         </dl>
-      </section>
+        </section>
+      </details>
 
-      <RuntimeDashboardPanel
-        dashboard={dashboard}
-        batchStatus={batchStatus}
-        status={status}
-        helper={helper}
-        adb={adb}
-        pollingLatencyMs={pollingLatencyMs}
-      />
+      <details className="panel runDiagnostics">
+        <summary>Run diagnostics</summary>
+        <RuntimeDashboardPanel
+          dashboard={dashboard}
+          batchStatus={batchStatus}
+          status={status}
+          helper={helper}
+          adb={adb}
+          pollingLatencyMs={pollingLatencyMs}
+        />
+      </details>
 
       <section className="split">
         <article className="panel scenarios">

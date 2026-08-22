@@ -23,6 +23,7 @@ export interface RunPanelProps {
   stop: () => void;
   effectiveMode: 'smoke' | 'full';
   status: RunStatus | null;
+  batchStatus: BatchStatus | null;
   stepPolicyText: string;
   selectedCount: number;
   fullValidationScenarioIds: readonly string[];
@@ -76,6 +77,7 @@ export function RunPanel({
   stop,
   effectiveMode,
   status,
+  batchStatus,
   stepPolicyText,
   selectedCount,
   fullValidationScenarioIds,
@@ -141,7 +143,6 @@ export function RunPanel({
     });
   };
 
-  const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null);
   const controlsLocked = running || batchStatus?.state === 'running' || launchInFlight;
   const customOptionsEnabled = runProfile === 'custom-debug' && !controlsLocked;
   const selectedDeviceRecords = useMemo(
@@ -194,23 +195,10 @@ export function RunPanel({
   const deviceCountClass = devices.length === 1 ? 'deviceCountOne' : devices.length <= 5 ? 'deviceCountFew' : 'deviceCountMany';
 
   useEffect(() => {
-    let timer: number;
-    const pollBatch = async () => {
-      try {
-        const res = await api.getBatchStatus();
-        setBatchStatus(res);
-        if (res.state === 'running') {
-          timer = window.setTimeout(pollBatch, 2000);
-        } else {
-          timer = window.setTimeout(pollBatch, 5000);
-        }
-      } catch (err) {
-        timer = window.setTimeout(pollBatch, 5000);
-      }
-    };
-    pollBatch();
-    return () => window.clearTimeout(timer);
-  }, []);
+    if (!launchInFlight || (!running && batchStatus?.state !== 'running')) return;
+    launchInFlightRef.current = false;
+    setLaunchInFlight(false);
+  }, [batchStatus?.state, launchInFlight, running]);
 
   useEffect(() => {
     if (!pendingConfirmation) return undefined;
@@ -285,6 +273,7 @@ export function RunPanel({
 
     launchInFlightRef.current = true;
     setLaunchInFlight(true);
+    let launchAccepted = false;
     try {
       const res = await api.startBatch({
         mode: plannedMode,
@@ -299,12 +288,14 @@ export function RunPanel({
         traversal_identity_v2: traversalIdentityV2,
         traversal_profiler: traversalProfiler,
       });
-      setBatchStatus(res);
+      launchAccepted = res.state === 'running';
     } catch (err) {
       setRunError(errorMessage(err, 'Failed to start batch'));
     } finally {
-      launchInFlightRef.current = false;
-      setLaunchInFlight(false);
+      if (!launchAccepted) {
+        launchInFlightRef.current = false;
+        setLaunchInFlight(false);
+      }
     }
   };
 
@@ -457,19 +448,22 @@ export function RunPanel({
           </div>
         )}
         {batchStatus && batchStatus.state !== 'idle' && (
-          <div style={{ marginTop: '12px', padding: '10px', background: 'var(--color-bg-dim)', borderRadius: '6px', fontSize: '12px' }}>
-            <div style={{ fontWeight: 500, marginBottom: '6px' }}>
-              Batch: {batchStatus.batch_id} - <span style={{ color: batchStatus.state === 'running' ? 'var(--color-primary)' : 'inherit' }}>{batchStatus.state}</span>
+          <details className="advancedRunOptions batchStatusDetails">
+            <summary>Batch device details</summary>
+            <div style={{ marginTop: '12px', padding: '10px', background: 'var(--color-bg-dim)', borderRadius: '6px', fontSize: '12px' }}>
+              <div style={{ fontWeight: 500, marginBottom: '6px' }}>
+                Batch: {batchStatus.batch_id} - <span style={{ color: batchStatus.state === 'running' ? 'var(--color-primary)' : 'inherit' }}>{batchStatus.state}</span>
+              </div>
+              <div style={{ display: 'grid', gap: '4px' }}>
+                {batchStatus.devices.map(d => (
+                  <div key={d.serial} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>{d.model} <span style={{color: 'var(--color-text-dim)', fontSize: '10px'}}>({d.serial})</span></span>
+                    <span style={{ color: d.state === 'running' ? 'var(--color-primary)' : d.state === 'passed' ? 'var(--color-success)' : d.state === 'failed' ? 'var(--color-danger)' : 'var(--color-text-dim)' }}>{d.state}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div style={{ display: 'grid', gap: '4px' }}>
-              {batchStatus.devices.map(d => (
-                <div key={d.serial} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>{d.model} <span style={{color: 'var(--color-text-dim)', fontSize: '10px'}}>({d.serial})</span></span>
-                  <span style={{ color: d.state === 'running' ? 'var(--color-primary)' : d.state === 'passed' ? 'var(--color-success)' : d.state === 'failed' ? 'var(--color-danger)' : 'var(--color-text-dim)' }}>{d.state}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          </details>
         )}
       </div>
 

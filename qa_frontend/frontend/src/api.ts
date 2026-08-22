@@ -546,6 +546,7 @@ export type RuntimeDashboard = {
   elapsed_seconds: number;
   current_scenario: string | null;
   completed_scenarios: number;
+  completed_or_terminal_scenarios?: number;
   executed_scenarios?: number;
   not_available_scenarios?: number;
   not_available_candidate_scenarios?: number;

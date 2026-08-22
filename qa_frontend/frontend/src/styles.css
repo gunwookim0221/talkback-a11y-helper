@@ -1172,6 +1172,210 @@ small {
   margin-top: 14px;
 }
 
+.currentRunPanel {
+  margin-top: 0;
+}
+
+.currentRunHeader {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.currentRunHeader h2 {
+  margin: 0 0 6px;
+}
+
+.currentRunStatus {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 4px 8px;
+}
+
+.currentRunStatusGood {
+  background: #d8f4df;
+  color: #215a2f;
+}
+
+.currentRunStatusWarn {
+  background: #fff2bf;
+  color: #725a00;
+}
+
+.currentRunStatusNeutral {
+  background: #e7edf3;
+  color: #43515c;
+}
+
+.currentRunStop {
+  flex: 0 0 auto;
+}
+
+.currentRunIdle,
+.currentRunCompletion {
+  color: #526a7c;
+  margin: 14px 0 0;
+}
+
+.currentRunSummary {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.currentRunSummary > div {
+  background: #f6f8fa;
+  border: 1px solid #dce3e9;
+  border-radius: 6px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.currentRunSummary span {
+  color: #667480;
+  font-size: 12px;
+}
+
+.currentRunSummary strong,
+.currentRunDeviceHeader strong,
+.currentRunScenario,
+.currentRunWarning span,
+.currentRunTechnicalList,
+.currentRunDetails dd {
+  overflow-wrap: anywhere;
+}
+
+.currentRunWarning {
+  align-items: flex-start;
+  background: #fff2bf;
+  border: 1px solid #e2c95d;
+  border-radius: 6px;
+  color: #725a00;
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 12px;
+}
+
+.currentRunDevices {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  margin-top: 12px;
+}
+
+.currentRunDeviceCard {
+  border: 1px solid #d9e0e7;
+  border-radius: 6px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.currentRunDeviceHeader {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.currentRunDeviceHeader > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.currentRunDeviceHeader small {
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.currentRunScenario {
+  color: #526a7c;
+  margin: 10px 0 0;
+}
+
+.currentRunDeviceDetails,
+.currentRunDetails {
+  border-top: 1px solid #edf1f4;
+  margin-top: 10px;
+  padding-top: 8px;
+}
+
+.currentRunDeviceDetails summary,
+.currentRunDetails summary,
+.preflightDetails > summary,
+.runDiagnostics > summary {
+  color: #526a7c;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.currentRunDetails dl,
+.currentRunDeviceDetails dl {
+  display: grid;
+  gap: 4px 10px;
+  grid-template-columns: minmax(100px, auto) minmax(0, 1fr);
+  margin: 10px 0 0;
+}
+
+.currentRunDetails dt,
+.currentRunDeviceDetails dt {
+  color: #667480;
+}
+
+.currentRunDetails dd,
+.currentRunDeviceDetails dd {
+  margin: 0;
+}
+
+.currentRunTechnicalList {
+  color: #667480;
+  font-size: 12px;
+  margin: 10px 0 0;
+  padding-left: 18px;
+}
+
+.currentRunErrorDetails {
+  background: #fff5f5;
+  border: 1px solid #efb3b3;
+  border-radius: 6px;
+  color: #8d1e1e;
+  margin: 10px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px;
+  white-space: pre-wrap;
+}
+
+.preflightDetails,
+.runDiagnostics {
+  margin-top: 14px;
+}
+
+.preflightDetails > summary,
+.runDiagnostics > summary {
+  list-style-position: inside;
+  padding-bottom: 0;
+}
+
+.preflightDetails[open] > summary,
+.runDiagnostics[open] > summary {
+  margin-bottom: 10px;
+}
+
+.preflightDetails .preflightPanel,
+.runDiagnostics .dashboardPanel {
+  margin-top: 0;
+}
+
 .metricGrid {
   display: grid;
   gap: 8px;
@@ -2003,6 +2207,26 @@ h3 {
   .deviceSelectionGrid,
   .deviceSelectionGrid.deviceCountMany {
     grid-template-columns: 1fr;
+  }
+
+  .currentRunHeader {
+    flex-direction: column;
+  }
+
+  .currentRunStop {
+    width: 100%;
+  }
+
+  .currentRunSummary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .currentRunDevices {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .currentRunDeviceHeader {
+    flex-direction: column;
   }
 }
 

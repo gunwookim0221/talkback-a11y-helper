@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { api, BatchStatus, RunStatus, RuntimeDashboard } from '../api';
+import { shouldUseBatch } from '../currentRun';
 
 export interface UseRunPollingProps {
   onOutputsChanged: () => void;
@@ -67,17 +68,18 @@ export function useRunPolling({ onOutputsChanged, onRunFinished }: UseRunPolling
       let finalDashboard = snapshot.dashboard;
       let currentStateForEffect = snapshot.state;
 
-      if (batchStatusRef && batchStatusRef.state && batchStatusRef.state !== 'idle') {
-        const unifiedState = batchStatusRef.state === 'running' ? 'running' 
-          : batchStatusRef.state === 'error' ? 'error' 
+      if (batchStatusRef && batchStatusRef.state && batchStatusRef.state !== 'idle' && shouldUseBatch(batchStatusRef, snapshot.status)) {
+        const unifiedState = batchStatusRef.state === 'running' ? 'running'
+          : batchStatusRef.state === 'error' || batchStatusRef.state === 'failed' ? 'error'
+          : batchStatusRef.state === 'stopped' ? 'stopped'
           : 'finished';
-          
+
         finalStatus = {
           ...snapshot.status,
           state: unifiedState,
         };
         currentStateForEffect = unifiedState;
-        
+
         if (unifiedState === 'running') {
           const currentDev = batchStatusRef.devices?.find((d: any) => d.state === 'running' || d.state === 'pending');
           finalDashboard = snapshot.dashboard;
