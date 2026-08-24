@@ -168,6 +168,7 @@ export type BatchProgressStatus = {
   tail_observed_scenarios?: number;
   total_scenarios: number;
   completed_scenarios: number;
+  terminal_scenarios?: number;
   executed_scenarios?: number;
   not_available_scenarios?: number;
   not_available_candidate_scenarios?: number;

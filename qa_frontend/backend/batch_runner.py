@@ -20,7 +20,7 @@ from tb_runner.profiler_archive import create_profiler_archives
 
 from tb_runner.run_spec import RunSpec, resolve_identity_feature_flags
 from .paths import ROOT_DIR, RUN_LOG_DIR, SCRIPT_PATH, RUNTIME_CONFIG_PATH
-from .runtime_dashboard import parse_runtime_log
+from .runtime_dashboard import TERMINAL_SCENARIO_STATUSES, parse_runtime_log
 from .runtime_config_selection import write_selected_runtime_config
 from .device_locale import apply_language_mode, normalize_language_mode, format_language_log_lines
 from .preflight import (
@@ -180,6 +180,7 @@ def _empty_live_status() -> dict:
             "tail_observed_scenarios": 0,
             "total_scenarios": 0,
             "completed_scenarios": 0,
+            "terminal_scenarios": 0,
             "executed_scenarios": 0,
             "not_available_scenarios": 0,
             "not_available_candidate_scenarios": 0,
@@ -260,6 +261,9 @@ def _parse_live_log(log_text: str, *, scenario_ids: list[str] | None = None) -> 
             + live["progress"]["failed_scenarios"]
         )
         or 0
+    )
+    live["progress"]["terminal_scenarios"] = int(
+        parsed.get("completed_or_terminal_scenarios") or 0
     )
 
     for line in lines:
@@ -668,11 +672,68 @@ class BatchRunManager:
     def _device_status_with_live_summary(self, device: dict) -> dict:
         item = dict(device)
         live = self._live_status_for_device(device)
+        terminal_progress = self._terminal_progress_from_summary(device)
+        if terminal_progress is not None:
+            live["progress"].update(terminal_progress)
         item["runner_log_path"] = live.get("runner_log_path")
         item["current"] = live["current"]
         item["progress"] = live["progress"]
         item["logs"] = live["logs"]
         return item
+
+    def _terminal_progress_from_summary(self, device: dict) -> dict[str, int] | None:
+        if str(device.get("state") or "") not in {"passed", "failed", "skipped", "error", "stopped"}:
+            return None
+        output_dir = str(device.get("output_dir") or "")
+        if not output_dir:
+            return None
+        summary_path = ROOT_DIR / output_dir / "summary.json"
+        if not summary_path.is_file():
+            return None
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            _log_invalid_summary_warning_once(summary_path, exc, kind="device")
+            return None
+        if not isinstance(summary, dict):
+            return None
+        scenarios = summary.get("scenarios")
+        selected_ids = {str(item) for item in (self._scenario_ids or []) if item}
+        if not isinstance(scenarios, list) or not selected_ids:
+            return None
+
+        terminal_status_by_id: dict[str, str] = {}
+        for scenario in scenarios:
+            if not isinstance(scenario, dict):
+                continue
+            scenario_id = str(scenario.get("id") or "")
+            status = str(scenario.get("status") or "")
+            if scenario_id in selected_ids and status in TERMINAL_SCENARIO_STATUSES:
+                terminal_status_by_id[scenario_id] = status
+        if not terminal_status_by_id:
+            return {"terminal_scenarios": 0, "completed_scenarios": 0}
+
+        progress = {
+            "terminal_scenarios": len(terminal_status_by_id),
+            # Batch live progress has historically used this field for terminal
+            # scenario count. Keep the compatibility alias coherent while the
+            # explicit terminal_scenarios field becomes the frontend contract.
+            "completed_scenarios": len(terminal_status_by_id),
+        }
+        for key in (
+            "executed_scenarios",
+            "not_available_scenarios",
+            "not_available_candidate_scenarios",
+            "no_target_candidate_scenarios",
+            "availability_candidate_scenarios",
+            "passed_scenarios",
+            "warning_scenarios",
+            "failed_scenarios",
+        ):
+            value = summary.get(key)
+            if isinstance(value, int) and value >= 0:
+                progress[key] = value
+        return progress
 
     def _live_status_for_device(self, device: dict | None) -> dict:
         if not device:

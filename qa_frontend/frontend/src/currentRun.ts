@@ -11,7 +11,7 @@ export type CurrentRunDevice = {
   readonly state: string;
   readonly statusLabel: string;
   readonly progressLabel: string;
-  readonly completedScenarios: number;
+  readonly processedScenarios: number;
   readonly totalScenarios: number;
   readonly currentScenarioId: string | null;
   readonly currentScenarioLabel: string | null;
@@ -33,7 +33,7 @@ export type CurrentRunProjection = {
   readonly runLabel: string;
   readonly runId: string | null;
   readonly primaryProgressLabel: string | null;
-  readonly completedScenarios: number;
+  readonly processedScenarios: number;
   readonly totalScenarios: number;
   readonly finishedDevices: number;
   readonly totalDevices: number;
@@ -128,13 +128,14 @@ function projectDevice(device: BatchDeviceStatus): CurrentRunDevice {
   const currentScenarioId = ['running', 'pending'].includes(device.state)
     ? current?.current_scenario_id ?? null
     : null;
+  const processedScenarios = progress?.terminal_scenarios ?? progress?.completed_scenarios ?? 0;
   return {
     serial: device.serial,
     model: device.model || 'Android device',
     state: device.state,
     statusLabel: deviceStatusLabel(device.state),
-    progressLabel: scenarioProgressLabel(progress?.completed_scenarios ?? 0, progress?.selected_scenarios ?? progress?.total_scenarios ?? 0),
-    completedScenarios: progress?.completed_scenarios ?? 0,
+    progressLabel: scenarioProgressLabel(processedScenarios, progress?.selected_scenarios ?? progress?.total_scenarios ?? 0),
+    processedScenarios,
     totalScenarios: progress?.selected_scenarios ?? progress?.total_scenarios ?? 0,
     currentScenarioId,
     currentScenarioLabel: scenarioDisplayName(currentScenarioId, current?.current_scenario_name ?? null),
@@ -209,14 +210,14 @@ export function projectCurrentRun(input: CurrentRunInput): CurrentRunProjection 
     const finishedDevices = batch.batch?.finished_devices ?? devices.filter((device) => TERMINAL_DEVICE_STATES.has(device.state)).length;
     const progress = batch.progress;
     const totalScenarios = progress?.selected_scenarios ?? progress?.total_scenarios ?? 0;
-    const completedScenarios = progress?.completed_scenarios ?? 0;
+    const processedScenarios = progress?.terminal_scenarios ?? progress?.completed_scenarios ?? 0;
     const currentScenarioId = state === 'running' ? batch.current?.current_scenario_id ?? null : null;
     const currentScenarioLabel = currentScenarioId
       ? scenarioDisplayName(currentScenarioId, batch.current?.current_scenario_name ?? null)
       : state === 'running' ? 'Preparing next scenario…' : null;
     const primaryProgressLabel = totalDevices > 1
       ? `${finishedDevices} / ${totalDevices} devices completed`
-      : scenarioProgressLabel(completedScenarios, totalScenarios);
+      : scenarioProgressLabel(processedScenarios, totalScenarios);
     const technicalDetails = [
       `Batch ID: ${batch.batch_id ?? '-'}`,
       `State: ${batch.state}`,
@@ -230,7 +231,7 @@ export function projectCurrentRun(input: CurrentRunInput): CurrentRunProjection 
     const elapsed = elapsedSeconds(startedAt, finishedAt, input.nowMs, 0);
     return {
       active: state === 'running', state, runLabel, runId: batch.batch_id,
-      primaryProgressLabel, completedScenarios, totalScenarios, finishedDevices, totalDevices,
+      primaryProgressLabel, processedScenarios, totalScenarios, finishedDevices, totalDevices,
       currentScenarioId, currentScenarioLabel, elapsedSeconds: elapsed, elapsedLabel: formatElapsedDuration(elapsed), devices,
       actionableWarning: actionableWarning(batch, null, state), technicalError: batchTechnicalError(batch), technicalDetails,
     };
@@ -253,7 +254,7 @@ export function projectCurrentRun(input: CurrentRunInput): CurrentRunProjection 
     active: statusState === 'running', state: statusState, runLabel,
     runId: input.status?.run_id ?? input.dashboard?.run_id ?? null,
     primaryProgressLabel: totalScenarios > 0 ? scenarioProgressLabel(completedScenarios, totalScenarios) : null,
-    completedScenarios, totalScenarios, finishedDevices: statusState === 'finished' ? 1 : 0, totalDevices: 1,
+    processedScenarios: completedScenarios, totalScenarios, finishedDevices: statusState === 'finished' ? 1 : 0, totalDevices: 1,
     currentScenarioId, currentScenarioLabel, elapsedSeconds: elapsed, elapsedLabel: formatElapsedDuration(elapsed), devices: [],
     actionableWarning: actionableWarning(null, input.status, statusState), technicalError: input.status?.error ?? null, technicalDetails,
   };

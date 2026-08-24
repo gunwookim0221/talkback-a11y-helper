@@ -41,6 +41,17 @@ TRANSIENT_PRESENTATION_FAILURE_REASONS = {
     "no_unvisited_local_tab",
     "viewport_exhausted",
 }
+TERMINAL_SCENARIO_STATUSES = frozenset(
+    {
+        "passed",
+        "warning",
+        "failed",
+        "skipped",
+        "not_available",
+        "not_available_candidate",
+        "no_target_candidate",
+    }
+)
 
 
 def _availability_signal() -> dict[str, object]:
@@ -417,7 +428,7 @@ def parse_runtime_log(
         passed_count + warning_count + failed_count + availability_terminal_count
     )
     terminal_count = executed_count
-    completed_count = len([item for item in progress.values() if item["status"] in {"passed", "warning", "failed", "skipped", "not_available", "not_available_candidate", "no_target_candidate"}])
+    completed_count = len([item for item in progress.values() if item["status"] in TERMINAL_SCENARIO_STATUSES])
     return {
         "mode": mode,
         "launch_mode": launch_mode,

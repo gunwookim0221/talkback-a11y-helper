@@ -37,3 +37,5 @@ def test_current_run_preserves_phase_a_setup_safety_contracts():
     assert "launchAccepted = res.state === 'running'" in run_panel_tsx
     assert "batchStatus?.state === 'running'" in run_panel_tsx
     assert "scenarioDisplayName" in current_run_ts
+    assert "terminal_scenarios" in current_run_ts
+    assert "processedScenarios" in current_run_ts

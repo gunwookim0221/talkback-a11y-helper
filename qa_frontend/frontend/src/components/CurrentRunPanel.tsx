@@ -161,8 +161,8 @@ export function CurrentRunPanel({ batchStatus, status, dashboard, runLabel, full
               <dd>{projection.runId ?? '-'}</dd>
               <dt>Current scenario ID</dt>
               <dd>{projection.currentScenarioId ?? '-'}</dd>
-              <dt>Completed scenarios</dt>
-              <dd>{projection.completedScenarios} / {projection.totalScenarios || '-'}</dd>
+              <dt>Processed scenarios</dt>
+              <dd>{projection.processedScenarios} / {projection.totalScenarios || '-'}</dd>
               <dt>Devices</dt>
               <dd>{projection.finishedDevices} / {projection.totalDevices || '-'}</dd>
             </dl>

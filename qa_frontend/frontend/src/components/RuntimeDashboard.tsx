@@ -218,7 +218,7 @@ function BatchLiveMonitor({
 
   const deviceTotal = batch?.total_devices ?? batchStatus?.devices?.length ?? 0;
   const finishedDevices = batch?.finished_devices ?? batchStatus?.devices?.filter((device) => !['pending', 'running'].includes(device.state)).length ?? 0;
-  const scenarioCompleted = progress?.completed_scenarios ?? 0;
+  const scenarioCompleted = progress?.terminal_scenarios ?? progress?.completed_scenarios ?? 0;
   const scenarioSelected = progress?.selected_scenarios ?? progress?.total_scenarios ?? 0;
   const scenarioObserved = progress?.observed_scenarios ?? 0;
   const observedEvents = progress?.observed_runtime_events ?? 0;

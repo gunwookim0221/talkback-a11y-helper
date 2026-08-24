@@ -52,6 +52,7 @@ function batchFixture(overrides = {}) {
       observed_scenarios: 19,
       total_scenarios: 32,
       completed_scenarios: 18,
+      terminal_scenarios: 18,
       executed_scenarios: 18,
       not_available_scenarios: 0,
       not_available_candidate_scenarios: 0,
@@ -125,17 +126,54 @@ test('active batch uses completed scenarios, friendly scenario name, and elapsed
   assert.equal(projection.devices[0].currentScenarioLabel, 'Air Care');
 });
 
-test('observed counters do not replace completed progress', () => {
+test('explicit terminal counters drive processed progress instead of observed or PASS counts', () => {
   const projection = projectCurrentRun({
-    batchStatus: batchFixture(),
+    batchStatus: batchFixture({
+      progress: {
+        ...batchFixture().progress,
+        observed_scenarios: 20,
+        completed_scenarios: 18,
+        terminal_scenarios: 19,
+      },
+    }),
     status: null,
     dashboard: null,
     runLabel: 'Full Validation',
     nowMs: NOW,
   });
 
-  assert.equal(projection.primaryProgressLabel, '18 / 32 scenarios');
-  assert.notEqual(projection.primaryProgressLabel, '19 / 32 scenarios');
+  assert.equal(projection.primaryProgressLabel, '19 / 32 scenarios');
+});
+
+test('terminal mixed outcomes render all processed scenarios without changing result counters', () => {
+  const fixture = batchFixture({
+    state: 'finished',
+    batch: {
+      ...batchFixture().batch,
+      state: 'finished',
+      finished_at: '2026-08-22T03:24:00Z',
+    },
+    progress: {
+      ...batchFixture().progress,
+      selected_scenarios: 32,
+      terminal_scenarios: 32,
+      completed_scenarios: 30,
+      passed_scenarios: 9,
+      warning_scenarios: 21,
+      failed_scenarios: 1,
+      not_available_scenarios: 1,
+    },
+  });
+  const projection = projectCurrentRun({
+    batchStatus: fixture,
+    status: null,
+    dashboard: null,
+    runLabel: 'Full Validation',
+    nowMs: NOW,
+  });
+
+  assert.equal(projection.primaryProgressLabel, '32 / 32 scenarios');
+  assert.equal(projection.processedScenarios, 32);
 });
 
 test('unknown scenario falls back to its ID and missing current scenario is conservative', () => {
@@ -179,13 +217,13 @@ test('multi-device projection preserves per-device progress and completion state
       serial: 'serial-2', model: 'Galaxy Fold', state: 'passed', return_code: 0,
       output_dir: '', started_at: '2026-08-22T02:00:00Z', finished_at: '2026-08-22T03:00:00Z',
       current: { ...batchFixture().current, current_device_serial: 'serial-2', current_device_model: 'Galaxy Fold' },
-      progress: { ...batchFixture().progress, completed_scenarios: 32, selected_scenarios: 32 }, logs: batchFixture().logs,
+      progress: { ...batchFixture().progress, completed_scenarios: 32, terminal_scenarios: 32, selected_scenarios: 32 }, logs: batchFixture().logs,
     },
     {
       serial: 'serial-3', model: 'Galaxy S25', state: 'pending', return_code: null,
       output_dir: '', started_at: null, finished_at: null,
       current: { ...batchFixture().current, current_device_serial: 'serial-3', current_device_model: 'Galaxy S25', current_scenario_id: null },
-      progress: { ...batchFixture().progress, completed_scenarios: 0, selected_scenarios: 32 }, logs: batchFixture().logs,
+      progress: { ...batchFixture().progress, completed_scenarios: 0, terminal_scenarios: 0, selected_scenarios: 32 }, logs: batchFixture().logs,
     },
   ];
   const projection = projectCurrentRun({
