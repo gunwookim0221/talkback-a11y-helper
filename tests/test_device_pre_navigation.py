@@ -75,6 +75,40 @@ def _device_card(label, left, top):
     )
 
 
+def _structural_device_card(name, left=42, top=628, *, state="Connected"):
+    card = _node(
+        f"{name} {state}".strip(),
+        "com.samsung.android.oneconnect:id/device_card",
+        {"l": left, "t": top, "r": left + 477, "b": top + 345},
+    )
+    card["children"] = [
+        _node(
+            name,
+            "com.samsung.android.oneconnect:id/device_name",
+            {"l": left + 24, "t": top + 24, "r": left + 220, "b": top + 82},
+            class_name="android.widget.TextView",
+            clickable=False,
+            focusable=False,
+            effective_clickable=False,
+        )
+    ]
+    return card
+
+
+def _scrollable_device_viewport():
+    viewport = _node(
+        "",
+        "com.samsung.android.oneconnect:id/card_recycler",
+        {"l": 0, "t": 0, "r": 1080, "b": 2316},
+        class_name="androidx.recyclerview.widget.RecyclerView",
+        clickable=False,
+        focusable=False,
+        effective_clickable=False,
+    )
+    viewport["scrollable"] = True
+    return viewport
+
+
 def _assign_room_cta():
     return _node(
         "방 지정하기",
@@ -320,6 +354,101 @@ def test_enter_device_card_plugin_fails_closed_when_top_is_unverified(monkeypatc
     assert ok is False
     assert reason == "device_list_top_unverified:no_visible_change_unverified"
     assert client.swipe_calls == []
+
+
+def test_enter_device_card_plugin_direct_enters_unique_visible_structural_target_before_top(monkeypatch):
+    nodes = [_all_devices(), _scrollable_device_viewport(), _structural_device_card("Camera")]
+    client = DummyDeviceClient([nodes])
+    monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **_kwargs: (True, "screen_text"))
+    monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
+
+    ok, reason = collection_flow._run_enter_device_card_plugin(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_id": "device_camera_plugin"},
+        step={"target_stable_labels": ["Camera"]},
+        target="Camera",
+        max_scroll_search_steps=2,
+        step_wait_seconds=0,
+        transition_fast_path=True,
+    )
+
+    assert ok is True
+    assert reason == "visible_target_direct_entry"
+    assert client.scroll_to_top_calls == []
+    assert client.tap_xy_adb_calls[-1]["x"] == 280
+    assert client.tap_xy_adb_calls[-1]["y"] == 800
+
+
+def test_direct_visible_entry_does_not_claim_verified_top(monkeypatch):
+    nodes = [_all_devices(), _scrollable_device_viewport(), _structural_device_card("Camera")]
+    client = DummyDeviceClient([nodes])
+    monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **_kwargs: (True, "screen_text"))
+    monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
+
+    ok, reason = collection_flow._run_enter_device_card_plugin(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_id": "device_camera_plugin"},
+        step={"target_stable_labels": ["Camera"]},
+        target="Camera",
+        max_scroll_search_steps=1,
+        step_wait_seconds=0,
+        transition_fast_path=True,
+    )
+
+    assert ok is True
+    assert reason == "visible_target_direct_entry"
+    assert "VERIFIED_TOP" not in reason
+
+
+def test_visible_target_absent_keeps_unverified_top_fail_closed(monkeypatch):
+    nodes = [_all_devices(), _scrollable_device_viewport(), _structural_device_card("Smoke sensor")]
+    client = DummyDeviceClient([nodes])
+    client.scroll_to_top = lambda **_kwargs: {
+        "ok": False,
+        "reached_top": False,
+        "status": "NO_VISIBLE_CHANGE_UNVERIFIED",
+        "reason": "no_visible_change_unverified",
+    }
+    monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
+
+    ok, reason = collection_flow._run_enter_device_card_plugin(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_id": "device_camera_plugin"},
+        step={"target_stable_labels": ["Camera"]},
+        target="Camera",
+        max_scroll_search_steps=1,
+        step_wait_seconds=0,
+        transition_fast_path=True,
+    )
+
+    assert ok is False
+    assert reason == "device_list_top_unverified:no_visible_change_unverified"
+    assert client.tap_xy_adb_calls == []
+
+
+def test_existing_verified_top_search_path_remains_unchanged(monkeypatch):
+    nodes = [_all_devices(), _device_card("연기 감지 안 됨", 42, 628)]
+    client = DummyDeviceClient([nodes])
+    monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **_kwargs: (True, "screen_text"))
+    monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
+
+    ok, reason = collection_flow._run_enter_device_card_plugin(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_id": "device_smoke_sensor_plugin"},
+        step={"target_stable_labels": ["연기"]},
+        target="연기",
+        max_scroll_search_steps=1,
+        step_wait_seconds=0,
+        transition_fast_path=True,
+    )
+
+    assert ok is True
+    assert reason == "device_card_opened"
+    assert len(client.scroll_to_top_calls) == 1
 
 
 def test_enter_device_card_plugin_uses_adb_swipe_for_bounded_device_search(monkeypatch):

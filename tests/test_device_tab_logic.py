@@ -54,6 +54,49 @@ def _device_card(label, left, top, *, rid="com.samsung.android.oneconnect:id/dev
     )
 
 
+def _structural_device_card(
+    name,
+    bounds,
+    *,
+    state="Connected",
+    clickable=True,
+    focusable=True,
+    effective_clickable=True,
+    child_label=None,
+    child_rid="com.samsung.android.oneconnect:id/device_name",
+):
+    left, top, right, bottom = bounds
+    card = _node(
+        f"{name} {state}".strip(),
+        "com.samsung.android.oneconnect:id/device_card",
+        {"l": left, "t": top, "r": right, "b": bottom},
+        clickable=clickable,
+        focusable=focusable,
+        effective_clickable=effective_clickable,
+    )
+    card["children"] = [
+        _node(
+            child_label or name,
+            child_rid,
+            {"l": left + 24, "t": top + 24, "r": min(right - 24, left + 220), "b": min(bottom - 24, top + 82)},
+            class_name="android.widget.TextView",
+            clickable=False,
+            focusable=False,
+            effective_clickable=False,
+        )
+    ]
+    return card
+
+
+def _safe_visible_card(nodes, labels, viewport=(0, 0, 1080, 2316), avoid_bounds=()):
+    return device_tab_logic.find_safe_visible_device_card_by_stable_label(
+        nodes,
+        labels,
+        usable_viewport_bounds=viewport,
+        avoid_bounds=avoid_bounds,
+    )
+
+
 def test_collect_visible_device_cards_collects_viewgroup_cards_only():
     nodes = [
         _device_card("연기 감지 안 됨", 42, 628),
@@ -731,6 +774,122 @@ def test_find_device_card_by_stable_label_returns_none_for_missing_target():
     nodes = [_device_card("연기 감지 안 됨", 42, 628)]
 
     assert device_tab_logic.find_device_card_by_stable_label(nodes, ["누수"]) is None
+
+
+def test_safe_visible_target_allows_unique_structural_card_before_unverified_top():
+    card = _structural_device_card("Camera", (40, 400, 520, 700))
+
+    result = _safe_visible_card([card], ["Camera"])
+
+    assert result is not None
+    assert result["identity_source"] == "device_name_child"
+    assert result["direct_entry"] is True
+    assert result["safe_tap"]["point"] == (280, 550)
+
+
+def test_safe_visible_target_fails_closed_when_target_is_absent():
+    nodes = [_structural_device_card("Camera", (40, 400, 520, 700))]
+
+    assert _safe_visible_card(nodes, ["Water leak sensor"]) is None
+
+
+def test_safe_visible_target_fails_closed_for_duplicate_structural_targets():
+    nodes = [
+        _structural_device_card("Camera", (40, 400, 520, 700)),
+        _structural_device_card("Camera", (560, 400, 1040, 700)),
+    ]
+
+    assert _safe_visible_card(nodes, ["Camera"]) is None
+
+
+def test_safe_visible_target_ignores_target_text_on_wrong_sibling_or_status_action():
+    card = _structural_device_card(
+        "Temperature",
+        (40, 400, 520, 700),
+        state="Humidity",
+        child_label="Temperature",
+    )
+    sibling = _node(
+        "Camera Connected",
+        "com.samsung.android.oneconnect:id/status",
+        {"l": 60, "t": 430, "r": 300, "b": 480},
+        class_name="android.widget.TextView",
+        clickable=False,
+        focusable=False,
+        effective_clickable=False,
+    )
+    action = _node(
+        "Camera",
+        "com.samsung.android.oneconnect:id/action_button",
+        {"l": 360, "t": 500, "r": 480, "b": 620},
+        class_name="android.widget.ImageButton",
+    )
+
+    assert _safe_visible_card([card, sibling, action], ["Camera"]) is None
+
+
+def test_safe_visible_target_rejects_partially_visible_card():
+    card = _structural_device_card("Camera", (40, 2100, 520, 2450))
+
+    assert _safe_visible_card([card], ["Camera"], viewport=(0, 0, 1080, 2316)) is None
+
+
+def test_safe_visible_target_rejects_non_actionable_card():
+    card = _structural_device_card(
+        "Camera",
+        (40, 400, 520, 700),
+        clickable=False,
+        focusable=False,
+        effective_clickable=False,
+    )
+
+    assert _safe_visible_card([card], ["Camera"]) is None
+
+
+def test_safe_visible_target_rejects_covered_effective_tap_point():
+    card = _structural_device_card("Camera", (40, 400, 520, 700))
+
+    assert _safe_visible_card([card], ["Camera"], avoid_bounds=[(0, 350, 1080, 750)]) is None
+
+
+def test_safe_visible_target_uses_structural_name_for_temperature_humidity_siblings():
+    nodes = [
+        _structural_device_card("Temperature", (40, 400, 520, 700), state="Humidity"),
+        _structural_device_card("Humidity", (560, 400, 1040, 700), state="Temperature"),
+    ]
+
+    result = _safe_visible_card(nodes, ["Temperature"])
+
+    assert result is not None
+    assert result["stable_label"] == "Temperature"
+    assert result["node"] is nodes[0]
+
+
+def test_safe_visible_target_accepts_camera_structural_fixture_without_camera_specific_rules():
+    card = _structural_device_card("Camera", (40, 820, 520, 1120), state="Connected")
+
+    result = _safe_visible_card([card], ["Camera"])
+
+    assert result is not None
+    assert result["stable_label"] == "Camera"
+
+
+def test_safe_visible_target_ignores_localized_state_for_korean_name():
+    card = _structural_device_card("카메라", (40, 400, 520, 700), state="Connected")
+
+    result = _safe_visible_card([card], ["카메라"])
+
+    assert result is not None
+    assert result["stable_label"] == "카메라"
+
+
+def test_safe_visible_target_ignores_arbitrary_localized_state_for_name_identity():
+    card = _structural_device_card("Coffee Maker", (40, 400, 520, 700), state="状態-غير معروف")
+
+    result = _safe_visible_card([card], ["Coffee Maker"])
+
+    assert result is not None
+    assert result["stable_label"] == "Coffee Maker"
 
 
 def test_device_name_child_wins_over_korean_state_text():

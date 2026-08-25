@@ -677,6 +677,56 @@ def find_device_card_by_stable_label(
     return matches[0]
 
 
+def find_safe_visible_device_card_by_stable_label(
+    nodes: list[dict[str, Any]],
+    target_stable_labels: list[str] | tuple[str, ...],
+    *,
+    usable_viewport_bounds: tuple[int, int, int, int] | str | dict[str, Any] | None,
+    avoid_bounds: list[tuple[int, int, int, int] | str | dict[str, Any]]
+    | tuple[tuple[int, int, int, int] | str | dict[str, Any], ...] = (),
+) -> dict[str, Any] | None:
+    """Return a card safe for direct entry before top normalization.
+
+    The ordinary card matcher intentionally remains permissive for the
+    post-normalization search path. This stricter companion is used only for
+    the bounded visible-target fast path and therefore requires structural
+    identity, complete containment in a proven usable viewport, and a safe
+    actionable tap point.
+    """
+    card = find_device_card_by_stable_label(nodes, target_stable_labels)
+    if card is None or card.get("identity_source") != "device_name_child":
+        return None
+    if not (
+        bool(card.get("clickable"))
+        or bool(card.get("focusable"))
+        or bool(card.get("effective_clickable"))
+    ):
+        return None
+
+    card_bounds = _bounds_tuple(card.get("node", {}))
+    viewport_bounds = _parse_any_bounds(usable_viewport_bounds)
+    if not card_bounds or not viewport_bounds or not _bounds_contains(viewport_bounds, card_bounds):
+        return None
+
+    safe_tap = compute_safe_device_card_tap_point(card_bounds, avoid_bounds)
+    if not isinstance(safe_tap, dict):
+        return None
+    point = safe_tap.get("point")
+    if not (
+        isinstance(point, tuple)
+        and len(point) == 2
+        and _point_in_bounds(point, card_bounds)
+        and _point_in_bounds(point, viewport_bounds)
+    ):
+        return None
+
+    result = dict(card)
+    result["direct_entry"] = True
+    result["usable_viewport_bounds"] = ",".join(str(value) for value in viewport_bounds)
+    result["safe_tap"] = safe_tap
+    return result
+
+
 def verify_device_list_top(
     nodes: list[dict[str, Any]],
     top_anchor_labels: list[str] | tuple[str, ...] | None = None,

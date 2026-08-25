@@ -6425,7 +6425,8 @@ def _device_list_scroll_geometry(nodes: list[dict[str, Any]]) -> dict[str, Any]:
     scrollable_bounds: list[tuple[int, int, int, int]] = []
     bottom_navigation_bounds: list[tuple[int, int, int, int]] = []
     content_bounds: list[tuple[int, int, int, int]] = []
-    for node in nodes:
+    annotated_nodes = annotate_bottom_nav_candidates(nodes, expected_count=5)
+    for node in annotated_nodes:
         if not isinstance(node, dict):
             continue
         bounds = _parse_device_entry_bounds(node.get("boundsInScreen", node.get("bounds", "")))
@@ -6433,11 +6434,25 @@ def _device_list_scroll_geometry(nodes: list[dict[str, Any]]) -> dict[str, Any]:
             continue
         resource_id = str(node.get("viewIdResourceName", node.get("resourceId", "")) or "").lower()
         class_name = str(node.get("className", "") or "").lower()
-        if any(token in resource_id for token in _GLOBAL_BOTTOM_NAV_RESOURCE_TOKENS):
+        is_bottom_navigation = (
+            any(token in resource_id for token in _GLOBAL_BOTTOM_NAV_RESOURCE_TOKENS)
+            or str(node.get("isBottomNavigationBar", "") or "").lower() == "true"
+            or str(node.get("is_bottom_navigation_bar", "") or "").lower() == "true"
+            or is_annotated_bottom_nav_candidate(node)
+        )
+        if is_bottom_navigation:
             bottom_navigation_bounds.append(bounds)
             continue
         content_bounds.append(bounds)
-        if bool(node.get("scrollable")) or "recyclerview" in class_name or "scrollview" in class_name:
+        if (
+            bool(node.get("scrollable"))
+            or bool(node.get("isScrollable"))
+            or bool(node.get("is_scrollable"))
+            or "recyclerview" in class_name
+            or "gridview" in class_name
+            or "scrollview" in class_name
+            or "viewpager" in class_name
+        ):
             scrollable_bounds.append(bounds)
 
     viewport: tuple[int, int, int, int] | None = None
@@ -6483,6 +6498,30 @@ def _device_list_scroll_geometry(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         "bottom_navigation_bounds": "|".join(format_bounds(bounds) for bounds in bottom_navigation_bounds),
         "visible_card_count": len(visible_cards),
     }
+
+
+def _find_safe_visible_device_card_for_direct_entry(
+    nodes: list[dict[str, Any]],
+    labels: list[str],
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    geometry = _device_list_scroll_geometry(nodes)
+    viewport = geometry.get("viewport")
+    # A card-union fallback is sufficient for bounded swiping, but not for a
+    # pre-normalization direct entry. The fast path needs explicit container
+    # evidence proving that the whole card is currently usable.
+    if not geometry.get("scrollable_bounds") or not isinstance(viewport, tuple):
+        return None, geometry
+    avoid_bounds = [
+        candidate.get("bounds", "")
+        for candidate in device_tab_logic.collect_device_card_tap_avoid_bounds(nodes)
+    ]
+    card = device_tab_logic.find_safe_visible_device_card_by_stable_label(
+        nodes,
+        labels,
+        usable_viewport_bounds=viewport,
+        avoid_bounds=avoid_bounds,
+    )
+    return card, geometry
 
 
 def _perform_device_list_adb_swipe(
@@ -6716,19 +6755,65 @@ def _run_enter_device_card_plugin(
     if not callable(scroll_to_top_fn) and bool(step.get("scroll_to_top", True)):
         return False, "device_list_top_normalization_unavailable"
     if callable(scroll_to_top_fn) and bool(step.get("scroll_to_top", True)):
+        initial_nodes: list[dict[str, Any]] = []
+        try:
+            initial_dump = dump_tree_fn(dev=dev)
+            initial_nodes = initial_dump if isinstance(initial_dump, list) else []
+        except Exception as exc:
+            log(f"[DEVICE_ENTRY][visible_target] initial_dump_failed reason='{exc}'")
+
+        # Use the existing All-devices selection evidence as the context gate.
+        # This bypass never substitutes for Devices context verification and
+        # never turns an unverified top into VERIFIED_TOP.
+        initial_location_state = _detect_selected_device_location_with_xml_fallback(client, dev, initial_nodes)
+        if bool(initial_location_state.get("selected")):
+            direct_card, direct_geometry = _find_safe_visible_device_card_for_direct_entry(initial_nodes, labels)
+            if direct_card is not None:
+                log(
+                    f"[DEVICE_ENTRY][visible_target] direct_entry=true stable='{direct_card.get('stable_label', '')}' "
+                    f"identity_source='{direct_card.get('identity_source', '')}' "
+                    f"viewport='{direct_card.get('usable_viewport_bounds', '')}'"
+                )
+                tap_ok, tap_reason = _tap_device_card_safe(client, dev, direct_card, nodes=initial_nodes)
+                if not tap_ok:
+                    return False, tap_reason
+                confirm_ok, confirm_signal = _confirm_click_focused_transition(
+                    client=client,
+                    dev=dev,
+                    tab_cfg=tab_cfg,
+                    transition_fast_path=transition_fast_path,
+                )
+                setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
+                setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
+                if confirm_ok:
+                    return True, "visible_target_direct_entry"
+                return False, f"transition_not_confirmed:{confirm_signal}"
+            log(
+                "[DEVICE_ENTRY][visible_target] direct_entry=false "
+                f"reason='no_safe_unique_visible_target' viewport='{direct_geometry.get('viewport', '')}'"
+            )
+        else:
+            log(
+                "[DEVICE_ENTRY][visible_target] direct_entry=false "
+                f"reason='devices_context_unverified:{initial_location_state.get('reason', 'unknown')}'"
+            )
         top_anchor_labels = step.get(
             "top_anchor_stable_labels",
             device_tab_logic.DEFAULT_DEVICE_LIST_TOP_ANCHOR_LABELS,
         )
+        top_evidence_nodes: list[dict[str, Any]] = []
+
+        def _capture_top_evidence(current_nodes: list[dict[str, Any]]) -> dict[str, Any]:
+            if isinstance(current_nodes, list):
+                top_evidence_nodes[:] = current_nodes
+            return device_tab_logic.verify_device_list_top(current_nodes, top_anchor_labels)
+
         try:
             top_result = scroll_to_top_fn(
                 dev=dev,
                 max_swipes=int(step.get("scroll_to_top_max_swipes", 5) or 5),
                 pause=0.6,
-                top_evidence=lambda current_nodes: device_tab_logic.verify_device_list_top(
-                    current_nodes,
-                    top_anchor_labels,
-                ),
+                top_evidence=_capture_top_evidence,
             )
         except Exception as exc:
             log(f"[DEVICE_ENTRY][normalize] scroll_to_top_failed reason='{exc}'")
@@ -6738,17 +6823,25 @@ def _run_enter_device_card_plugin(
             log(f"[DEVICE_ENTRY][normalize] scroll_to_top_unverified reason='{reason}'")
             return False, f"device_list_top_unverified:{reason}"
 
+        search_seed_nodes = top_evidence_nodes or initial_nodes
+    else:
+        search_seed_nodes = None
+
     expanded_sections: set[str] = set()
     location_normalized = False
     last_reason = "target_not_found"
     repeated_inventory_signature_count = 0
     for search_step in range(1, max_scroll_search_steps + 1):
-        try:
-            nodes = dump_tree_fn(dev=dev)
-        except Exception as exc:
-            nodes = []
-            last_reason = f"dump_tree_failed:{exc}"
-        nodes = nodes if isinstance(nodes, list) else []
+        if isinstance(search_seed_nodes, list):
+            nodes = search_seed_nodes
+            search_seed_nodes = None
+        else:
+            try:
+                nodes = dump_tree_fn(dev=dev)
+            except Exception as exc:
+                nodes = []
+                last_reason = f"dump_tree_failed:{exc}"
+            nodes = nodes if isinstance(nodes, list) else []
 
         if not location_normalized:
             location_ok, nodes, location_reason = _ensure_all_devices_location_selected(
