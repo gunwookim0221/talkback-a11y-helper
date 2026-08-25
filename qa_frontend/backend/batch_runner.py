@@ -41,6 +41,7 @@ from .sleep_prevention import (
 from .shadow_pipeline import run_shadow_validation_pipeline
 from .shadow_reporting import load_shadow_validation_summary
 from .quality_issues import classify_quality_signals, normalize_legacy_quality_issues
+from .coverage_health import build_coverage_health_report
 
 logger = logging.getLogger(__name__)
 
@@ -1005,6 +1006,17 @@ class BatchRunManager:
                 except Exception as e:
                     print(f"Failed to extract coverage probe summary from xlsx: {e}")
 
+            if xlsx_path or parsed_summary.get("scenarios") or data.get("scenarios"):
+                try:
+                    data["coverage_health"] = build_coverage_health_report(
+                        scenarios=parsed_summary.get("scenarios") or data.get("scenarios") or [],
+                        log_path=(ROOT_DIR / log_path) if log_path else None,
+                        xlsx_path=(ROOT_DIR / xlsx_path) if xlsx_path else None,
+                        focusable_coverage=data.get("focusable_coverage"),
+                    )
+                except Exception as e:
+                    print(f"Failed to build coverage health report: {e}")
+
             data.update({
                 "batch_id": self._batch_id,
                 "run_kind": self._run_kind,
@@ -1037,6 +1049,7 @@ class BatchRunManager:
                     else parsed_summary.get("traversal_identity_v2_diagnostics")
                 ),
                 "quality": quality,
+                "coverage_health": data.get("coverage_health"),
                 "scenarios": parsed_summary.get("scenarios", []),
                 "process_status": parsed_summary.get("process_status"),
                 "scenario_result_status": parsed_summary.get("scenario_result_status"),
@@ -1695,6 +1708,7 @@ def get_recent_batches() -> list[dict]:
                                 )
                                 dev_info["focusable_coverage"] = dev_data.get("focusable_coverage")
                                 dev_info["focusable_issues"] = dev_data.get("focusable_issues")
+                                dev_info["coverage_health"] = dev_data.get("coverage_health")
                                 coverage_probe_summary = dev_data.get(
                                     "coverage_probe_summary",
                                     dev_data.get("coverage_probe"),
@@ -1720,6 +1734,16 @@ def get_recent_batches() -> list[dict]:
                                 dev_info.update(parsed)
                             except (OSError, json.JSONDecodeError) as exc:
                                 _log_invalid_summary_warning_once(dev_summary_path, exc, kind="device")
+                            except Exception:
+                                pass
+                        if not isinstance(dev_info.get("coverage_health"), dict):
+                            try:
+                                dev_info["coverage_health"] = build_coverage_health_report(
+                                    scenarios=dev_info.get("scenarios") or [],
+                                    log_path=(ROOT_DIR / dev_info["log_path"]) if dev_info.get("log_path") else None,
+                                    xlsx_path=(ROOT_DIR / dev_info["xlsx_path"]) if dev_info.get("xlsx_path") else None,
+                                    focusable_coverage=dev_info.get("focusable_coverage"),
+                                )
                             except Exception:
                                 pass
                         coverage_probe_summary = dev_info.get("coverage_probe_summary")

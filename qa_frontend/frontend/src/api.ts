@@ -349,6 +349,7 @@ export type MismatchSummary = {
     classification_available?: boolean;
   };
   focusable_coverage?: FocusableCoverage;
+  coverage_health?: CoverageHealth;
   coverage_probe_summary?: CoverageProbeSummary;
   coverage_probe?: CoverageProbeSummary | null;
 };
@@ -371,6 +372,11 @@ export type FocusableCoverage = {
     focusable_review_expected_count?: number;
     focusable_review_unknown_count?: number;
     focusable_optional_expected_count?: number;
+    focusable_expected_count?: number;
+    focusable_covered_count?: number;
+    focusable_missed_count?: number;
+    focusable_unknown_count?: number;
+    focusable_ignored_count?: number;
     focusable_coverage_rate?: number | null;
   };
   scenarios?: Array<{
@@ -380,6 +386,51 @@ export type FocusableCoverage = {
     focusable_coverage_rate?: number | null;
   }>;
   issues?: FocusableCoverageIssue[];
+};
+
+export type CoverageHealthScenario = {
+  scenario_id: string;
+  stabilization_mode?: string | null;
+  anchor_present?: boolean | null;
+  entry_failed?: boolean | null;
+  content_entered?: boolean | null;
+  content_row_count?: number | null;
+  traversal_terminal_state?: string | null;
+  availability_state?: string | null;
+  derived_classification?: string | null;
+  scenario_result?: string | null;
+  stop_reason?: string | null;
+};
+
+export type CoverageHealth = {
+  schema_version?: number;
+  summary?: {
+    anchor_mode_count?: number;
+    true_anchor_traversal_failure_count?: number;
+    anchor_mode_content_traversed_count?: number;
+    unavailable_or_no_target_count?: number;
+    handled_or_ambiguous_count?: number;
+    content_entered_count?: number;
+    entry_failed_count?: number;
+  };
+  scenarios?: CoverageHealthScenario[];
+  focusable_candidate_coverage?: {
+    label?: string;
+    formula?: string;
+    covered_count?: number;
+    expected_count?: number;
+    missed_count?: number;
+    unknown_count?: number;
+    ignored_count?: number;
+    rate?: number | null;
+  };
+  semantic_value_coverage?: {
+    label?: string;
+    formula?: string;
+    covered_count?: number;
+    expected_count?: number;
+    rate?: number | null;
+  };
 };
 
 export type CoverageProbeSummary = {
@@ -495,6 +546,7 @@ export type RecentBatchDevice = {
   };
   focusable_coverage?: FocusableCoverage | null;
   focusable_issues?: FocusableCoverageIssue[];
+  coverage_health?: CoverageHealth | null;
   coverage_probe_summary?: CoverageProbeSummary | null;
   coverage_probe?: CoverageProbeSummary | null;
   shadow_validation?: ShadowValidationSummary | null;

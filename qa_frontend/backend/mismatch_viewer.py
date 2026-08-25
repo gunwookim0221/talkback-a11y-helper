@@ -4,6 +4,7 @@ import openpyxl
 import json
 from pathlib import Path
 from .paths import OUTPUT_DIR
+from .coverage_health import build_coverage_health_report
 from .quality_issues import classify_quality_signals
 from .recent_runs import safe_recent_run_log_path
 from .run_summary import read_summary_file, summary_path_for_log
@@ -35,9 +36,20 @@ def get_run_mismatch_summary(run_id: str) -> dict[str, object]:
     if not xlsx_path:
         return {"error": "xlsx output not available"}
 
-    return get_mismatch_summary_from_xlsx(xlsx_path)
+    coverage_health = build_coverage_health_report(
+        scenarios=(summary or {}).get("scenarios", []) if isinstance(summary, dict) else [],
+        log_path=log_path,
+        xlsx_path=xlsx_path,
+        focusable_coverage=(summary or {}).get("focusable_coverage") if isinstance(summary, dict) else None,
+    )
+    return get_mismatch_summary_from_xlsx(xlsx_path, coverage_health=coverage_health)
 
-def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
+
+def get_mismatch_summary_from_xlsx(
+    xlsx_path: Path,
+    *,
+    coverage_health: dict[str, object] | None = None,
+) -> dict[str, object]:
     if not xlsx_path.exists():
         return {"error": "xlsx file not found"}
 
@@ -397,6 +409,11 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
                 "focusable_review_expected_count": int(focusable_summary.get("focusable_review_expected_count") or 0),
                 "focusable_review_unknown_count": int(focusable_summary.get("focusable_review_unknown_count") or 0),
                 "focusable_optional_expected_count": int(focusable_summary.get("focusable_optional_expected_count") or 0),
+                "focusable_expected_count": int(focusable_summary.get("focusable_expected_count") or 0),
+                "focusable_covered_count": int(focusable_summary.get("focusable_covered_count") or 0),
+                "focusable_missed_count": int(focusable_summary.get("focusable_missed_count") or 0),
+                "focusable_unknown_count": int(focusable_summary.get("focusable_unknown_count") or 0),
+                "focusable_ignored_count": int(focusable_summary.get("focusable_ignored_count") or 0),
                 "focusable_coverage_rate": focusable_summary.get("focusable_coverage_rate"),
             },
             "scenario_summary": scenario_summary,
@@ -405,6 +422,7 @@ def get_mismatch_summary_from_xlsx(xlsx_path: Path) -> dict[str, object]:
             "automation_diagnostics": automation_diagnostics,
             "quality_issues_contract": classified_quality.contract,
             "focusable_coverage": focusable_coverage,
+            "coverage_health": coverage_health,
             "coverage_probe_summary": coverage_probe_summary,
             "coverage_probe": coverage_probe_summary,
             "debug": {
@@ -581,6 +599,11 @@ def _empty_focusable_coverage() -> dict[str, object]:
             "focusable_review_expected_count": 0,
             "focusable_review_unknown_count": 0,
             "focusable_optional_expected_count": 0,
+            "focusable_expected_count": 0,
+            "focusable_covered_count": 0,
+            "focusable_missed_count": 0,
+            "focusable_unknown_count": 0,
+            "focusable_ignored_count": 0,
             "focusable_coverage_rate": None,
         },
         "scenarios": [],
@@ -612,6 +635,9 @@ def _read_focusable_coverage_for_xlsx(xlsx_path: Path) -> dict[str, object]:
     total_optional_expected = 0
     expected_total = 0
     covered_total = 0
+    missed_total = 0
+    unknown_total = 0
+    ignored_total = 0
     scenarios: list[dict[str, object]] = []
 
     for item in summaries:
@@ -625,6 +651,9 @@ def _read_focusable_coverage_for_xlsx(xlsx_path: Path) -> dict[str, object]:
         optional_expected = _safe_int(item.get("optional_expected_count"))
         expected = _safe_int(item.get("expected_count"))
         covered = _safe_int(item.get("covered_count"))
+        missed = _safe_int(item.get("missed_count"))
+        unknown = _safe_int(item.get("unknown_count"))
+        ignored = _safe_int(item.get("ignore_count"))
         total_required_expected += required_expected
         total_required_covered += required_covered
         total_required_missed += required_missed
@@ -633,6 +662,9 @@ def _read_focusable_coverage_for_xlsx(xlsx_path: Path) -> dict[str, object]:
         total_optional_expected += optional_expected
         expected_total += expected
         covered_total += covered
+        missed_total += missed
+        unknown_total += unknown
+        ignored_total += ignored
         scenarios.append(
             {
                 "scenario_id": str(item.get("scenario_id", "") or ""),
@@ -670,6 +702,11 @@ def _read_focusable_coverage_for_xlsx(xlsx_path: Path) -> dict[str, object]:
             "focusable_review_expected_count": total_review_expected,
             "focusable_review_unknown_count": total_review_unknown,
             "focusable_optional_expected_count": total_optional_expected,
+            "focusable_expected_count": expected_total,
+            "focusable_covered_count": covered_total,
+            "focusable_missed_count": missed_total,
+            "focusable_unknown_count": unknown_total,
+            "focusable_ignored_count": ignored_total,
             "focusable_coverage_rate": round((covered_total / expected_total) * 100.0, 1) if expected_total else None,
         },
         "scenarios": scenarios,

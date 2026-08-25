@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState, useMemo } from 'react';
-import { RecentRun, api, RecentBatch, RecentBatchDevice, CoverageProbeSummary, ShadowValidationSummary } from '../api';
+import { RecentRun, api, RecentBatch, RecentBatchDevice, CoverageHealth, CoverageProbeSummary, ShadowValidationSummary } from '../api';
 import { CrashIssuesPanel } from './CrashIssuesPanel';
 import { IdentityShadowCard } from './IdentityShadowCard';
 import { TraversalIdentityV2Card } from './TraversalIdentityV2Card';
@@ -111,6 +111,7 @@ type MismatchSummary = {
       focusable_taxonomy_reason?: string;
     }>;
   };
+  coverage_health?: CoverageHealth;
   coverage_probe?: CoverageProbeSummary | null;
 };
 
@@ -228,6 +229,10 @@ export function RecentRunsPanel({
     const shadowQuality = runData?.shadow_quality;
     const focusableCoverage = runData?.focusable_coverage;
     const focusableSummary = focusableCoverage?.summary;
+    const coverageHealth = runData?.coverage_health as CoverageHealth | null | undefined;
+    const coverageHealthSummary = coverageHealth?.summary;
+    const focusableCandidateCoverage = coverageHealth?.focusable_candidate_coverage;
+    const semanticValueCoverage = coverageHealth?.semantic_value_coverage;
     const coverageProbe = (
       runData?.coverage_probe_summary ?? runData?.coverage_probe
     ) as CoverageProbeSummary | null | undefined;
@@ -361,6 +366,93 @@ export function RecentRunsPanel({
             </details>
           </div>
         </details>
+
+        {coverageHealth && (
+          <details open style={{ marginTop: '16px' }}>
+            <summary style={{ fontSize: '14px', fontWeight: 'bold' }}>Coverage Health</summary>
+            <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', marginTop: '4px' }}>
+              Validator-facing interpretation. Stabilization mode is a mechanism, not a traversal outcome.
+            </div>
+            <div className="scenarioDetailList" style={{ marginTop: '8px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '8px', marginBottom: '8px' }}>
+                {[
+                  ['Content entered', coverageHealthSummary?.content_entered_count ?? 0],
+                  ['Entry failed', coverageHealthSummary?.entry_failed_count ?? 0],
+                  ['Unavailable / no target', coverageHealthSummary?.unavailable_or_no_target_count ?? 0],
+                  ['Handled / special', coverageHealthSummary?.handled_or_ambiguous_count ?? 0],
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="scenarioDetailRow" style={{ textAlign: 'center', padding: '10px 6px' }}>
+                    <small>{label}</small>
+                    <strong style={{ fontSize: '1.25em' }}>{value}</strong>
+                  </div>
+                ))}
+              </div>
+              <div style={{ padding: '8px 10px', color: 'var(--color-text-dim)', fontSize: '12px' }}>
+                <strong>Anchor-mode interpretation:</strong>{' '}
+                {coverageHealthSummary?.anchor_mode_count ?? 0} stabilization-mode scenarios ·{' '}
+                {coverageHealthSummary?.anchor_mode_content_traversed_count ?? 0} content traversed ·{' '}
+                {coverageHealthSummary?.true_anchor_traversal_failure_count ?? 0} true anchor-only traversal failures
+              </div>
+              {focusableCandidateCoverage && (
+                <div style={{ padding: '8px 10px', border: '1px solid var(--color-border)', borderRadius: '6px', marginTop: '4px' }}>
+                  <strong>{focusableCandidateCoverage.label || 'Focusable candidate coverage'}</strong>
+                  <small style={{ display: 'block', color: 'var(--color-text-dim)', marginTop: '3px' }}>
+                    Inventory/probe metric, not total UI traversal · {focusableCandidateCoverage.formula || 'covered / expected'}
+                  </small>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '6px', marginTop: '6px' }}>
+                    {[
+                      ['Covered', focusableCandidateCoverage.covered_count ?? 0],
+                      ['Expected', focusableCandidateCoverage.expected_count ?? 0],
+                      ['Missed', focusableCandidateCoverage.missed_count ?? 0],
+                      ['Unknown', focusableCandidateCoverage.unknown_count ?? 0],
+                      ['Ignored', focusableCandidateCoverage.ignored_count ?? 0],
+                    ].map(([label, value]) => (
+                      <div key={String(label)} style={{ textAlign: 'center' }}>
+                        <small>{label}</small>
+                        <strong style={{ display: 'block' }}>{value}</strong>
+                      </div>
+                    ))}
+                  </div>
+                  <small style={{ display: 'block', marginTop: '5px' }}>
+                    Rate: {typeof focusableCandidateCoverage.rate === 'number' ? `${focusableCandidateCoverage.rate}%` : '-'}
+                  </small>
+                </div>
+              )}
+              {semanticValueCoverage && (
+                <div style={{ padding: '8px 10px', border: '1px solid var(--color-border)', borderRadius: '6px', marginTop: '8px' }}>
+                  <strong>{semanticValueCoverage.label || 'Semantic value coverage'}</strong>
+                  <small style={{ display: 'block', color: 'var(--color-text-dim)', marginTop: '3px' }}>
+                    Separate semantic-value metric · {semanticValueCoverage.formula || 'covered / expected'}
+                  </small>
+                  <strong style={{ display: 'block', marginTop: '5px' }}>
+                    {semanticValueCoverage.covered_count ?? 0} / {semanticValueCoverage.expected_count ?? 0} ({typeof semanticValueCoverage.rate === 'number' ? `${semanticValueCoverage.rate}%` : '-'})
+                  </strong>
+                </div>
+              )}
+              {(coverageHealth.scenarios || []).length > 0 && (
+                <details style={{ marginTop: '8px' }}>
+                  <summary>Scenario coverage evidence</summary>
+                  <div className="scenarioDetailList" style={{ marginTop: '6px' }}>
+                    {(coverageHealth.scenarios || []).map(scenario => (
+                      <div key={scenario.scenario_id} className="scenarioDetailRow">
+                        <strong>{scenario.scenario_id}</strong>
+                        <small>
+                          {scenario.derived_classification || 'INDETERMINATE'} ·{' '}
+                          content_entered={scenario.content_entered == null ? 'unknown' : String(scenario.content_entered)} ·{' '}
+                          entry_failed={scenario.entry_failed == null ? 'unknown' : String(scenario.entry_failed)} ·{' '}
+                          rows={scenario.content_row_count == null ? 'unknown' : scenario.content_row_count}
+                        </small>
+                        <small>
+                          terminal={scenario.traversal_terminal_state || 'none'} · availability={scenario.availability_state || 'unknown'}
+                        </small>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          </details>
+        )}
 
         {shadowValidation?.available && (
           <details open className="shadowValidationCard">
@@ -569,31 +661,40 @@ export function RecentRunsPanel({
 
         {focusableSummary && (
           <details open style={{ marginTop: '16px' }}>
-            <summary style={{ fontSize: '14px', fontWeight: 'bold' }}>Focusable Coverage</summary>
+            <summary style={{ fontSize: '14px', fontWeight: 'bold' }}>Focusable Candidate Coverage</summary>
             <div style={{ fontSize: '12px', color: 'var(--color-text-dim)', marginTop: '4px' }}>
-              Reporting-only V7 focusable coverage signal. This does not change PASS/WARN/FAIL.
+              Reporting-only inventory/probe candidate metric. It is not generic total UI traversal coverage and does not change PASS/WARN/FAIL.
             </div>
             <div className="scenarioDetailList" style={{ marginTop: '8px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '8px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '8px', marginBottom: '8px' }}>
+                <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '10px 6px' }}>
+                  <small>Covered</small>
+                  <strong style={{ fontSize: '1.25em' }}>{focusableCandidateCoverage?.covered_count ?? focusableSummary.focusable_covered_count ?? 0}</strong>
+                </div>
+                <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '10px 6px' }}>
+                  <small>Expected</small>
+                  <strong style={{ fontSize: '1.25em' }}>{focusableCandidateCoverage?.expected_count ?? focusableSummary.focusable_expected_count ?? 0}</strong>
+                </div>
                 <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
-                  <small>Required Misses</small>
-                  <strong style={{ fontSize: '1.4em', color: (focusableSummary.focusable_required_missed_count ?? 0) > 0 ? 'var(--color-danger)' : 'var(--color-success)' }}>
-                    {focusableSummary.focusable_required_missed_count ?? 0}
+                  <small>Missed</small>
+                  <strong style={{ fontSize: '1.25em', color: (focusableCandidateCoverage?.missed_count ?? focusableSummary.focusable_missed_count ?? focusableSummary.focusable_required_missed_count ?? 0) > 0 ? 'var(--color-danger)' : 'var(--color-success)' }}>
+                    {focusableCandidateCoverage?.missed_count ?? focusableSummary.focusable_missed_count ?? focusableSummary.focusable_required_missed_count ?? 0}
                   </strong>
                 </div>
                 <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
-                  <small>Review Unknown</small>
-                  <strong style={{ fontSize: '1.4em', color: (focusableSummary.focusable_review_unknown_count ?? 0) > 0 ? 'var(--color-warning)' : 'inherit' }}>
-                    {focusableSummary.focusable_review_unknown_count ?? 0}
+                  <small>Unknown</small>
+                  <strong style={{ fontSize: '1.25em', color: (focusableCandidateCoverage?.unknown_count ?? focusableSummary.focusable_unknown_count ?? focusableSummary.focusable_review_unknown_count ?? 0) > 0 ? 'var(--color-warning)' : 'inherit' }}>
+                    {focusableCandidateCoverage?.unknown_count ?? focusableSummary.focusable_unknown_count ?? focusableSummary.focusable_review_unknown_count ?? 0}
                   </strong>
                 </div>
                 <div className="scenarioDetailRow" style={{ textAlign: 'center', padding: '12px 8px' }}>
-                  <small>Coverage Rate</small>
-                  <strong style={{ fontSize: '1.4em' }}>
-                    {typeof focusableSummary.focusable_coverage_rate === 'number' ? `${focusableSummary.focusable_coverage_rate}%` : '-'}
+                  <small>Ignored</small>
+                  <strong style={{ fontSize: '1.25em' }}>
+                    {focusableCandidateCoverage?.ignored_count ?? focusableSummary.focusable_ignored_count ?? 0}
                   </strong>
                 </div>
               </div>
+              <small>Rate: {typeof (focusableCandidateCoverage?.rate ?? focusableSummary.focusable_coverage_rate) === 'number' ? `${focusableCandidateCoverage?.rate ?? focusableSummary.focusable_coverage_rate}%` : '-'}</small>
               {focusableIssues.length > 0 ? (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
                   <div className="scenarioDetailRow" style={{ alignItems: 'flex-start' }}>
