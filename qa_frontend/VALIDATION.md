@@ -128,12 +128,12 @@ FAIL logs:
 
 PASS:
 
-- `/api/scenarios` still exposes each scenario's source `enabled` state from `config/runtime_config.json`
-- Frontend initial checkbox selection is `global_nav_main` only
-- `global_nav_main` is the default because Phase 1 smoke should start from the smallest stable sanity-check entry point
-- Source-enabled scenarios such as `life_family_care_plugin` are not auto-selected just because the source config has `enabled=true`
-- UI text clearly separates run selection count from source runtime_config enabled count
-- `Select Global Nav` selects only `global_nav_main`
+- `/api/scenarios` exposes each scenario's source `enabled` state and backend-derived `canonical_full` membership
+- Frontend initial checkbox selection is the complete canonical Full scenario set
+- Canonical Full count is derived from the registry and is independent of the current runtime_config enabled count
+- Source `enabled` flags remain targeted execution defaults; they do not define Full membership
+- Exact canonical selection is labeled Full Validation; one-scenario and other partial selections are Custom Run
+- The `Select Global Nav` preset remains available for targeted smoke/custom checks
 - `Clear All` clears the run selection and a run start should be blocked by the backend with `No scenario selected`
 
 FAIL logs:
@@ -502,7 +502,7 @@ FAIL logs:
 - Device-required scenarios remain manual because they depend on real ADB transport, helper state, SmartThings screen state, and live runner behavior.
 - The automated set only validates `qa_frontend` importability, API structure, safe path handling, static file presence, and runner guard behavior.
 - Selected Smoke means a reduced-step sanity check for the currently selected scenarios. Selected Full means a regression run that keeps source `runtime_config.json` `max_steps` for the selected scenarios.
-- Source `enabled` flags are display-only in the UI. The actual run selection comes from the current checkbox state, which defaults to `global_nav_main`.
+- Full Validation means the exact canonical Full registry set; any partial selection is Custom Run. Source `enabled` flags remain targeted execution defaults and are not used to define Full membership.
 - Launch mode defaults to `Clean launch` so SmartThings starts from a more stable baseline. `Warm launch` is retained for advanced/debug runs that intentionally preserve the current app state.
 - Presets (`Navigation`, `Life Plugins`, `Device Plugins`, `All Plugins`, `All Scenarios`, `Clear All`) only change frontend checkbox selection state. All Plugins selects `device_*_plugin` and `life_*_plugin` only; All Scenarios also includes navigation/main scenarios. Selected Smoke/Selected Full choose execution mode. Presets do not modify the source runtime config.
 - Run status is process execution status. Scenario status is validation result status parsed from the run log and may be `failed` even when the process exits successfully.

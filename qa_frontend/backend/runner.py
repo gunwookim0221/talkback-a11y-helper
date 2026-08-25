@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 from tb_runner.run_spec import RunSpec, resolve_identity_feature_flags
+from tb_runner.scenario_config import classify_scenario_selection
 
 from .paths import ROOT_DIR, RUN_LOG_DIR, SCRIPT_PATH, RUNTIME_CONFIG_PATH, OUTPUT_DIR
 from .device_locale import apply_language_mode, format_language_log_lines, normalize_language_mode
@@ -40,6 +41,7 @@ class RunManager:
         self._state: RunState = "idle"
         self._run_id: str | None = None
         self._mode: str | None = None
+        self._run_kind = "CUSTOM"
         self._log_path: Path | None = None
         self._started_at: str | None = None
         self._finished_at: str | None = None
@@ -99,6 +101,7 @@ class RunManager:
                 self._finished_at = None
                 self._returncode = None
                 self._scenario_ids = list(scenario_ids or [])
+                self._run_kind = classify_scenario_selection(self._scenario_ids)
                 self._launch_mode = normalized_launch_mode
                 self._language_mode = normalized_language_mode
                 self._language_status = None
@@ -173,6 +176,10 @@ class RunManager:
                     f"runtime_config_path='{self._runtime_config_path}' "
                     f"launch_mode='{normalized_launch_mode}' "
                     f"language_mode='{normalized_language_mode}'\n"
+                )
+                log_file.write(
+                    f"[QA_FRONTEND][run_kind] run_kind='{self._run_kind}' "
+                    f"canonical_full={self._run_kind == 'FULL'}\n"
                 )
                 log_file.write(
                     "[QA_FRONTEND][scenario_selection] "
@@ -507,6 +514,7 @@ class RunManager:
             "state": self._state,
             "run_id": self._run_id,
             "mode": self._mode,
+            "run_kind": self._run_kind,
             "started_at": self._started_at,
             "finished_at": self._finished_at,
             "returncode": self._returncode,

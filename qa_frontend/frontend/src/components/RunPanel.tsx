@@ -362,7 +362,7 @@ export function RunPanel({
           disabled={controlsLocked}
         >
           Full Validation
-          <small>Clean · {fullValidationScenarioIds.length} enabled registry scenarios · approval diagnostics on</small>
+          <small>Clean · {fullValidationScenarioIds.length} canonical Full scenarios · approval diagnostics on</small>
         </button>
         <details className="advancedRunOptions">
           <summary>Additional run profiles</summary>

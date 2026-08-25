@@ -3,7 +3,7 @@ import type { Scenario } from './api';
 export const DEFAULT_SCENARIO_ID = 'global_nav_main';
 
 export function getFullValidationScenarioIds(scenarios: readonly Scenario[]): string[] {
-  return scenarios.filter((scenario) => scenario.enabled).map((scenario) => scenario.id);
+  return scenarios.filter((scenario) => scenario.canonical_full).map((scenario) => scenario.id);
 }
 
 export function initialScenarioSelection(scenarios: readonly Scenario[]): Set<string> {

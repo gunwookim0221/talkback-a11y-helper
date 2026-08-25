@@ -1491,3 +1491,28 @@ TAB_CONFIGS = [
 
 
 ]
+
+
+def canonical_full_scenario_ids() -> list[str]:
+    """Return the authoritative scenario IDs in the approval Full suite.
+
+    Runtime ``enabled`` flags are intentionally not consulted here. They are
+    targeted execution defaults, while ``TAB_CONFIGS`` defines canonical Full
+    membership.
+    """
+
+    return [
+        str(item["scenario_id"])
+        for item in TAB_CONFIGS
+        if isinstance(item, dict) and item.get("scenario_id")
+    ]
+
+
+def classify_scenario_selection(scenario_ids: list[str] | tuple[str, ...]) -> str:
+    """Classify an explicit selection without conflating it with ``enabled``."""
+
+    selected = [str(item) for item in scenario_ids if item]
+    canonical = canonical_full_scenario_ids()
+    if len(selected) == len(canonical) and set(selected) == set(canonical):
+        return "FULL"
+    return "CUSTOM"

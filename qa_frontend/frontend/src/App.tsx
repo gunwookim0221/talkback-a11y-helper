@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import type { DeviceInfo, HelperStatus, OutputFile, RecentRun, RunStatus, Scenario, RuntimeDashboard } from './api';
 import { applyPresetSelection, PRESETS, ScenarioPresetId } from './presets';
-import { getFullValidationScenarioIds, initialScenarioSelection } from './selection';
+import { getFullValidationScenarioIds, initialScenarioSelection, isFullValidationSelection } from './selection';
 import { ADBPanel } from './components/ADBPanel';
 import { HelperPanel } from './components/HelperPanel';
 import { RunPanel } from './components/RunPanel';
@@ -94,7 +94,7 @@ export default function App() {
   const effectiveMode = status?.state === 'running' ? ((status.mode as 'smoke' | 'full' | null) ?? plannedMode) : plannedMode;
   const currentRunLabel = effectiveMode === 'smoke'
     ? 'Quick Smoke'
-    : selectedCount > 0 && selectedCount === fullValidationScenarioCount
+    : isFullValidationSelection(selected, fullValidationIds)
       ? 'Full Validation'
       : 'Custom Run';
   const stepPolicyText =
@@ -448,7 +448,7 @@ export default function App() {
           <h2>Scenarios</h2>
           <p>
             {selectedCount} / {fullValidationScenarioCount} scenarios selected for Full Validation. The default set is derived
-            from the enabled scenarios in the current runtime_config registry.
+            from the canonical Full scenario registry.
           </p>
           <p className="scenarioHint">
             Selecting fewer or additional scenarios changes this to Custom Run. Disabled or optional scenarios remain available
@@ -470,7 +470,7 @@ export default function App() {
             ))}
           </div>
           {fullValidationScenarioCount === 0 && (
-            <div className="notice">No enabled scenarios are available for Full Validation. Select an explicit custom scenario before running.</div>
+            <div className="notice">No canonical Full scenarios are available. Select an explicit custom scenario before running.</div>
           )}
           <div className="scenarioGroupsContainer">
             {groupScenarios(scenarios).map((group) => (

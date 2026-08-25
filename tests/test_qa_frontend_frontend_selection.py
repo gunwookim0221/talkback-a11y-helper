@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_frontend_initial_selection_uses_enabled_registry_and_safe_validator_defaults():
+def test_frontend_initial_selection_uses_canonical_registry_and_safe_validator_defaults():
     selection_ts = (ROOT / "qa_frontend" / "frontend" / "src" / "selection.ts").read_text(encoding="utf-8")
     app_tsx = (ROOT / "qa_frontend" / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
     run_panel_tsx = (ROOT / "qa_frontend" / "frontend" / "src" / "components" / "RunPanel.tsx").read_text(encoding="utf-8")
@@ -14,7 +14,8 @@ def test_frontend_initial_selection_uses_enabled_registry_and_safe_validator_def
     api_ts = (ROOT / "qa_frontend" / "frontend" / "src" / "api.ts").read_text(encoding="utf-8")
 
     assert "getFullValidationScenarioIds" in selection_ts
-    assert "scenario.enabled" in selection_ts
+    assert "scenario.canonical_full" in selection_ts
+    assert "scenario.enabled" not in selection_ts
     assert "new Set(getFullValidationScenarioIds(scenarios))" in selection_ts
     assert "setSelected(initialScenarioSelection(response.scenarios))" in app_tsx
     assert "const DEFAULT_RUN_PROFILE = RUN_PROFILES['full-validation']" in app_tsx
@@ -40,6 +41,7 @@ def test_frontend_initial_selection_uses_enabled_registry_and_safe_validator_def
     assert "presetId === 'select_all'" in presets_ts
     assert "new Set(scenarios.map((scenario) => scenario.id))" in presets_ts
     assert "The default set is derived" in app_tsx
+    assert "canonical Full scenario registry" in app_tsx
     assert "selected for Full Validation" in app_tsx
     assert "Selected Smoke" in run_panel_tsx
     assert "selected scenarios with reduced max_steps" in run_panel_tsx

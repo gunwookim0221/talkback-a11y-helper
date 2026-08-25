@@ -2,8 +2,9 @@
 
 ## 1. Run Profiles
 
-The Run screen provides three frontend-only profiles. A profile maps to the existing
-Run start request fields; it does not add a new backend field or alter `RunSpec`.
+The Run screen provides three frontend profiles. A profile maps to the existing Run
+start request fields; the backend derives and persists semantic `run_kind` from the
+explicit scenario IDs and does not add it to `RunSpec`.
 
 | Profile | Launch | Mode | Coverage | Traversal | Evidence | Profiler | Identity V2 | Legacy shadow |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -21,9 +22,11 @@ Full Validation is the initial profile. Its defaults prevent a complete scenario
 selection from being accidentally submitted with `mode=smoke`, which would make
 the resulting run ineligible as a full baseline candidate.
 
-Scenario selection remains a separate, explicit operator choice. The existing
-initial `global_nav_main` selection and scenario presets are unchanged. Therefore,
-the initial screen can correctly show `NOT READY` until All Scenarios is selected.
+Scenario selection remains explicit, but the validator-safe initial selection is
+the complete canonical Full scenario set. Full Validation always means the exact
+canonical registry set; any partial or expanded selection is classified as Custom
+Run. Runtime `enabled` flags remain targeted execution defaults and do not shrink
+the canonical Full set.
 
 ## 3. Validation Readiness
 

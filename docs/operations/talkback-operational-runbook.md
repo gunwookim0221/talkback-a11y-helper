@@ -58,7 +58,7 @@ Available run / candidate is a local input list, not an approval list. APPROVED 
 
 ## 6. Full Validation Profile
 
-Select Full Validation, Clean launch, all scenarios, and the target locale. The profile enables Full mode, Coverage Probe, Evidence Ledger, Identity V2, Production Traversal V2, and Profiler; Shadow Validation is off. Smoke/Targeted runs are reproduction inputs, not approval evidence.
+Select Full Validation, Clean launch, the exact canonical Full scenario set, and the target locale. The profile enables Full mode, Coverage Probe, Evidence Ledger, Identity V2, Production Traversal V2, and Profiler; Shadow Validation is off. A partial selection is a Custom Run. Smoke/Targeted runs are reproduction inputs, not approval evidence.
 
 ## 7. English Full Run / 8. Korean Full Run
 

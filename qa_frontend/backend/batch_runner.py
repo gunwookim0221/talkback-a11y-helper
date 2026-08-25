@@ -19,6 +19,7 @@ from tb_runner.canonical_json import canonical_sha256
 from tb_runner.profiler_archive import create_profiler_archives
 
 from tb_runner.run_spec import RunSpec, resolve_identity_feature_flags
+from tb_runner.scenario_config import classify_scenario_selection
 from .paths import ROOT_DIR, RUN_LOG_DIR, SCRIPT_PATH, RUNTIME_CONFIG_PATH
 from .runtime_dashboard import TERMINAL_SCENARIO_STATUSES, parse_runtime_log
 from .runtime_config_selection import write_selected_runtime_config
@@ -512,6 +513,7 @@ class BatchRunManager:
         self._batch_id = None
         self._state = "idle"  # idle, running, finished, error
         self._mode = None
+        self._run_kind = "CUSTOM"
         self._created_at = None
         self._devices = []
         self._current_device_idx = -1
@@ -537,6 +539,7 @@ class BatchRunManager:
             self._launch_mode = normalize_launch_mode(launch_mode)
             self._language_mode = normalize_language_mode(language_mode)
             self._scenario_ids = scenario_ids or []
+            self._run_kind = classify_scenario_selection(self._scenario_ids)
             self._enable_coverage_probe = enable_coverage_probe
             self._shadow_validation_requested = (
                 shadow_validation is True and str(mode).lower() == "full"
@@ -649,11 +652,13 @@ class BatchRunManager:
             "batch_id": self._batch_id,
             "state": self._state,
             "mode": self._mode,
+            "run_kind": self._run_kind,
             "feature_flags": dict(self._feature_flags),
             "current_device": current_serial,
             "devices": device_statuses,
             "batch": {
                 "batch_id": self._batch_id,
+                "run_kind": self._run_kind,
                 "state": _normalize_batch_state(self._state),
                 "started_at": self._created_at,
                 "finished_at": self._batch_finished_at(device_statuses),
@@ -836,6 +841,7 @@ class BatchRunManager:
         data = {
             "batch_id": self._batch_id,
             "mode": self._mode,
+            "run_kind": self._run_kind,
             "scenario_ids": [str(item) for item in (self._scenario_ids or [])],
             "created_at": self._created_at,
             "state": self._state,
@@ -1001,6 +1007,7 @@ class BatchRunManager:
 
             data.update({
                 "batch_id": self._batch_id,
+                "run_kind": self._run_kind,
                 "serial": device_info.get("serial"),
                 "model": device_info.get("model"),
                 "state": device_info.get("state"),
@@ -1755,6 +1762,7 @@ def get_recent_batches() -> list[dict]:
                 "batch_id": data.get("batch_id", batch_dir.name),
                 "state": data.get("state", "unknown"),
                 "mode": data.get("mode", "unknown"),
+                "run_kind": data.get("run_kind"),
                 "scenario_ids": [
                     str(item)
                     for item in (

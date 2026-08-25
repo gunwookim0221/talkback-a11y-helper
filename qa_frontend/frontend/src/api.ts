@@ -23,6 +23,7 @@ export type RunStatus = {
   state: 'idle' | 'running' | 'stopped' | 'finished' | 'error';
   run_id: string | null;
   mode: string | null;
+  run_kind?: 'FULL' | 'CUSTOM' | string | null;
   started_at: string | null;
   finished_at: string | null;
   returncode: number | null;
@@ -131,6 +132,7 @@ export type BatchDeviceStatus = {
 
 export type BatchSummaryStatus = {
   batch_id: string | null;
+  run_kind?: 'FULL' | 'CUSTOM' | string | null;
   state: 'idle' | 'running' | 'finished' | 'failed' | 'stopped' | string;
   started_at: string | null;
   finished_at: string | null;
@@ -205,6 +207,7 @@ export type BatchStatus = {
   batch_id: string | null;
   state: 'idle' | 'running' | 'finished' | 'error' | string;
   mode: string | null;
+  run_kind?: 'FULL' | 'CUSTOM' | string | null;
   current_device: string | null;
   devices: BatchDeviceStatus[];
   batch?: BatchSummaryStatus;
@@ -217,6 +220,7 @@ export type Scenario = {
   id: string;
   enabled: boolean;
   max_steps: number | null;
+  canonical_full: boolean;
 };
 
 export type OutputFile = {
@@ -244,6 +248,7 @@ export type ComparisonHistoryEntry = { comparison_id: string; baseline_id: strin
 export type RecentRun = {
   run_id: string;
   mode: 'smoke' | 'full';
+  run_kind?: 'FULL' | 'CUSTOM' | string | null;
   scenario_ids?: string[];
   language_mode?: string;
   device_locale?: string | null;
@@ -525,6 +530,7 @@ export type RecentBatch = {
   batch_id: string;
   state: string;
   mode: string;
+  run_kind?: 'FULL' | 'CUSTOM' | string | null;
   created_at?: string | null;
   duration_seconds?: number | null;
   scenario_ids?: string[];

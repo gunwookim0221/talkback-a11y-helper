@@ -31,7 +31,11 @@ from tb_runner.environment_fingerprint import (
 )
 from tb_runner.environment_validator import parse_package_metadata
 from tb_runner.profiler_archive import read_profiler_archive
-from tb_runner.scenario_config import SCENARIO_CONFIG_VERSION, TAB_CONFIGS
+from tb_runner.scenario_config import (
+    SCENARIO_CONFIG_VERSION,
+    canonical_full_scenario_ids,
+    classify_scenario_selection,
+)
 
 
 ARTIFACT_SPECS = (
@@ -427,11 +431,10 @@ def _scenario_set(
             str(item.get("id"))
             for item in scenarios if isinstance(item, dict) and item.get("id")
         ] if isinstance(scenarios, list) else []
-    registry_order = [str(item.get("scenario_id")) for item in TAB_CONFIGS if item.get("scenario_id")]
+    registry_order = canonical_full_scenario_ids()
     is_full = (
         str(batch.get("mode") or summary.get("mode") or "").lower() == "full"
-        and len(selected) == len(registry_order)
-        and set(selected) == set(registry_order)
+        and classify_scenario_selection(selected) == "FULL"
     )
     return {
         "scenario_set_schema": SCENARIO_SET_SCHEMA_VERSION,

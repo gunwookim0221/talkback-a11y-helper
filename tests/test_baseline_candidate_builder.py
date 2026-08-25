@@ -10,7 +10,7 @@ from tb_runner.baseline_candidate_validator import validate_baseline_candidate
 from tb_runner.canonical_json import canonical_json_bytes
 from tb_runner.environment_fingerprint import build_environment_fingerprint
 from tb_runner.environment_profile import ENVIRONMENT_PROFILE_SCHEMA_VERSION
-from tb_runner.scenario_config import TAB_CONFIGS
+from tb_runner.scenario_config import TAB_CONFIGS, canonical_full_scenario_ids
 
 
 CAPTURED_AT = "2026-07-15T00:00:00.000Z"
@@ -343,7 +343,8 @@ def test_all_registry_scenarios_are_classified_as_full_run(tmp_path):
     result = build_baseline_candidate(run_root, write=False)
     scenario_set = result.candidate.comparison_contract["scenario_set"]
 
-    assert scenario_set["selected_scenario_count"] == len(TAB_CONFIGS) == 32
+    assert scenario_set["selected_scenario_count"] == len(canonical_full_scenario_ids()) == 32
+    assert scenario_set["registry_scenario_count"] == len(canonical_full_scenario_ids())
     assert scenario_set["run_kind"] == "FULL"
     assert scenario_set["is_targeted"] is False
 

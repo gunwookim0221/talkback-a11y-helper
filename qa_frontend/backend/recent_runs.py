@@ -175,6 +175,7 @@ def _recent_run_from_summary(
     return {
         "run_id": _string_or_none(summary.get("run_id")) or run_id,
         "mode": _string_or_none(summary.get("mode")) or mode,
+        "run_kind": _string_or_none(summary.get("run_kind")),
         "scenario_ids": scenario_ids,
         "feature_flags": summary.get("feature_flags") if isinstance(summary.get("feature_flags"), dict) else None,
         "traversal_identity_v2_diagnostics": (

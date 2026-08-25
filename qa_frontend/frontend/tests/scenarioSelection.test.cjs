@@ -18,15 +18,15 @@ const {
 } = require('../.test-dist/runProfiles.js');
 
 const scenarios = [
-  { id: 'home_main', enabled: true, max_steps: null },
-  { id: 'home_safe_plugin', enabled: false, max_steps: 30 },
-  { id: 'devices_main', enabled: true, max_steps: null },
-  { id: 'life_main', enabled: true, max_steps: null },
-  { id: 'routines_main', enabled: true, max_steps: null },
-  { id: 'menu_main', enabled: true, max_steps: null },
-  { id: 'global_nav_main', enabled: true, max_steps: null },
-  { id: 'life_food_plugin', enabled: true, max_steps: null },
-  { id: 'device_cleaning_mode_plugin', enabled: true, max_steps: null },
+  { id: 'home_main', enabled: true, canonical_full: true, max_steps: null },
+  { id: 'home_safe_plugin', enabled: false, canonical_full: true, max_steps: 30 },
+  { id: 'devices_main', enabled: true, canonical_full: true, max_steps: null },
+  { id: 'life_main', enabled: true, canonical_full: true, max_steps: null },
+  { id: 'routines_main', enabled: true, canonical_full: true, max_steps: null },
+  { id: 'menu_main', enabled: true, canonical_full: true, max_steps: null },
+  { id: 'global_nav_main', enabled: true, canonical_full: true, max_steps: null },
+  { id: 'life_food_plugin', enabled: true, canonical_full: true, max_steps: null },
+  { id: 'device_cleaning_mode_plugin', enabled: true, canonical_full: false, max_steps: null },
 ];
 
 function scenarioIdsForGroup(title) {
@@ -79,18 +79,19 @@ test('navigation labels include routines and menu', () => {
   assert.equal(getNavigationName('menu_main'), 'Menu');
 });
 
-test('Full Validation selection is derived from enabled registry entries', () => {
+test('Full Validation selection is derived from canonical registry membership', () => {
   const fullValidationIds = getFullValidationScenarioIds(scenarios);
   const initial = initialScenarioSelection(scenarios);
 
   assert.deepEqual([...initial].sort(), fullValidationIds.sort());
   assert.ok(initial.has('home_main'));
-  assert.ok(!initial.has('home_safe_plugin'));
+  assert.ok(initial.has('home_safe_plugin'));
+  assert.ok(!initial.has('device_cleaning_mode_plugin'));
   assert.ok(isFullValidationSelection(initial, fullValidationIds));
 });
 
-test('new enabled registry entries are included without changing the frontend', () => {
-  const extended = [...scenarios, { id: 'future_validation', enabled: true, max_steps: 20 }];
+test('canonical registry entries are included even when runtime disabled', () => {
+  const extended = [...scenarios, { id: 'future_validation', enabled: false, canonical_full: true, max_steps: 20 }];
   const fullValidationIds = getFullValidationScenarioIds(extended);
 
   assert.equal(fullValidationIds.includes('future_validation'), true);

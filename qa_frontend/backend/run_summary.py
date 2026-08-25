@@ -5,6 +5,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from tb_runner.environment_fingerprint import document_digest_reference
+from tb_runner.scenario_config import classify_scenario_selection
 
 from .paths import OUTPUT_DIR
 from .runtime_dashboard import parse_runtime_log
@@ -70,6 +71,10 @@ def build_run_summary(
     started_at = _string_or_none(status.get("started_at"))
     finished_at = _string_or_none(status.get("finished_at"))
     run_id, mode = _run_identity(status=status, log_path=log_path)
+    # The explicit selection is the semantic source for persisted provenance;
+    # never allow a stale/inconsistent caller-provided label to mark a partial
+    # selection as canonical Full.
+    run_kind = classify_scenario_selection(selected_scenario_ids)
     feature_flags = status.get("feature_flags") if isinstance(status.get("feature_flags"), dict) else None
     traversal_identity_diagnostics = (
         status.get("traversal_identity_v2_diagnostics")
@@ -86,6 +91,7 @@ def build_run_summary(
         "schema_version": SUMMARY_SCHEMA_VERSION,
         "run_id": run_id,
         "mode": _string_or_none(status.get("mode")) or mode,
+        "run_kind": run_kind,
         "scenario_ids": selected_scenario_ids,
         "feature_flags": feature_flags,
         "environment_profile": environment_profile,
