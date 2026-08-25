@@ -984,7 +984,7 @@ class TouchIsinTest(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual([call.args[1] for call in scroll_mock.call_args_list], ["up", "down"])
 
-    def test_scroll_to_top_stops_when_no_visible_change(self):
+    def test_scroll_to_top_does_not_promote_no_visible_change_to_top(self):
         client = FakeA11yClient()
         dumps = [
             [{"text": "a", "boundsInScreen": {"l": 0, "t": 0, "r": 100, "b": 100}}],
@@ -997,10 +997,91 @@ class TouchIsinTest(unittest.TestCase):
         ):
             result = client.scroll_to_top("SER", max_swipes=5, pause=0.0)
 
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["reached_top"])
+        self.assertEqual(result["status"], "NO_VISIBLE_CHANGE_UNVERIFIED")
+        self.assertEqual(result["reason"], "no_visible_change_unverified")
+        self.assertEqual(scroll_mock.call_count, 1)
+
+    def test_scroll_to_top_accepts_actual_verified_top_without_swipe(self):
+        client = FakeA11yClient()
+        nodes = [{"text": "localized header", "boundsInScreen": {"l": 0, "t": 0, "r": 100, "b": 100}}]
+
+        with patch.object(client, "dump_tree", return_value=nodes), patch.object(client, "scroll") as scroll_mock:
+            result = client.scroll_to_top("SER", max_swipes=5, pause=0.0, top_evidence=lambda current: current == nodes)
+
         self.assertTrue(result["ok"])
         self.assertTrue(result["reached_top"])
-        self.assertEqual(result["reason"], "no_visible_change")
-        self.assertEqual(scroll_mock.call_count, 1)
+        self.assertEqual(result["status"], "VERIFIED_TOP")
+        self.assertEqual(scroll_mock.call_count, 0)
+
+    def test_scroll_to_top_accepts_movement_followed_by_verified_top(self):
+        client = FakeA11yClient()
+        before = [{"text": "middle", "boundsInScreen": {"l": 0, "t": 100, "r": 100, "b": 200}}]
+        after = [{"text": "top", "boundsInScreen": {"l": 0, "t": 0, "r": 100, "b": 100}}]
+
+        with patch.object(client, "dump_tree", side_effect=[before, after]), patch.object(client, "scroll", return_value=True), patch(
+            "talkback_lib.time.sleep", return_value=None,
+        ):
+            result = client.scroll_to_top("SER", max_swipes=5, pause=0.0, top_evidence=lambda current: current == after)
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["reached_top"])
+        self.assertEqual(result["status"], "VERIFIED_TOP")
+
+    def test_scroll_to_top_accepts_no_visible_change_only_with_affirmative_evidence(self):
+        client = FakeA11yClient()
+        dumps = [
+            [{"text": "same localized state", "boundsInScreen": {"l": 0, "t": 0, "r": 100, "b": 100}}],
+            [{"text": "same localized state", "boundsInScreen": {"l": 0, "t": 0, "r": 100, "b": 100}}],
+        ]
+
+        with patch.object(client, "dump_tree", side_effect=dumps), patch.object(client, "scroll", return_value=True), patch(
+            "talkback_lib.time.sleep", return_value=None,
+        ):
+            result = client.scroll_to_top("SER", max_swipes=5, pause=0.0, top_evidence=lambda current: True)
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["reached_top"])
+        self.assertEqual(result["status"], "VERIFIED_TOP")
+
+    def test_scroll_to_top_does_not_accept_duplicate_similar_top_nodes_as_evidence(self):
+        client = FakeA11yClient()
+        nodes = [
+            {"text": "same", "viewIdResourceName": "id/top", "boundsInScreen": {"l": 0, "t": 0, "r": 100, "b": 100}},
+            {"text": "same", "viewIdResourceName": "id/top", "boundsInScreen": {"l": 0, "t": 0, "r": 100, "b": 100}},
+        ]
+
+        with patch.object(client, "dump_tree", side_effect=[nodes, nodes]), patch.object(client, "scroll", return_value=True), patch(
+            "talkback_lib.time.sleep", return_value=None,
+        ):
+            result = client.scroll_to_top(
+                "SER",
+                max_swipes=1,
+                pause=0.0,
+                top_evidence=lambda current: len(current) == len({(node.get("viewIdResourceName"), str(node.get("boundsInScreen"))) for node in current}) == 1,
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "NO_VISIBLE_CHANGE_UNVERIFIED")
+
+    def test_scroll_to_top_top_evidence_is_not_text_locale_dependent(self):
+        client = FakeA11yClient()
+        before = [{"text": "한국어 상태", "viewIdResourceName": "id/top", "boundsInScreen": {"l": 0, "t": 0, "r": 100, "b": 100}}]
+        after = [{"text": "English state", "viewIdResourceName": "id/top", "boundsInScreen": {"l": 0, "t": 0, "r": 100, "b": 100}}]
+
+        with patch.object(client, "dump_tree", side_effect=[before, after]), patch.object(client, "scroll", return_value=True), patch(
+            "talkback_lib.time.sleep", return_value=None,
+        ):
+            result = client.scroll_to_top(
+                "SER",
+                max_swipes=1,
+                pause=0.0,
+                top_evidence=lambda current: any(node.get("viewIdResourceName") == "id/top" for node in current),
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], "VERIFIED_TOP")
 
     def test_scroll_to_top_falls_back_to_max_swipes(self):
         client = FakeA11yClient()
@@ -1016,9 +1097,10 @@ class TouchIsinTest(unittest.TestCase):
         ):
             result = client.scroll_to_top("SER", max_swipes=2, pause=0.0)
 
-        self.assertTrue(result["ok"])
+        self.assertFalse(result["ok"])
         self.assertFalse(result["reached_top"])
-        self.assertEqual(result["reason"], "max_swipes")
+        self.assertEqual(result["status"], "MOVED")
+        self.assertEqual(result["reason"], "max_swipes_unverified")
         self.assertEqual(scroll_mock.call_count, 2)
 
 

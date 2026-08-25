@@ -37,7 +37,7 @@ class DummyDeviceClient:
 
     def scroll_to_top(self, **kwargs):
         self.scroll_to_top_calls.append(kwargs)
-        return {"ok": True}
+        return {"ok": True, "reached_top": True, "status": "VERIFIED_TOP", "reason": "test_verified_top"}
 
 
 def _node(
@@ -294,6 +294,32 @@ def test_enter_device_card_plugin_returns_failure_for_missing_target_after_bound
 
     assert ok is False
     assert reason == "target_not_found"
+
+
+def test_enter_device_card_plugin_fails_closed_when_top_is_unverified(monkeypatch):
+    client = DummyDeviceClient([[_all_devices(), _device_card("연기 Smoke detected", 42, 628)]])
+    client.scroll_to_top = lambda **_kwargs: {
+        "ok": False,
+        "reached_top": False,
+        "status": "NO_VISIBLE_CHANGE_UNVERIFIED",
+        "reason": "no_visible_change_unverified",
+    }
+    monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
+
+    ok, reason = collection_flow._run_enter_device_card_plugin(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_id": "device_motion_sensor_plugin"},
+        step={"target_stable_labels": ["모션센서", "Motion sensor"]},
+        target="모션센서",
+        max_scroll_search_steps=2,
+        step_wait_seconds=0,
+        transition_fast_path=True,
+    )
+
+    assert ok is False
+    assert reason == "device_list_top_unverified:no_visible_change_unverified"
+    assert client.swipe_calls == []
 
 
 def test_enter_device_card_plugin_uses_adb_swipe_for_bounded_device_search(monkeypatch):

@@ -6713,11 +6713,30 @@ def _run_enter_device_card_plugin(
         return False, "dump_tree_unavailable"
 
     scroll_to_top_fn = getattr(client, "scroll_to_top", None)
+    if not callable(scroll_to_top_fn) and bool(step.get("scroll_to_top", True)):
+        return False, "device_list_top_normalization_unavailable"
     if callable(scroll_to_top_fn) and bool(step.get("scroll_to_top", True)):
+        top_anchor_labels = step.get(
+            "top_anchor_stable_labels",
+            device_tab_logic.DEFAULT_DEVICE_LIST_TOP_ANCHOR_LABELS,
+        )
         try:
-            scroll_to_top_fn(dev=dev, max_swipes=int(step.get("scroll_to_top_max_swipes", 5) or 5), pause=0.6)
+            top_result = scroll_to_top_fn(
+                dev=dev,
+                max_swipes=int(step.get("scroll_to_top_max_swipes", 5) or 5),
+                pause=0.6,
+                top_evidence=lambda current_nodes: device_tab_logic.verify_device_list_top(
+                    current_nodes,
+                    top_anchor_labels,
+                ),
+            )
         except Exception as exc:
             log(f"[DEVICE_ENTRY][normalize] scroll_to_top_failed reason='{exc}'")
+            return False, "device_list_top_normalization_failed"
+        if not isinstance(top_result, dict) or not bool(top_result.get("reached_top")):
+            reason = str((top_result or {}).get("reason") or "unknown") if isinstance(top_result, dict) else "invalid_result"
+            log(f"[DEVICE_ENTRY][normalize] scroll_to_top_unverified reason='{reason}'")
+            return False, f"device_list_top_unverified:{reason}"
 
     expanded_sections: set[str] = set()
     location_normalized = False

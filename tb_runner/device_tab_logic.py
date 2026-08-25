@@ -10,6 +10,19 @@ DEVICE_CARD_RESOURCE_IDS = {
     "com.samsung.android.oneconnect:id/device_card_camera",
 }
 
+DEVICE_NAME_RESOURCE_TOKENS = (
+    ":device_name",
+    ":devicename",
+    ":containername",
+    ":container_name",
+    "/device_name",
+    "/devicename",
+    "/containername",
+    "/container_name",
+)
+
+DEFAULT_DEVICE_LIST_TOP_ANCHOR_LABELS = ("연기", "Smoke sensor")
+
 ALL_DEVICES_LABELS = {
     "모든 기기",
     "all devices",
@@ -128,6 +141,79 @@ def _bounds_text(node: dict[str, Any]) -> str:
 
 def _bounds_tuple(node: dict[str, Any]) -> tuple[int, int, int, int] | None:
     return parse_bounds_str(node.get("boundsInScreen", node.get("bounds", "")))
+
+
+def _iter_descendant_nodes(node: dict[str, Any]) -> list[dict[str, Any]]:
+    descendants: list[dict[str, Any]] = []
+
+    def visit(current: dict[str, Any]) -> None:
+        children = current.get("children")
+        if not isinstance(children, list):
+            return
+        for child in children:
+            if not isinstance(child, dict):
+                continue
+            descendants.append(child)
+            visit(child)
+
+    visit(node)
+    return descendants
+
+
+def _device_card_owned_nodes(card: dict[str, Any], nodes: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    card_bounds = _bounds_tuple(card)
+    candidates = _iter_descendant_nodes(card)
+    if nodes and card_bounds:
+        for node in nodes:
+            if not isinstance(node, dict) or node is card:
+                continue
+            node_bounds = _bounds_tuple(node)
+            if node_bounds and _bounds_contains(card_bounds, node_bounds):
+                candidates.append(node)
+
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for node in candidates:
+        key = (_resource_id(node), _bounds_text(node), _node_label(node))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(node)
+    return unique
+
+
+def _device_name_child(card: dict[str, Any], nodes: list[dict[str, Any]] | None) -> tuple[str, str] | None:
+    candidates: list[tuple[int, int, str, str]] = []
+    for index, node in enumerate(_device_card_owned_nodes(card, nodes)):
+        label = _node_label(node)
+        rid = _resource_id(node).lower()
+        if not label:
+            continue
+        role = _normalized_label(
+            node.get("role")
+            or node.get("semanticRole")
+            or node.get("semantic_role")
+            or node.get("accessibilityRole")
+            or ""
+        )
+        if any(rid.endswith(token) for token in DEVICE_NAME_RESOURCE_TOKENS):
+            score = 100
+        elif role in {"device name", "device_name", "name", "title"}:
+            score = 90
+        else:
+            continue
+        bounds = _bounds_tuple(node)
+        top = bounds[1] if bounds else 0
+        candidates.append((score, -top, label, rid))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (-item[0], item[1], item[2].lower(), item[3]))
+    best = candidates[0]
+    tied = [item for item in candidates if item[:2] == best[:2] and _normalized_label(item[2]) != _normalized_label(best[2])]
+    if tied:
+        return None
+    return best[2], "device_name_child"
 
 
 def _bool_value(value: Any) -> bool:
@@ -298,16 +384,27 @@ def _location_candidate_selection_signal(
     return False, "", 0
 
 
-def _make_candidate(node: dict[str, Any], *, role: str) -> dict[str, Any]:
+def _make_candidate(
+    node: dict[str, Any],
+    *,
+    role: str,
+    scope_nodes: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     bounds = _bounds_tuple(node)
     left, top, right, bottom = bounds if bounds else (0, 0, 0, 0)
     label = _node_label(node)
-    stable_label = normalize_device_stable_label(label)
+    name_child = _device_name_child(node, scope_nodes)
+    if name_child is not None:
+        stable_label, identity_source = name_child
+    else:
+        stable_label = normalize_device_stable_label(label)
+        identity_source = "card_label_fallback"
     return {
         "role": role,
         "node": node,
         "label": label,
         "stable_label": stable_label,
+        "identity_source": identity_source,
         "rid": _resource_id(node),
         "resource_id": _resource_id(node),
         "class_name": _text(node.get("className")),
@@ -547,7 +644,7 @@ def collect_visible_device_cards(nodes: list[dict[str, Any]]) -> list[dict[str, 
     for index, node in enumerate(nodes):
         if not isinstance(node, dict) or not _is_device_card_node(node):
             continue
-        card = _make_candidate(node, role="device_card")
+        card = _make_candidate(node, role="device_card", scope_nodes=nodes)
         card["source_index"] = index
         card["entry_target"] = {
             "type": "bounds" if card["bounds"] else "resource",
@@ -570,10 +667,36 @@ def find_device_card_by_stable_label(
     }
     if not target_labels:
         return None
-    for card in collect_visible_device_cards(nodes):
-        if normalize_device_match_label(card.get("stable_label", "")) in target_labels:
-            return card
-    return None
+    matches = [
+        card
+        for card in collect_visible_device_cards(nodes)
+        if normalize_device_match_label(card.get("stable_label", "")) in target_labels
+    ]
+    if len(matches) != 1:
+        return None
+    return matches[0]
+
+
+def verify_device_list_top(
+    nodes: list[dict[str, Any]],
+    top_anchor_labels: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    cards = collect_visible_device_cards(nodes)
+    anchors = tuple(top_anchor_labels or DEFAULT_DEVICE_LIST_TOP_ANCHOR_LABELS)
+    anchor = find_device_card_by_stable_label(nodes, anchors)
+    if anchor is None:
+        return {"ok": False, "reason": "top_anchor_not_visible"}
+    if anchor.get("identity_source") != "device_name_child":
+        return {"ok": False, "reason": "top_anchor_identity_not_structural"}
+    if not cards or cards[0].get("bounds") != anchor.get("bounds"):
+        return {"ok": False, "reason": "top_anchor_not_first_visible_card"}
+    return {
+        "ok": True,
+        "reason": "stable_first_device_card",
+        "anchor": anchor.get("stable_label", ""),
+        "anchor_resource_id": anchor.get("resource_id", ""),
+        "anchor_bounds": anchor.get("bounds", ""),
+    }
 
 
 def select_all_devices_candidate_for_action(nodes: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -599,7 +722,7 @@ def promote_device_card_target(node: dict[str, Any], nodes: list[dict[str, Any]]
     if not isinstance(node, dict):
         return None
     if _is_device_card_node(node):
-        return _make_candidate(node, role="device_card")
+        return _make_candidate(node, role="device_card", scope_nodes=nodes)
     child_bounds = _bounds_tuple(node)
     cards = collect_visible_device_cards(nodes)
     if not child_bounds:

@@ -2045,30 +2045,83 @@ class A11yAdbClient:
         node_hashes = A11yAdbClient._tree_node_hashes(nodes)
         return "|".join(node_hashes[:max_samples])
 
-    def scroll_to_top(self, dev: Any, max_swipes: int = 5, pause: float = 0.6) -> dict[str, Any]:
+    def scroll_to_top(
+        self,
+        dev: Any,
+        max_swipes: int = 5,
+        pause: float = 0.6,
+        top_evidence: Any = None,
+    ) -> dict[str, Any]:
         attempts = max(1, int(max_swipes))
         print(f"[SCROLL_TOP] start max_swipes={attempts}")
         try:
             before_nodes = self.dump_tree(dev=dev)
         except Exception as exc:
             print(f"[SCROLL_TOP] skipped reason='screen_not_scrollable' detail='dump_tree_failed:{exc}'")
-            return {"ok": False, "reached_top": False, "attempts": 0, "reason": "dump_tree_failed"}
+            return {
+                "ok": False,
+                "reached_top": False,
+                "status": "FAILED",
+                "attempts": 0,
+                "reason": "dump_tree_failed",
+            }
 
         if not isinstance(before_nodes, list) or not before_nodes:
             print("[SCROLL_TOP] skipped reason='screen_not_scrollable' detail='empty_dump'")
-            return {"ok": True, "reached_top": False, "attempts": 0, "reason": "empty_dump"}
+            return {
+                "ok": False,
+                "reached_top": False,
+                "status": "FAILED",
+                "attempts": 0,
+                "reason": "empty_dump",
+            }
 
         before_fp = self._top_visible_fingerprint(before_nodes)
         if not before_fp:
             print("[SCROLL_TOP] skipped reason='screen_not_scrollable' detail='missing_fingerprint'")
-            return {"ok": True, "reached_top": False, "attempts": 0, "reason": "missing_fingerprint"}
+            return {
+                "ok": False,
+                "reached_top": False,
+                "status": "FAILED",
+                "attempts": 0,
+                "reason": "missing_fingerprint",
+            }
+
+        def verified_top(nodes: list[dict[str, Any]]) -> tuple[bool, str]:
+            if not callable(top_evidence):
+                return False, "top_evidence_unavailable"
+            try:
+                evidence = top_evidence(nodes)
+            except Exception as exc:
+                return False, f"top_evidence_failed:{type(exc).__name__}"
+            if isinstance(evidence, dict):
+                return bool(evidence.get("ok")), str(evidence.get("reason") or "top_evidence")
+            return bool(evidence), "top_evidence"
+
+        top_verified, top_reason = verified_top(before_nodes)
+        if top_verified:
+            print(f"[SCROLL_TOP] reached_top=true reason='verified_top' evidence='{top_reason}'")
+            return {
+                "ok": True,
+                "reached_top": True,
+                "status": "VERIFIED_TOP",
+                "attempts": 0,
+                "reason": "verified_top",
+                "evidence": top_reason,
+            }
 
         for attempt in range(1, attempts + 1):
             print(f"[SCROLL_TOP] swipe attempt={attempt}/{attempts}")
             scrolled = self.scroll(dev, "up")
             if not scrolled:
-                print("[SCROLL_TOP] reached_top=true reason='scroll_failed'")
-                return {"ok": True, "reached_top": True, "attempts": attempt, "reason": "scroll_failed"}
+                print("[SCROLL_TOP] reached_top=false reason='scroll_failed'")
+                return {
+                    "ok": False,
+                    "reached_top": False,
+                    "status": "FAILED",
+                    "attempts": attempt,
+                    "reason": "scroll_failed",
+                }
 
             time.sleep(max(0.0, pause))
             try:
@@ -2080,13 +2133,48 @@ class A11yAdbClient:
 
             changed = bool(after_fp and after_fp != before_fp)
             print(f"[SCROLL_TOP] changed={'true' if changed else 'false'}")
+            if changed:
+                top_verified, top_reason = verified_top(after_nodes)
+                if top_verified:
+                    print(f"[SCROLL_TOP] reached_top=true reason='verified_top' evidence='{top_reason}'")
+                    return {
+                        "ok": True,
+                        "reached_top": True,
+                        "status": "VERIFIED_TOP",
+                        "attempts": attempt,
+                        "reason": "verified_top",
+                        "evidence": top_reason,
+                    }
             if not changed:
-                print("[SCROLL_TOP] reached_top=true reason='no_visible_change'")
-                return {"ok": True, "reached_top": True, "attempts": attempt, "reason": "no_visible_change"}
+                top_verified, top_reason = verified_top(after_nodes)
+                if top_verified:
+                    print(f"[SCROLL_TOP] reached_top=true reason='verified_top' evidence='{top_reason}'")
+                    return {
+                        "ok": True,
+                        "reached_top": True,
+                        "status": "VERIFIED_TOP",
+                        "attempts": attempt,
+                        "reason": "verified_top",
+                        "evidence": top_reason,
+                    }
+                print("[SCROLL_TOP] reached_top=false reason='no_visible_change_unverified'")
+                return {
+                    "ok": False,
+                    "reached_top": False,
+                    "status": "NO_VISIBLE_CHANGE_UNVERIFIED",
+                    "attempts": attempt,
+                    "reason": "no_visible_change_unverified",
+                }
             before_fp = after_fp
 
-        print("[SCROLL_TOP] fallback_stop reason='max_swipes'")
-        return {"ok": True, "reached_top": False, "attempts": attempts, "reason": "max_swipes"}
+        print("[SCROLL_TOP] fallback_stop reason='max_swipes_unverified'")
+        return {
+            "ok": False,
+            "reached_top": False,
+            "status": "MOVED",
+            "attempts": attempts,
+            "reason": "max_swipes_unverified",
+        }
 
     def move_focus(self, dev: Any = None, direction: str = "next") -> bool:
         if not self.check_helper_status(dev=dev):

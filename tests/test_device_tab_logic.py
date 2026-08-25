@@ -18,6 +18,8 @@ def _node(
     visible=True,
     has_clickable_descendant=False,
     actionable_descendant_resource_id=None,
+    children=None,
+    role=None,
 ):
     return {
         "text": label,
@@ -38,6 +40,8 @@ def _node(
         "isVisibleToUser": visible,
         "hasClickableDescendant": has_clickable_descendant,
         "actionableDescendantResourceId": actionable_descendant_resource_id,
+        "children": children if children is not None else [],
+        "role": role,
     }
 
 
@@ -727,6 +731,190 @@ def test_find_device_card_by_stable_label_returns_none_for_missing_target():
     nodes = [_device_card("연기 감지 안 됨", 42, 628)]
 
     assert device_tab_logic.find_device_card_by_stable_label(nodes, ["누수"]) is None
+
+
+def test_device_name_child_wins_over_korean_state_text():
+    card = _device_card(
+        "연기 연기 감지됨",
+        42,
+        628,
+        children=[
+            _node(
+                "연기",
+                "com.samsung.android.oneconnect:id/device_name",
+                {"l": 78, "t": 690, "r": 220, "b": 760},
+                class_name="android.widget.TextView",
+                clickable=False,
+                focusable=False,
+                effective_clickable=False,
+            ),
+            _node(
+                "연기 감지됨",
+                "com.samsung.android.oneconnect:id/device_status",
+                {"l": 78, "t": 760, "r": 320, "b": 820},
+                class_name="android.widget.TextView",
+                clickable=False,
+                focusable=False,
+                effective_clickable=False,
+            ),
+        ],
+    )
+
+    card_result = device_tab_logic.find_device_card_by_stable_label([card], ["연기"])
+
+    assert card_result is not None
+    assert card_result["stable_label"] == "연기"
+    assert card_result["identity_source"] == "device_name_child"
+
+
+def test_device_name_child_wins_over_english_localized_state_text():
+    card = _device_card(
+        "연기 Smoke detected",
+        42,
+        628,
+        children=[
+            _node(
+                "연기",
+                "com.samsung.android.oneconnect:id/device_name",
+                {"l": 78, "t": 690, "r": 220, "b": 760},
+                class_name="android.widget.TextView",
+                clickable=False,
+                focusable=False,
+                effective_clickable=False,
+            ),
+            _node(
+                "Smoke detected",
+                "com.samsung.android.oneconnect:id/device_status",
+                {"l": 78, "t": 760, "r": 320, "b": 820},
+                class_name="android.widget.TextView",
+                clickable=False,
+                focusable=False,
+                effective_clickable=False,
+            ),
+            _node(
+                "Turn off",
+                "com.samsung.android.oneconnect:id/image_button",
+                {"l": 410, "t": 710, "r": 500, "b": 800},
+                class_name="android.widget.ImageButton",
+            ),
+        ],
+    )
+
+    card_result = device_tab_logic.find_device_card_by_stable_label([card], ["연기"])
+
+    assert card_result is not None
+    assert card_result["stable_label"] == "연기"
+    assert card_result["identity_source"] == "device_name_child"
+
+
+def test_device_name_child_supports_english_name_and_arbitrary_localized_state():
+    card = _device_card(
+        "Coffee Maker 状態-غير معروف",
+        42,
+        628,
+        children=[
+            _node(
+                "Coffee Maker",
+                "com.samsung.android.oneconnect:id/device_name",
+                {"l": 78, "t": 690, "r": 320, "b": 760},
+                class_name="android.widget.TextView",
+                clickable=False,
+                focusable=False,
+                effective_clickable=False,
+            ),
+            _node(
+                "状態-غير معروف",
+                "com.samsung.android.oneconnect:id/device_status",
+                {"l": 78, "t": 760, "r": 420, "b": 820},
+                class_name="android.widget.TextView",
+                clickable=False,
+                focusable=False,
+                effective_clickable=False,
+            ),
+        ],
+    )
+
+    card_result = device_tab_logic.find_device_card_by_stable_label([card], ["Coffee Maker"])
+
+    assert card_result is not None
+    assert card_result["stable_label"] == "Coffee Maker"
+
+
+def test_flat_dedicated_name_child_is_scoped_to_its_own_card():
+    first = _device_card("연기 Smoke detected", 42, 628)
+    second = _device_card("누수 Wet", 561, 628)
+    nodes = [
+        first,
+        second,
+        _node(
+            "연기",
+            "com.samsung.android.oneconnect:id/device_name",
+            {"l": 78, "t": 690, "r": 220, "b": 760},
+            class_name="android.widget.TextView",
+            clickable=False,
+            focusable=False,
+            effective_clickable=False,
+        ),
+        _node(
+            "누수",
+            "com.samsung.android.oneconnect:id/device_name",
+            {"l": 597, "t": 690, "r": 740, "b": 760},
+            class_name="android.widget.TextView",
+            clickable=False,
+            focusable=False,
+            effective_clickable=False,
+        ),
+    ]
+
+    cards = device_tab_logic.collect_visible_device_cards(nodes)
+
+    assert [card["stable_label"] for card in cards] == ["연기", "누수"]
+    assert device_tab_logic.find_device_card_by_stable_label(nodes, ["누수"])["bounds"] == "561,628,1038,973"
+
+
+def test_duplicate_target_identity_fails_closed():
+    nodes = [
+        _device_card("연기 Smoke detected", 42, 628, children=[_node(
+            "연기", "com.samsung.android.oneconnect:id/device_name", {"l": 78, "t": 690, "r": 220, "b": 760},
+            class_name="android.widget.TextView", clickable=False, focusable=False, effective_clickable=False,
+        )]),
+        _device_card("연기 Wet", 561, 628, children=[_node(
+            "연기", "com.samsung.android.oneconnect:id/device_name", {"l": 597, "t": 690, "r": 740, "b": 760},
+            class_name="android.widget.TextView", clickable=False, focusable=False, effective_clickable=False,
+        )]),
+    ]
+
+    assert device_tab_logic.find_device_card_by_stable_label(nodes, ["연기"]) is None
+
+
+def test_verify_device_list_top_requires_first_structural_anchor():
+    nodes = [
+        _device_card("연기 Smoke detected", 42, 628, children=[_node(
+            "연기", "com.samsung.android.oneconnect:id/device_name", {"l": 78, "t": 690, "r": 220, "b": 760},
+            class_name="android.widget.TextView", clickable=False, focusable=False, effective_clickable=False,
+        )]),
+        _device_card("누수 Wet", 561, 628),
+    ]
+
+    result = device_tab_logic.verify_device_list_top(nodes)
+
+    assert result["ok"] is True
+    assert result["reason"] == "stable_first_device_card"
+
+
+def test_verify_device_list_top_rejects_anchor_when_not_first_visible_card():
+    nodes = [
+        _device_card("누수 Wet", 42, 628),
+        _device_card("연기 Smoke detected", 561, 628, children=[_node(
+            "연기", "com.samsung.android.oneconnect:id/device_name", {"l": 597, "t": 690, "r": 740, "b": 760},
+            class_name="android.widget.TextView", clickable=False, focusable=False, effective_clickable=False,
+        )]),
+    ]
+
+    result = device_tab_logic.verify_device_list_top(nodes)
+
+    assert result["ok"] is False
+    assert result["reason"] == "top_anchor_not_first_visible_card"
 
 
 def test_compute_safe_device_card_tap_point_returns_center_when_no_avoid_hit():
