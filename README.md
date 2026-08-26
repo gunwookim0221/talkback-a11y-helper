@@ -1,6 +1,13 @@
 # TalkBack A11y Helper
 
-`talkback-a11y-helper`는 TalkBack 활성화 환경에서 접근성 자동화 수집/제어를 보조하는 프로젝트입니다.
+`talkback-a11y-helper`는 SmartThings TalkBack 환경에서 시나리오 기반 접근성
+검증을 실행하고, 실제 TalkBack focus와 화면/발화 evidence를 수집해 사람이 검토할
+수 있도록 하는 시스템입니다. Android Helper, Python Runner, QA Frontend가 하나의
+controlled/manual validation workflow를 이룹니다.
+
+> 이 문서는 현재 `main` 구현의 요약입니다. 과거 acceptance 결과는 당시 실행의
+> 범위와 날짜를 보존한 historical evidence이며, 현재 구현 capability나 최신
+> physical-device validation result와 같은 의미가 아닙니다.
 
 ---
 
@@ -16,10 +23,20 @@
 
 - 시나리오 기반 수집 실행
 - step row 생성/정제/저장(`raw/filtered/summary/result`)
-- overlay 처리, stop 정책, diagnostics 로깅
+- overlay 처리, traversal/recovery, stop 정책, diagnostics 로깅
+- actual TalkBack focus, visible text, speech observation, focus/evidence,
+  screenshot/crop, XLSX/JSON/log artifact 수집
 - V10 opt-in Shadow Validation과 Promotion Readiness reporting
 
-### 3) V10 현재 상태
+### 3) QA Frontend (`qa_frontend/backend/`, `qa_frontend/frontend/`)
+
+- device/ADB/Helper/TalkBack preflight
+- Full Validation, Quick Smoke, Custom/Debug run profile과 scenario selection
+- Batch 실행, 현재 상태/진행률, Run History, crash/coverage/identity 확인
+- QA accessibility review와 automation diagnostics를 분리한 Review Required projection
+- Candidate, Offline Validation, Comparator 결과와 Baseline metadata 확인
+
+### 4) V10 현재 상태
 
 V10은 Device Card를 runtime inventory로 수집하고, card를 짧게 열어 capability
 resource-id/XML 구조로 plugin family를 식별한 뒤 versioned policy registry의 scenario
@@ -27,8 +44,10 @@ candidate와 Legacy 결과를 비교한다.
 
 - 구현 완료: Runtime Inventory, Quick Plugin Identify, Policy Registry, Shadow
   Validation, Shadow-only Runner, QA Frontend reporting, Promotion Readiness
-- 운영 모드: Legacy routing/traversal이 authoritative이며 V10은 비교와 평가만 수행
-- 기본값: V10 feature flags와 QA Frontend Shadow Validation은 모두 OFF
+- V10 비교의 기준은 기존 Legacy scenario result이며, V10 자체는 production
+  routing/traversal을 수행하지 않음
+- 기본값: V10 feature flags와 QA Frontend Shadow Validation은 모두 OFF이며 V10은
+  production traversal authority가 아님
 - 미구현: Controlled Routing과 V10 traversal 활성화
 
 개발 중 기존 Full Run을 반복하지 않고 Shadow만 재실행하려면:
@@ -40,7 +59,7 @@ python tools/run_v10_shadow_only.py --run-dir "<device-run-dir>" --output-suffix
 현재 운영 설명은 `docs/system-overview.md`, 상세 종료 판단은
 `docs/design/v10/v10-phase-closure.md`를 참조한다.
 
-### 4) Canonical Identity Shadow Phase 8 / Production Migration Phase 8.5
+### 5) Canonical Identity Shadow Phase 8 / Production Migration Phase 8.5
 
 Traversal Evidence의 physical focus observation을 Canonical Identity로 정규화해
 `MOVE_CONFIRMED`, `STATIC_FOCUS`, `MOVE_TO_OTHER_NODE`, `SNAP_BACK`,
@@ -56,13 +75,14 @@ Traversal Evidence의 physical focus observation을 Canonical Identity로 정규
   incomplete/indeterminate/other-node/snap-back은 legacy fallback
 - OFF 보존: Phase 8.5 flag OFF에서는 기존 traversal/anchor/representative/visit/coverage/
   audit/summary/XLSX 경로 유지
-- 현재 상태: Phase 8 acceptance complete, reconciliation PASS,
-  `anchor_abort_preserved=true`; Phase 8.5 full acceptance complete
-- Full Run 결과: Safe 17 raw / 16 filtered / 76.9% coverage / recovery 5회 중 4회 confirmed,
-  Motion parity 유지, cross-plugin recovery 19회 중 11회 recovered, reconciliation/evidence PASS,
-  orphan/duplicate/ledger failure 없음, scenario FAIL 0
-- Known limitation: Home Monitor Shadow FAIL 1건, container hierarchy evidence 부족,
-  positive `MOVE_TO_OTHER_NODE`/`SNAP_BACK` corpus 부족; Legacy traversal은 Compatibility Mode로 유지
+- 현재 production default: Traversal Identity V2가 run-scoped Production Traversal Engine으로
+  ON이며, 필요한 Evidence Ledger와 Identity Shadow V2도 함께 활성화
+- strong closed transaction만 progress/visit/stop/recovery gate에 제한적으로 사용하고,
+  incomplete/indeterminate/other-node/snap-back은 Legacy fallback
+- `TB_TRAVERSAL_IDENTITY_V2_ENABLED=0`을 명시한 run은 Legacy Compatibility path를 사용
+
+이 문서에 연결된 Phase 8/8.5 수치는 해당 문서에 기록된 당시 acceptance evidence입니다.
+현재 `main`의 최신 32-scenario physical-device Full Validation 결과로 재해석하지 않습니다.
 
 상세: `docs/design/talkback-identity-shadow-phase8-completion.md`,
 `docs/design/talkback-production-traversal-migration.md`
@@ -84,89 +104,114 @@ PR14-A/B/C까지 반영되어 Python client 책임 분해가 완료되었습니�
 
 ---
 
-## 현재 문서 체계
+## Canonical Full Validation
 
-## Phase 10 운영 빠른 시작
+구현의 authoritative source는
+[`canonical_full_scenario_ids()`](tb_runner/scenario_config.py)이며,
+`TAB_CONFIGS`의 scenario ID를 그대로 canonical Full membership으로 사용합니다.
+현재 source에서 확인되는 Full set은 **32개**입니다.
 
-이 프로젝트는 TalkBack 접근성 Full Validation 결과를 immutable Candidate와 Approved Baseline으로
-비교하는 controlled/manual production workflow를 제공합니다. 현재 지원 범위는
-`com.samsung.android.oneconnect`, English/Korean locale, 승인된 `galaxy-z-flip6` 대표 단말
-환경과 Phase 10 Comparator/QA Frontend 흐름입니다. Comparator는 자동 승인을 수행하지 않습니다.
+- **6개 main/navigation**: `global_nav_main`, `home_main`, `devices_main`,
+  `life_main`, `routines_main`, `menu_main`
+- **12개 Device plugin**: `device_smoke_sensor_plugin`,
+  `device_water_leak_sensor_plugin`, `device_motion_sensor_plugin`,
+  `device_door_lock_plugin`, `device_air_purifier_plugin`, `device_tv_plugin`,
+  `device_washer_plugin`, `device_humidity_sensor_plugin`,
+  `device_temperature_humidity_sensor_plugin`, `device_camera_plugin`,
+  `device_home_camera_plugin`, `device_audio_plugin`
+- **12개 Life plugin**: `life_food_plugin`, `life_air_care_plugin`,
+  `life_home_care_plugin`, `life_energy_plugin`, `life_pet_care_plugin`,
+  `life_family_care_plugin`, `life_plant_care_plugin`,
+  `life_clothing_care_plugin`, `life_find_plugin`, `life_video_plugin`,
+  `life_home_monitor_plugin`, `life_music_sync_plugin`
+- **2개 auxiliary/support**: `home_safe_plugin`, `settings_entry_example`
+
+`config/runtime_config.json`은 같은 32개 scenario entry를 담고 있지만, checked-in
+기본값에서 `enabled`인 항목은 targeted execution을 위한 1개뿐입니다. 이 `enabled`
+값은 canonical Full membership을 정의하지 않습니다. QA Frontend의 Full Validation은
+위 32개를 모두 선택하고, 일부만 선택하면 Custom Run으로 분류합니다.
+
+## Candidate / Comparator / Baseline workflow
 
 ```text
 Full Validation → Candidate → Offline Validation → Compare UI/Comparator
   → Markdown/JSON Report → Human Approval → Approved Baseline + Observation Bundle
 ```
 
-새 PC에서는 `python -m pip install -r requirements-qa_frontend.txt`와
-`qa_frontend/frontend`의 `npm install` 후 [운영 Runbook](docs/operations/talkback-operational-runbook.md)을
-따르세요. Backend는 `uvicorn qa_frontend.backend.main:app --reload`, Frontend는
-`npm run dev`로 시작합니다. QA Frontend의 기본 `Full Validation` profile은 Clean launch,
-Full mode, Coverage Probe, Evidence Ledger, Identity V2, Production Traversal V2, Profiler를
-사용합니다.
+Full Validation profile은 Clean launch, Full mode, canonical 32개 scenario, Coverage
+Probe, Evidence Ledger, Identity V2, Production Traversal V2, Profiler를 사용합니다.
+Shadow Validation은 별도 opt-in입니다. 완전한 terminal Full run과 필요한 artifact가
+있을 때 Batch Runner가 Candidate를 additive하게 만들 수 있으며, Candidate는 자동 승인되지
+않습니다.
 
-Compare UI에서 `Available run / candidate`는 로컬 `qa_frontend_runs/` 입력 목록이고,
-`Approved Baseline` 목록과 다른 개념입니다. Run은 실행 결과, Candidate는 비교/승인 검토용
-canonical 입력, Baseline은 사람이 승인한 immutable reference입니다. `qa_frontend_runs/`와
-raw logs/XLSX는 Git에 포함되지 않으므로 clean clone에서는 Approved Baseline과 portable bundle은
-보이지만 local Candidate 목록은 비어 있을 수 있습니다.
+Comparator는 선택한 Candidate와 Approved Baseline을 읽고 deterministic JSON/Markdown
+report와 verdict를 만듭니다. QA Frontend와 Comparator는 Baseline을 자동 변경하거나
+approval을 수행하지 않습니다. `qa_frontend_runs/`와 raw logs/XLSX는 Git에 포함되지
+않으므로 clean clone에서는 local Candidate 목록이 비어 있을 수 있습니다.
 
-현재 readiness는 **Production Ready with Limitations (controlled/manual)**입니다. Candidate
-bundle 자동 생성, durable Compare history, remote CAS, multi-device baseline, unattended
-approval은 아직 제공하지 않습니다.
+현재 readiness는 **Production Ready with Limitations (controlled/manual)**입니다.
+사람의 review/approval이 필요하며, unattended approval, remote CAS/durable history,
+일반적인 multi-device Baseline family 운영, 모든 미래 Candidate의 portable bundle 자동
+첨부는 제공되지 않습니다. 모델 policy도 exact reviewed model 기준이며 unknown model을
+자동 승인하지 않습니다.
 
-Phase 10 문서:
+## Historical evidence의 해석
 
-- [Phase 10 closure](docs/design/talkback-phase10-phase-closure.md)
-- [Operational Runbook](docs/operations/talkback-operational-runbook.md)
+다음 문서의 결과는 각 문서에 기록된 당시 scope/date의 evidence로만 해석합니다.
+
+- Phase 8/8.5 identity/traversal acceptance와 recovery 수치
+- 2026-07-03에 기록된 Global `7/7`, Life `12/12`, Device `12/12` group 결과
+- Phase 9.5 및 9.5.1의 Full Run/regression 결과와 RCA
+- Phase 10 offline/comparator acceptance
+
+이 결과들은 현재 `main`의 capability와 설계 계약을 이해하는 데 유용하지만, 최신
+HEAD가 32-scenario physical-device Full Validation을 통과했다는 증거로 재사용하지
+않습니다. 현재 tracked evidence에는 최신 HEAD에 대한 새로운 32-scenario physical
+acceptance result를 주장할 수 있는 기록이 없으므로, 이 저장소는 capability와
+controlled/manual 운영 준비 상태를 문서화할 뿐 새 validation 결과를 발명하지 않습니다.
+
+## 문서 시작점
+
+- [문서 인덱스](docs/README.md)
+- [시스템 개요](docs/system-overview.md)
+- [아키텍처](docs/architecture.md)
+- [운영 Runbook](docs/operations/talkback-operational-runbook.md)
+- [QA Frontend README](qa_frontend/README.md) / [검증 계약](qa_frontend/VALIDATION.md)
+- [현재 Python client 구조](docs/current-client-architecture.md)
+- [Runner 흐름](docs/runner_flow.md) / [scenario 설정](docs/scenario-config.md) /
+  [runtime 설정](docs/runtime-config.md)
+- [Phase 10.2.5 Run Profiles](docs/design/talkback-phase10.2.5-run-profiles.md)
+- [Phase 10.4 Compare UI](docs/design/talkback-phase10.4-compare-ui.md)
 - [Comparator finalization](docs/design/talkback-phase10.3d-comparator-finalization.md)
-- [Compare UI](docs/design/talkback-phase10.4-compare-ui.md)
+- [V10 closure](docs/design/v10/v10-phase-closure.md)
 
-### A. 현재 운영 기준 문서
+새 PC에서는 다음 의존성을 설치한 뒤 [운영 Runbook](docs/operations/talkback-operational-runbook.md)의
+preflight 순서를 따릅니다.
 
-- `docs/system-overview.md`
-- `docs/architecture.md`
-- `docs/testing-pipeline.md`
-- `docs/api-reference.md`
-- `docs/runtime-config.md`
-- `docs/scenario-config.md`
-- `docs/runner_flow.md`
-- `docs/current-client-architecture.md`
-- `docs/qa-frontend-guide.md`
-- `docs/talkback-quality-guide.md`
-- `docs/design/v8-coverage-driven-traversal.md`
-- `docs/design/audit-v7-focusable-coverage-design.md`
-- `docs/design/semantic-value-shadow-audit.md`
-- `docs/design/v10/v10-phase-closure.md`
+```powershell
+python -m pip install -r requirements-script_test.txt
+python -m pip install -r requirements-qa_frontend.txt
+Set-Location qa_frontend/frontend
+npm install
+```
 
-### B. 과거 PR 설계 기록 (historical design record)
+Runner 실행:
 
-- `docs/archive/pr1_function_split.md`
-- `docs/archive/pr2_start_pipeline_design.md`
-- `docs/archive/pr3_stop_policy_design.md`
-- `docs/archive/pr4_overlay_flow_design.md`
-- `docs/archive/pr14_client_split_design.md`
+```powershell
+python script_test.py
+```
 
-> 위 PR 문서들은 당시 설계 의사결정 기록이며, 현재 운영 기준은 A 섹션 문서를 우선합니다.
+QA Backend/Frontend 실행:
 
----
+```powershell
+uvicorn qa_frontend.backend.main:app --reload
+Set-Location qa_frontend/frontend
+npm run dev
+```
 
-## 빠른 문서 안내
-
-- 시스템 개요: `docs/system-overview.md`
-- 아키텍처: `docs/architecture.md`
-- 실행 파이프라인: `docs/testing-pipeline.md`
-- 클라이언트 API: `docs/api-reference.md`
-- Runner 상세 흐름: `docs/runner_flow.md`
-- 시나리오/런타임 설정: `docs/scenario-config.md`, `docs/runtime-config.md`
-- V8 Coverage-Driven Traversal: `docs/design/v8-coverage-driven-traversal.md`
-- V7/V8 focusable coverage / probe / promotion 설계: `docs/design/audit-v7-focusable-coverage-design.md`
-- semantic shadow / probe shadow / production 구분: `docs/design/semantic-value-shadow-audit.md`
-- V10 구현 상태와 종료 판단: `docs/design/v10/v10-phase-closure.md`
-- Canonical Identity Shadow Phase 8: `docs/design/talkback-identity-shadow-phase8-completion.md`
-- Production Traversal Migration Phase 8.5: `docs/design/talkback-production-traversal-migration.md`
-
----
+물리 단말 실행은 연결된 Android device, USB debugging, Helper APK, TalkBack,
+지원 모델 policy와 locale preflight가 필요합니다. 이 문서는 physical Full Validation을
+자동으로 실행하지 않습니다.
 
 ## `script_test.py` 실행 환경 준비
 

@@ -1,87 +1,107 @@
 # Docs Guide
 
-현재 운영 기준 문서와 historical 설계 문서를 분리해 둔 인덱스입니다.
+이 문서는 `talkback-a11y-helper` 문서를 어디에서 읽어야 하는지 안내하는 primary
+index입니다. 현재 구현, 운영 계약, dated acceptance evidence, historical design을
+서로 다른 권위로 취급합니다.
 
-## 운영 기준
+## 문서 권위 순서
 
-- Phase 10 운영 Runbook: [operations/talkback-operational-runbook.md](operations/talkback-operational-runbook.md)
-- Phase 10 종료/Handoff: [design/talkback-phase10-phase-closure.md](design/talkback-phase10-phase-closure.md)
+현재 상태를 확인할 때는 다음 순서를 따릅니다.
 
-- 시스템 개요: [system-overview.md](system-overview.md)
-- 아키텍처: [architecture.md](architecture.md)
-- 현재 client 구조: [current-client-architecture.md](current-client-architecture.md)
-- 실행 흐름: [runner_flow.md](runner_flow.md)
-- 테스트 파이프라인: [testing-pipeline.md](testing-pipeline.md)
-- scenario 설정: [scenario-config.md](scenario-config.md)
-- runtime 설정: [runtime-config.md](runtime-config.md)
-- helper/client API: [api-reference.md](api-reference.md)
-- V8 Coverage-Driven Traversal: [design/v8-coverage-driven-traversal.md](design/v8-coverage-driven-traversal.md)
-- V7/V8 Focusable Coverage 설계: [design/audit-v7-focusable-coverage-design.md](design/audit-v7-focusable-coverage-design.md)
-- Semantic Value / Shadow / Promotion 구분: [design/semantic-value-shadow-audit.md](design/semantic-value-shadow-audit.md)
-- Devices plugin 운영: [device-plugin-guide.md](device-plugin-guide.md)
-- Device Plugin Audit V3: [device-plugin-audit-guide.md](device-plugin-audit-guide.md)
-- Device Plugin Audit V4 Design: [design/audit-v4-xml-coverage-design.md](design/audit-v4-xml-coverage-design.md)
-- Audit V4 Closure: [design/audit-v4-phase-closure.md](design/audit-v4-phase-closure.md)
-- Audit V5 Traversal Engine Audit: [design/audit-v5-traversal-engine-audit.md](design/audit-v5-traversal-engine-audit.md)
-- Audit V5 Phase 5A Traversal Event Inventory: [design/audit-v5-phase5a-traversal-event-inventory.md](design/audit-v5-phase5a-traversal-event-inventory.md)
-- Audit V5 Phase 5A Normalized Event Schema: [design/audit-v5-phase5a-normalized-event-schema.md](design/audit-v5-phase5a-normalized-event-schema.md)
-- Traversal Evidence Architecture: [design/talkback-traversal-evidence-architecture.md](design/talkback-traversal-evidence-architecture.md)
-- Evidence Instrumentation: [design/talkback-traversal-evidence-implementation.md](design/talkback-traversal-evidence-implementation.md)
-- Canonical Identity & Target Relation: [design/talkback-canonical-identity-and-target-relation.md](design/talkback-canonical-identity-and-target-relation.md)
-- Identity Shadow Frontend Integration: [design/talkback-identity-shadow-frontend-integration.md](design/talkback-identity-shadow-frontend-integration.md)
-- Canonical Identity Shadow Phase 8 Completion: [design/talkback-identity-shadow-phase8-completion.md](design/talkback-identity-shadow-phase8-completion.md)
-- Production Traversal Migration Phase 8.5: [design/talkback-production-traversal-migration.md](design/talkback-production-traversal-migration.md)
-- 신규 plugin onboarding: [plugin-onboarding-guide.md](plugin-onboarding-guide.md)
-- report row schema: [report-schema.md](report-schema.md)
-- i18n / locale matching: [i18n_locale_matching.md](i18n_locale_matching.md)
-- QA Local Control Panel: [qa-frontend-guide.md](qa-frontend-guide.md) (Batch-First UX 통합 적용)
-- QA Frontend 로컬 실행: [qa-frontend-local-run.md](qa-frontend-local-run.md)
-- TalkBack 접근성 품질 판독: [talkback-quality-guide.md](talkback-quality-guide.md)
-- Crash Capture Design: [crash-capture-design.md](crash-capture-design.md)
+1. **Current operational authority** — [Phase 10 운영 Runbook](operations/talkback-operational-runbook.md),
+   [QA Frontend README](../qa_frontend/README.md), [QA Frontend validation contract](../qa_frontend/VALIDATION.md)
+2. **Current architecture / system overview** — [시스템 개요](system-overview.md),
+   [아키텍처](architecture.md)
+3. **Implemented subsystem contracts** — Runner/client/config/report, traversal,
+   Compare UI와 Candidate/Comparator 계약
+4. **Dated phase closure and acceptance evidence** — 해당 phase의 scope/date에서만
+   유효한 결과와 handoff
+5. **Historical design / archive** — 당시 설계 의사결정과 RCA
 
-## V10 Design and Closure
+오래된 문서의 acceptance 수치나 flag 설명이 현재 코드와 다르면, 위 순서에 따라
+현재 구현과 Runbook을 우선합니다. historical 문서는 과거 기록 보존을 위해 수정하지
+않습니다.
 
-- V10 Overview: [design/v10/v10-overview.md](design/v10/v10-overview.md)
-- V10 Phase Plan: [design/v10/v10-phase-plan.md](design/v10/v10-phase-plan.md)
-- V10 Device Inventory: [design/v10/v10-device-inventory-design.md](design/v10/v10-device-inventory-design.md)
-- V10 Quick Plugin Identify: [design/v10/v10-quick-plugin-identify-design.md](design/v10/v10-quick-plugin-identify-design.md)
-- V10 Policy Mapping: [design/v10/v10-policy-mapping-design.md](design/v10/v10-policy-mapping-design.md)
-- V10 Shadow Validation: [design/v10/v10-shadow-validation-design.md](design/v10/v10-shadow-validation-design.md)
-- V10 Shadow Corpus / History: [design/v10/v10-shadow-corpus-design.md](design/v10/v10-shadow-corpus-design.md)
-- V10 Implementation Roadmap: [design/v10/v10-implementation-roadmap.md](design/v10/v10-implementation-roadmap.md)
-- V10 Phase Closure: [design/v10/v10-phase-closure.md](design/v10/v10-phase-closure.md)
+## 현재 시스템과 운영 계약
 
-V10 Sprint 0~6 구현은 완료됐다. Runtime Inventory, Quick Plugin Identify, Policy
-Registry, Shadow Validation, Shadow-only Runner, QA Frontend reporting과 Promotion
-Readiness는 현재 제공된다. Legacy routing/traversal은 계속 authoritative이며
-Controlled Routing은 V11 이후 계획이다.
+- [시스템 개요](system-overview.md): 현재 실행 lifecycle, evidence, review, Candidate/
+  Comparator/Baseline 흐름
+- [아키텍처](architecture.md): Production authority와 diagnostic/shadow 계층 구분
+- [Runner 흐름](runner_flow.md): scenario open, traversal, recovery, persistence
+- [현재 Python client 구조](current-client-architecture.md): `A11yAdbClient`와 내부 책임 분해
+- [테스트 파이프라인](testing-pipeline.md): 수집/검증 파이프라인 요약
+- [scenario 설정](scenario-config.md) / [runtime 설정](runtime-config.md): scenario registry와
+  targeted runtime defaults
+- [report row schema](report-schema.md): raw/result/representative row semantics
+- [Devices plugin 운영](device-plugin-guide.md): Devices entry와 bounded search 계약
+- [QA Local Control Panel](qa-frontend-guide.md) / [QA Frontend local run](qa-frontend-local-run.md):
+  로컬 실행과 operator UI
+- [TalkBack 품질 판독](talkback-quality-guide.md): evidence와 품질 해석 규칙
 
-V10 후속 Shadow Corpus는 run-local shadow 결과의 compact history와 family/readiness
-요약을 `artifacts/v10/corpus/`에 누적한다. raw XLSX, screenshot, full log는 복사하지
-않으며 `python tools/update_v10_shadow_corpus.py --run-dir "<device-run-dir>"`로
-갱신한다.
+## Traversal, coverage, evidence
 
-QA Frontend의 별도 `V10 Corpus Readiness` 카드에서 누적 entry, overall readiness,
-family별 MATCH/UNKNOWN/MISMATCH/FAILED, 단말·locale 다양성과 V11 pilot 후보를
-확인할 수 있다. 이 dashboard는 `/api/v10/corpus/summary`를 읽기만 하며 Controlled
-Routing을 활성화하거나 Promotion Readiness를 재판정하지 않는다.
+- [Production Traversal Migration Phase 8.5](design/talkback-production-traversal-migration.md):
+  현재 V2 default-on/Legacy compatibility 계약과 dated migration evidence
+- [V8 Coverage-Driven Traversal](design/v8-coverage-driven-traversal.md): focusable discovery,
+  coverage와 probe의 역할
+- [V7/V8 Focusable Coverage 설계](design/audit-v7-focusable-coverage-design.md)
+- [Semantic Value / Shadow / Promotion](design/semantic-value-shadow-audit.md)
+- [Device Plugin Audit V3](device-plugin-audit-guide.md): traversal audit의 진단 목적
+- [Evidence implementation](design/talkback-traversal-evidence-implementation.md)
+- [Canonical Identity & Target Relation](design/talkback-canonical-identity-and-target-relation.md)
 
-## Plugin Onboarding Wizard MVP
+Coverage, audit, Identity Shadow, V10 Shadow는 각각 evidence/diagnostic/readiness를
+제공할 수 있지만, 문서가 명시한 Production authority를 자동으로 대체하지 않습니다.
+현재 Full Validation은 canonical registry 전체를 선택하며 runtime `enabled` flag는
+targeted execution default입니다.
 
-신규 Life / Device plugin 추가 흐름은 [plugin-onboarding-guide.md](plugin-onboarding-guide.md)
-와 [qa-frontend-guide.md](qa-frontend-guide.md)를 우선 참조합니다.
+## QA Frontend, profiles, and comparison
 
-현재 MVP 범위:
+- [Phase 10.2.5 Run Profiles](design/talkback-phase10.2.5-run-profiles.md): Full Validation,
+  Quick Smoke, Custom/Debug profile 계약
+- [Comparator finalization](design/talkback-phase10.3d-comparator-finalization.md):
+  deterministic report, replay와 verdict 계약
+- [Phase 10.4 Compare UI](design/talkback-phase10.4-compare-ui.md): local Candidate와
+  Approved Baseline을 선택하는 read-only UI
+- [QA validation contract](../qa_frontend/VALIDATION.md): scenario selection, preflight,
+  batch/live/history/review 검증
+- [Crash Capture Design](crash-capture-design.md)
+- [Plugin onboarding wizard](plugin-onboarding-guide.md): discovery, bounded probe, draft review
 
-- visible plugin discovery
-- bounded probe
-- draft generate/review/apply
-- smoke start/status refresh
-- onboarding session persistence/restore
-- next action recommendation
-- rollback preview
+Full Validation의 Candidate 자동 생성은 terminal/full registry/required artifacts 조건을
+통과한 경우에만 additive하게 시도됩니다. Comparator와 Frontend는 자동 approval을 하지
+않으며, Approved Baseline은 사람의 결정을 거친 reference입니다.
 
-현재 rollback은 preview only이며 실제 복원 실행은 제공하지 않습니다.
+## V10 Shadow and readiness
+
+- [V10 shadow corpus](design/v10/v10-shadow-corpus-design.md)
+- [V10 phase closure](design/v10/v10-phase-closure.md)
+
+V10은 Runtime Inventory, Quick Plugin Identify, Policy Registry, Shadow Compare,
+Promotion Readiness와 corpus/readiness reporting을 제공합니다. V10 shadow 비교에서는
+기존 Legacy scenario result가 comparison reference이며, 전체 production traversal은
+current Runner/Traversal Identity V2 경로가 담당합니다. **Controlled Routing은 아직
+시작되지 않았습니다**. V10 계획/roadmap은 구현된 current contract보다 우선하지 않습니다.
+
+## Dated closure and historical evidence
+
+다음 문서들은 당시 checkpoint를 기록한 evidence 또는 handoff입니다. 현재 운영을
+설명하는 문서로 읽지 말고, 날짜와 scope를 함께 확인하십시오.
+
+- [Phase 8 Identity Shadow completion](design/talkback-identity-shadow-phase8-completion.md)
+- [Phase 9.5 Full Acceptance](design/talkback-phase9.5-full-acceptance.md)
+- [Phase 9.5.1 Regression Recovery](design/talkback-phase9.5.1-regression-recovery.md)
+- [Phase 9.5.2 Aggregate RCA](design/talkback-phase9.5.2-aggregate-rca.md)
+- [Phase 9.5.3 Navigation Boundary Fix](design/talkback-phase9.5.3-global-navigation-boundary-fix.md)
+- [Phase 10 phase closure](design/talkback-phase10-phase-closure.md)
+- [Audit V4 closure](design/audit-v4-phase-closure.md) / [Audit V5 traversal audit](design/audit-v5-traversal-engine-audit.md)
+- [V10 overview](design/v10/v10-overview.md), [phase plan](design/v10/v10-phase-plan.md),
+  [implementation roadmap](design/v10/v10-implementation-roadmap.md)
+
+Phase 9.x의 Full Run 수치, Phase 8.5 recovery 결과, 그리고 2026-07-03 group result
+(`7/7`, `12/12` 등)은 해당 문서의 historical/group scope에서만 유효합니다. 최신
+`main`의 canonical 32-scenario physical-device acceptance를 증명하는 current result로
+표시하지 않습니다.
 
 ## Historical design record
 
@@ -93,16 +113,5 @@ Routing을 활성화하거나 Promotion Readiness를 재판정하지 않는다.
 - PR4 overlay flow
 - PR14 client split
 
-운영 판단은 archive 문서보다 운영 기준 문서를 우선합니다.
-*(최근의 Batch-First UX 통합 및 Known Issues 등에 대해서는 `qa-frontend-guide.md`를 참고하세요.)*
-
-Phase 8과 Phase 8.5는 모두 완료됐다. Phase 8.5는 default-OFF experimental feature flag로
-운영되며 Full Acceptance 기준 Safe recovery 개선, Motion parity, cross-plugin recovery,
-reconciliation PASS가 확인됐다. 남은 known limitation은 Home Monitor Shadow FAIL 1건,
-container hierarchy evidence 부족, positive `MOVE_TO_OTHER_NODE`/`SNAP_BACK` corpus 부족이다.
-
-## Related design documents
-
-- [v8-coverage-driven-traversal.md](design/v8-coverage-driven-traversal.md)
-- [audit-v7-focusable-coverage-design.md](design/audit-v7-focusable-coverage-design.md)
-- [semantic-value-shadow-audit.md](design/semantic-value-shadow-audit.md)
+Archive와 phase 문서는 당시 결정을 설명하며, 현재 운영 판단은 위의 current operational
+authority와 구현 source를 우선합니다.

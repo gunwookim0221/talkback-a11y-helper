@@ -1,184 +1,224 @@
 # Architecture (현재 운영 기준)
 
-[System Overview](system-overview.md) | [Current Client Architecture](current-client-architecture.md) | [Device Plugin Guide](device-plugin-guide.md)
+[System Overview](system-overview.md) | [Current Client Architecture](current-client-architecture.md) |
+[Operational Runbook](operations/talkback-operational-runbook.md) | [Device Plugin Guide](device-plugin-guide.md)
 
-Updated for Production Traversal Migration Phase 8.5: 2026-07-13
+Updated for current `main`: 2026-08-26
 
-## 1) 상위 구조
-
-```text
-Python Runner
-  script_test.py
-  tb_runner/*
-  talkback_lib/*
-    -> A11yAdbClient façade
-    -> focus / step / row assembly
-    -> runtime log parsing and report save
-
-Android Helper
-  app/*
-    -> AccessibilityService
-    -> target action / dump_tree / SMART_NEXT bridge
-
-QA Frontend / V10 Shadow
-  qa_frontend/backend/*
-  tb_runner/device_inventory.py
-  tb_runner/quick_plugin_identify.py
-  tb_runner/policy_registry.py
-  tb_runner/shadow_compare.py
-    -> inventory / identify / candidate / comparison
-    -> promotion readiness / Recent Runs reporting
-
-Traversal Evidence / Canonical Identity / Traversal Identity V2
-  tb_runner/evidence.py
-  tb_runner/evidence_identity.py
-  tb_runner/traversal_evidence_gate.py
-  tb_runner/collection_flow.py
-  qa_frontend/backend/evidence_identity_reporting.py
-    -> append-only action evidence
-    -> canonical observation normalization
-    -> V2 physical/semantic/hierarchy/temporal relation
-    -> read-only verdict distribution reporting
-    -> default-OFF production progress/visit/stop/recovery gate
-```
-
-## 2) 운영 계층
-
-### Client 계층
-- `A11yAdbClient`
-- `FocusService`
-- `StepCollectionService`
-- `StepRowBuilder`
-
-### Runner 계층
-- `collection_flow.py`: scenario open, main loop, persist
-- `anchor_logic.py`, `tab_logic.py`: start stabilization
-- `overlay_logic.py`: overlay branch and recovery
-- `excel_report.py`: workbook export
-
-### Scenario 계층
-- Global / main tabs
-- Life plugins
-- Device plugins
-
-### V10 Shadow 계층
-
-- `device_inventory.py`: bounded Device Card inventory와 conservative boundary dedupe
-- `quick_plugin_identify.py`: post-open helper/XML evidence와 fail-closed classification
-- `policy_registry.py`: versioned plugin-family-to-scenario candidate mapping
-- `shadow_compare.py`: Legacy/V10 comparison과 metrics
-- `shadow_pipeline.py`: Full Run 이후 별도 pass orchestration
-- `promotion_readiness.py`: family별 readiness 평가와 JSON/Markdown 생성
-- `shadow_reporting.py`: Recent Runs용 optional summary
-
-현재 실행 관계:
+## 1) 계층과 실행 경계
 
 ```text
-Legacy Full Run (authoritative)
-  -> Legacy artifact 저장
-  -> [Shadow requested + run-local flags ON]
-     Runtime Inventory
-       -> Quick Plugin Identify
-       -> Policy Registry candidate
-       -> Legacy/V10 Shadow Compare
-       -> Promotion Readiness
-       -> Shadow Reporting
-  -> Legacy result 반환
-```
+QA Frontend / Backend control plane
+  -> device / ADB / Helper / TalkBack preflight
+  -> Full Validation / Quick Smoke / Custom profile
+  -> canonical scenario selection
+  -> Batch Runner and current-run/history projection
 
-V10 경로는 scenario candidate를 만들지만 production routing이나 traversal을 수행하지
-않는다.
-
-### Canonical Identity Shadow 계층
-
-Canonical Identity Shadow는 위 Device Card V10 Shadow와 독립된 evidence 분석 계층이다.
-
-```text
-Helper evidenceEvents
-  -> Runner transaction correlation
-  -> evidence-event-v1 ledger
-  -> Legacy shadow reducer (retained)
-  -> CanonicalObservation normalization
-  -> target-relation-v2 reducer
-  -> append-only SHADOW_ACTION_REDUCED_V2
-  -> reconciliation metrics / QA Frontend read-only report
-```
-
-Raw camelCase/snake_case observation은 normalization boundary에서 한 번만 변환한다.
-이후 physical, semantic, hierarchy, temporal comparator는 CanonicalObservation만 읽는다.
-Missing은 difference가 아니라 unavailable이며, hierarchy는 path/parent/assertion evidence만
-사용한다. Bounds-only container inference는 금지한다.
-
-최종 V2 verdict는 `MOVE_CONFIRMED`, `STATIC_FOCUS`, `MOVE_TO_OTHER_NODE`,
-`SNAP_BACK`, `INDETERMINATE`다. 이 verdict는 traversal, visit, coverage, audit,
-production summary/PASS/FAIL 또는 XLSX의 입력이 아니다. 상세 acceptance와 limitation은
-[talkback-identity-shadow-phase8-completion.md](design/talkback-identity-shadow-phase8-completion.md)를
-따른다.
-
-Traversal Identity V2는 Production Default다. `TB_TRAVERSAL_IDENTITY_V2_ENABLED=0`이면
-Legacy Compatibility traversal을 명시적으로 선택한다. V2가 ON이면 위 V2 결과 중에서도 closed, complete,
-ACKed, stable, high-confidence `MOVE_CONFIRMED`/`STATIC_FOCUS`만
-`tb_runner/traversal_evidence_gate.py`를 통해 production progress/visit/stop/recovery에
-제한적으로 사용한다. `MOVE_TO_OTHER_NODE`, `SNAP_BACK`, incomplete, malformed, orphan,
-uncorrelated 결과는 모두 legacy fallback이다. Flag OFF에서는 이 경로를 전혀 읽지 않는다.
-
-```text
-Traversal Engine selection (run-scoped)
-  Traversal Identity V2  -- flag=1 / omitted --> Production Default
-  Legacy Traversal       -- flag=0 -----------> Compatibility Mode
-```
-
-Production traversal orchestration은 policy와 Android action을 다시 구현하지 않는다.
-`collection_flow`가 step lifecycle의 outer orchestrator로 남고, Phase 8.5 decision coordination은
-`tb_runner/traversal_orchestration.py`에 분리한다.
-
-```text
-collection_flow (step lifecycle / side-effect ordering)
+Execution plane
+  -> RunSpec feature flags
+  -> script_test.py / A11yAdbClient façade
+  -> collection_flow (step lifecycle outer orchestrator)
   -> TraversalCoordinator
-       -> StopPolicy (recovery eligibility reason set)
-       -> RecoveryCoordinator (existing one-candidate executor repetition)
-       -> RecoveryExecutor (existing FOCUS_IN_BOUNDS action lifecycle)
-       -> VisitTracker (planning consumed / physical visited projection)
-       -> traversal_evidence_gate (authoritative strong-evidence decision)
+       -> StopPolicy
+       -> RecoveryCoordinator
+       -> RecoveryExecutor / FOCUS_IN_BOUNDS action lifecycle
+       -> VisitTracker
+       -> Traversal Evidence Gate
+  -> Android Helper AccessibilityService
+  -> XLSX + JSON/log/evidence/crop artifacts
+
+Review / comparison plane
+  -> QA Review vs Automation Diagnostics classification
+  -> terminal Full Run Candidate generation
+  -> Offline Validation
+  -> Comparator / Compare UI
+  -> human approval
+  -> Approved Baseline + observation bundle
+
+Diagnostic / shadow plane (read-only to production routing)
+  -> Coverage Probe / coverage health
+  -> V10 Runtime Inventory / Quick Identify / Policy Registry
+  -> V10 Shadow Compare / Promotion Readiness / Corpus Readiness
 ```
 
-Candidate selection, focus action, recovery result construction, stop counter/threshold, row persistence,
-coverage, representative selection과 evidence emission 순서는 기존 phase 함수에 그대로 유지한다.
+Production execution은 `collection_flow`의 lifecycle과 기존 action/policy 구현을
+중심으로 동작합니다. `traversal_orchestration.py`는 이 lifecycle에 stop/recovery/visit
+결정을 연결하고, Android Helper는 실제 accessibility action과 tree/focus bridge를
+제공합니다.
 
-## 3) Devices plugin 운영 추가점
+## 2) Production authority
 
-Devices plugin은 일반 Life plugin과 다르게 Devices list normalization을 먼저
-수행한다.
+### Run profile과 scenario membership
 
-- `enter_device_card_plugin` pre-navigation 사용
-- `All devices` selected 보장
-- visible inventory 우선 매칭
-- 필요할 때만 room expand
-- safe tap 적용
-- bounded search는 helper scroll이 아니라 **ADB swipe** 사용
+`tb_runner/scenario_config.py`의 `canonical_full_scenario_ids()`가 `TAB_CONFIGS` 전체를
+반환하며 현재 canonical Full Validation membership은 32개입니다. `runtime_config.json`
+의 `enabled`는 targeted execution default일 뿐 Full membership을 정의하지 않습니다.
+QA Frontend에서 exact canonical selection은 Full Validation이고 partial selection은
+Custom Run입니다.
 
-자세한 흐름은 [device-plugin-guide.md](device-plugin-guide.md)를 따른다.
+Full Validation profile은 Clean launch, Full mode, Coverage Probe, Evidence Ledger,
+Identity V2, Production Traversal V2, Profiler를 사용합니다. Shadow Validation은 별도
+opt-in이며 Full profile의 production traversal authority와 혼동하지 않습니다.
 
-## 4) Report row semantics
+### Traversal Identity V2
 
-현재 raw/result 기본 visible 계열은 representative가 아니라 **actual TalkBack
-focus 기준**이다.
+Traversal Identity V2는 현재 Production Default입니다. source-level default는
+`tb_runner/run_spec.py`, QA Backend Batch Runner, QA Frontend Full profile에서 모두
+enabled입니다. V2가 ON이면 Identity와 Evidence Ledger dependency가 run-scoped로
+함께 활성화됩니다.
 
-- 기본 컬럼: actual focus
-- `representative_*`: traversal representative
+`tb_runner/traversal_evidence_gate.py`는 complete transaction, ACKed helper transport,
+matching transaction ID, stable landing, high-confidence와 contradiction 여부를 확인한
+강한 evidence를 production decision에 전달합니다.
 
-자세한 스키마는 [report-schema.md](report-schema.md)를 본다.
+- strong `MOVE_CONFIRMED`: 실제 이동/visit 진행에 제한적으로 사용
+- strong `STATIC_FOCUS`: 정적 focus를 확인해 false progress를 억제하는 데 사용
+- `MOVE_TO_OTHER_NODE`, `SNAP_BACK`, incomplete, malformed, orphan, uncorrelated,
+  indeterminate: Legacy fallback
 
-## 5) 불변 계약
+`TB_TRAVERSAL_IDENTITY_V2_ENABLED=0`을 명시한 run은 Legacy Compatibility path입니다.
+이 path는 기존 traversal/anchor/representative/visit/coverage/audit/summary/XLSX
+계약을 유지하기 위한 run-scoped compatibility입니다. V2의 shadow reducer 자체와
+production gate 소비를 혼동하지 않아야 합니다.
 
-- helper protocol unchanged
-- traversal / scoring / representative selection unchanged
-- stop reason 해석 유지
-- 운영 로그 키 유지
-- row schema는 additive change를 우선
-- Shadow 실패는 Legacy 결과로 전파하지 않음
+```text
+Traversal engine selection (run-scoped)
+  flag omitted or 1 -> Traversal Identity V2 / Production Default
+  flag explicitly 0 -> Legacy Traversal / Compatibility Mode
+```
+
+`collection_flow.py`는 side-effect ordering과 step lifecycle의 source of truth로 남고,
+`TraversalCoordinator`는 policy와 Android action을 재구현하지 않습니다. Candidate
+selection, focus action, recovery result, stop counter/threshold, row persistence,
+coverage, representative selection과 evidence emission은 기존 phase contract를
+통해 실행됩니다.
+
+### Evidence Ledger와 Coverage
+
+Evidence Ledger는 helper action/evidence event를 transaction과 correlation ID에 따라
+append-only로 기록하고, Canonical Identity normalization/reconciliation에 필요한
+입력을 제공합니다. 이 ledger가 있어야 V2가 closed transaction 여부와 orphan/duplicate/
+contradiction을 판단할 수 있습니다.
+
+Coverage Probe는 focusable inventory에서 bounded `FOCUS_IN_BOUNDS` probe를 수행해
+candidate coverage와 semantic-value evidence를 보강하는 별도 경로입니다. 현재 Full
+Validation profile에서는 켜지지만 probe/coverage health는 validator-facing diagnostic
+projection이며, 그것만으로 traversal이나 제품 PASS/FAIL verdict의 권위를 갖지 않습니다.
+Coverage, audit, semantic shadow 결과는 조사와 review의 근거로 사용되고, production
+traversal gate의 명시된 strong-evidence 계약을 대체하지 않습니다.
+
+## 3) Helper, client, runner 계층
+
+### Android Helper
+
+`app/`의 `AccessibilityService`는 ADB broadcast 명령을 받아 tree dump, focus target,
+click, next/previous, smart-next, scroll, text input과 evidence event를 수행합니다.
+대용량 tree dump는 chunked transport를 사용합니다.
+
+### Python client
+
+- `talkback_lib/__init__.py`: 공개 `A11yAdbClient` façade
+- low-level ADB execution, logcat, action result parsing, helper bridge
+- focus trace, focus service, step row, collection service
+
+공개 client 계약은 유지하고 내부 책임은 모듈별로 분리되어 있습니다. 상세 내용은
+[current-client-architecture.md](current-client-architecture.md)를 따릅니다.
+
+### Runner와 plugin traversal
+
+- `collection_flow.py`: scenario open, precondition, main loop, checkpoint, persist
+- `anchor_logic.py`, `tab_logic.py`, `local_tab_logic.py`: start/local-tab stabilization
+- `overlay_logic.py`: overlay classification과 bounded recovery
+- Device plugin: `All devices` 상태, visible inventory 우선, 필요 시 room expand,
+  safe tap, bounded ADB swipe search
+- Life plugin: locale-aware XML scroll/search와 plugin-specific anchors/context
+- `excel_report.py`: raw/result/summary와 final workbook export
+
+Report의 기본 visible 계열은 actual TalkBack focus 기준이고 traversal representative는
+`representative_*` 컬럼에 따로 저장됩니다.
+
+## 4) QA Frontend와 review 계층
+
+QA Frontend Backend는 ADB/device preflight, run-scoped `RunSpec`, Batch Runner, current
+progress, terminal status, crash/coverage/identity/recovery projection을 제공합니다.
+Frontend는 Full/Smoke/Custom profile, scenario selection, current run, history, review,
+comparator 화면을 제공합니다.
+
+Quality signal은 `review_classification.py` 계약으로 분리됩니다.
+
+- `qa_accessibility`: 실제 접근성 품질을 사람이 판단해야 하는 QA Review 대상
+- `automation_engine`: runner/recovery/artifact/environment의 automation diagnostic
+- `unknown`: 분류 provenance가 부족하여 별도 조사해야 하는 대상
+
+Review Required panel의 QA count에는 Automation Diagnostics가 포함되지 않습니다. 이
+분리는 automation 오류를 사용자 접근성 결함으로 자동 오인하지 않게 하지만, QA review,
+known-limitation snapshot, automation acknowledgment가 모두 필요한 Candidate approval
+절차를 없애지는 않습니다.
+
+## 5) Candidate, Comparator, Baseline
+
+```text
+qualifying terminal Full Validation
+  -> deterministic profiler archive
+  -> Candidate (write-only/additive, unapproved)
+  -> Offline Validation
+  -> Comparator replay / canonical JSON + Markdown report
+  -> QA review + automation acknowledgment
+  -> explicit human approval
+  -> Approved Baseline + portable observation bundle
+```
+
+Batch Runner는 full registry, terminal state, successful device return code, zero
+`NO_TARGET_CANDIDATE`와 required artifacts 등의 조건을 만족할 때 Candidate generation을
+시도합니다. Candidate가 `NOT_ELIGIBLE`이어도 읽을 수 있으면 Comparator 선택 목록에는
+남을 수 있지만 approval을 의미하지 않습니다.
+
+Comparator는 명시적으로 선택한 Candidate와 Approved Baseline을 read-only로 비교합니다.
+입력은 local `qa_frontend_runs/`와 tracked/migrated baseline package에서 오며, Comparator
+또는 Frontend가 Baseline, Candidate, repository lifecycle을 자동 변경하지 않습니다.
+비교 history는 현재 backend process memory 범위이며 remote CAS/durable shared history는
+제공되지 않습니다.
+
+## 6) Diagnostic, shadow, and V10 boundary
+
+### Coverage/audit/shadow
+
+Coverage health, Device Plugin Audit, semantic-value shadow와 Identity Shadow reporting은
+관찰/분석/리포팅 계층입니다. Identity V2의 reducer는 shadow evidence를 만들고, 명시된
+strong closed transaction만 Production Traversal Gate를 통해 제한적으로 소비됩니다.
+그 밖의 incomplete/indeterminate 결과와 모든 audit/coverage projection은 fallback 또는
+진단으로 남습니다.
+
+### V10
+
+V10은 Runtime Inventory, Quick Plugin Identify, versioned Policy Registry, Shadow Compare,
+Promotion Readiness, Shadow Corpus와 QA Frontend readiness card를 제공합니다. V10은
+Legacy run artifact를 입력으로 candidate/readiness를 평가하지만 production routing이나
+traversal을 시작하지 않습니다.
+
+**Controlled Routing은 NOT STARTED입니다.** V10의 `READY`, `MATCH`, family readiness와
+corpus 요약은 shadow evaluation이며 production verdict authority가 아닙니다.
+
+```text
+Production authority
+  RunSpec -> collection_flow -> Traversal Identity V2 gate/fallback
+  -> Runner/Helper actions -> report and terminal result
+
+Diagnostic / shadow only
+  Coverage Probe, audit, V10 identify/compare/readiness/corpus
+  -> observe/analyze/report; no Controlled Routing
+```
+
+## 7) 운영 불변 계약과 제한
+
+- Helper protocol과 public client contract 유지
+- V2 OFF 시 Legacy Compatibility semantics 유지
+- Shadow 실패는 Legacy/production result로 자동 전파하지 않음
 - `unknown`, `ambiguous`, `failed`는 fail-closed
-- Controlled Routing과 V10 traversal은 비활성/미구현
-- Canonical Identity V2 verdict는 기본 shadow-only이며, Production Default Traversal Identity V2에서만
-  strong gate 결과가 production progress/visit/stop/recovery에 제한적으로 소비됨; Legacy Compatibility는
-  명시적 run-scoped OFF로 유지
+- exact reviewed model policy를 사용하며 unknown model 자동 승인을 하지 않음
+- Full Validation은 controlled/manual이며 human approval이 필요
+- 최신 `main`의 32-scenario physical-device acceptance 결과를 이 문서가 주장하지 않음
+
+현재 운영 readiness는 **Production Ready with Limitations (controlled/manual)**입니다.
+Phase 8/9/10 문서의 acceptance와 RCA는 각 날짜와 scope의 historical evidence로 보존되며,
+현재 architecture contract나 최신 validation result로 재해석하지 않습니다.
