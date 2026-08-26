@@ -4,6 +4,7 @@ import android.graphics.Rect
 import android.os.Build
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
+import java.util.IdentityHashMap
 import kotlin.math.abs
 
 object A11yTraversalAnalyzer {
@@ -50,9 +51,20 @@ object A11yTraversalAnalyzer {
             .distinctBy { focused ->
                 Rect().also { focused.node.getBoundsInScreen(it) }
             }
+        val stableOrderByNode = IdentityHashMap<AccessibilityNodeInfo, Long>()
+        dedupedNodes.forEachIndexed { index, focused ->
+            stableOrderByNode[focused.node] = index.toLong()
+        }
         val filteredNodes = dedupedNodes
             .filterNot { shouldExcludeAsEmptyShell(it) }
-            .sortedWith(spatialComparator())
+            .sortedWith(
+                spatialComparator(
+                    stableOrderOf = { focused ->
+                        stableOrderByNode[focused.node]
+                            ?: System.identityHashCode(focused.node).toLong()
+                    }
+                )
+            )
         return filteredNodes
     }
 
@@ -660,19 +672,45 @@ object A11yTraversalAnalyzer {
 
     private fun area(rect: Rect): Int = rect.width().coerceAtLeast(0) * rect.height().coerceAtLeast(0)
 
-    internal fun spatialComparator(yBucketSize: Int = 5): Comparator<FocusedNode> {
-        return Comparator { left, right ->
-            compareByContainmentAndPosition(
-                left = left.node,
-                right = right.node,
+    private data class TraversalSortSegment(
+        val validityRank: Int,
+        val centerYBucket: Long,
+        val left: Long,
+        val top: Long,
+        val right: Long,
+        val bottom: Long
+    )
+
+    private data class TraversalSortKey(
+        val path: List<TraversalSortSegment>,
+        val tieBreaker: Long
+    )
+
+    internal fun spatialComparator(
+        yBucketSize: Int = 5,
+        stableOrderOf: ((FocusedNode) -> Long)? = null
+    ): Comparator<FocusedNode> {
+        val keyCache = IdentityHashMap<FocusedNode, TraversalSortKey>()
+
+        fun keyOf(focused: FocusedNode): TraversalSortKey {
+            return keyCache[focused] ?: traversalSortKey(
+                value = focused.node,
                 parentOf = { node -> node.parent },
                 boundsOf = { node ->
                     Rect().also { rect ->
                         node.getBoundsInScreen(rect)
                     }
                 },
-                yBucketSize = yBucketSize
-            )
+                yBucketSize = yBucketSize,
+                tieBreakerOf = {
+                    stableOrderOf?.invoke(focused)
+                        ?: System.identityHashCode(focused.node).toLong()
+                }
+            ).also { keyCache[focused] = it }
+        }
+
+        return Comparator { left, right ->
+            compareTraversalSortKeys(keyOf(left), keyOf(right))
         }
     }
 
@@ -681,27 +719,94 @@ object A11yTraversalAnalyzer {
         right: T,
         parentOf: (T) -> T?,
         boundsOf: (T) -> Rect,
-        yBucketSize: Int = 5
+        yBucketSize: Int = 5,
+        tieBreakerOf: ((T) -> Long)? = null
     ): Int {
-        if (left == right) return 0
-        if (isAncestorOf(ancestor = left, descendant = right, parentOf = parentOf)) return -1
-        if (isAncestorOf(ancestor = right, descendant = left, parentOf = parentOf)) return 1
-
-        val leftRect = boundsOf(left)
-        val rightRect = boundsOf(right)
-
-        val leftCenterY = (leftRect.top + leftRect.bottom) / 2
-        val rightCenterY = (rightRect.top + rightRect.bottom) / 2
-        if (kotlin.math.abs(leftCenterY - rightCenterY) < yBucketSize) {
-            if (leftRect.bottom <= rightRect.top) return -1
-            if (rightRect.bottom <= leftRect.top) return 1
+        val fallbackTieBreaker: (T) -> Long = tieBreakerOf ?: { value ->
+            System.identityHashCode(value).toLong()
         }
+        val leftKey = traversalSortKey(
+            value = left,
+            parentOf = parentOf,
+            boundsOf = boundsOf,
+            yBucketSize = yBucketSize,
+            tieBreakerOf = fallbackTieBreaker
+        )
+        val rightKey = traversalSortKey(
+            value = right,
+            parentOf = parentOf,
+            boundsOf = boundsOf,
+            yBucketSize = yBucketSize,
+            tieBreakerOf = fallbackTieBreaker
+        )
+        return compareTraversalSortKeys(leftKey, rightKey)
+    }
 
-        val leftCenterYBucket = leftCenterY / yBucketSize
-        val rightCenterYBucket = rightCenterY / yBucketSize
-        if (leftCenterYBucket != rightCenterYBucket) return leftCenterYBucket - rightCenterYBucket
-        if (leftRect.left != rightRect.left) return leftRect.left - rightRect.left
-        return leftRect.top - rightRect.top
+    private fun <T> traversalSortKey(
+        value: T,
+        parentOf: (T) -> T?,
+        boundsOf: (T) -> Rect,
+        yBucketSize: Int,
+        tieBreakerOf: (T) -> Long
+    ): TraversalSortKey {
+        val bucketSize = yBucketSize.toLong().coerceAtLeast(1L)
+        val reversePath = mutableListOf<TraversalSortSegment>()
+        val seen = IdentityHashMap<Any, Boolean>()
+        var current: T? = value
+        while (current != null) {
+            val currentObject = current as Any
+            if (seen.put(currentObject, true) != null) break
+            reversePath += traversalSortSegment(boundsOf(current), bucketSize)
+            current = parentOf(current)
+        }
+        reversePath.reverse()
+        return TraversalSortKey(
+            path = reversePath,
+            tieBreaker = tieBreakerOf(value)
+        )
+    }
+
+    private fun traversalSortSegment(rect: Rect, bucketSize: Long): TraversalSortSegment {
+        val left = rect.left.toLong()
+        val top = rect.top.toLong()
+        val right = rect.right.toLong()
+        val bottom = rect.bottom.toLong()
+        val centerY = (top + bottom) / 2L
+        return TraversalSortSegment(
+            validityRank = if (right > left && bottom > top) 0 else 1,
+            centerYBucket = centerY / bucketSize,
+            left = left,
+            top = top,
+            right = right,
+            bottom = bottom
+        )
+    }
+
+    private fun compareTraversalSortKeys(left: TraversalSortKey, right: TraversalSortKey): Int {
+        val sharedPathLength = minOf(left.path.size, right.path.size)
+        for (index in 0 until sharedPathLength) {
+            val segmentComparison = compareTraversalSortSegments(left.path[index], right.path[index])
+            if (segmentComparison != 0) return segmentComparison
+        }
+        val pathLengthComparison = left.path.size.compareTo(right.path.size)
+        if (pathLengthComparison != 0) return pathLengthComparison
+        return left.tieBreaker.compareTo(right.tieBreaker)
+    }
+
+    private fun compareTraversalSortSegments(
+        left: TraversalSortSegment,
+        right: TraversalSortSegment
+    ): Int {
+        return compareValuesBy(
+            left,
+            right,
+            { it.validityRank },
+            { it.centerYBucket },
+            { it.left },
+            { it.top },
+            { it.right },
+            { it.bottom }
+        )
     }
 
     internal fun <T> isAncestorOf(

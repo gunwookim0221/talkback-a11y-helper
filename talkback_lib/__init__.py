@@ -1078,7 +1078,7 @@ class A11yAdbClient:
         logs = ""
         while time.time() - start_time < wait_seconds:
             logs = self._logcat_reader.dump_raw_filtered(dev=dev)
-            if self._has_req_marker(logs, "DUMP_TREE_END", req_id):
+            if self._has_req_marker(logs, "DUMP_TREE_END", req_id) or self._has_req_marker(logs, "DUMP_TREE_RESULT", req_id):
                 break
             time.sleep(1.0)
 
@@ -1100,6 +1100,9 @@ class A11yAdbClient:
             raise RuntimeError(f"DUMP_TREE JSON 파싱 실패: {exc}") from exc
 
         if isinstance(parsed, dict):
+            if parsed.get("success") is False:
+                reason = str(parsed.get("reason") or "unknown failure")
+                raise RuntimeError(f"DUMP_TREE failed: {reason}")
             nodes = parsed.get("nodes")
             if not isinstance(nodes, list):
                 raise RuntimeError("DUMP_TREE JSON 형식이 올바르지 않습니다.")

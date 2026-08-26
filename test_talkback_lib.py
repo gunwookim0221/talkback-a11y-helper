@@ -1403,6 +1403,23 @@ class ClientInterfaceCompatTest(unittest.TestCase):
 
         self.assertEqual(result, [{"id": 3}])
 
+    def test_dump_tree_reports_explicit_helper_failure_without_waiting_for_end_marker(self):
+        client = A11yAdbClient(start_monitor=False)
+        log_payload = (
+            'A11Y_HELPER DUMP_TREE_RESULT REQID803 '
+            '{"reqId":"REQID803","success":false,"reason":"comparator failure"}'
+        )
+
+        with patch("talkback_lib.uuid.uuid4", return_value="REQID803-xxxx"), patch.object(client, "check_helper_status", return_value=True), patch.object(client, "clear_logcat", return_value=""), patch.object(client, "_broadcast", return_value="ok"), patch.object(
+            client,
+            "_run",
+            return_value=log_payload,
+        ), patch("talkback_lib.time.sleep") as sleep_mock:
+            with self.assertRaisesRegex(RuntimeError, "DUMP_TREE failed: comparator failure"):
+                client.dump_tree(dev="SER", wait_seconds=5.0)
+
+        sleep_mock.assert_not_called()
+
     def test_check_talkback_status_returns_true_when_talkback_enabled(self):
         client = FakeA11yClient()
         client.enabled_services_payload = "service:a:b:com.google.android.marvin.talkback/.TalkBackService"

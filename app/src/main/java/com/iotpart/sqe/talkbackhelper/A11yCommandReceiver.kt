@@ -130,10 +130,31 @@ class A11yCommandReceiver : BroadcastReceiver() {
         val reqId = parseReqId(intent)
         val service = A11yHelperService.instance
         if (service == null) {
-            logFailure("DUMP_TREE_RESULT", reqId, "Accessibility Service is null or not running")
+            logDumpTreeFailure(reqId, "Accessibility Service is null or not running")
             return
         }
-        service.dumpTree(reqId)
+        executeDumpTreeSafely(
+            reqId = reqId,
+            dumpTree = { service.dumpTree(reqId) },
+            reportFailure = { reason -> logDumpTreeFailure(reqId, reason) }
+        )
+    }
+
+    internal fun executeDumpTreeSafely(
+        reqId: String,
+        dumpTree: () -> Unit,
+        reportFailure: (String) -> Unit,
+        logError: (String, Throwable) -> Unit = { message, error -> Log.e(TAG, message, error) }
+    ): Boolean {
+        return try {
+            dumpTree()
+            true
+        } catch (error: Exception) {
+            val reason = "Traversal analysis failed: ${error.javaClass.simpleName}: ${error.message ?: "no message"}"
+            logError("[DUMP_TREE] failed req_id='$reqId'", error)
+            reportFailure(reason)
+            false
+        }
     }
 
     private fun handleTargetAction(intent: Intent, action: Int) {
@@ -460,5 +481,14 @@ class A11yCommandReceiver : BroadcastReceiver() {
             .put("reason", reason)
             .toString()
         Log.w(TAG, "$resultTag $payload")
+    }
+
+    private fun logDumpTreeFailure(reqId: String, reason: String) {
+        val payload = org.json.JSONObject()
+            .put("reqId", reqId)
+            .put("success", false)
+            .put("reason", reason)
+            .toString()
+        Log.w(TAG, "DUMP_TREE_RESULT $reqId $payload")
     }
 }
