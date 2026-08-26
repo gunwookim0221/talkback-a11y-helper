@@ -29,6 +29,28 @@ qa_frontend_debug.png
 
 artifacts/
 
+# Tracked GitHub Pages presentation allowlist; other generated artifacts stay ignored.
+!artifacts/
+artifacts/*
+!artifacts/index.html
+!artifacts/shared/
+artifacts/shared/*
+!artifacts/shared/styles.css
+!artifacts/assets/
+artifacts/assets/*
+!artifacts/assets/images/
+artifacts/assets/images/*
+!artifacts/assets/images/talkback/
+artifacts/assets/images/talkback/*
+!artifacts/assets/images/talkback/*.png
+!artifacts/report/
+artifacts/report/*
+!artifacts/report/*.html
+!artifacts/dashboard/
+artifacts/dashboard/*
+!artifacts/dashboard/*.html
+!artifacts/TEMPLATE_GUIDE.md
+
 tmp*/
 tmp_*/
 tmp_pytest*/

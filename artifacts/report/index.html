@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="TalkBack 접근성 자동검증 프로젝트 보고서">
+  <title>프로젝트 보고서 · TalkBack 접근성 자동검증</title>
+  <link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
+  <header class="site-header"><div class="container nav-shell"><a class="brand" href="../index.html"><span class="brand-mark">TB</span><span>TalkBack A11y<small>Project Report</small></span></a><nav class="site-nav" aria-label="주요 메뉴"><a href="../index.html">홈</a><a href="index.html" aria-current="page">보고서</a><a href="../dashboard/index.html">대시보드</a><a href="https://github.com/gunwookim0221/talkback-a11y-helper/tree/main/docs" target="_blank" rel="noreferrer">기술 문서</a></nav></div></header>
+  <main id="main-content"><div class="container">
+    <section class="hero"><p class="eyebrow">Project Report</p><h1>실제 TalkBack 흐름으로 보는 접근성 검증</h1><p class="lead">화면에 보이는 것만 확인하지 않고, TalkBack이 실제로 어디에 focus하고 무엇을 발화하는지 evidence로 남기는 시스템의 현재와 방향을 소개합니다.</p></section>
+    <section class="grid grid-2" aria-label="보고서 목차">
+      <a class="card card-link" href="01-overview.html"><p class="eyebrow">01</p><h2>프로젝트 개요</h2><p>수동 검증의 비용과 Android Helper · Python Runner · QA Frontend의 역할을 설명합니다.</p><span class="mini-link">왜 필요한가 →</span></a>
+      <a class="card card-link" href="02-how-it-works.html"><p class="eyebrow">02</p><h2>시스템 동작 구조</h2><p>현재 production traversal, evidence, review, shadow 계층의 경계를 시각화합니다.</p><span class="mini-link">어떻게 동작하는가 →</span></a>
+      <a class="card card-link" href="03-validation-workflow.html"><p class="eyebrow">03</p><h2>검증 흐름</h2><p>Full Validation, Quick Smoke, Custom Run과 32개 canonical scenario의 의미를 정리합니다.</p><span class="mini-link">어떻게 검증하는가 →</span></a>
+      <a class="card card-link" href="04-achievements.html"><p class="eyebrow">04</p><h2>현재까지의 성과</h2><p>무엇이 구현되었는지를 capability 중심으로 보여주고, historical 수치는 scope를 붙여 구분합니다.</p><span class="mini-link">무엇이 준비되었는가 →</span></a>
+      <a class="card card-link" href="05-roadmap.html"><p class="eyebrow">05 · Future design</p><h2>향후 개선 방향</h2><p>Scenario-driven traversal에서 State-Graph-driven accessibility crawl로 이어지는 설계 방향을 설명합니다.</p><span class="mini-link">어디로 진화하는가 →</span></a>
+    </section>
+    <section class="section callout"><strong>문서 경계</strong><p>세부 계약과 실행 명령은 <a href="https://github.com/gunwookim0221/talkback-a11y-helper/blob/main/docs/operations/talkback-operational-runbook.md" target="_blank" rel="noreferrer">운영 Runbook</a>과 <a href="https://github.com/gunwookim0221/talkback-a11y-helper/tree/main/docs" target="_blank" rel="noreferrer">기술 문서</a>를 기준으로 합니다. 이 보고서는 이해를 돕는 한국어 presentation입니다.</p></section>
+  </div></main>
+  <footer class="site-footer"><div class="container footer-grid"><span>보고서 · current implementation과 future direction</span><span><a href="../dashboard/index.html">운영 대시보드 →</a></span></div></footer>
+</body>
+</html>

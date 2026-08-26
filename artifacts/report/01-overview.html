@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="TalkBack 접근성 자동검증 프로젝트 개요">
+  <title>프로젝트 개요 · TalkBack 접근성 자동검증</title>
+  <link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
+  <header class="site-header"><div class="container nav-shell"><a class="brand" href="../index.html"><span class="brand-mark">TB</span><span>TalkBack A11y<small>Project Report</small></span></a><nav class="site-nav" aria-label="주요 메뉴"><a href="../index.html">홈</a><a href="index.html" aria-current="page">보고서</a><a href="../dashboard/index.html">대시보드</a><a href="https://github.com/gunwookim0221/talkback-a11y-helper/tree/main/docs" target="_blank" rel="noreferrer">기술 문서</a></nav></div></header>
+  <main id="main-content"><div class="container">
+    <section class="hero"><p class="eyebrow">Report 01 · Context</p><h1>프로젝트 개요</h1><p class="lead">접근성 검증은 화면을 한 번 보는 것으로 끝나지 않습니다. TalkBack focus 순서, 발화, 동적 content와 recovery까지 확인하고 재현 가능한 evidence로 남겨야 합니다.</p></section>
+    <section class="section grid grid-2">
+      <div class="card"><h2>왜 수동 검증이 어려운가</h2><ul><li>focusable object가 많고 시각적 배치와 TalkBack 순서가 다를 수 있습니다.</li><li>plugin 화면은 scroll, popup, overlay, lazy content와 함께 변합니다.</li><li>보이는 text와 실제 speech가 다를 수 있어 두 정보를 함께 비교해야 합니다.</li><li>실패 위치의 screenshot, crop, focus와 로그가 있어야 원인을 재검토할 수 있습니다.</li><li>앱/plugin 변경 때 anchor, resource-id, navigation path와 recovery 규칙이 함께 흔들릴 수 있습니다.</li></ul></div>
+      <figure class="screenshot-frame"><img src="../assets/images/talkback/control-panel-main.png" alt="TalkBack QA Control Panel의 ADB 연결, Helper와 TalkBack 상태, Current Run 영역을 보여주는 화면 예시"><figcaption>QA Control Panel main screen 예시. 실행 전 preflight와 Current Run 상태를 한 화면에서 확인합니다. 이 이미지는 현재 HEAD의 validation metric을 증명하는 결과표가 아닙니다.</figcaption></figure>
+    </section>
+    <section class="section"><div class="section-heading"><div><p class="eyebrow">Three layers</p><h2>하나의 검증을 만드는 세 계층</h2></div></div><div class="grid grid-3">
+      <article class="card"><span class="status planned">Android</span><h3>Android Helper</h3><p>AccessibilityService 기반 APK가 ADB broadcast를 받아 tree dump, focus 이동, target action, SMART_NEXT와 evidence event를 연결합니다.</p></article>
+      <article class="card"><span class="status good">Execution</span><h3>Python Runner</h3><p>시나리오 진입, traversal, recovery, stop policy, 실제 focus 기반 row와 XLSX/JSON/log/evidence 저장을 조정합니다.</p></article>
+      <article class="card"><span class="status good">Control &amp; review</span><h3>QA Frontend</h3><p>device/TalkBack preflight, run profile, scenario selection, Batch monitor, Review Required와 Candidate/Comparator를 제공합니다.</p></article>
+    </div></section>
+    <section class="section callout future"><strong>핵심 관점</strong><p>이 시스템의 목적은 단순히 “자동으로 클릭한다”가 아닙니다. 화면에 도달한 뒤 실제 TalkBack이 방문한 focus와 발화/화면 evidence를 수집하고, 사람이 판단할 수 있는 형태로 만드는 것입니다.</p></section>
+    <section class="section button-row"><a class="button" href="02-how-it-works.html">다음: 시스템 동작 구조 →</a><a class="button secondary" href="index.html">보고서 목차</a></section>
+  </div></main>
+  <footer class="site-footer"><div class="container footer-grid"><span>Report 01 · 프로젝트 개요</span><span><a href="../dashboard/index.html">운영 대시보드 →</a></span></div></footer>
+</body>
+</html>

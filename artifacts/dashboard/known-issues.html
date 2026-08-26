@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="TalkBack 접근성 자동검증의 현재 known issues와 해석 경계">
+  <title>Known Issues · 운영 대시보드</title>
+  <link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
+  <header class="site-header"><div class="container nav-shell"><a class="brand" href="../index.html"><span class="brand-mark">TB</span><span>TalkBack A11y<small>Operations Dashboard</small></span></a><nav class="site-nav" aria-label="주요 메뉴"><a href="../index.html">홈</a><a href="../report/index.html">보고서</a><a href="index.html" aria-current="page">대시보드</a><a href="https://github.com/gunwookim0221/talkback-a11y-helper/tree/main/docs" target="_blank" rel="noreferrer">기술 문서</a></nav></div></header>
+  <main id="main-content"><div class="container">
+    <section class="hero"><p class="eyebrow">Dashboard 03 · Review boundary</p><h1>Known Issues</h1><p class="lead">자동화의 제한과 제품 접근성 검토 항목을 섞지 않습니다. 같은 실행에서 보이더라도 ownership과 다음 조사가 다를 수 있습니다.</p></section>
+    <section class="section grid grid-2"><div class="card"><span class="status warning">Automation / structure</span><h2>해석에 영향을 주는 제한</h2><ul><li>최신 HEAD의 physical-device 32-scenario Full Validation evidence freshness 갱신 필요</li><li>WebView, Compose, merged node, lazy content와 dynamic hierarchy의 일반화 gap</li><li>향후 Candidate의 portable observation bundle 자동 첨부는 아직 일반화되지 않음</li><li>Comparator history는 backend process memory 범위이며 remote CAS/durable shared history 없음</li><li>container hierarchy evidence와 positive recovery corpus가 제한적</li><li>plugin discovery와 exact reviewed model policy의 범위 밖 단말은 별도 검토 필요</li><li>plugin onboarding rollback은 preview only</li><li>V10 Controlled Routing은 구현되지 않음</li></ul></div><figure class="screenshot-frame"><img src="../assets/images/talkback/review-required.png" alt="Review Required 화면에서 두 개의 QA Review 항목에 visible text, TalkBack speech, screenshot과 status가 표시된 예시"><figcaption>Review Required UI 예시. 실제 화면/발화 확인이 필요한 QA Review와 Automation Diagnostics를 구분하는 현재 contract를 보여줍니다.</figcaption></figure></section>
+    <section class="section"><div class="section-heading"><div><p class="eyebrow">Separate the signal</p><h2>제품 접근성 검토 vs 자동화 진단</h2></div></div><div class="grid grid-2"><article class="card"><span class="status good">QA Review</span><h3>제품 접근성 검토 항목</h3><p><code>qa_accessibility</code> signal은 visible text와 TalkBack speech, focus/evidence를 사람이 확인해야 하는 대상입니다. Review Required의 QA Review count에 포함됩니다.</p></article><article class="card"><span class="status neutral">Automation Diagnostics</span><h3>자동화 진단 항목</h3><p><code>automation_engine</code> signal은 traversal, recovery, artifact, environment 또는 engine을 조사할 대상입니다. QA 접근성 결함으로 자동 승격하지 않습니다.</p></article></div></section>
+    <section class="section callout"><strong>주의: evidence freshness ≠ product FAIL</strong><p>현재 근거가 오래되었거나 특정 corpus가 부족하다는 표시만으로 제품 접근성 FAIL을 선언하지 않습니다. 새 실행, 재현, reviewer decision이 필요한 상태와 실제 접근성 결함은 각각의 evidence로 판단합니다.</p></section>
+    <section class="section button-row"><a class="button" href="backlog.html">관련 backlog →</a><a class="button secondary" href="index.html">대시보드 홈</a></section>
+  </div></main>
+  <footer class="site-footer"><div class="container footer-grid"><span>Dashboard 03 · Known Issues</span><span><a href="../report/04-achievements.html">성과와 범위 →</a></span></div></footer>
+</body>
+</html>

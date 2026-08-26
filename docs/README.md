@@ -55,6 +55,14 @@ Coverage, audit, Identity Shadow, V10 Shadow는 각각 evidence/diagnostic/readi
 현재 Full Validation은 canonical registry 전체를 선택하며 runtime `enabled` flag는
 targeted execution default입니다.
 
+## Future design / roadmap
+
+- [State-Graph 기반 자동 Accessibility Crawl 로드맵](design/talkback-state-graph-accessibility-crawl-roadmap.md):
+  현재 Scenario-driven traversal에서 미래 State-Graph-driven crawl로의 설계 방향
+
+이 로드맵은 현재 production traversal의 설명이 아니라 future architectural direction입니다.
+현재 기반과 향후 설계/구현 gap을 구분해서 읽습니다.
+
 ## QA Frontend, profiles, and comparison
 
 - [Phase 10.2.5 Run Profiles](design/talkback-phase10.2.5-run-profiles.md): Full Validation,

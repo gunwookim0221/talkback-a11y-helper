@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="SmartThings TalkBack 접근성 자동검증 프로젝트의 한국어 보고서와 운영 대시보드">
+  <title>TalkBack 접근성 자동검증</title>
+  <link rel="stylesheet" href="shared/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
+  <header class="site-header">
+    <div class="container nav-shell">
+      <a class="brand" href="index.html"><span class="brand-mark">TB</span><span>TalkBack A11y<small>한국어 프로젝트 프레젠테이션</small></span></a>
+      <nav class="site-nav" aria-label="주요 메뉴">
+        <a href="index.html" aria-current="page">홈</a>
+        <a href="report/index.html">보고서</a>
+        <a href="dashboard/index.html">대시보드</a>
+        <a href="https://github.com/gunwookim0221/talkback-a11y-helper/tree/main/docs" target="_blank" rel="noreferrer">기술 문서</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main-content">
+    <div class="container">
+      <section class="hero">
+        <p class="eyebrow">Korean GitHub Pages presentation</p>
+        <h1>TalkBack 접근성 자동검증</h1>
+        <p class="lead">SmartThings 화면을 실제 TalkBack 탐색 흐름으로 순회하고, 보이는 정보·발화·포커스·증거를 수집해 접근성 품질을 검증하는 자동화 플랫폼입니다.</p>
+        <div class="hero-actions">
+          <a class="button" href="report/index.html">프로젝트 보고서 보기</a>
+          <a class="button secondary" href="dashboard/index.html">운영 대시보드 보기</a>
+        </div>
+      </section>
+
+      <section class="grid grid-4" aria-label="현재 요약">
+        <div class="stat"><span class="stat-value">32</span><span class="stat-label">canonical Full Validation scenario</span></div>
+        <div class="stat"><span class="stat-value">V2 기본</span><span class="stat-label">Traversal Identity production default</span></div>
+        <div class="stat"><span class="stat-value">Human</span><span class="stat-label">최종 review / approval 주체</span></div>
+        <div class="stat"><span class="stat-value">갱신 필요</span><span class="stat-label">최신 HEAD 물리 Full 근거</span></div>
+      </section>
+
+      <section class="section grid grid-2" aria-label="주요 목적지">
+        <a class="card card-link" href="report/index.html">
+          <p class="eyebrow">Project Report</p>
+          <h2>프로젝트 보고서</h2>
+          <p>왜 필요한지, 현재 시스템이 어떻게 동작하는지, 어떤 evidence/review workflow가 있는지, 다음 architecture가 어디로 향하는지 설명합니다.</p>
+          <span class="mini-link">추진 배경 · 구조 · 흐름 · 성과 · 로드맵 →</span>
+        </a>
+        <a class="card card-link" href="dashboard/index.html">
+          <p class="eyebrow">Operations Dashboard</p>
+          <h2>운영 대시보드</h2>
+          <p>현재 구현 capability, validation evidence freshness, known issues와 다음 backlog를 한눈에 확인합니다.</p>
+          <span class="mini-link">Capability · Validation · Issues · Backlog →</span>
+        </a>
+      </section>
+
+      <section class="section callout warning">
+        <strong>읽는 방법</strong>
+        <p>이 Pages는 기술 문서를 대체하지 않는 presentation layer입니다. 현재 구현 capability, 현재 운영/검증 근거, known limitation, future roadmap을 구분해 표시합니다. 과거 acceptance 수치는 최신 `main`의 physical-device PASS를 의미하지 않습니다.</p>
+      </section>
+
+      <section class="section">
+        <div class="section-heading"><div><p class="eyebrow">System in one view</p><h2>검증 lifecycle</h2></div></div>
+        <div class="flow" aria-label="검증 lifecycle">
+          <div class="flow-step"><strong>Preflight</strong><small>Device · ADB · TalkBack</small></div>
+          <div class="flow-step"><strong>Scenario Run</strong><small>Batch · profile · runner</small></div>
+          <div class="flow-step"><strong>Evidence</strong><small>Focus · speech · screen</small></div>
+          <div class="flow-step"><strong>Review</strong><small>QA · automation 진단</small></div>
+          <div class="flow-step"><strong>Baseline</strong><small>Comparator · human approval</small></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer"><div class="container footer-grid"><span>talkback-a11y-helper · Korean presentation layer</span><span><a href="https://github.com/gunwookim0221/talkback-a11y-helper" target="_blank" rel="noreferrer">GitHub repository</a></span></div></footer>
+</body>
+</html>

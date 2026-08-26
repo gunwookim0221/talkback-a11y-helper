@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="TalkBack 접근성 자동검증 현재 구현 상태와 backlog 대시보드">
+  <title>운영 대시보드 · TalkBack 접근성 자동검증</title>
+  <link rel="stylesheet" href="../shared/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
+  <header class="site-header"><div class="container nav-shell"><a class="brand" href="../index.html"><span class="brand-mark">TB</span><span>TalkBack A11y<small>Operations Dashboard</small></span></a><nav class="site-nav" aria-label="주요 메뉴"><a href="../index.html">홈</a><a href="../report/index.html">보고서</a><a href="index.html" aria-current="page">대시보드</a><a href="https://github.com/gunwookim0221/talkback-a11y-helper/tree/main/docs" target="_blank" rel="noreferrer">기술 문서</a></nav></div></header>
+  <main id="main-content"><div class="container">
+    <section class="hero"><p class="eyebrow">Operations Dashboard</p><h1>현재 구현과 다음 작업</h1><p class="lead">이 대시보드는 제품 capability, validation evidence freshness, known issues와 future backlog를 구분해 보여줍니다.</p></section>
+    <section class="grid grid-4" aria-label="현재 대시보드 요약"><div class="stat"><span class="stat-value">32</span><span class="stat-label">canonical Full scenario</span></div><div class="stat"><span class="stat-value">Production</span><span class="stat-label">Traversal Identity V2 기본</span></div><div class="stat"><span class="stat-value">Manual</span><span class="stat-label">review / approval 방식</span></div><div class="stat"><span class="stat-value">주의</span><span class="stat-label">최신 physical Full 근거 갱신</span></div></section>
+    <section class="section grid grid-2"><a class="card card-link" href="phase-status.html"><p class="eyebrow">01 · Capability</p><h2>Capability Status</h2><p>실행, traversal, evidence, review, comparator와 future roadmap capability의 maturity를 확인합니다.</p><span class="mini-link">상태표 보기 →</span></a><a class="card card-link" href="validation-status.html"><p class="eyebrow">02 · Evidence</p><h2>Validation Status</h2><p>canonical scope, run mode와 historical/current evidence freshness를 구분합니다.</p><span class="mini-link">근거 상태 보기 →</span></a><a class="card card-link" href="known-issues.html"><p class="eyebrow">03 · Review</p><h2>Known Issues</h2><p>해석에 영향을 주는 운영 제한, automation diagnostic과 QA review 경계를 확인합니다.</p><span class="mini-link">제한사항 보기 →</span></a><a class="card card-link" href="backlog.html"><p class="eyebrow">04 · Future</p><h2>Backlog</h2><p>State-Graph crawl로 이어지는 Discovery, Reconciliation, Safe Navigation의 검토 항목입니다.</p><span class="mini-link">다음 작업 보기 →</span></a></section>
+    <section class="section callout warning"><strong>대시보드 해석 주의</strong><p>Capability가 구현되어 있다는 사실은 최신 physical-device Full Validation이 통과했다는 뜻이 아닙니다. 현재 tracked evidence 기준으로 최신 HEAD 물리 단말 Full Validation은 <strong>근거 갱신 필요</strong> 상태입니다.</p></section>
+  </div></main>
+  <footer class="site-footer"><div class="container footer-grid"><span>운영 대시보드 · capability와 evidence freshness</span><span><a href="../report/index.html">프로젝트 보고서 →</a></span></div></footer>
+</body>
+</html>
