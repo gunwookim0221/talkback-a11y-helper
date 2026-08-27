@@ -6524,6 +6524,27 @@ def _find_safe_visible_device_card_for_direct_entry(
     return card, geometry
 
 
+def _find_safe_visible_device_card_for_bounded_search(
+    nodes: list[dict[str, Any]],
+    labels: list[str],
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    geometry = _device_list_scroll_geometry(nodes)
+    viewport = geometry.get("viewport")
+    if not geometry.get("scrollable_bounds") or not isinstance(viewport, tuple):
+        return None, geometry
+    avoid_bounds = [
+        candidate.get("bounds", "")
+        for candidate in device_tab_logic.collect_device_card_tap_avoid_bounds(nodes)
+    ]
+    card = device_tab_logic.find_safe_visible_device_card_by_stable_label(
+        nodes,
+        labels,
+        usable_viewport_bounds=viewport,
+        avoid_bounds=avoid_bounds,
+    )
+    return card, geometry
+
+
 def _perform_device_list_adb_swipe(
     client: A11yAdbClient,
     dev: str,
@@ -6831,6 +6852,42 @@ def _run_enter_device_card_plugin(
     location_normalized = False
     last_reason = "target_not_found"
     repeated_inventory_signature_count = 0
+
+    def _safe_bounded_card(current_nodes: list[dict[str, Any]]) -> dict[str, Any] | None:
+        nonlocal last_reason
+        candidate = device_tab_logic.find_device_card_by_stable_label(current_nodes, labels)
+        if candidate is None:
+            return None
+        safe_card, geometry = _find_safe_visible_device_card_for_bounded_search(current_nodes, labels)
+        if safe_card is not None:
+            return safe_card
+        viewport = geometry.get("viewport")
+        candidate_bounds = parse_bounds_str(str(candidate.get("bounds", "") or ""))
+        candidate_actionable = bool(
+            candidate.get("clickable")
+            or candidate.get("focusable")
+            or candidate.get("effective_clickable")
+        )
+        if (
+            candidate.get("identity_source") == "device_name_child"
+            and candidate_actionable
+            and isinstance(viewport, tuple)
+            and candidate_bounds
+            and _safe_bounds_contains(viewport, candidate_bounds)
+        ):
+            # Preserve the existing safe-tap failure result when geometry and
+            # identity are valid but every point is covered by an avoid bound.
+            return candidate
+        last_reason = "target_not_fully_visible_or_actionable"
+        log(
+            "[DEVICE_ENTRY][match] "
+            f"label='{candidate.get('label', '')}' stable='{candidate.get('stable_label', '')}' "
+            f"identity_source='{candidate.get('identity_source', '')}' action='defer' "
+            "reason='target_not_fully_visible_or_actionable' "
+            f"viewport='{geometry.get('viewport', '')}' bounds='{candidate.get('bounds', '')}'"
+        )
+        return None
+
     for search_step in range(1, max_scroll_search_steps + 1):
         if isinstance(search_seed_nodes, list):
             nodes = search_seed_nodes
@@ -6860,7 +6917,7 @@ def _run_enter_device_card_plugin(
             f"[DEVICE_ENTRY][inventory] phase='before_expand' count={len(visible_cards)} "
             f"labels='{ '|'.join(str(card.get('label', '') or '') for card in visible_cards[:10]) }'"
         )
-        card = device_tab_logic.find_device_card_by_stable_label(nodes, labels)
+        card = _safe_bounded_card(nodes)
         if card is not None:
             log(
                 f"[DEVICE_ENTRY][match] phase='before_expand' label='{card.get('label', '')}' "
@@ -6898,7 +6955,7 @@ def _run_enter_device_card_plugin(
             else:
                 last_reason = "collapsed_room_expand_failed"
 
-        card = device_tab_logic.find_device_card_by_stable_label(nodes, labels)
+        card = _safe_bounded_card(nodes)
         if card is not None:
             log(
                 f"[DEVICE_ENTRY][match] phase='after_expand' label='{card.get('label', '')}' "

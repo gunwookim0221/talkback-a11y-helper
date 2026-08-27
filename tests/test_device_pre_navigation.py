@@ -68,11 +68,24 @@ def _node(
 
 
 def _device_card(label, left, top):
-    return _node(
+    card = _node(
         label,
         "com.samsung.android.oneconnect:id/device_card",
         {"l": left, "t": top, "r": left + 477, "b": top + 345},
     )
+    name = collection_flow.device_tab_logic.normalize_device_stable_label(label)
+    card["children"] = [
+        _node(
+            name,
+            "com.samsung.android.oneconnect:id/device_name",
+            {"l": left + 24, "t": top + 24, "r": left + 220, "b": top + 82},
+            class_name="android.widget.TextView",
+            clickable=False,
+            focusable=False,
+            effective_clickable=False,
+        )
+    ]
+    return card
 
 
 def _structural_device_card(name, left=42, top=628, *, state="Connected"):
@@ -107,6 +120,10 @@ def _scrollable_device_viewport():
     )
     viewport["scrollable"] = True
     return viewport
+
+
+def _safe_device_nodes(*nodes):
+    return [*nodes, _scrollable_device_viewport()]
 
 
 def _assign_room_cta():
@@ -227,7 +244,7 @@ def test_device_list_scroll_uses_window_xml_selected_fallback(monkeypatch):
 
 
 def test_enter_device_card_plugin_opens_smoke_card_by_stable_label(monkeypatch):
-    client = DummyDeviceClient([[_all_devices(), _device_card("연기 감지 안 됨", 42, 628)]])
+    client = DummyDeviceClient([_safe_device_nodes(_all_devices(), _device_card("연기 감지 안 됨", 42, 628))])
     monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **_kwargs: (True, "screen_text"))
     monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
 
@@ -243,7 +260,7 @@ def test_enter_device_card_plugin_opens_smoke_card_by_stable_label(monkeypatch):
     )
 
     assert ok is True
-    assert reason == "device_card_opened"
+    assert reason == "visible_target_direct_entry"
     assert client.tap_xy_adb_calls[-1]["x"] == 280
     assert client.tap_xy_adb_calls[-1]["y"] == 800
 
@@ -255,7 +272,7 @@ def test_enter_device_card_plugin_matches_visible_target_before_room_expand(monk
         {"l": 42, "t": 520, "r": 1038, "b": 628},
     )
     smoke = _device_card("연기 Clear", 42, 628)
-    client = DummyDeviceClient([[_all_devices(), collapsed_room, smoke]])
+    client = DummyDeviceClient([_safe_device_nodes(_all_devices(), collapsed_room, smoke)])
     logs = []
     monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **_kwargs: (True, "screen_text"))
     monkeypatch.setattr(collection_flow, "log", lambda message, *_args, **_kwargs: logs.append(str(message)))
@@ -264,7 +281,7 @@ def test_enter_device_card_plugin_matches_visible_target_before_room_expand(monk
         client=client,
         dev="SERIAL",
         tab_cfg={"scenario_id": "device_smoke_sensor_plugin"},
-        step={"target_stable_labels": ["연기", "Smoke sensor"]},
+        step={"target_stable_labels": ["연기", "Smoke sensor"], "scroll_to_top": False},
         target="연기",
         max_scroll_search_steps=2,
         step_wait_seconds=0,
@@ -283,9 +300,9 @@ def test_enter_device_card_plugin_matches_visible_target_before_room_expand(monk
 
 
 def test_enter_device_card_plugin_opens_water_leak_after_bounded_scroll(monkeypatch):
-    scrolled_nodes = [_all_devices(), _room_none(focusable=False), _device_card("누수 물기 없음", 561, 628)]
+    scrolled_nodes = _safe_device_nodes(_all_devices(), _room_none(focusable=False), _device_card("누수 물기 없음", 561, 628))
     client = DummyDeviceClient([
-        [_all_devices(), _device_card("연기 감지 안 됨", 42, 628)],
+        _safe_device_nodes(_all_devices(), _device_card("연기 감지 안 됨", 42, 628)),
         scrolled_nodes,
         scrolled_nodes,
     ])
@@ -311,7 +328,7 @@ def test_enter_device_card_plugin_opens_water_leak_after_bounded_scroll(monkeypa
 
 
 def test_enter_device_card_plugin_returns_failure_for_missing_target_after_bound(monkeypatch):
-    repeated_nodes = [_all_devices(), _room_none(focusable=False), _device_card("연기 감지 안 됨", 42, 628)]
+    repeated_nodes = _safe_device_nodes(_all_devices(), _room_none(focusable=False), _device_card("연기 감지 안 됨", 42, 628))
     client = DummyDeviceClient([repeated_nodes, repeated_nodes, repeated_nodes])
     monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
 
@@ -430,8 +447,11 @@ def test_visible_target_absent_keeps_unverified_top_fail_closed(monkeypatch):
 
 
 def test_existing_verified_top_search_path_remains_unchanged(monkeypatch):
-    nodes = [_all_devices(), _device_card("연기 감지 안 됨", 42, 628)]
-    client = DummyDeviceClient([nodes])
+    partial = _device_card("연기 감지 안 됨", 42, 2068)
+    partial["boundsInScreen"] = {"l": 42, "t": 2068, "r": 519, "b": 2431}
+    nodes = _safe_device_nodes(_all_devices(), partial)
+    full_nodes = _safe_device_nodes(_all_devices(), _device_card("연기 감지 안 됨", 42, 628))
+    client = DummyDeviceClient([nodes, full_nodes, full_nodes])
     monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **_kwargs: (True, "screen_text"))
     monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
 
@@ -441,20 +461,51 @@ def test_existing_verified_top_search_path_remains_unchanged(monkeypatch):
         tab_cfg={"scenario_id": "device_smoke_sensor_plugin"},
         step={"target_stable_labels": ["연기"]},
         target="연기",
-        max_scroll_search_steps=1,
+        max_scroll_search_steps=2,
         step_wait_seconds=0,
         transition_fast_path=True,
     )
 
     assert ok is True
     assert reason == "device_card_opened"
+    assert len(client.swipe_calls) == 1
+
+
+def test_partial_card_is_reacquired_after_bounded_scroll_before_tap(monkeypatch):
+    partial = _structural_device_card("Camera", left=30, top=2194)
+    partial["boundsInScreen"] = {"l": 30, "t": 2194, "r": 525, "b": 2431}
+    initial_nodes = _safe_device_nodes(_all_devices(), partial)
+    full_nodes = _safe_device_nodes(_all_devices(), _structural_device_card("Camera", left=30, top=1500))
+    client = DummyDeviceClient([initial_nodes, full_nodes, full_nodes])
+    logs = []
+    monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **_kwargs: (True, "screen_text"))
+    monkeypatch.setattr(collection_flow, "log", lambda message, *_args, **_kwargs: logs.append(str(message)))
+
+    ok, reason = collection_flow._run_enter_device_card_plugin(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_id": "device_camera_plugin"},
+        step={"target_stable_labels": ["Camera"]},
+        target="Camera",
+        max_scroll_search_steps=2,
+        step_wait_seconds=0,
+        transition_fast_path=True,
+    )
+
+    assert ok is True
+    assert reason == "device_card_opened"
+    assert len(client.swipe_calls) == 1
+    assert len(client.tap_xy_adb_calls) == 1
+    assert client.tap_xy_adb_calls[0]["y"] < 2194
+    assert any("target_not_fully_visible_or_actionable" in line for line in logs)
+    assert not any("selected='277,2312'" in line for line in logs)
     assert len(client.scroll_to_top_calls) == 1
 
 
 def test_enter_device_card_plugin_uses_adb_swipe_for_bounded_device_search(monkeypatch):
-    scrolled_nodes = [_all_devices(), _room_none(focusable=False), _device_card("누수 물기 없음", 561, 628)]
+    scrolled_nodes = _safe_device_nodes(_all_devices(), _room_none(focusable=False), _device_card("누수 물기 없음", 561, 628))
     client = DummyDeviceClient([
-        [_all_devices(), _device_card("연기 감지 안 됨", 42, 628)],
+        _safe_device_nodes(_all_devices(), _device_card("연기 감지 안 됨", 42, 628)),
         scrolled_nodes,
         scrolled_nodes,
     ])
@@ -480,8 +531,8 @@ def test_enter_device_card_plugin_uses_adb_swipe_for_bounded_device_search(monke
 
 def test_enter_device_card_plugin_fails_when_device_list_scroll_drift_detected(monkeypatch):
     client = DummyDeviceClient([
-        [_all_devices(), _device_card("연기 감지 안 됨", 42, 628)],
-        [_room_none(), _device_card("누수 물기 없음", 561, 628), _assign_room_cta()],
+        _safe_device_nodes(_all_devices(), _device_card("연기 감지 안 됨", 42, 628)),
+        _safe_device_nodes(_room_none(), _device_card("누수 물기 없음", 561, 628), _assign_room_cta()),
     ])
     logs = []
     monkeypatch.setattr(collection_flow, "log", lambda message, *_args, **_kwargs: logs.append(str(message)))
@@ -504,7 +555,7 @@ def test_enter_device_card_plugin_fails_when_device_list_scroll_drift_detected(m
 
 
 def test_enter_device_card_plugin_marks_exhaustion_after_repeated_inventory_signature(monkeypatch):
-    repeated_nodes = [_all_devices(), _room_none(focusable=False), _device_card("연기 감지 안 됨", 42, 628)]
+    repeated_nodes = _safe_device_nodes(_all_devices(), _room_none(focusable=False), _device_card("연기 감지 안 됨", 42, 628))
     client = DummyDeviceClient([
         repeated_nodes,
         repeated_nodes,
@@ -548,9 +599,9 @@ def test_enter_device_card_plugin_taps_all_devices_and_high_confidence_collapsed
     )
     smoke = _device_card("연기 감지 안 됨", 42, 628)
     client = DummyDeviceClient([
-        [all_devices_unselected, collapsed_room],
-        [all_devices_selected, collapsed_room],
-        [smoke],
+        _safe_device_nodes(all_devices_unselected, collapsed_room),
+        _safe_device_nodes(all_devices_selected, collapsed_room),
+        _safe_device_nodes(smoke),
     ])
     monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **_kwargs: (True, "screen_text"))
     monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
@@ -580,9 +631,9 @@ def test_enter_device_card_plugin_retries_all_devices_selection_once(monkeypatch
     all_devices_selected = _all_devices("모든 기기 모든 기기", focusable=True)
     smoke = _device_card("연기 감지 안 됨", 42, 628)
     client = DummyDeviceClient([
-        [all_devices_unselected, room_selected],
-        [all_devices_unselected, room_selected],
-        [all_devices_selected, smoke],
+        _safe_device_nodes(all_devices_unselected, room_selected),
+        _safe_device_nodes(all_devices_unselected, room_selected),
+        _safe_device_nodes(all_devices_selected, smoke),
     ])
     logs = []
     monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **_kwargs: (True, "screen_text"))
@@ -637,12 +688,9 @@ def test_enter_device_card_plugin_fails_when_all_devices_selection_retry_does_no
 
 
 def test_enter_device_card_plugin_uses_safe_tap_when_card_center_overlaps_cta(monkeypatch):
-    card = _node(
-        "온습도 센서 진동 감지됨",
-        "com.samsung.android.oneconnect:id/device_card",
-        {"l": 42, "t": 2068, "r": 519, "b": 2316},
-    )
-    client = DummyDeviceClient([[_all_devices(), card, _assign_room_cta()]])
+    card = _device_card("온습도 센서 진동 감지됨", 42, 2068)
+    card["boundsInScreen"] = {"l": 42, "t": 2068, "r": 519, "b": 2316}
+    client = DummyDeviceClient([_safe_device_nodes(_all_devices(), card, _assign_room_cta())])
     logs = []
     monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **_kwargs: (True, "screen_text"))
     monkeypatch.setattr(collection_flow, "log", lambda message, *_args, **_kwargs: logs.append(str(message)))
@@ -659,7 +707,7 @@ def test_enter_device_card_plugin_uses_safe_tap_when_card_center_overlaps_cta(mo
     )
 
     assert ok is True
-    assert reason == "device_card_opened"
+    assert reason == "visible_target_direct_entry"
     tap = client.tap_xy_adb_calls[-1]
     assert tap["x"] != 280 or tap["y"] != 2192
     assert 42 < tap["x"] < 519
@@ -669,18 +717,15 @@ def test_enter_device_card_plugin_uses_safe_tap_when_card_center_overlaps_cta(mo
 
 
 def test_enter_device_card_plugin_fails_when_safe_tap_point_unavailable(monkeypatch):
-    card = _node(
-        "온습도 센서 진동 감지됨",
-        "com.samsung.android.oneconnect:id/device_card",
-        {"l": 42, "t": 2068, "r": 519, "b": 2316},
-    )
+    card = _device_card("온습도 센서 진동 감지됨", 42, 2068)
+    card["boundsInScreen"] = {"l": 42, "t": 2068, "r": 519, "b": 2316}
     covered_cta = _node(
         "방 지정하기",
         "com.samsung.android.oneconnect:id/move_devices_button",
         {"l": 0, "t": 2000, "r": 1080, "b": 2400},
         class_name="android.widget.TextView",
     )
-    client = DummyDeviceClient([[_all_devices(), card, covered_cta]])
+    client = DummyDeviceClient([_safe_device_nodes(_all_devices(), card, covered_cta)])
     monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
 
     ok, reason = collection_flow._run_enter_device_card_plugin(
