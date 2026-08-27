@@ -363,6 +363,7 @@ LOCAL_TAB_ACTIVE_TTL_STEPS = 3
 _LIFE_AIR_CARE_SCENARIO_ID = "life_air_care_plugin"
 _LIFE_AIR_CARE_VERIFY_REGEX = r"(?i)\b(air\s*care|air\s*quality|air\s*comfort)\b"
 _HOME_TAB_RESOURCE_ID = "com.samsung.android.oneconnect:id/menu_favorites"
+_DEVICES_TAB_RESOURCE_ID = "com.samsung.android.oneconnect:id/menu_devices"
 _LIFE_TAB_RESOURCE_ID = "com.samsung.android.oneconnect:id/menu_services"
 _SAFE_CARD_RESOURCE_TOKEN = "favorite_device_card"
 _SAFE_ACTION_RESOURCE_TOKEN = "image_button"
@@ -2588,6 +2589,11 @@ def _is_life_plugin_scenario(scenario_id: str) -> bool:
     return bool(normalized_scenario_id.startswith("life_") and normalized_scenario_id.endswith("_plugin"))
 
 
+def _is_device_plugin_scenario(scenario_id: str) -> bool:
+    normalized_scenario_id = str(scenario_id or "").strip().lower()
+    return bool(normalized_scenario_id.startswith("device_") and normalized_scenario_id.endswith("_plugin"))
+
+
 def _detect_life_plugin_identity_mismatch(
     *,
     scenario_id: str,
@@ -3257,11 +3263,153 @@ def _ensure_life_plugin_list_ready(client: A11yAdbClient, dev: str, tab_cfg: dic
     return False, "unknown"
 
 
+def _device_recovery_context_verified(result: Any) -> bool:
+    if not isinstance(result, dict) or not bool(result.get("ok")) or not bool(result.get("selected")):
+        return False
+    context = result.get("context")
+    if not isinstance(context, dict) or not bool(context.get("ok")):
+        context = result.get("verify_context")
+    if not isinstance(context, dict):
+        return False
+    if str(context.get("type", "") or "").strip().lower() != "selected_bottom_tab":
+        return False
+    actual_values = (
+        context.get("actual_selected_text", ""),
+        context.get("actual_text", ""),
+        context.get("actual_announcement", ""),
+    )
+    return any(canonicalize_label(value, domain="bottom_tab") == "devices" for value in actual_values)
+
+
+def recover_to_device_start_state(
+    client: A11yAdbClient,
+    dev: str,
+    tab_cfg: dict[str, Any],
+) -> tuple[bool, str]:
+    """Return to the verified Devices root before a device-card scenario.
+
+    Device plugins are entered from the Devices tab, so the generic Life reset
+    is the wrong recovery target for this scenario family.  This helper keeps
+    recovery bounded: it sends Back only while the global navigation is absent,
+    then uses the existing tab-selection/context verification contract.
+    """
+    policy = _resolve_recovery_policy(tab_cfg)
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip() or "unknown"
+    wait_seconds = _get_wait_seconds(tab_cfg, "back_recovery_wait_seconds", MAIN_STEP_WAIT_SECONDS)
+    max_back_count = int(policy.get("max_back_count", 3) or 3)
+    device_tab_cfg = dict(tab_cfg)
+    device_tab_cfg.update(
+        {
+            "scenario_id": f"{scenario_id}:device_reset",
+            "tab_name": "(?i).*(devices|기기).*",
+            "tab_type": "b",
+            "screen_context_mode": "bottom_tab",
+            "stabilization_mode": "tab_context",
+            "tab": {
+                "resource_id_regex": re.escape(_DEVICES_TAB_RESOURCE_ID),
+                "text_regex": "(?i).*(devices|기기).*",
+                "announcement_regex": "(?i).*(selected|선택됨).*(devices|기기).*",
+                "tie_breaker": "bottom_nav_left_to_right",
+                "allow_resource_id_only": True,
+            },
+            "context_verify": {
+                "type": "selected_bottom_tab",
+                "text_regex": "(?i).*(devices|기기).*",
+                "announcement_regex": r"(?i).*(selected|선택됨).*(devices|기기).*",
+            },
+            "global_nav": {
+                "labels": ["Home", "Devices", "Life", "Routines", "Menu"],
+                "resource_ids": [
+                    _HOME_TAB_RESOURCE_ID,
+                    _DEVICES_TAB_RESOURCE_ID,
+                    _LIFE_TAB_RESOURCE_ID,
+                    "com.samsung.android.oneconnect:id/menu_automations",
+                    "com.samsung.android.oneconnect:id/menu_more",
+                ],
+            },
+        }
+    )
+    log(
+        f"[DEVICE_RESET] start scenario='{scenario_id}' "
+        f"max_back_count={max_back_count} expected_tab='Devices'"
+    )
+    last_reason = "global_nav_not_visible"
+    back_count = 0
+    for attempt in range(0, max_back_count + 1):
+        try:
+            raw_nodes = client.dump_tree(dev=dev)
+        except Exception:
+            raw_nodes = []
+        nodes = raw_nodes if isinstance(raw_nodes, list) else []
+        global_nav_visible, nav_signal_count = _has_global_nav_signals(nodes)
+        log(
+            f"[DEVICE_RESET][state] scenario='{scenario_id}' attempt={attempt + 1}/{max_back_count + 1} "
+            f"global_nav_visible={str(bool(global_nav_visible)).lower()} "
+            f"nav_signal_count={nav_signal_count} back_count={back_count}"
+        )
+        if global_nav_visible:
+            try:
+                tab_result = stabilize_tab_selection(
+                    client=client,
+                    dev=dev,
+                    tab_cfg=device_tab_cfg,
+                    max_retries=2,
+                )
+            except Exception as exc:
+                tab_result = {"ok": False, "reason": f"stabilize_exception:{exc}"}
+            context = tab_result.get("context") if isinstance(tab_result, dict) else {}
+            if not isinstance(context, dict):
+                context = tab_result.get("verify_context", {}) if isinstance(tab_result, dict) else {}
+            actual = str(context.get("actual_selected_text", "") or "") if isinstance(context, dict) else ""
+            if _device_recovery_context_verified(tab_result):
+                log(
+                    f"[DEVICE_RESET] success=true scenario='{scenario_id}' "
+                    f"reason='devices_context_verified' actual='{actual}'"
+                )
+                return True, "devices_context_verified"
+            last_reason = "devices_context_verification_failed"
+            log(
+                f"[DEVICE_RESET][tab_verify] scenario='{scenario_id}' ok=false "
+                f"actual='{actual}' reason='{last_reason}'"
+            )
+            # The global-nav root is already the safest recovery surface.  Do
+            # not press Back from it; use the bounded selection retries instead.
+            continue
+
+        last_reason = "global_nav_not_visible"
+        if back_count >= max_back_count:
+            break
+        back_sent = _send_back(client, dev)
+        if not back_sent:
+            last_reason = "back_failed"
+            break
+        back_count += 1
+        log(
+            f"[DEVICE_RESET][back] scenario='{scenario_id}' count={back_count}/{max_back_count} "
+            "reason='global_nav_not_visible'"
+        )
+        time.sleep(min(max(wait_seconds, 0.2), 0.8))
+    log(
+        f"[DEVICE_RESET] success=false scenario='{scenario_id}' "
+        f"reason='{last_reason}' back_count={back_count}"
+    )
+    return False, last_reason
+
+
 def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, Any]) -> bool:
     policy = _resolve_recovery_policy(tab_cfg)
     if not policy.get("enabled", True):
         log("[RECOVER] skipped reason='disabled'")
         return True
+
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    if _is_device_plugin_scenario(scenario_id):
+        reset_ok, reset_reason = recover_to_device_start_state(client, dev, tab_cfg)
+        if reset_ok:
+            log("[RECOVER] success reason='device_reset_ready'")
+            return True
+        log(f"[RECOVER] failed reason='{reset_reason}'")
+        return False
 
     reset_ok, reset_reason = _ensure_life_plugin_list_ready(client, dev, tab_cfg)
     if reset_ok:

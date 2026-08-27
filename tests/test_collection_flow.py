@@ -1,5 +1,6 @@
 import sys
 import json
+import re
 from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
@@ -2477,6 +2478,151 @@ def test_recover_to_start_state_failure_returns_false(monkeypatch):
 
     assert ok is False
     assert client.back_calls == 4
+
+
+def _global_nav_nodes(selected_label="Devices"):
+    return [
+        {
+            "viewIdResourceName": resource_id,
+            "contentDescription": label,
+            "selected": label == selected_label or f"{label} selected" == selected_label,
+            "visibleToUser": True,
+        }
+        for resource_id, label in [
+            ("com.samsung.android.oneconnect:id/menu_favorites", "Home"),
+            ("com.samsung.android.oneconnect:id/menu_devices", "Devices"),
+            ("com.samsung.android.oneconnect:id/menu_services", "Life"),
+            ("com.samsung.android.oneconnect:id/menu_automations", "Routines"),
+            ("com.samsung.android.oneconnect:id/menu_more", "Menu"),
+        ]
+    ]
+
+
+def test_recover_to_start_state_routes_device_plugins_to_devices_recovery(monkeypatch):
+    calls = []
+
+    def _recover(client, dev, tab_cfg):
+        calls.append({"client": client, "dev": dev, "tab_cfg": tab_cfg})
+        return True, "devices_context_verified"
+
+    monkeypatch.setattr(collection_flow, "recover_to_device_start_state", _recover)
+
+    ok = collection_flow.recover_to_start_state(
+        DummyClient([]),
+        "SERIAL",
+        {"scenario_id": "device_door_lock_plugin"},
+    )
+
+    assert ok is True
+    assert len(calls) == 1
+    assert calls[0]["tab_cfg"]["scenario_id"] == "device_door_lock_plugin"
+
+
+def test_device_recovery_sends_back_until_global_nav_then_verifies_devices(monkeypatch):
+    client = DummyClient([])
+    client.dump_tree_sequence = [[], _global_nav_nodes()]
+    stabilize_calls = []
+
+    def _stabilize(**kwargs):
+        stabilize_calls.append(kwargs)
+        return {
+            "ok": True,
+            "selected": True,
+            "context": {
+                "ok": True,
+                "type": "selected_bottom_tab",
+                "actual_selected_text": "Devices selected",
+            },
+        }
+
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", _stabilize)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    ok, reason = collection_flow.recover_to_device_start_state(
+        client,
+        "SERIAL",
+        {"scenario_id": "device_camera_plugin", "recovery": {"max_back_count": 2}},
+    )
+
+    assert ok is True
+    assert reason == "devices_context_verified"
+    assert client.back_calls == 1
+    assert len(stabilize_calls) == 1
+    recovery_cfg = stabilize_calls[0]["tab_cfg"]
+    assert recovery_cfg["screen_context_mode"] == "bottom_tab"
+    assert recovery_cfg["stabilization_mode"] == "tab_context"
+    assert recovery_cfg["tab"]["resource_id_regex"] == re.escape(
+        "com.samsung.android.oneconnect:id/menu_devices"
+    )
+    assert recovery_cfg["context_verify"]["type"] == "selected_bottom_tab"
+
+
+def test_device_recovery_does_not_accept_life_context(monkeypatch):
+    client = DummyClient([])
+    client.dump_tree_sequence = [_global_nav_nodes(), _global_nav_nodes()]
+    results = iter(
+        [
+            {
+                "ok": True,
+                "selected": True,
+                "context": {
+                    "ok": True,
+                    "type": "selected_bottom_tab",
+                    "actual_selected_text": "Life selected",
+                },
+            },
+            {
+                "ok": True,
+                "selected": True,
+                "context": {
+                    "ok": True,
+                    "type": "selected_bottom_tab",
+                    "actual_selected_text": "Devices selected",
+                },
+            },
+        ]
+    )
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **_: next(results))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    ok, reason = collection_flow.recover_to_device_start_state(
+        client,
+        "SERIAL",
+        {"scenario_id": "device_camera_plugin", "recovery": {"max_back_count": 2}},
+    )
+
+    assert ok is True
+    assert reason == "devices_context_verified"
+    assert client.back_calls == 0
+
+
+def test_device_recovery_fails_closed_when_devices_context_is_not_verified(monkeypatch):
+    client = DummyClient([])
+    client.dump_tree_sequence = [_global_nav_nodes()] * 3
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_tab_selection",
+        lambda **_: {
+            "ok": True,
+            "selected": True,
+            "context": {
+                "ok": True,
+                "type": "selected_bottom_tab",
+                "actual_selected_text": "Life selected",
+            },
+        },
+    )
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    ok, reason = collection_flow.recover_to_device_start_state(
+        client,
+        "SERIAL",
+        {"scenario_id": "device_camera_plugin", "recovery": {"max_back_count": 2}},
+    )
+
+    assert ok is False
+    assert reason == "devices_context_verification_failed"
+    assert client.back_calls == 0
 
 
 def test_collect_tab_rows_previous_step_not_updated_after_stop_break(monkeypatch):
