@@ -1235,6 +1235,15 @@ def _focusable_coverage_row_labels(row: dict[str, Any]) -> set[str]:
     return labels
 
 
+def _focusable_coverage_row_representative_labels(row: dict[str, Any]) -> set[str]:
+    labels: set[str] = set()
+    for key in ("representative_visible", "representative_speech"):
+        normalized = _normalize_focusable_inventory_value(row.get(key, ""))
+        if normalized:
+            labels.add(normalized)
+    return labels
+
+
 def _focusable_coverage_row_view_ids(row: dict[str, Any]) -> set[str]:
     view_ids: set[str] = set()
     for key in (
@@ -1245,6 +1254,90 @@ def _focusable_coverage_row_view_ids(row: dict[str, Any]) -> set[str]:
         if normalized:
             view_ids.add(normalized)
     return view_ids
+
+
+def _focusable_coverage_row_representative_view_ids(row: dict[str, Any]) -> set[str]:
+    view_ids: set[str] = set()
+    for key in ("representative_resource_id", "representative_view_id"):
+        normalized = _normalize_focusable_inventory_value(row.get(key, ""))
+        if normalized:
+            view_ids.add(normalized)
+    return view_ids
+
+
+def _focusable_coverage_view_id_is_child(child_view_id: Any, parent_view_id: Any) -> bool:
+    child = _normalize_focusable_inventory_value(child_view_id)
+    parent = _normalize_focusable_inventory_value(parent_view_id)
+    if not child or not parent or child == parent:
+        return False
+    return any(child.startswith(f"{parent}{separator}") for separator in ("_", "-", "/", ".", ":"))
+
+
+def _focusable_coverage_label_contains(label: Any, term: Any) -> bool:
+    normalized_label = _normalize_focusable_inventory_value(label)
+    normalized_term = _normalize_focusable_inventory_value(term)
+    if not normalized_label or not normalized_term:
+        return False
+    return re.search(rf"(?<!\w){re.escape(normalized_term)}(?!\w)", normalized_label) is not None
+
+
+def _focusable_coverage_representative_compound_match(item: dict[str, Any], row: dict[str, Any]) -> bool:
+    item_view_id = _normalize_focusable_inventory_value(item.get("view_id", ""))
+    item_label = _normalize_focusable_inventory_value(item.get("label", ""))
+    if not item_view_id or not item_label:
+        return False
+    parent_ids = _focusable_coverage_row_representative_view_ids(row)
+    if not any(_focusable_coverage_view_id_is_child(item_view_id, parent_id) for parent_id in parent_ids):
+        return False
+    return any(
+        _focusable_coverage_label_contains(parent_label, item_label)
+        for parent_label in _focusable_coverage_row_representative_labels(row)
+    )
+
+
+def _focusable_percentage_label_tokens(value: Any) -> tuple[str, ...]:
+    normalized = _normalize_focusable_inventory_value(value)
+    if not normalized:
+        return ()
+    return tuple(re.findall(r"\d+(?:\.\d+)?|[^\W\d_]+|[%/]", normalized, flags=re.UNICODE))
+
+
+def _focusable_percentage_label_canonical(value: Any) -> tuple[str, ...]:
+    tokens = _focusable_percentage_label_tokens(value)
+    if (
+        len(tokens) < 2
+        or tokens[-1] != "%"
+        or not re.fullmatch(r"\d+(?:\.\d+)?", tokens[-2])
+    ):
+        return ()
+    repeated_words = {token for token in tokens if token.isalpha() and tokens.count(token) > 1}
+    redundant_unit_words = {
+        word
+        for word in repeated_words
+        if len(
+            positions := [index for index, token in enumerate(tokens) if token == word]
+        )
+        == 2
+        and all(
+            index > 0 and re.fullmatch(r"\d+(?:\.\d+)?", tokens[index - 1])
+            for index in positions
+        )
+    }
+    seen_words: set[str] = set()
+    canonical: list[str] = []
+    for token in tokens:
+        if token in redundant_unit_words:
+            if token in seen_words:
+                continue
+            seen_words.add(token)
+        canonical.append(token)
+    return tuple(canonical)
+
+
+def _focusable_percentage_labels_equivalent(left: Any, right: Any) -> bool:
+    left_tokens = _focusable_percentage_label_canonical(left)
+    right_tokens = _focusable_percentage_label_canonical(right)
+    return bool(left_tokens and left_tokens == right_tokens)
 
 
 def _focusable_coverage_row_bounds(row: dict[str, Any]) -> set[str]:
@@ -1301,6 +1394,7 @@ def _focusable_coverage_candidate_rows(item: dict[str, Any], rows: list[dict[str
     item_view_id = _normalize_focusable_inventory_value(item.get("view_id", ""))
     item_bounds = _normalize_focusable_bounds_value(item.get("bounds", ""))
     item_semantic_card_id = _normalize_focusable_inventory_value(item.get("semantic_card_id", ""))
+    item_taxonomy_reason = _focusable_taxonomy(item)[1]
     scoped_rows = [
         row
         for row in rows
@@ -1308,6 +1402,8 @@ def _focusable_coverage_candidate_rows(item: dict[str, Any], rows: list[dict[str
     ]
     view_id_matches: list[dict[str, Any]] = []
     label_matches: list[dict[str, Any]] = []
+    percentage_matches: list[dict[str, Any]] = []
+    representative_compound_matches: list[dict[str, Any]] = []
     semantic_matches: list[dict[str, Any]] = []
     bounds_matches: list[dict[str, Any]] = []
     for row in scoped_rows:
@@ -1318,6 +1414,13 @@ def _focusable_coverage_candidate_rows(item: dict[str, Any], rows: list[dict[str
             view_id_matches.append(row)
         if item_label and item_label in row_labels:
             label_matches.append(row)
+        if (
+            item_taxonomy_reason == "percentage_value"
+            and any(_focusable_percentage_labels_equivalent(item_label, row_label) for row_label in row_labels)
+        ):
+            percentage_matches.append(row)
+        if _focusable_coverage_representative_compound_match(item, row):
+            representative_compound_matches.append(row)
         if item_semantic_card_id and item_semantic_card_id == _normalize_focusable_inventory_value(row.get("semantic_card_id", "")):
             semantic_matches.append(row)
         if item_bounds and (item_bounds in row_bounds or any(_bounds_related(item.get("bounds", ""), row_bounds_raw) for row_bounds_raw in row_bounds)):
@@ -1325,6 +1428,8 @@ def _focusable_coverage_candidate_rows(item: dict[str, Any], rows: list[dict[str
     return {
         "view_id": view_id_matches,
         "label": label_matches,
+        "percentage": percentage_matches,
+        "representative_compound": representative_compound_matches,
         "semantic": semantic_matches,
         "bounds": bounds_matches,
     }
@@ -1348,6 +1453,20 @@ def _focusable_coverage_match(item: dict[str, Any], rows: list[dict[str, Any]]) 
         if item_view_id and row_view_ids and item_view_id not in row_view_ids:
             return {"status": "UNKNOWN", "row": row, "reason": "label_match_view_id_mismatch"}
         return {"status": "COVERED", "row": row, "reason": "label_exact"}
+
+    percentage_matches = matches["percentage"]
+    if percentage_matches:
+        if len(percentage_matches) > 1:
+            return {"status": "UNKNOWN", "row": percentage_matches[0], "reason": "ambiguous_percentage_label_match"}
+        row = percentage_matches[0]
+        return {"status": "COVERED", "row": row, "reason": "percentage_compound_label"}
+
+    representative_compound_matches = matches["representative_compound"]
+    if representative_compound_matches:
+        if len(representative_compound_matches) > 1:
+            return {"status": "UNKNOWN", "row": representative_compound_matches[0], "reason": "ambiguous_representative_compound_match"}
+        row = representative_compound_matches[0]
+        return {"status": "COVERED", "row": row, "reason": "representative_compound_parent"}
 
     if matches["semantic"]:
         row = matches["semantic"][0]

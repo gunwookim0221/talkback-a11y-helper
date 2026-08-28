@@ -260,6 +260,217 @@ def test_focusable_coverage_does_not_use_representative_label_as_covered(tmp_pat
     assert payload["records"][0]["coverage_reason"] == "no_matching_row"
 
 
+def test_focusable_coverage_matches_tv_volume_header_from_compound_parent(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    inventory = [
+        {
+            "scenario_id": "device_tv_plugin",
+            "label": "Volume",
+            "view_id": "AudioVolumeMuteCardView_header_title",
+            "bounds": "84,586,936,655",
+            "source": "focus_payload",
+        }
+    ]
+    rows = [
+        {
+            "scenario_id": "device_tv_plugin",
+            "step_index": 5,
+            "visible_label": "Off",
+            "focus_view_id": "SwitchCapabilityCardView",
+            "representative_visible": "Volume Mute",
+            "representative_speech": "Volume Mute",
+            "representative_resource_id": "AudioVolumeMuteCardView",
+        }
+    ]
+
+    payload = collection_flow._build_focusable_coverage_payload(inventory, rows, output_path)
+
+    assert payload["records"][0]["coverage_status"] == "COVERED"
+    assert payload["records"][0]["coverage_reason"] == "representative_compound_parent"
+    assert payload["records"][0]["matched_step"] == 5
+
+
+def test_focusable_coverage_marks_missing_tv_volume_header_missed(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    inventory = [
+        {
+            "scenario_id": "device_tv_plugin",
+            "label": "Volume",
+            "view_id": "AudioVolumeMuteCardView_header_title",
+            "bounds": "84,586,936,655",
+            "source": "focus_payload",
+        }
+    ]
+
+    payload = collection_flow._build_focusable_coverage_payload(inventory, [], output_path)
+
+    assert payload["records"][0]["coverage_status"] == "MISSED"
+    assert payload["records"][0]["coverage_reason"] == "no_matching_row"
+
+
+def test_focusable_coverage_keeps_tv_volume_header_missed_without_related_parent(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    inventory = [
+        {
+            "scenario_id": "device_tv_plugin",
+            "label": "Volume",
+            "view_id": "AudioVolumeMuteCardView_header_title",
+            "bounds": "84,586,936,655",
+            "source": "focus_payload",
+        }
+    ]
+    rows = [
+        {
+            "scenario_id": "device_tv_plugin",
+            "step_index": 5,
+            "visible_label": "Off",
+            "focus_view_id": "SwitchCapabilityCardView",
+            "representative_visible": "Channel",
+            "representative_resource_id": "AudioVolumeMuteCardView",
+        }
+    ]
+
+    payload = collection_flow._build_focusable_coverage_payload(inventory, rows, output_path)
+
+    assert payload["records"][0]["coverage_status"] == "MISSED"
+    assert payload["records"][0]["coverage_reason"] == "no_matching_row"
+
+
+def test_focusable_coverage_matches_percentage_value_with_redundant_unit_word(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    inventory = [
+        {
+            "scenario_id": "life_family_care_plugin",
+            "label": "3647 steps / 6000 steps 60 %",
+            "view_id": "",
+            "bounds": "84,2164,996,2316",
+            "source": "helper_snapshot",
+        }
+    ]
+    rows = [
+        {
+            "scenario_id": "life_family_care_plugin",
+            "step_index": 17,
+            "visible_label": "3647 steps / 6000 60 %",
+            "actual_focus_visible": "3647 steps / 6000 60 %",
+            "focus_bounds": "84,1314,996,1477",
+        }
+    ]
+
+    payload = collection_flow._build_focusable_coverage_payload(inventory, rows, output_path)
+
+    assert payload["records"][0]["coverage_status"] == "COVERED"
+    assert payload["records"][0]["coverage_reason"] == "percentage_compound_label"
+    assert payload["records"][0]["matched_step"] == 17
+
+
+def test_focusable_coverage_marks_missing_percentage_value_missed(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    inventory = [
+        {
+            "scenario_id": "life_family_care_plugin",
+            "label": "3647 steps / 6000 steps 60 %",
+            "view_id": "",
+            "bounds": "",
+            "source": "helper_snapshot",
+        }
+    ]
+
+    payload = collection_flow._build_focusable_coverage_payload(inventory, [], output_path)
+
+    assert payload["records"][0]["coverage_status"] == "MISSED"
+    assert payload["records"][0]["coverage_reason"] == "no_matching_row"
+
+
+def test_focusable_coverage_keeps_unrelated_percentage_value_missed(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    inventory = [
+        {
+            "scenario_id": "life_family_care_plugin",
+            "label": "3647 steps / 6000 steps 60 %",
+            "view_id": "",
+            "bounds": "",
+            "source": "helper_snapshot",
+        }
+    ]
+    rows = [
+        {
+            "scenario_id": "life_family_care_plugin",
+            "step_index": 17,
+            "visible_label": "Room 60 %",
+        }
+    ]
+
+    payload = collection_flow._build_focusable_coverage_payload(inventory, rows, output_path)
+
+    assert payload["records"][0]["coverage_status"] == "MISSED"
+    assert payload["records"][0]["coverage_reason"] == "no_matching_row"
+
+
+def test_focusable_coverage_preserves_compound_accessibility_matches(tmp_path):
+    output_path = str(tmp_path / "talkback_compare.xlsx")
+    inventory = [
+        {
+            "scenario_id": "device_air_purifier_plugin",
+            "label": "Air quality CAQI",
+            "view_id": "air_quality_caqi",
+            "bounds": "",
+            "source": "focus_payload",
+        },
+        {
+            "scenario_id": "device_air_purifier_plugin",
+            "label": "PM 10",
+            "view_id": "pm10",
+            "bounds": "",
+            "source": "focus_payload",
+        },
+        {
+            "scenario_id": "device_air_purifier_plugin",
+            "label": "PM 2.5",
+            "view_id": "pm25",
+            "bounds": "",
+            "source": "focus_payload",
+        },
+        {
+            "scenario_id": "device_washer_plugin",
+            "label": "Stopped",
+            "view_id": "washer_stopped",
+            "bounds": "",
+            "source": "focus_payload",
+        },
+    ]
+    rows = [
+        {
+            "scenario_id": "device_air_purifier_plugin",
+            "step_index": 1,
+            "visible_label": "Air quality CAQI",
+            "focus_view_id": "air_quality_caqi",
+        },
+        {
+            "scenario_id": "device_air_purifier_plugin",
+            "step_index": 2,
+            "visible_label": "PM 10",
+            "focus_view_id": "pm10",
+        },
+        {
+            "scenario_id": "device_air_purifier_plugin",
+            "step_index": 3,
+            "visible_label": "PM 2.5",
+            "focus_view_id": "pm25",
+        },
+        {
+            "scenario_id": "device_washer_plugin",
+            "step_index": 4,
+            "visible_label": "Stopped",
+            "focus_view_id": "washer_stopped",
+        },
+    ]
+
+    payload = collection_flow._build_focusable_coverage_payload(inventory, rows, output_path)
+
+    assert all(record["coverage_status"] == "COVERED" for record in payload["records"])
+
+
 def test_focusable_coverage_marks_ambiguous_history_unknown(tmp_path):
     output_path = str(tmp_path / "talkback_compare.xlsx")
     inventory = [
