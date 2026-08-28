@@ -7,7 +7,11 @@ from typing import Any, Mapping, assert_never
 
 import openpyxl
 
-from tb_runner.review_classification import ReviewDomain, classify_review_domain
+from tb_runner.review_classification import (
+    ReviewClassification,
+    ReviewDomain,
+    classify_review_domain,
+)
 from tb_runner.review_signature import (
     review_source_signature,
     review_source_signature_digest,
@@ -110,6 +114,78 @@ def _evidence_reference(
     )
 
 
+def _source_row(
+    item: Mapping[str, Any], source_matches: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Select the workbook row that best corresponds to a summary signal."""
+    if not source_matches:
+        return {}
+    failure_reason = _text(item.get("failure_reason")).lower()
+    resource_id = _text(item.get("resource_id") or item.get("focus_view_id"))
+    for source in source_matches:
+        source_failure = _text(source.get("failure_reason")).lower()
+        source_resource = _text(source.get("focus_view_id"))
+        if failure_reason and source_failure and source_failure != failure_reason:
+            continue
+        if resource_id and source_resource and source_resource != resource_id:
+            continue
+        return source
+    return source_matches[0]
+
+
+def _sort_component(value: Any) -> tuple[int, int | str]:
+    value_text = _text(value)
+    if not value_text:
+        return (0, "")
+    if value_text.isdigit():
+        return (1, int(value_text))
+    return (2, value_text)
+
+
+def _issue_sort_key(item: Mapping[str, Any]) -> tuple[Any, ...]:
+    signature = item.get("source_signature")
+    signature = signature if isinstance(signature, Mapping) else {}
+    return (
+        _text(item.get("scenario_id")),
+        _sort_component(item.get("step") or signature.get("step")),
+        _text(item.get("mismatch_type") or item.get("code")).upper(),
+        _text(item.get("failure_reason")).lower(),
+        _text(item.get("resource_id") or signature.get("resource_id")),
+        _text(item.get("source_transaction_id") or signature.get("transaction_id")),
+        _sort_component(signature.get("source_row")),
+        _text(item.get("source_signature_digest")),
+    )
+
+
+def _malformed_automation_diagnostic() -> dict[str, Any]:
+    signature = review_source_signature(
+        scenario_id="",
+        step="",
+        mismatch_type="",
+        resource_id="",
+        transaction_id="",
+        source_row=None,
+    )
+    return {
+        "code": "MALFORMED_AUTOMATION_DIAGNOSTIC",
+        "mismatch_type": "",
+        "category": "AUTOMATION_DIAGNOSTIC",
+        "review_domain": ReviewDomain.UNKNOWN.value,
+        "scenario_id": "",
+        "step": "",
+        "raw_result": None,
+        "failure_reason": "malformed_automation_diagnostic",
+        "classification_reason": "malformed_automation_diagnostic",
+        "resource_id": "",
+        "source_transaction_id": "",
+        "evidence_reference": "",
+        "source_row": None,
+        "source_signature": signature,
+        "source_signature_digest": review_source_signature_digest(signature),
+        "review_status": "UNREVIEWED",
+    }
+
+
 def classify_candidate_review_issues(
     run_root: Path,
     summary: Mapping[str, Any],
@@ -127,17 +203,45 @@ def classify_candidate_review_issues(
     qa: list[dict[str, Any]] = []
     automation: list[dict[str, Any]] = []
     unknown: list[dict[str, Any]] = []
+    projected_signatures: dict[str, ReviewDomain] = {}
+    source_items: list[tuple[Any, ReviewDomain | None]] = []
     issues = summary.get("quality_issues")
-    for item in issues if isinstance(issues, list) else []:
+    if isinstance(issues, list):
+        source_items.extend((item, None) for item in issues)
+    # Newer summaries persist the already classified automation collection
+    # separately.  Keep quality_issues as a legacy fallback because older
+    # summaries carried both review domains in that collection.
+    diagnostics = summary.get("automation_diagnostics")
+    if isinstance(diagnostics, list):
+        source_items.extend(
+            (item, ReviewDomain.AUTOMATION_ENGINE) for item in diagnostics
+        )
+
+    for item, expected_domain in source_items:
         if not isinstance(item, Mapping):
+            if expected_domain is ReviewDomain.AUTOMATION_ENGINE:
+                malformed = _malformed_automation_diagnostic()
+                digest = malformed["source_signature_digest"]
+                if projected_signatures.get(digest) is None:
+                    projected_signatures[digest] = ReviewDomain.UNKNOWN
+                    unknown.append(malformed)
             continue
         mismatch_type = _text(item.get("mismatch_type")).upper()
         if not mismatch_type:
-            continue
+            if expected_domain is not ReviewDomain.AUTOMATION_ENGINE:
+                continue
+            classification = ReviewClassification(
+                ReviewDomain.UNKNOWN,
+                "malformed_automation_diagnostic",
+                _text(item.get("failure_reason")).lower(),
+                mismatch_type,
+            )
+        else:
+            classification = None
         scenario_id = _text(item.get("scenario_id"))
         step = _text(item.get("step"))
         source_matches = result_rows.get((scenario_id, step, mismatch_type), [])
-        source = source_matches.pop(0) if source_matches else {}
+        source = _source_row(item, source_matches)
         failure_reason = _text(
             item.get("failure_reason") or source.get("failure_reason")
         )
@@ -157,9 +261,25 @@ def classify_candidate_review_issues(
             evidence_path,
             transaction_id,
         )
-        classification = classify_review_domain(
-            mismatch_type=mismatch_type,
-            failure_reason=failure_reason,
+        if classification is None:
+            classification = classify_review_domain(
+                mismatch_type=mismatch_type,
+                failure_reason=failure_reason,
+            )
+        if (
+            expected_domain is ReviewDomain.AUTOMATION_ENGINE
+            and classification.review_domain is not ReviewDomain.AUTOMATION_ENGINE
+        ):
+            classification = ReviewClassification(
+                ReviewDomain.UNKNOWN,
+                "automation_diagnostic_domain_mismatch",
+                failure_reason.lower(),
+                mismatch_type,
+            )
+        code = mismatch_type or (
+            "MALFORMED_AUTOMATION_DIAGNOSTIC"
+            if expected_domain is ReviewDomain.AUTOMATION_ENGINE
+            else ""
         )
         signature = review_source_signature(
             scenario_id=scenario_id,
@@ -170,7 +290,7 @@ def classify_candidate_review_issues(
             source_row=source.get("source_row"),
         )
         provenance = {
-            "code": mismatch_type,
+            "code": code,
             "mismatch_type": mismatch_type,
             "category": (
                 "OBSERVED_RESULT_LIMITATION"
@@ -180,7 +300,11 @@ def classify_candidate_review_issues(
             "review_domain": classification.review_domain.value,
             "scenario_id": scenario_id,
             "step": step,
-            "raw_result": item.get("final_result"),
+            "raw_result": (
+                item.get("final_result")
+                or item.get("raw_final_result")
+                or source.get("final_result")
+            ),
             "failure_reason": failure_reason,
             "classification_reason": classification.classification_reason,
             "resource_id": resource_id,
@@ -190,6 +314,11 @@ def classify_candidate_review_issues(
             "source_signature": signature,
             "source_signature_digest": review_source_signature_digest(signature),
         }
+        digest = provenance["source_signature_digest"]
+        previous_domain = projected_signatures.get(digest)
+        if previous_domain is classification.review_domain:
+            continue
+        projected_signatures[digest] = classification.review_domain
         match classification.review_domain:
             case ReviewDomain.QA_ACCESSIBILITY:
                 qa.append({**provenance, "review_status": "UNREVIEWED"})
@@ -201,6 +330,9 @@ def classify_candidate_review_issues(
                 unknown.append({**provenance, "review_status": "UNREVIEWED"})
             case _ as unreachable:
                 assert_never(unreachable)
+    qa.sort(key=_issue_sort_key)
+    automation.sort(key=_issue_sort_key)
+    unknown.sort(key=_issue_sort_key)
     return tuple(qa), tuple(automation), tuple(unknown)
 
 
