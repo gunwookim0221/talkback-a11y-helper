@@ -45,7 +45,13 @@ object A11yTraversalAnalyzer {
 
     internal fun buildTalkBackLikeFocusNodes(root: AccessibilityNodeInfo): List<FocusedNode> {
         val focusNodes = mutableListOf<FocusedNode>()
-        collectFocusableNodes(node = root, containerAncestor = null, sink = focusNodes)
+        val emittedNodes = IdentityHashMap<AccessibilityNodeInfo, Boolean>()
+        collectFocusableNodes(
+            node = root,
+            containerAncestor = null,
+            sink = focusNodes,
+            emittedNodes = emittedNodes
+        )
 
         val dedupedNodes = focusNodes
             .distinctBy { focused ->
@@ -71,9 +77,10 @@ object A11yTraversalAnalyzer {
     internal fun collectFocusableNodes(
         node: AccessibilityNodeInfo,
         containerAncestor: AccessibilityNodeInfo?,
-        sink: MutableList<FocusedNode>
+        sink: MutableList<FocusedNode>,
+        emittedNodes: MutableMap<AccessibilityNodeInfo, Boolean> = IdentityHashMap()
     ) {
-        if (!node.isVisibleToUser) return
+        if (!node.isVisibleToUser || emittedNodes.containsKey(node)) return
 
         val container = isFocusContainer(node)
         val descendantMetadata = collectActionableDescendantMetadata(node)
@@ -93,6 +100,7 @@ object A11yTraversalAnalyzer {
                 actionableDescendantClassName = descendantMetadata.actionableDescendantClassName,
                 actionableDescendantContentDescription = descendantMetadata.actionableDescendantContentDescription
             )
+            emittedNodes[node] = true
         } else if (containerAncestor == null && hasAnyText(node)) {
             sink += FocusedNode(
                 node = node,
@@ -106,6 +114,7 @@ object A11yTraversalAnalyzer {
                 actionableDescendantClassName = descendantMetadata.actionableDescendantClassName,
                 actionableDescendantContentDescription = descendantMetadata.actionableDescendantContentDescription
             )
+            emittedNodes[node] = true
         } else {
             val staticTextDecision = evaluateOneConnectStaticTextPromotion(node, containerAncestor)
             if (staticTextDecision.shouldLog) {
@@ -133,6 +142,7 @@ object A11yTraversalAnalyzer {
                     actionableDescendantClassName = descendantMetadata.actionableDescendantClassName,
                     actionableDescendantContentDescription = descendantMetadata.actionableDescendantContentDescription
                 )
+                emittedNodes[node] = true
             }
         }
 
@@ -150,10 +160,131 @@ object A11yTraversalAnalyzer {
             collectFocusableNodes(
                 node = child,
                 containerAncestor = nextContainer,
-                sink = sink
+                sink = sink,
+                emittedNodes = emittedNodes
             )
         }
+
+        projectNestedAdjustableDescendants(
+            owner = node,
+            sink = sink,
+            emittedNodes = emittedNodes
+        )
     }
+
+    private fun projectNestedAdjustableDescendants(
+        owner: AccessibilityNodeInfo,
+        sink: MutableList<FocusedNode>,
+        emittedNodes: MutableMap<AccessibilityNodeInfo, Boolean>
+    ) {
+        if (!isAdjustableProjectionScope(owner)) return
+
+        val seen = IdentityHashMap<AccessibilityNodeInfo, Boolean>()
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        for (index in 0 until owner.childCount) {
+            owner.getChild(index)?.let(queue::addLast)
+        }
+
+        while (queue.isNotEmpty()) {
+            val current = queue.removeFirst()
+            if (seen.put(current, true) != null || !current.isVisibleToUser) continue
+
+            val shouldProject = shouldProjectNestedAdjustableDescendant(
+                visible = current.isVisibleToUser,
+                enabled = current.isEnabled,
+                focusable = current.isFocusable,
+                clickable = current.isClickable,
+                className = current.className?.toString(),
+                hasRangeInfo = current.rangeInfo != null,
+                hasSetProgressAction = current.actionList.any { action ->
+                    action == AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS
+                },
+                bounds = Rect().also { current.getBoundsInScreen(it) },
+                hasReadableLabel = hasAnyText(current),
+                withinContentScope = true,
+                alreadyRepresented = emittedNodes.containsKey(current)
+            )
+            if (shouldProject) {
+                if (!emittedNodes.containsKey(current)) {
+                    val descendantMetadata = collectActionableDescendantMetadata(current)
+                    sink += FocusedNode(
+                        node = current,
+                        text = current.text?.toString(),
+                        contentDescription = current.contentDescription?.toString(),
+                        mergedLabel = null,
+                        hasClickableDescendant = descendantMetadata.hasClickableDescendant,
+                        hasFocusableDescendant = descendantMetadata.hasFocusableDescendant,
+                        effectiveClickable = current.isClickable || descendantMetadata.hasClickableDescendant,
+                        actionableDescendantResourceId = descendantMetadata.actionableDescendantResourceId,
+                        actionableDescendantClassName = descendantMetadata.actionableDescendantClassName,
+                        actionableDescendantContentDescription = descendantMetadata.actionableDescendantContentDescription
+                    )
+                    emittedNodes[current] = true
+                }
+                continue
+            }
+
+            // A nested independently actionable container owns its descendants.
+            // Do not let a projection from the outer card leak into another card.
+            if (isFocusContainer(current)) continue
+            for (index in 0 until current.childCount) {
+                current.getChild(index)?.let(queue::addLast)
+            }
+        }
+    }
+
+    private fun isAdjustableProjectionScope(node: AccessibilityNodeInfo): Boolean {
+        if (!isFocusContainer(node) || !node.isVisibleToUser || !node.isEnabled) return false
+        val bounds = Rect().also { node.getBoundsInScreen(it) }
+        if (bounds.isEmpty) return false
+        if (A11yNodeUtils.isTopAppBar(node, screenTop = 0, screenHeight = 1)) return false
+        if (A11yNodeUtils.isBottomNavigationBar(node, screenBottom = 1, screenHeight = 1)) return false
+        return !isNavigationLikeProjectionNode(node)
+    }
+
+    private fun isNavigationLikeProjectionNode(node: AccessibilityNodeInfo): Boolean {
+        val resourceId = node.viewIdResourceName?.lowercase().orEmpty()
+        val className = node.className?.toString()?.lowercase().orEmpty()
+        return PROJECTION_NAVIGATION_TOKENS.any { token ->
+            resourceId.contains(token) || className.contains(token)
+        }
+    }
+
+    internal fun shouldProjectNestedAdjustableDescendant(
+        visible: Boolean,
+        enabled: Boolean,
+        focusable: Boolean,
+        clickable: Boolean,
+        className: String?,
+        hasRangeInfo: Boolean,
+        hasSetProgressAction: Boolean,
+        bounds: Rect,
+        hasReadableLabel: Boolean,
+        withinContentScope: Boolean,
+        alreadyRepresented: Boolean
+    ): Boolean {
+        if (hasReadableLabel || !withinContentScope || alreadyRepresented) return false
+        return shouldRetainUnlabeledAdjustableTarget(
+            visible = visible,
+            enabled = enabled,
+            focusable = focusable,
+            clickable = clickable,
+            className = className,
+            hasRangeInfo = hasRangeInfo,
+            hasSetProgressAction = hasSetProgressAction,
+            bounds = bounds
+        )
+    }
+
+    private val PROJECTION_NAVIGATION_TOKENS = setOf(
+        "bottom_nav",
+        "bottomnavigation",
+        "navbar",
+        "nav_bar",
+        "navigation",
+        "tab",
+        "segment"
+    )
 
     internal fun collectMergedTextFromContainer(container: AccessibilityNodeInfo): List<String> {
         val merged = mutableListOf<String>()
@@ -414,12 +545,48 @@ object A11yTraversalAnalyzer {
         if (isOneConnectSettingsCandidateNode(current, recoveredDescendantLabel)) {
             return false
         }
+        if (shouldRetainUnlabeledAdjustableTarget(current)) {
+            return false
+        }
         return shouldExcludeAsEmptyShell(
             mergedText = node.text,
             mergedContentDescription = node.contentDescription,
             clickable = current.isClickable,
             childCount = current.childCount
         )
+    }
+
+    private fun shouldRetainUnlabeledAdjustableTarget(node: AccessibilityNodeInfo): Boolean {
+        val bounds = Rect().also(node::getBoundsInScreen)
+        val hasSetProgressAction = node.actionList.any { action ->
+            action == AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS
+        }
+        return shouldRetainUnlabeledAdjustableTarget(
+            visible = node.isVisibleToUser,
+            enabled = node.isEnabled,
+            focusable = node.isFocusable,
+            clickable = node.isClickable,
+            className = node.className?.toString(),
+            hasRangeInfo = node.rangeInfo != null,
+            hasSetProgressAction = hasSetProgressAction,
+            bounds = bounds
+        )
+    }
+
+    internal fun shouldRetainUnlabeledAdjustableTarget(
+        visible: Boolean,
+        enabled: Boolean,
+        focusable: Boolean,
+        clickable: Boolean,
+        className: String?,
+        hasRangeInfo: Boolean,
+        hasSetProgressAction: Boolean,
+        bounds: Rect
+    ): Boolean {
+        if (!visible || !enabled || !focusable || bounds.isEmpty) return false
+
+        val explicitAdjustableSemantics = hasRangeInfo || hasSetProgressAction
+        return explicitAdjustableSemantics
     }
 
     internal fun isOneConnectSettingsCandidateNode(

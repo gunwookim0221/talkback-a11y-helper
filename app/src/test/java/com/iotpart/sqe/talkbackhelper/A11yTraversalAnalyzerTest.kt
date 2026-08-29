@@ -112,6 +112,149 @@ class A11yTraversalAnalyzerTest {
     }
 
     @Test
+    fun shouldRetainUnlabeledAdjustableTarget_acceptsVisibleEnabledFocusableSeekBar() {
+        val retained = A11yTraversalAnalyzer.shouldRetainUnlabeledAdjustableTarget(
+            visible = true,
+            enabled = true,
+            focusable = true,
+            clickable = true,
+            className = "android.widget.SeekBar",
+            hasRangeInfo = true,
+            hasSetProgressAction = false,
+            bounds = Rect(204, 2173, 876, 2224)
+        )
+
+        assertTrue(retained)
+    }
+
+    @Test
+    fun shouldRetainUnlabeledAdjustableTarget_acceptsGenericRangeControlWithoutLabelOrResourceId() {
+        val retained = A11yTraversalAnalyzer.shouldRetainUnlabeledAdjustableTarget(
+            visible = true,
+            enabled = true,
+            focusable = true,
+            clickable = false,
+            className = "com.example.CustomControl",
+            hasRangeInfo = true,
+            hasSetProgressAction = false,
+            bounds = Rect(10, 100, 300, 160)
+        )
+
+        assertTrue(retained)
+    }
+
+    @Test
+    fun shouldRetainUnlabeledAdjustableTarget_rejectsGenericFocusableViewWithoutAdjustableSemantics() {
+        val retained = A11yTraversalAnalyzer.shouldRetainUnlabeledAdjustableTarget(
+            visible = true,
+            enabled = true,
+            focusable = true,
+            clickable = true,
+            className = "android.view.View",
+            hasRangeInfo = false,
+            hasSetProgressAction = false,
+            bounds = Rect(10, 100, 300, 160)
+        )
+
+        assertFalse(retained)
+    }
+
+    @Test
+    fun shouldRetainUnlabeledAdjustableTarget_rejectsClassOnlySeekBar() {
+        val retained = A11yTraversalAnalyzer.shouldRetainUnlabeledAdjustableTarget(
+            visible = true,
+            enabled = true,
+            focusable = true,
+            clickable = true,
+            className = "android.widget.SeekBar",
+            hasRangeInfo = false,
+            hasSetProgressAction = false,
+            bounds = Rect(204, 2173, 876, 2224)
+        )
+
+        assertFalse(retained)
+    }
+
+    @Test
+    fun shouldRetainUnlabeledAdjustableTarget_rejectsInvisibleDisabledAndInvalidTargets() {
+        fun retained(
+            visible: Boolean = true,
+            enabled: Boolean = true,
+            focusable: Boolean = true,
+            bounds: Rect = Rect(10, 100, 300, 160)
+        ): Boolean = A11yTraversalAnalyzer.shouldRetainUnlabeledAdjustableTarget(
+            visible = visible,
+            enabled = enabled,
+            focusable = focusable,
+            clickable = true,
+            className = "android.widget.SeekBar",
+            hasRangeInfo = false,
+            hasSetProgressAction = false,
+            bounds = bounds
+        )
+
+        assertFalse(retained(visible = false))
+        assertFalse(retained(enabled = false))
+        assertFalse(retained(focusable = false))
+        assertFalse(retained(bounds = Rect()))
+    }
+
+    @Test
+    fun shouldProjectNestedAdjustableDescendant_acceptsStrongUnlabeledControlInContentScope() {
+        val projected = A11yTraversalAnalyzer.shouldProjectNestedAdjustableDescendant(
+            visible = true,
+            enabled = true,
+            focusable = true,
+            clickable = true,
+            className = "android.widget.SeekBar",
+            hasRangeInfo = true,
+            hasSetProgressAction = false,
+            bounds = Rect(204, 2173, 876, 2224),
+            hasReadableLabel = false,
+            withinContentScope = true,
+            alreadyRepresented = false
+        )
+
+        assertTrue(projected)
+    }
+
+    @Test
+    fun shouldProjectNestedAdjustableDescendant_rejectsWeakOrOutOfScopeControls() {
+        fun projected(
+            visible: Boolean = true,
+            enabled: Boolean = true,
+            focusable: Boolean = true,
+            hasRangeInfo: Boolean = true,
+            hasSetProgressAction: Boolean = false,
+            hasReadableLabel: Boolean = false,
+            withinContentScope: Boolean = true,
+            alreadyRepresented: Boolean = false,
+            bounds: Rect = Rect(204, 2173, 876, 2224)
+        ): Boolean = A11yTraversalAnalyzer.shouldProjectNestedAdjustableDescendant(
+            visible = visible,
+            enabled = enabled,
+            focusable = focusable,
+            clickable = true,
+            className = "android.widget.SeekBar",
+            hasRangeInfo = hasRangeInfo,
+            hasSetProgressAction = hasSetProgressAction,
+            bounds = bounds,
+            hasReadableLabel = hasReadableLabel,
+            withinContentScope = withinContentScope,
+            alreadyRepresented = alreadyRepresented
+        )
+
+        assertFalse(projected(hasReadableLabel = true))
+        assertFalse(projected(withinContentScope = false))
+        assertFalse(projected(alreadyRepresented = true))
+        assertFalse(projected(visible = false))
+        assertFalse(projected(enabled = false))
+        assertFalse(projected(focusable = false))
+        assertFalse(projected(hasRangeInfo = false, hasSetProgressAction = false))
+        assertFalse(projected(bounds = Rect()))
+    }
+
+    @Test
     fun collectActionableDescendantMetadata_preservesClickableDescendantInfo() {
         data class Node(
             val resourceId: String?,
