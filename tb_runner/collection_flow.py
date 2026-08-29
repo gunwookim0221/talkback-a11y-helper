@@ -14176,6 +14176,28 @@ def _collect_step_candidate_priority_groups(
         short_tab_like = local_tab_canonical_word_count <= 3 and len(local_tab_canonical_label.strip()) <= 32
         badged_tab_like = bool(local_tab_canonical_label and local_tab_canonical_label != label.strip())
         compact = width_ratio <= 0.52 and height_ratio <= 0.18
+        node_enabled = node.get("enabled", node.get("isEnabled", True)) is not False
+        navigation_like = bool(
+            button_like
+            or any(
+                token in resource_id or token in class_name
+                for token in ("bottom_nav", "bottomnavigation", "navbar", "nav_bar", "navigation", "tab", "segment")
+            )
+        )
+        strong_content_card = bool(
+            ("card" in resource_id or "card" in class_name)
+            or (descendant_actionable and width_ratio >= 0.70 and height >= 160)
+        )
+        lower_viewport_content = bool(
+            center_y >= bottom_band_top
+            and node_enabled
+            and not compact
+            and width_ratio >= 0.70
+            and height >= 160
+            and (actionable or descendant_actionable)
+            and strong_content_card
+            and not navigation_like
+        )
         if center_y >= bottom_band_top and actionable and short_tab_like and compact and (button_like or local_tab_canonical_word_count <= 2 or badged_tab_like):
             children = node.get("children", []) if isinstance(node.get("children"), list) else []
             raw_bottom_strip_candidates.append(
@@ -14226,7 +14248,7 @@ def _collect_step_candidate_priority_groups(
         )
         passive_status = _is_passive_status_text(label, scenario_id=scenario_id)
         content_like = bool(
-            center_y < bottom_band_top
+            (center_y < bottom_band_top or lower_viewport_content)
             and (
                 actionable
                 or card_like

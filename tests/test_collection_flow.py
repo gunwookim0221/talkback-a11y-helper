@@ -5,6 +5,8 @@ from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 try:
     import pandas  # noqa: F401
 except ImportError:
@@ -9111,6 +9113,224 @@ def test_collect_step_candidate_priority_groups_prioritizes_clickable_containers
 
     assert filtered["representative_candidates"][0]["rid"] == "com.example:id/medication_container"
     assert "Medication" in meta["top_priority_container_candidates"]
+
+
+def _lower_viewport_candidate_tree(*children):
+    return [
+        {
+            "className": "android.widget.FrameLayout",
+            "visibleToUser": True,
+            "boundsInScreen": "0,0,1080,2400",
+            "children": list(children),
+        }
+    ]
+
+
+def _lower_viewport_compound_card(*, enabled=True):
+    return {
+        "text": "",
+        "contentDescription": "Set temperature 83.0 F",
+        "viewIdResourceName": "com.example:id/generic_compound_card",
+        "className": "android.view.ViewGroup",
+        "clickable": True,
+        "focusable": False,
+        "effectiveClickable": True,
+        "hasFocusableDescendant": True,
+        "enabled": enabled,
+        "visibleToUser": True,
+        "boundsInScreen": "30,1500,1050,2100",
+        "children": [
+            {
+                "text": "Set temperature",
+                "viewIdResourceName": "com.example:id/generic_compound_card_header",
+                "className": "android.widget.TextView",
+                "enabled": enabled,
+                "visibleToUser": True,
+                "boundsInScreen": "84,1550,936,1620",
+                "children": [],
+            },
+            {
+                "text": "83.0 F",
+                "viewIdResourceName": "com.example:id/generic_compound_card_value",
+                "className": "android.widget.TextView",
+                "enabled": enabled,
+                "visibleToUser": True,
+                "boundsInScreen": "84,1660,996,1760",
+                "children": [],
+            },
+            {
+                "text": "",
+                "viewIdResourceName": "com.example:id/generic_compound_card_slider",
+                "className": "android.widget.SeekBar",
+                "clickable": True,
+                "focusable": True,
+                "effectiveClickable": True,
+                "enabled": enabled,
+                "visibleToUser": True,
+                "boundsInScreen": "204,1870,876,1940",
+                "children": [],
+            },
+        ],
+    }
+
+
+def test_collect_step_candidate_priority_groups_retains_lower_viewport_compound_card():
+    content, bottom_strip, meta = collection_flow._collect_step_candidate_priority_groups(
+        _lower_viewport_candidate_tree(
+            _lower_viewport_compound_card(),
+            {
+                "text": "Home",
+                "viewIdResourceName": "com.example:id/home_tab",
+                "className": "android.widget.Button",
+                "clickable": True,
+                "focusable": True,
+                "effectiveClickable": True,
+                "enabled": True,
+                "visibleToUser": True,
+                "boundsInScreen": "30,2300,300,2380",
+                "children": [],
+            },
+            {
+                "text": "Devices",
+                "viewIdResourceName": "com.example:id/devices_tab",
+                "className": "android.widget.Button",
+                "clickable": True,
+                "focusable": True,
+                "effectiveClickable": True,
+                "enabled": True,
+                "visibleToUser": True,
+                "boundsInScreen": "360,2300,630,2380",
+                "children": [],
+            },
+        )
+    )
+
+    assert any(candidate["rid"] == "com.example:id/generic_compound_card" for candidate in content)
+    assert bottom_strip == []
+    assert "Home" in meta["rejected_bottom_strip_candidates"]
+    assert "Devices" in meta["rejected_bottom_strip_candidates"]
+    assert not any(candidate["rid"] in {"com.example:id/home_tab", "com.example:id/devices_tab"} for candidate in content)
+
+
+@pytest.mark.parametrize(
+    "case_name,node",
+    [
+        (
+            "compact_bottom_nav",
+            {
+                "text": "Home",
+                "viewIdResourceName": "com.example:id/home_button",
+                "className": "android.widget.Button",
+                "clickable": True,
+                "focusable": True,
+                "effectiveClickable": True,
+                "enabled": True,
+                "visibleToUser": True,
+                "boundsInScreen": "30,2200,300,2300",
+                "children": [],
+            },
+        ),
+        (
+            "bottom_tab",
+            {
+                "text": "Devices",
+                "viewIdResourceName": "com.example:id/devices_bottom_tab",
+                "className": "android.widget.LinearLayout",
+                "clickable": True,
+                "focusable": True,
+                "effectiveClickable": True,
+                "enabled": True,
+                "visibleToUser": True,
+                "boundsInScreen": "360,2200,660,2300",
+                "children": [],
+            },
+        ),
+        (
+            "non_actionable_lower_node",
+            {
+                "text": "Informational panel",
+                "viewIdResourceName": "com.example:id/informational_panel",
+                "className": "android.widget.FrameLayout",
+                "clickable": False,
+                "focusable": False,
+                "effectiveClickable": False,
+                "enabled": True,
+                "visibleToUser": True,
+                "boundsInScreen": "30,1500,1050,2100",
+                "children": [],
+            },
+        ),
+        (
+            "disabled_card",
+            _lower_viewport_compound_card(enabled=False),
+        ),
+        (
+            "outside_usable_viewport",
+            {
+                "text": "Offscreen card",
+                "viewIdResourceName": "com.example:id/offscreen_card",
+                "className": "android.view.ViewGroup",
+                "clickable": True,
+                "focusable": False,
+                "effectiveClickable": True,
+                "enabled": True,
+                "visibleToUser": False,
+                "boundsInScreen": "30,2500,1050,3000",
+                "children": [],
+            },
+        ),
+        (
+            "ambiguous_lower_node",
+            {
+                "text": "Content panel",
+                "viewIdResourceName": "com.example:id/content_panel",
+                "className": "android.widget.FrameLayout",
+                "clickable": True,
+                "focusable": False,
+                "effectiveClickable": True,
+                "enabled": True,
+                "visibleToUser": True,
+                "boundsInScreen": "30,1500,1050,2100",
+                "children": [],
+            },
+        ),
+        (
+            "small_clickable_control",
+            {
+                "text": "Apply",
+                "viewIdResourceName": "com.example:id/apply_button",
+                "className": "android.widget.Button",
+                "clickable": True,
+                "focusable": True,
+                "effectiveClickable": True,
+                "enabled": True,
+                "visibleToUser": True,
+                "boundsInScreen": "760,2200,1000,2300",
+                "children": [],
+            },
+        ),
+    ],
+    ids=[
+        "compact_bottom_nav",
+        "bottom_tab",
+        "non_actionable_lower_node",
+        "disabled_card",
+        "outside_usable_viewport",
+        "ambiguous_lower_node",
+        "small_clickable_control",
+    ],
+)
+def test_collect_step_candidate_priority_groups_rejects_unsafe_lower_viewport_nodes(case_name, node):
+    content, _bottom_strip, _meta = collection_flow._collect_step_candidate_priority_groups(
+        _lower_viewport_candidate_tree(node)
+    )
+
+    content_ids = {
+        candidate["rid"]
+        for content_candidate in content
+        for candidate in content_candidate.get("cluster_members", [content_candidate])
+    }
+    assert node.get("viewIdResourceName", "").lower() not in content_ids
 
 
 def test_filter_content_candidates_applies_container_priority_for_repeated_group():
