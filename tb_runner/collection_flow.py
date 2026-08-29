@@ -1273,6 +1273,132 @@ def _focusable_coverage_view_id_is_child(child_view_id: Any, parent_view_id: Any
     return any(child.startswith(f"{parent}{separator}") for separator in ("_", "-", "/", ".", ":"))
 
 
+def _focusable_coverage_evidence_events_for_row(
+    row: dict[str, Any],
+    *,
+    evidence_runtime: Any = None,
+    evidence_transaction_for_step: Callable[[Any], Any] | None = None,
+) -> tuple[Any, ...]:
+    if evidence_runtime is None or not bool(getattr(evidence_runtime, "is_enabled", False)):
+        return ()
+    transaction_id = str(
+        row.get("transaction_id", "")
+        or row.get("evidence_transaction_id", "")
+        or ""
+    ).strip()
+    if not transaction_id and callable(evidence_transaction_for_step):
+        try:
+            transaction_id = str(evidence_transaction_for_step(row.get("step_index")) or "").strip()
+        except Exception:
+            transaction_id = ""
+    if not transaction_id:
+        return ()
+    events_for_transaction = getattr(evidence_runtime, "events_for_transaction", None)
+    if not callable(events_for_transaction):
+        return ()
+    try:
+        events = tuple(events_for_transaction(transaction_id) or ())
+    except Exception:
+        return ()
+    scenario_id = str(row.get("scenario_id", "") or "").strip()
+    step_index = str(row.get("step_index", "") or "").strip()
+    if not scenario_id or not step_index:
+        return ()
+    return tuple(
+        event
+        for event in events
+        if str(getattr(event, "scenario_id", "") or "").strip() == scenario_id
+        and str(getattr(event, "step_index", "") or "").strip() == step_index
+    )
+
+
+def _focusable_coverage_event_payload(event: Any) -> dict[str, Any]:
+    payload = getattr(event, "payload", None)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _focusable_coverage_event_focus_node(event: Any) -> dict[str, Any] | None:
+    event_type = str(getattr(event, "event_type", "") or "").strip()
+    if event_type not in {"ACCESSIBILITY_EVENT", "ACCESSIBILITY_FOCUS_EVENT"}:
+        return None
+    node = _focusable_coverage_event_payload(event).get("focus")
+    return node if isinstance(node, dict) else None
+
+
+def _focusable_coverage_linked_compound_match(
+    item: dict[str, Any],
+    row: dict[str, Any],
+    *,
+    evidence_runtime: Any = None,
+    evidence_transaction_for_step: Callable[[Any], Any] | None = None,
+) -> bool:
+    if _focusable_taxonomy(item)[1] != "percentage_value":
+        return False
+    expected_label = _normalize_focusable_inventory_value(item.get("label", ""))
+    expected_tokens = _focusable_percentage_label_tokens(expected_label)
+    if (
+        not expected_tokens
+        or expected_tokens[-1] != "%"
+        or not re.fullmatch(r"\d+(?:\.\d+)?", expected_tokens[-2])
+    ):
+        return False
+    expected_percentage = expected_tokens[-2]
+    row_bounds = _focusable_coverage_row_bounds(row)
+    row_labels = _focusable_coverage_row_labels(row)
+    if not row_bounds or not row_labels:
+        return False
+    evidence_events = _focusable_coverage_evidence_events_for_row(
+        row,
+        evidence_runtime=evidence_runtime,
+        evidence_transaction_for_step=evidence_transaction_for_step,
+    )
+    if not evidence_events:
+        return False
+    has_complete_linked_announcement = any(
+        str(getattr(event, "event_type", "") or "").strip() == "ANNOUNCEMENT_OBSERVED"
+        and _normalize_focusable_inventory_value(_focusable_coverage_event_payload(event).get("text", ""))
+        == expected_label
+        for event in evidence_events
+    )
+    if not has_complete_linked_announcement:
+        return False
+    for event in evidence_events:
+        node = _focusable_coverage_event_focus_node(event)
+        if not node or not bool(node.get("accessibilityFocused")):
+            continue
+        node_labels = {
+            _normalize_focusable_inventory_value(node.get(key, ""))
+            for key in (
+                "text",
+                "contentDescription",
+                "stateDescription",
+                "talkbackLabel",
+                "mergedLabel",
+                "label",
+                "actionableDescendantContentDescription",
+            )
+        }
+        node_labels.discard("")
+        if not node_labels.intersection(row_labels):
+            continue
+        node_bounds = _normalize_focusable_bounds_value(
+            node.get("boundsInScreen", node.get("bounds", ""))
+        )
+        if not node_bounds or node_bounds not in row_bounds:
+            continue
+        children = node.get("children")
+        if not isinstance(children, list) or not children:
+            continue
+        child_labels = {
+            _normalize_focusable_inventory_value(_node_label_blob(child))
+            for child in children
+            if isinstance(child, dict) and _node_label_blob(child)
+        }
+        if expected_percentage in child_labels and "%" in child_labels:
+            return True
+    return False
+
+
 def _focusable_coverage_label_contains(label: Any, term: Any) -> bool:
     normalized_label = _normalize_focusable_inventory_value(label)
     normalized_term = _normalize_focusable_inventory_value(term)
@@ -1388,7 +1514,13 @@ def _bounds_related(left_raw: Any, right_raw: Any) -> bool:
     return overlap_ratio >= 0.8
 
 
-def _focusable_coverage_candidate_rows(item: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+def _focusable_coverage_candidate_rows(
+    item: dict[str, Any],
+    rows: list[dict[str, Any]],
+    *,
+    evidence_runtime: Any = None,
+    evidence_transaction_for_step: Callable[[Any], Any] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
     scenario_id = str(item.get("scenario_id", "") or "").strip()
     item_label = _normalize_focusable_inventory_value(item.get("label", ""))
     item_view_id = _normalize_focusable_inventory_value(item.get("view_id", ""))
@@ -1404,6 +1536,7 @@ def _focusable_coverage_candidate_rows(item: dict[str, Any], rows: list[dict[str
     label_matches: list[dict[str, Any]] = []
     percentage_matches: list[dict[str, Any]] = []
     representative_compound_matches: list[dict[str, Any]] = []
+    linked_compound_matches: list[dict[str, Any]] = []
     semantic_matches: list[dict[str, Any]] = []
     bounds_matches: list[dict[str, Any]] = []
     for row in scoped_rows:
@@ -1419,6 +1552,13 @@ def _focusable_coverage_candidate_rows(item: dict[str, Any], rows: list[dict[str
             and any(_focusable_percentage_labels_equivalent(item_label, row_label) for row_label in row_labels)
         ):
             percentage_matches.append(row)
+        if _focusable_coverage_linked_compound_match(
+            item,
+            row,
+            evidence_runtime=evidence_runtime,
+            evidence_transaction_for_step=evidence_transaction_for_step,
+        ):
+            linked_compound_matches.append(row)
         if _focusable_coverage_representative_compound_match(item, row):
             representative_compound_matches.append(row)
         if item_semantic_card_id and item_semantic_card_id == _normalize_focusable_inventory_value(row.get("semantic_card_id", "")):
@@ -1429,14 +1569,26 @@ def _focusable_coverage_candidate_rows(item: dict[str, Any], rows: list[dict[str
         "view_id": view_id_matches,
         "label": label_matches,
         "percentage": percentage_matches,
+        "linked_compound": linked_compound_matches,
         "representative_compound": representative_compound_matches,
         "semantic": semantic_matches,
         "bounds": bounds_matches,
     }
 
 
-def _focusable_coverage_match(item: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
-    matches = _focusable_coverage_candidate_rows(item, rows)
+def _focusable_coverage_match(
+    item: dict[str, Any],
+    rows: list[dict[str, Any]],
+    *,
+    evidence_runtime: Any = None,
+    evidence_transaction_for_step: Callable[[Any], Any] | None = None,
+) -> dict[str, Any]:
+    matches = _focusable_coverage_candidate_rows(
+        item,
+        rows,
+        evidence_runtime=evidence_runtime,
+        evidence_transaction_for_step=evidence_transaction_for_step,
+    )
     item_view_id = _normalize_focusable_inventory_value(item.get("view_id", ""))
     item_label = _normalize_focusable_inventory_value(item.get("label", ""))
 
@@ -1460,6 +1612,13 @@ def _focusable_coverage_match(item: dict[str, Any], rows: list[dict[str, Any]]) 
             return {"status": "UNKNOWN", "row": percentage_matches[0], "reason": "ambiguous_percentage_label_match"}
         row = percentage_matches[0]
         return {"status": "COVERED", "row": row, "reason": "percentage_compound_label"}
+
+    linked_compound_matches = matches["linked_compound"]
+    if linked_compound_matches:
+        if len(linked_compound_matches) > 1:
+            return {"status": "UNKNOWN", "row": linked_compound_matches[0], "reason": "ambiguous_linked_compound_match"}
+        row = linked_compound_matches[0]
+        return {"status": "COVERED", "row": row, "reason": "linked_compound_announcement"}
 
     representative_compound_matches = matches["representative_compound"]
     if representative_compound_matches:
@@ -1528,10 +1687,21 @@ def _canonicalize_focusable_inventory(inventory: list[dict[str, Any]]) -> list[d
     return list(canonical_by_id.values())
 
 
-def _focusable_coverage_canonical_match(item: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _focusable_coverage_canonical_match(
+    item: dict[str, Any],
+    rows: list[dict[str, Any]],
+    *,
+    evidence_runtime: Any = None,
+    evidence_transaction_for_step: Callable[[Any], Any] | None = None,
+) -> dict[str, Any]:
     best_match: dict[str, Any] = {"status": "MISSED", "row": None, "reason": "no_matching_row"}
     for raw_item in item.get("raw_records", []) if isinstance(item.get("raw_records"), list) else [item]:
-        match = _focusable_coverage_match(raw_item, rows)
+        match = _focusable_coverage_match(
+            raw_item,
+            rows,
+            evidence_runtime=evidence_runtime,
+            evidence_transaction_for_step=evidence_transaction_for_step,
+        )
         if _focusable_status_rank(str(match.get("status", ""))) > _focusable_status_rank(str(best_match.get("status", ""))):
             best_match = match
         if str(best_match.get("status", "")) == "COVERED":
@@ -1539,14 +1709,26 @@ def _focusable_coverage_canonical_match(item: dict[str, Any], rows: list[dict[st
     return best_match
 
 
-def _build_focusable_coverage_payload(inventory: list[dict[str, Any]], rows: list[dict[str, Any]], output_path: str) -> dict[str, Any]:
+def _build_focusable_coverage_payload(
+    inventory: list[dict[str, Any]],
+    rows: list[dict[str, Any]],
+    output_path: str,
+    *,
+    evidence_runtime: Any = None,
+    evidence_transaction_for_step: Callable[[Any], Any] | None = None,
+) -> dict[str, Any]:
     records: list[dict[str, Any]] = []
     summary_by_scenario: dict[str, dict[str, Any]] = {}
     canonical_items = _canonicalize_focusable_inventory(inventory if isinstance(inventory, list) else [])
     for item in canonical_items:
         if not isinstance(item, dict):
             continue
-        match = _focusable_coverage_canonical_match(item, rows if isinstance(rows, list) else [])
+        match = _focusable_coverage_canonical_match(
+            item,
+            rows if isinstance(rows, list) else [],
+            evidence_runtime=evidence_runtime,
+            evidence_transaction_for_step=evidence_transaction_for_step,
+        )
         matched_row = match.get("row") if isinstance(match.get("row"), dict) else None
         scenario_id = str(item.get("scenario_id", "") or "").strip()
         status = str(match.get("status", "UNKNOWN") or "UNKNOWN")
@@ -1738,7 +1920,13 @@ def _save_focusable_coverage(client: Any, output_path: str, rows: list[dict[str,
         return
     inventory = _ensure_focusable_inventory(client, output_path)
     target = _focusable_coverage_path(output_path)
-    payload = _build_focusable_coverage_payload(inventory, rows if isinstance(rows, list) else [], output_path)
+    payload = _build_focusable_coverage_payload(
+        inventory,
+        rows if isinstance(rows, list) else [],
+        output_path,
+        evidence_runtime=getattr(client, "evidence_runtime", None),
+        evidence_transaction_for_step=getattr(client, "_evidence_transaction_for_step", None),
+    )
     try:
         target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as exc:

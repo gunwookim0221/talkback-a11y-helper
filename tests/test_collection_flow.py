@@ -17,6 +17,7 @@ except ImportError:
     sys.modules.setdefault("openpyxl.drawing.image", SimpleNamespace(Image=object))
 
 from tb_runner import collection_flow
+from tb_runner.evidence import EvidenceRuntime
 from tb_runner.scenario_config import TAB_CONFIGS
 from tb_runner.tab_logic import (
     _expected_bottom_tab_from_tab_pattern,
@@ -27,6 +28,125 @@ from tb_runner.tab_logic import (
 
 def _scenario_config(scenario_id):
     return next(cfg for cfg in TAB_CONFIGS if cfg.get("scenario_id") == scenario_id)
+
+
+_E8_SCENARIO_ID = "life_family_care_plugin"
+_E8_REQUIRED_LABEL = "0 steps / 6000 steps 0 %"
+_E8_SHORT_LABEL = "0 steps / 6000 %"
+_E8_INVENTORY_BOUNDS = "84,1749,996,1912"
+_E8_FOCUS_BOUNDS = "84,1314,996,1477"
+
+
+def _e8_focus_node(
+    *,
+    label=_E8_SHORT_LABEL,
+    bounds=_E8_FOCUS_BOUNDS,
+    denominator="6000",
+    percentage="0",
+    include_percentage=True,
+):
+    children = [
+        {"text": denominator, "viewIdResourceName": "com.samsung.android.plugin.care:id/subtext"},
+        {"text": "steps"},
+    ]
+    if include_percentage:
+        children.extend(
+            [
+                {"text": percentage, "viewIdResourceName": "com.samsung.android.plugin.care:id/step_tooltip_text"},
+                {"text": "%", "viewIdResourceName": "com.samsung.android.plugin.care:id/step_tooltip_text_unit"},
+            ]
+        )
+    left, top, right, bottom = (int(value) for value in bounds.split(","))
+    return {
+        "packageName": "com.samsung.android.oneconnect",
+        "className": "android.view.ViewGroup",
+        "text": None,
+        "contentDescription": None,
+        "mergedLabel": label,
+        "talkbackLabel": label,
+        "accessibilityFocused": True,
+        "visibleToUser": True,
+        "boundsInScreen": {"l": left, "t": top, "r": right, "b": bottom},
+        "children": children,
+    }
+
+
+def _e8_runtime(
+    tmp_path,
+    *,
+    scenario_id=_E8_SCENARIO_ID,
+    announcement=_E8_REQUIRED_LABEL,
+    focus_node=None,
+):
+    runtime = EvidenceRuntime(
+        output_path=tmp_path / "e8.evidence",
+        run_id="run_e8",
+        enabled=True,
+        identity_shadow=False,
+    )
+    runtime.start_scenario(scenario_id, plugin_family="life", step_index=11)
+    runtime.set_step(11)
+    transaction = runtime.begin_transaction("SMART_NEXT", phase="main_loop")
+    runtime.emit(
+        "ACCESSIBILITY_FOCUS_EVENT",
+        producer="helper",
+        phase="helper",
+        transaction=transaction,
+        payload={"focus": focus_node or _e8_focus_node()},
+    )
+    if announcement is not None:
+        runtime.emit(
+            "ANNOUNCEMENT_OBSERVED",
+            producer="helper",
+            phase="helper",
+            transaction=transaction,
+            payload={"text": announcement},
+        )
+    runtime.close_transaction(transaction, status="completed", phase="main_loop")
+    return runtime, transaction["transaction_id"]
+
+
+def _e8_inventory(label=_E8_REQUIRED_LABEL):
+    return [
+        {
+            "scenario_id": _E8_SCENARIO_ID,
+            "label": label,
+            "view_id": "",
+            "bounds": _E8_INVENTORY_BOUNDS,
+            "source": "helper_snapshot",
+        }
+    ]
+
+
+def _e8_rows(
+    transaction_id="",
+    *,
+    scenario_id=_E8_SCENARIO_ID,
+    label=_E8_SHORT_LABEL,
+    bounds=_E8_FOCUS_BOUNDS,
+):
+    row = {
+        "scenario_id": scenario_id,
+        "step_index": 11,
+        "visible_label": label,
+        "actual_focus_visible": label,
+        "actual_focus_speech": label,
+        "focus_bounds": bounds,
+    }
+    if transaction_id:
+        row["transaction_id"] = transaction_id
+    return [row]
+
+
+def _e8_record(tmp_path, runtime=None, transaction_id="", rows=None, evidence_transaction_for_step=None):
+    payload = collection_flow._build_focusable_coverage_payload(
+        _e8_inventory(),
+        rows if rows is not None else _e8_rows(transaction_id),
+        str(tmp_path / "talkback_compare.xlsx"),
+        evidence_runtime=runtime,
+        evidence_transaction_for_step=evidence_transaction_for_step,
+    )
+    return payload["records"][0]
 
 
 def test_focusable_inventory_collects_focus_payload_and_dump_nodes(tmp_path):
@@ -362,6 +482,115 @@ def test_focusable_coverage_matches_percentage_value_with_redundant_unit_word(tm
     assert payload["records"][0]["coverage_status"] == "COVERED"
     assert payload["records"][0]["coverage_reason"] == "percentage_compound_label"
     assert payload["records"][0]["matched_step"] == 17
+
+
+def test_focusable_coverage_matches_linked_compound_percentage_evidence(tmp_path):
+    runtime, transaction_id = _e8_runtime(tmp_path)
+
+    record = _e8_record(
+        tmp_path,
+        runtime,
+        rows=_e8_rows(),
+        evidence_transaction_for_step=lambda _step_index: transaction_id,
+    )
+
+    assert record["coverage_status"] == "COVERED"
+    assert record["coverage_reason"] == "linked_compound_announcement"
+    assert record["matched_step"] == 11
+
+
+def test_focusable_coverage_rejects_linked_compound_unrelated_number(tmp_path):
+    runtime, transaction_id = _e8_runtime(
+        tmp_path,
+        announcement="1 steps / 6000 steps 1 %",
+        focus_node=_e8_focus_node(label="1 steps / 6000 %", percentage="1"),
+    )
+
+    record = _e8_record(tmp_path, runtime, transaction_id, rows=_e8_rows(label="1 steps / 6000 %"))
+
+    assert record["coverage_status"] == "MISSED"
+    assert record["coverage_reason"] == "no_matching_row"
+
+
+def test_focusable_coverage_rejects_linked_compound_unrelated_steps_value(tmp_path):
+    runtime, transaction_id = _e8_runtime(
+        tmp_path,
+        announcement="0 steps / 5000 steps 0 %",
+        focus_node=_e8_focus_node(label="0 steps / 5000 %", denominator="5000"),
+    )
+
+    record = _e8_record(tmp_path, runtime, transaction_id, rows=_e8_rows(label="0 steps / 5000 %"))
+
+    assert record["coverage_status"] == "MISSED"
+    assert record["coverage_reason"] == "no_matching_row"
+
+
+def test_focusable_coverage_rejects_linked_compound_missing_percentage_semantic(tmp_path):
+    runtime, transaction_id = _e8_runtime(
+        tmp_path,
+        announcement="0 steps / 6000 steps",
+        focus_node=_e8_focus_node(label="0 steps / 6000 steps", include_percentage=False),
+    )
+
+    record = _e8_record(tmp_path, runtime, transaction_id, rows=_e8_rows(label="0 steps / 6000 steps"))
+
+    assert record["coverage_status"] == "MISSED"
+    assert record["coverage_reason"] == "no_matching_row"
+
+
+def test_focusable_coverage_rejects_linked_compound_different_region(tmp_path):
+    runtime, transaction_id = _e8_runtime(
+        tmp_path,
+        focus_node=_e8_focus_node(bounds="84,1400,996,1563"),
+    )
+
+    record = _e8_record(tmp_path, runtime, transaction_id)
+
+    assert record["coverage_status"] == "MISSED"
+    assert record["coverage_reason"] == "no_matching_row"
+
+
+def test_focusable_coverage_rejects_unlinked_compound_announcement(tmp_path):
+    runtime, _transaction_id = _e8_runtime(tmp_path)
+
+    record = _e8_record(tmp_path, runtime, rows=_e8_rows())
+
+    assert record["coverage_status"] == "MISSED"
+    assert record["coverage_reason"] == "no_matching_row"
+
+
+def test_focusable_coverage_rejects_linked_compound_different_percentage_value(tmp_path):
+    runtime, transaction_id = _e8_runtime(
+        tmp_path,
+        announcement="0 steps / 6000 steps 60 %",
+        focus_node=_e8_focus_node(percentage="60"),
+    )
+
+    record = _e8_record(tmp_path, runtime, transaction_id)
+
+    assert record["coverage_status"] == "MISSED"
+    assert record["coverage_reason"] == "no_matching_row"
+
+
+def test_focusable_coverage_rejects_arbitrary_compound_token_deletion(tmp_path):
+    runtime, transaction_id = _e8_runtime(
+        tmp_path,
+        announcement="0 steps / 6000 0 %",
+    )
+
+    record = _e8_record(tmp_path, runtime, transaction_id)
+
+    assert record["coverage_status"] == "MISSED"
+    assert record["coverage_reason"] == "no_matching_row"
+
+
+def test_focusable_coverage_rejects_cross_scenario_compound_evidence(tmp_path):
+    runtime, transaction_id = _e8_runtime(tmp_path, scenario_id="life_other_plugin")
+
+    record = _e8_record(tmp_path, runtime, transaction_id)
+
+    assert record["coverage_status"] == "MISSED"
+    assert record["coverage_reason"] == "no_matching_row"
 
 
 def test_focusable_coverage_marks_missing_percentage_value_missed(tmp_path):
