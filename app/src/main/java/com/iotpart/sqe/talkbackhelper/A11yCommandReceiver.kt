@@ -26,6 +26,8 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val ACTION_CLICK_FOCUSED = "com.iotpart.sqe.talkbackhelper.CLICK_FOCUSED"
         private const val ACTION_SCROLL = "com.iotpart.sqe.talkbackhelper.SCROLL"
         private const val ACTION_SET_TEXT = "com.iotpart.sqe.talkbackhelper.SET_TEXT"
+        private const val ACTION_SET_SYSTEM_LANGUAGE = "com.iotpart.sqe.talkbackhelper.SET_SYSTEM_LANGUAGE"
+        internal const val HELPER_SERVICE_UNAVAILABLE_STATUS = "HELPER_SERVICE_UNAVAILABLE"
         private const val ACTION_PING = "com.iotpart.sqe.talkbackhelper.PING"
         private const val ACTION_COMMAND = "com.iotpart.sqe.talkbackhelper.ACTION_COMMAND"
         private const val ACTION_EVIDENCE_EVENTS = "com.iotpart.sqe.talkbackhelper.EVIDENCE_EVENTS"
@@ -41,6 +43,8 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val EXTRA_FORWARD = "forward"
         private const val EXTRA_DIRECTION = "direction"
         private const val EXTRA_TEXT = "text"
+        private const val EXTRA_LOCALE = "locale"
+        private const val EXTRA_CURRENT_LOCALE = "currentLocale"
         private const val EXTRA_BOUNDS = "bounds"
         private const val EXTRA_PREFER_EMPTY_STATE = "preferEmptyState"
         private const val EXTRA_EXCLUDE_TOP_CHROME = "excludeTopChrome"
@@ -96,6 +100,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
             ACTION_CLICK_FOCUSED -> handleClickFocused(intent)
             ACTION_SCROLL -> handleScroll(intent)
             ACTION_SET_TEXT -> handleSetText(intent)
+            ACTION_SET_SYSTEM_LANGUAGE -> handleSetSystemLanguage(intent)
             ACTION_PING -> handlePing(intent)
             ACTION_COMMAND -> handleExternalCommand(context, intent)
             ACTION_EVIDENCE_EVENTS -> handleEvidenceEvents(intent)
@@ -138,6 +143,24 @@ class A11yCommandReceiver : BroadcastReceiver() {
             dumpTree = { service.dumpTree(reqId) },
             reportFailure = { reason -> logDumpTreeFailure(reqId, reason) }
         )
+    }
+
+    private fun handleSetSystemLanguage(intent: Intent) {
+        val reqId = parseReqId(intent)
+        val service = A11yHelperService.instance
+        if (service == null) {
+            logFailure(
+                "SYSTEM_LANGUAGE_RESULT",
+                reqId,
+                HELPER_SERVICE_UNAVAILABLE_STATUS,
+                status = HELPER_SERVICE_UNAVAILABLE_STATUS,
+            )
+            return
+        }
+
+        val locale = intent.getStringExtra(EXTRA_LOCALE)?.trim().orEmpty()
+        val currentLocale = intent.getStringExtra(EXTRA_CURRENT_LOCALE)?.trim()
+        service.setSystemLanguage(locale, currentLocale, reqId)
     }
 
     internal fun executeDumpTreeSafely(
@@ -474,11 +497,14 @@ class A11yCommandReceiver : BroadcastReceiver() {
         Log.i(TAG, "PING_RESULT $payload")
     }
 
-    private fun logFailure(resultTag: String, reqId: String, reason: String) {
+    private fun logFailure(resultTag: String, reqId: String, reason: String, status: String? = null) {
         val payload = org.json.JSONObject()
             .put("reqId", reqId)
             .put("success", false)
             .put("reason", reason)
+            .apply {
+                if (!status.isNullOrBlank()) put("status", status)
+            }
             .toString()
         Log.w(TAG, "$resultTag $payload")
     }

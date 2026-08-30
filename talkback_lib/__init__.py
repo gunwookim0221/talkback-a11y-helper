@@ -35,6 +35,7 @@ from talkback_lib.constants import (
     ACTION_PREV,
     ACTION_SCROLL,
     ACTION_SET_TEXT,
+    ACTION_SET_SYSTEM_LANGUAGE,
     ACTION_SMART_NEXT,
     ACTION_TOUCH_BOUNDS_CENTER_TARGET,
     CLIENT_ALGORITHM_VERSION,
@@ -1840,6 +1841,52 @@ class A11yAdbClient:
             attempt_fn=_attempt_select,
             timeout_fn=_select_timeout,
         )
+
+    def set_system_language(
+        self,
+        dev: Any = None,
+        locale: str = "",
+        current_locale: str | None = None,
+        wait_: float = 5.0,
+    ) -> dict[str, Any]:
+        """Request one bounded, Settings-specific locale action from Helper.
+
+        This is intentionally separate from ``select``/``CLICK_TARGET``.  The
+        Helper owns the fail-closed Settings hierarchy validation, while this
+        client only transports the supported locale intent and reads its ACK.
+        A returned ACTION_PERFORMED is not treated as final success; callers
+        must verify the effective ADB locale after the configuration change.
+        """
+        normalized_locale = str(locale or "").strip()
+        if not normalized_locale:
+            return {
+                "success": False,
+                "status": "FAILED",
+                "reason": "locale_required",
+                "targetLocale": normalized_locale,
+            }
+        if not self.check_helper_status(dev=dev):
+            return {
+                "success": False,
+                "status": "HELPER_NOT_READY",
+                "reason": "helper_unavailable",
+                "targetLocale": normalized_locale,
+            }
+
+        self.clear_logcat(dev=dev)
+        req_id = str(uuid.uuid4())[:8]
+        extras = ["--es", "locale", self._escape_adb_string(normalized_locale)]
+        if current_locale is not None and str(current_locale).strip():
+            extras += ["--es", "currentLocale", self._escape_adb_string(str(current_locale).strip())]
+        extras += ["--es", "reqId", req_id]
+        self._broadcast(dev, ACTION_SET_SYSTEM_LANGUAGE, extras)
+        result = self._read_log_result(
+            dev,
+            "SYSTEM_LANGUAGE_RESULT",
+            req_id,
+            wait_seconds=max(0.25, float(wait_)),
+        )
+        return result
 
     def focus_in_bounds(
         self,

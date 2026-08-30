@@ -215,6 +215,37 @@ class A11yHelperService : AccessibilityService() {
         Log.i(TAG, "DUMP_TREE_END $reqId")
     }
 
+    /**
+     * Performs the one bounded Settings locale action.  The adapter owns all
+     * Settings-specific validation; this service only supplies the fresh root
+     * and reports the structured result.
+     */
+    fun setSystemLanguage(
+        locale: String,
+        currentLocale: String? = null,
+        reqId: String = "none",
+    ): JSONObject {
+        val result = SamsungSettingsLocaleAdapter.performWithStabilization(
+            observationProvider = ::observeLocaleRoot,
+            targetLocale = locale,
+            currentLocale = currentLocale,
+        )
+        val resultJson = result.toJson(reqId)
+        A11yEvidence.attach(resultJson, reqId)
+        Log.i(TAG, "SYSTEM_LANGUAGE_RESULT $resultJson")
+        return resultJson
+    }
+
+    private fun observeLocaleRoot(): SamsungSettingsLocaleAdapter.RootObservation {
+        val service = instance
+            ?: return SamsungSettingsLocaleAdapter.RootObservation(serviceAvailable = false, root = null)
+        val root = runCatching { service.rootInActiveWindow }.getOrNull()
+            ?: return SamsungSettingsLocaleAdapter.RootObservation(serviceAvailable = true, root = null)
+        val snapshot = runCatching { SamsungSettingsLocaleAdapter.snapshot(root) }.getOrNull()
+            ?: return SamsungSettingsLocaleAdapter.RootObservation(serviceAvailable = true, root = null)
+        return SamsungSettingsLocaleAdapter.RootObservation(serviceAvailable = true, root = snapshot)
+    }
+
     fun performTargetAction(query: A11yTargetFinder.TargetQuery, action: Int, reqId: String = "none"): JSONObject {
         val actionLabel = when (action) {
             AccessibilityNodeInfo.ACTION_CLICK -> "ACTION_CLICK"

@@ -8,6 +8,14 @@ import org.junit.Test
 class A11yCommandReceiverTest {
 
     @Test
+    fun systemLanguageUsesDedicatedServiceUnavailableStatus() {
+        assertEquals(
+            "HELPER_SERVICE_UNAVAILABLE",
+            A11yCommandReceiver.HELPER_SERVICE_UNAVAILABLE_STATUS,
+        )
+    }
+
+    @Test
     fun executeDumpTreeSafely_reportsSuccessWithoutFailureCallback() {
         var dumpCount = 0
         var failureReason: String? = null
