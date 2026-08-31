@@ -102,6 +102,7 @@ current Runner/Traversal Identity V2 경로가 담당합니다. **Controlled Rou
 - [Phase 9.5.2 Aggregate RCA](design/talkback-phase9.5.2-aggregate-rca.md)
 - [Phase 9.5.3 Navigation Boundary Fix](design/talkback-phase9.5.3-global-navigation-boundary-fix.md)
 - [Phase 10 phase closure](design/talkback-phase10-phase-closure.md)
+- [Korean locale / Baseline phase closure](design/talkback-phase10-korean-locale-baseline-closure.md)
 - [Audit V4 closure](design/audit-v4-phase-closure.md) / [Audit V5 traversal audit](design/audit-v5-traversal-engine-audit.md)
 - [V10 overview](design/v10/v10-overview.md), [phase plan](design/v10/v10-phase-plan.md),
   [implementation roadmap](design/v10/v10-implementation-roadmap.md)
