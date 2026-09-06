@@ -6768,6 +6768,11 @@ def _run_enter_safe_favorite_card(
     dump_tree_fn = getattr(client, "dump_tree", None)
     if not callable(dump_tree_fn):
         return False, "dump_tree_unavailable"
+
+    def dump_device_entry_tree(*, dev: str) -> list[dict[str, Any]]:
+        return _dump_device_entry_tree(client, dev)
+
+    dump_tree_fn = dump_device_entry_tree
     scroll_to_top_fn = getattr(client, "scroll_to_top", None)
     if callable(scroll_to_top_fn) and bool(step.get("scroll_to_top", True)):
         try:
@@ -6870,7 +6875,75 @@ def _parse_device_entry_bounds(value: Any) -> tuple[int, int, int, int] | None:
     return left, top, right, bottom
 
 
-def _device_list_scroll_geometry(nodes: list[dict[str, Any]]) -> dict[str, Any]:
+def _verified_device_collection_bounds(
+    collection_evidence: dict[str, Any] | None,
+) -> tuple[int, int, int, int] | None:
+    if not isinstance(collection_evidence, dict) or collection_evidence.get("verified") is not True:
+        return None
+    bounds = _parse_device_entry_bounds(collection_evidence.get("boundsInScreen", ""))
+    if not bounds:
+        return None
+    cards = collection_evidence.get("cardBounds")
+    if not isinstance(cards, list) or not cards:
+        return None
+    return bounds
+
+
+def _can_handoff_unverified_device_top_to_forward_search(
+    top_result: dict[str, Any] | None,
+    collection_evidence: dict[str, Any] | None,
+) -> bool:
+    """Allow only a validated collection to continue after an unproven top.
+
+    A missing backward action is a boundary hint, not proof that the device
+    list is at its top.  The narrow handoff below keeps that distinction
+    explicit: the caller may use the existing bounded forward search only
+    when the collection is structurally verified, forward scrolling is
+    supported, and the fresh top evidence positively failed rather than being
+    absent or malformed.
+    """
+    if not isinstance(top_result, dict) or top_result.get("reached_top") is not False:
+        return False
+    if top_result.get("reason") != "validated_collection_boundary_unverified":
+        return False
+    evidence = str(top_result.get("evidence") or "").strip()
+    if evidence not in {
+        "top_anchor_not_visible",
+        "top_anchor_not_first_visible_card",
+        "top_anchor_identity_not_structural",
+    }:
+        return False
+    if _verified_device_collection_bounds(collection_evidence) is None:
+        return False
+    return bool(collection_evidence.get("scrollForwardSupported"))
+
+
+def _verified_collection_contains_card(
+    card: dict[str, Any] | None,
+    collection_evidence: dict[str, Any] | None,
+) -> bool:
+    viewport = _verified_device_collection_bounds(collection_evidence)
+    if not viewport or not isinstance(card, dict):
+        return False
+    card_bounds = _parse_device_entry_bounds(card.get("bounds", ""))
+    if not card_bounds or not _safe_bounds_contains(viewport, card_bounds):
+        return False
+    raw_cards = collection_evidence.get("cardBounds") if isinstance(collection_evidence, dict) else None
+    if not isinstance(raw_cards, list):
+        return False
+    for raw_card in raw_cards:
+        if not isinstance(raw_card, dict):
+            continue
+        raw_bounds = _parse_device_entry_bounds(raw_card.get("boundsInScreen", ""))
+        if raw_bounds and _safe_bounds_contains(raw_bounds, card_bounds):
+            return True
+    return False
+
+
+def _device_list_scroll_geometry(
+    nodes: list[dict[str, Any]],
+    collection_evidence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     visible_cards = device_tab_logic.collect_visible_device_cards(nodes)
     card_bounds = [
         bounds
@@ -6909,6 +6982,10 @@ def _device_list_scroll_geometry(nodes: list[dict[str, Any]]) -> dict[str, Any]:
             or "viewpager" in class_name
         ):
             scrollable_bounds.append(bounds)
+
+    verified_collection_bounds = _verified_device_collection_bounds(collection_evidence)
+    if verified_collection_bounds:
+        scrollable_bounds = [verified_collection_bounds]
 
     viewport: tuple[int, int, int, int] | None = None
     if scrollable_bounds and card_bounds:
@@ -6952,14 +7029,18 @@ def _device_list_scroll_geometry(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         "visible_card_bounds": "|".join(format_bounds(bounds) for bounds in card_bounds),
         "bottom_navigation_bounds": "|".join(format_bounds(bounds) for bounds in bottom_navigation_bounds),
         "visible_card_count": len(visible_cards),
+        "verified_collection": bool(verified_collection_bounds),
+        "verified_collection_bounds": verified_collection_bounds,
     }
 
 
 def _find_safe_visible_device_card_for_direct_entry(
     nodes: list[dict[str, Any]],
     labels: list[str],
+    *,
+    collection_evidence: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    geometry = _device_list_scroll_geometry(nodes)
+    geometry = _device_list_scroll_geometry(nodes, collection_evidence=collection_evidence)
     viewport = geometry.get("viewport")
     # A card-union fallback is sufficient for bounded swiping, but not for a
     # pre-normalization direct entry. The fast path needs explicit container
@@ -6976,14 +7057,21 @@ def _find_safe_visible_device_card_for_direct_entry(
         usable_viewport_bounds=viewport,
         avoid_bounds=avoid_bounds,
     )
+    if card is not None and collection_evidence is not None and not _verified_collection_contains_card(
+        card,
+        collection_evidence,
+    ):
+        return None, geometry
     return card, geometry
 
 
 def _find_safe_visible_device_card_for_bounded_search(
     nodes: list[dict[str, Any]],
     labels: list[str],
+    *,
+    collection_evidence: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    geometry = _device_list_scroll_geometry(nodes)
+    geometry = _device_list_scroll_geometry(nodes, collection_evidence=collection_evidence)
     viewport = geometry.get("viewport")
     if not geometry.get("scrollable_bounds") or not isinstance(viewport, tuple):
         return None, geometry
@@ -6997,7 +7085,27 @@ def _find_safe_visible_device_card_for_bounded_search(
         usable_viewport_bounds=viewport,
         avoid_bounds=avoid_bounds,
     )
+    if card is not None and collection_evidence is not None and not _verified_collection_contains_card(
+        card,
+        collection_evidence,
+    ):
+        return None, geometry
     return card, geometry
+
+
+def _dump_device_entry_tree(client: Any, dev: str) -> list[dict[str, Any]]:
+    dump_tree = getattr(client, "dump_tree", None)
+    if not callable(dump_tree):
+        return []
+    try:
+        nodes = dump_tree(dev=dev, include_device_collection=True)
+    except TypeError:
+        # Legacy test doubles/clients do not know the optional production
+        # bridge. They may still provide the legacy flattened scroll bounds.
+        nodes = dump_tree(dev=dev)
+        if hasattr(client, "last_device_collection"):
+            setattr(client, "last_device_collection", {})
+    return nodes if isinstance(nodes, list) else []
 
 
 def _perform_device_list_adb_swipe(
@@ -7051,6 +7159,56 @@ def _perform_device_list_adb_swipe(
     }
 
 
+def _perform_device_list_accessibility_scroll(
+    client: A11yAdbClient,
+    dev: str,
+    *,
+    nodes: list[dict[str, Any]],
+) -> tuple[bool, dict[str, Any]]:
+    scroll_fn = getattr(client, "scroll", None)
+    if not callable(scroll_fn) or not hasattr(client, "last_scroll_result"):
+        return False, {
+            "method": "accessibility_action",
+            "reason": "device_list_accessibility_scroll_unavailable",
+        }
+    geometry = _device_list_scroll_geometry(
+        nodes,
+        collection_evidence=getattr(client, "last_device_collection", {}),
+    )
+    try:
+        success = bool(
+            scroll_fn(
+                dev=dev,
+                direction="down",
+                device_list_normalization=True,
+            )
+        )
+    except TypeError:
+        return False, {
+            "method": "accessibility_action",
+            "reason": "device_list_accessibility_scroll_contract_missing",
+            **geometry,
+        }
+    result = getattr(client, "last_scroll_result", {})
+    result = result if isinstance(result, dict) else {}
+    return success, {
+        "method": "accessibility_action",
+        "success": success,
+        "action": result.get("action", ""),
+        "action_supported": bool(result.get("actionSupported")),
+        "action_attempted": bool(result.get("actionAttempted")),
+        "validated_device_collection": bool(result.get("validatedDeviceCollection")),
+        "scrollable_bounds": (
+            ",".join(str(value) for value in geometry["verified_collection_bounds"])
+            if isinstance(geometry.get("verified_collection_bounds"), tuple)
+            else ""
+        ),
+        "visible_card_bounds": geometry.get("visible_card_bounds", ""),
+        "visible_card_count_before": geometry.get("visible_card_count", 0),
+        "raw_result": result,
+    }
+
+
 def _scroll_device_list_for_card_search(
     client: A11yAdbClient,
     dev: str,
@@ -7067,7 +7225,12 @@ def _scroll_device_list_for_card_search(
         return False, nodes_before, "device_list_scroll_filter_drift", False
 
     inventory_before = _device_inventory_signature(nodes_before)
-    swipe_ok, swipe_meta = _perform_device_list_adb_swipe(client, dev, nodes=nodes_before)
+    if hasattr(client, "last_scroll_result"):
+        swipe_ok, swipe_meta = _perform_device_list_accessibility_scroll(client, dev, nodes=nodes_before)
+    else:
+        # Preserve the legacy phone/Flip test-double topology while the real
+        # A11yAdbClient uses the bounded accessibility collection contract.
+        swipe_ok, swipe_meta = _perform_device_list_adb_swipe(client, dev, nodes=nodes_before)
     if not swipe_ok:
         log(
             "[DEVICE_SCROLL_ATTEMPT] "
@@ -7078,20 +7241,39 @@ def _scroll_device_list_for_card_search(
             f"bottom_navigation_overlap={str(bool(swipe_meta.get('bottom_navigation_overlap'))).lower()}"
         )
         return False, nodes_before, str(swipe_meta.get("reason", "device_list_adb_swipe_unavailable")), False
-    log(
-        "[DEVICE_SCROLL_ATTEMPT] "
-        f"viewport_before='{swipe_meta.get('viewport_before', '')}' "
-        f"scrollable_bounds='{swipe_meta.get('scrollable_bounds', '')}' "
-        f"visible_card_bounds='{swipe_meta.get('visible_card_bounds', '')}' "
-        f"swipe_start='{swipe_meta.get('x', '')},{swipe_meta.get('y_start', '')}' "
-        f"swipe_end='{swipe_meta.get('x', '')},{swipe_meta.get('y_end', '')}' "
-        f"scroll_delta={int(swipe_meta.get('scroll_delta', 0) or 0)} "
-        f"visible_card_count_before={int(swipe_meta.get('visible_card_count_before', 0) or 0)} "
-        f"bottom_navigation_overlap={str(bool(swipe_meta.get('bottom_navigation_overlap'))).lower()}"
-    )
+    if swipe_meta.get("method") == "accessibility_action":
+        if not bool(swipe_meta.get("validated_device_collection")):
+            log(
+                "[DEVICE_SCROLL_ATTEMPT] "
+                "success=false reason='device_list_collection_unverified' "
+                "method='accessibility_action'"
+            )
+            return False, nodes_before, "device_list_collection_unverified", False
+        log(
+            "[DEVICE_SCROLL_ATTEMPT] "
+            f"method='accessibility_action' action='{swipe_meta.get('action', '')}' "
+            f"action_supported={str(bool(swipe_meta.get('action_supported'))).lower()} "
+            f"action_attempted={str(bool(swipe_meta.get('action_attempted'))).lower()} "
+            f"validated_device_collection={str(bool(swipe_meta.get('validated_device_collection'))).lower()} "
+            f"scrollable_bounds='{swipe_meta.get('scrollable_bounds', '')}' "
+            f"visible_card_bounds='{swipe_meta.get('visible_card_bounds', '')}'"
+        )
+    else:
+        log(
+            "[DEVICE_SCROLL_ATTEMPT] "
+            f"viewport_before='{swipe_meta.get('viewport_before', '')}' "
+            f"scrollable_bounds='{swipe_meta.get('scrollable_bounds', '')}' "
+            f"visible_card_bounds='{swipe_meta.get('visible_card_bounds', '')}' "
+            f"swipe_start='{swipe_meta.get('x', '')},{swipe_meta.get('y_start', '')}' "
+            f"swipe_end='{swipe_meta.get('x', '')},{swipe_meta.get('y_end', '')}' "
+            f"scroll_delta={int(swipe_meta.get('scroll_delta', 0) or 0)} "
+            f"visible_card_count_before={int(swipe_meta.get('visible_card_count_before', 0) or 0)} "
+            f"bottom_navigation_overlap={str(bool(swipe_meta.get('bottom_navigation_overlap'))).lower()}"
+        )
     log(
         "[DEVICE][scroll] "
         f"method='{swipe_meta.get('method', 'adb_swipe')}' "
+        f"action='{swipe_meta.get('action', '')}' "
         f"start='{swipe_meta.get('x', '')},{swipe_meta.get('y_start', '')}' "
         f"end='{swipe_meta.get('x', '')},{swipe_meta.get('y_end', '')}' "
         f"duration_ms={int(swipe_meta.get('duration_ms', 0) or 0)}"
@@ -7103,6 +7285,18 @@ def _scroll_device_list_for_card_search(
     except Exception as exc:
         return False, nodes_before, f"device_list_post_scroll_dump_failed:{exc}", False
     nodes_after = nodes_after if isinstance(nodes_after, list) else []
+
+    # The accessibility action is valid only for the collection selected in
+    # the fresh tree.  Do not carry ownership from the pre-scroll snapshot
+    # across movement; an ambiguous or missing collection is fail-closed.
+    if swipe_meta.get("method") == "accessibility_action":
+        refreshed_collection = getattr(client, "last_device_collection", {}) or {}
+        if _verified_device_collection_bounds(refreshed_collection) is None:
+            log(
+                "[DEVICE_SCROLL_RESULT] "
+                "collection_revalidated=false reason='device_list_collection_unverified_after_scroll'"
+            )
+            return False, nodes_after, "device_list_collection_unverified_after_scroll", False
 
     state_after = _detect_selected_device_location_with_xml_fallback(client, dev, nodes_after)
     selected_after = _device_location_label(state_after)
@@ -7227,14 +7421,21 @@ def _run_enter_device_card_plugin(
     if not callable(dump_tree_fn):
         return False, "dump_tree_unavailable"
 
+    def dump_device_entry_tree(*, dev: str) -> list[dict[str, Any]]:
+        return _dump_device_entry_tree(client, dev)
+
+    # The production client uses the explicit structural collection bridge for
+    # every device-list dump in this flow. Legacy test doubles still work via
+    # _dump_device_entry_tree's TypeError fallback.
+    dump_tree_fn = dump_device_entry_tree
+
     scroll_to_top_fn = getattr(client, "scroll_to_top", None)
     if not callable(scroll_to_top_fn) and bool(step.get("scroll_to_top", True)):
         return False, "device_list_top_normalization_unavailable"
     if callable(scroll_to_top_fn) and bool(step.get("scroll_to_top", True)):
         initial_nodes: list[dict[str, Any]] = []
         try:
-            initial_dump = dump_tree_fn(dev=dev)
-            initial_nodes = initial_dump if isinstance(initial_dump, list) else []
+            initial_nodes = dump_device_entry_tree(dev=dev)
         except Exception as exc:
             log(f"[DEVICE_ENTRY][visible_target] initial_dump_failed reason='{exc}'")
 
@@ -7243,7 +7444,11 @@ def _run_enter_device_card_plugin(
         # never turns an unverified top into VERIFIED_TOP.
         initial_location_state = _detect_selected_device_location_with_xml_fallback(client, dev, initial_nodes)
         if bool(initial_location_state.get("selected")):
-            direct_card, direct_geometry = _find_safe_visible_device_card_for_direct_entry(initial_nodes, labels)
+            direct_card, direct_geometry = _find_safe_visible_device_card_for_direct_entry(
+                initial_nodes,
+                labels,
+                collection_evidence=getattr(client, "last_device_collection", {}) or None,
+            )
             if direct_card is not None:
                 log(
                     f"[DEVICE_ENTRY][visible_target] direct_entry=true stable='{direct_card.get('stable_label', '')}' "
@@ -7290,14 +7495,25 @@ def _run_enter_device_card_plugin(
                 max_swipes=int(step.get("scroll_to_top_max_swipes", 5) or 5),
                 pause=0.6,
                 top_evidence=_capture_top_evidence,
+                device_list_normalization=True,
             )
         except Exception as exc:
             log(f"[DEVICE_ENTRY][normalize] scroll_to_top_failed reason='{exc}'")
             return False, "device_list_top_normalization_failed"
         if not isinstance(top_result, dict) or not bool(top_result.get("reached_top")):
             reason = str((top_result or {}).get("reason") or "unknown") if isinstance(top_result, dict) else "invalid_result"
-            log(f"[DEVICE_ENTRY][normalize] scroll_to_top_unverified reason='{reason}'")
-            return False, f"device_list_top_unverified:{reason}"
+            if _can_handoff_unverified_device_top_to_forward_search(
+                top_result if isinstance(top_result, dict) else None,
+                getattr(client, "last_device_collection", {}) or None,
+            ):
+                log(
+                    "[DEVICE_ENTRY][normalize] "
+                    "handoff='bounded_forward_search' "
+                    f"reason='{reason}' evidence='{top_result.get('evidence', '')}'"
+                )
+            else:
+                log(f"[DEVICE_ENTRY][normalize] scroll_to_top_unverified reason='{reason}'")
+                return False, f"device_list_top_unverified:{reason}"
 
         search_seed_nodes = top_evidence_nodes or initial_nodes
     else:
@@ -7313,7 +7529,11 @@ def _run_enter_device_card_plugin(
         candidate = device_tab_logic.find_device_card_by_stable_label(current_nodes, labels)
         if candidate is None:
             return None
-        safe_card, geometry = _find_safe_visible_device_card_for_bounded_search(current_nodes, labels)
+        safe_card, geometry = _find_safe_visible_device_card_for_bounded_search(
+            current_nodes,
+            labels,
+            collection_evidence=getattr(client, "last_device_collection", {}) or None,
+        )
         if safe_card is not None:
             return safe_card
         viewport = geometry.get("viewport")

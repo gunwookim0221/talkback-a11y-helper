@@ -54,6 +54,40 @@ def is_placeholder_row(row: dict[str, Any]) -> bool:
     return False
 
 
+def classify_local_tab_probe(row: dict[str, Any]) -> str:
+    """Classify a semantically non-MOVE local-tab probe row.
+
+    Probe rows intentionally do not need the ordinary move_result/step_index
+    contract.  Keep their outcome explicit so a missing MOVE payload cannot
+    be projected as FAIL_MOVE, while incomplete evidence remains non-success.
+    """
+    probe_result = str(row.get("local_tab_content_entry_probe_result", "") or "").strip().lower()
+    visit_source = str(row.get("local_tab_content_visit_source", "") or "").strip().lower()
+    explicit_probe = bool(row.get("local_tab_probe", False)) or str(row.get("row_type", "") or "").strip().lower() in {
+        "local_tab_probe",
+        "local-tab-probe",
+    }
+    probe_markers = explicit_probe or bool(
+        probe_result
+        or visit_source.startswith("content_entry_probe:")
+        or visit_source == "activation_observed_content"
+        or row.get("local_tab_content_traversal_fail", False)
+    )
+    if not probe_markers:
+        return ""
+    if bool(row.get("local_tab_content_traversal_fail", False)) or probe_result in {
+        "failed",
+        "failure",
+        "fail",
+    }:
+        return "failure"
+    if probe_result in {"success", "succeeded", "pass", "passed"} or visit_source.startswith(
+        "content_entry_probe:"
+    ) or visit_source == "activation_observed_content" or bool(row.get("local_tab_content_entered", False)):
+        return "success"
+    return "unknown"
+
+
 def classify_step_result(
     row: dict[str, Any],
     *,
@@ -63,6 +97,7 @@ def classify_step_result(
     terminal_signal: bool,
 ) -> dict[str, str]:
     move_result = normalize_move_result(row)
+    local_tab_probe = classify_local_tab_probe(row)
     visible = _normalize_compare_text(row.get("normalized_visible_label", row.get("visible_label", "")))
     speech = _normalize_compare_text(row.get("normalized_announcement", row.get("merged_announcement", "")))
     post_move_verdict_source = str(row.get("post_move_verdict_source", "") or "").strip().lower()
@@ -95,6 +130,18 @@ def classify_step_result(
     elif stop_reason == "plugin_boundary_global_nav":
         traversal_result = "WARN_PLUGIN_BOUNDARY"
         failure_reason = "plugin_boundary_global_nav"
+    elif local_tab_probe == "failure":
+        traversal_result = "FAIL_LOCAL_TAB_PROBE"
+        failure_reason = str(
+            row.get("local_tab_content_traversal_fail_reason", "")
+            or "local_tab_probe_failed"
+        ).strip()
+    elif local_tab_probe == "success":
+        traversal_result = "PASS_LOCAL_TAB_PROBE"
+        failure_reason = ""
+    elif local_tab_probe == "unknown":
+        traversal_result = "WARN_LOCAL_TAB_PROBE"
+        failure_reason = "local_tab_probe_evidence_incomplete"
     elif move_result in {"moved", "edge_realign_then_moved"}:
         traversal_result = "PASS_MOVED"
         failure_reason = ""
@@ -124,9 +171,13 @@ def classify_step_result(
 
     if traversal_result.startswith("FAIL") or speech_match_result == "FAIL_MISMATCH":
         final_result = "FAIL"
-    elif traversal_result in {"WARN_TERMINAL_BY_REPEAT_STOP", "WARN_PLUGIN_BOUNDARY"} or speech_match_result == "WARN_CONTEXT_ADDED":
+    elif traversal_result in {
+        "WARN_TERMINAL_BY_REPEAT_STOP",
+        "WARN_PLUGIN_BOUNDARY",
+        "WARN_LOCAL_TAB_PROBE",
+    } or speech_match_result == "WARN_CONTEXT_ADDED":
         final_result = "WARN"
-    elif traversal_result in {"PASS_MOVED", "PASS_SCROLLED"} and speech_match_result in {"PASS_EXACT", "PASS_CONTAINS", "PASS_SMART_NAV"}:
+    elif traversal_result in {"PASS_MOVED", "PASS_SCROLLED", "PASS_LOCAL_TAB_PROBE"} and speech_match_result in {"PASS_EXACT", "PASS_CONTAINS", "PASS_SMART_NAV"}:
         final_result = "PASS"
     else:
         final_result = "WARN"

@@ -98,6 +98,9 @@ class A11yAdbClient:
         self._monitor_thread: threading.Thread | None = None
         self._last_log_marker: tuple[tuple[int, int, int, int, int, int], int] | None = None
         self.last_dump_metadata: dict[str, Any] = {}
+        self.last_scroll_capabilities: list[dict[str, Any]] = []
+        self.last_device_collection: dict[str, Any] = {}
+        self.last_scroll_result: dict[str, Any] = {}
         self.last_smart_nav_result: dict[str, Any] = {}
         self.last_smart_nav_terminal: bool = False
         self.last_target_action_result: dict[str, Any] = {}
@@ -1058,7 +1061,16 @@ class A11yAdbClient:
 
         return "talkback" in enabled_services.lower()
 
-    def dump_tree(self, dev: Any = None, wait_seconds: float = 5.0) -> list[dict[str, Any]]:
+    def dump_tree(
+        self,
+        dev: Any = None,
+        wait_seconds: float = 5.0,
+        *,
+        include_scroll_capabilities: bool = False,
+        include_device_collection: bool = False,
+    ) -> list[dict[str, Any]]:
+        self.last_scroll_capabilities = []
+        self.last_device_collection = {}
         if not self.check_helper_status(dev=dev):
             return []
         try:
@@ -1073,7 +1085,12 @@ class A11yAdbClient:
         self.last_merged_announcement = ""
         self.clear_logcat(dev=dev)
         req_id = str(uuid.uuid4())[:8]
-        self._broadcast(dev, ACTION_DUMP_TREE, ["--es", "reqId", req_id])
+        dump_extras = ["--es", "reqId", req_id]
+        if include_scroll_capabilities:
+            dump_extras += ["--ez", "includeScrollCapabilities", "true"]
+        if include_device_collection:
+            dump_extras += ["--ez", "includeDeviceCollection", "true"]
+        self._broadcast(dev, ACTION_DUMP_TREE, dump_extras)
 
         start_time = time.time()
         logs = ""
@@ -1111,6 +1128,16 @@ class A11yAdbClient:
                 "algorithmVersion": parsed.get("algorithmVersion"),
                 "canScrollDown": bool(parsed.get("canScrollDown", False)),
             }
+            self.last_scroll_capabilities = (
+                parsed.get("scrollCapabilities", [])
+                if include_scroll_capabilities and isinstance(parsed.get("scrollCapabilities", []), list)
+                else []
+            )
+            self.last_device_collection = (
+                parsed.get("deviceCollection", {})
+                if include_device_collection and isinstance(parsed.get("deviceCollection", {}), dict)
+                else {}
+            )
             return nodes
 
         if isinstance(parsed, list):
@@ -1118,9 +1145,24 @@ class A11yAdbClient:
                 "algorithmVersion": None,
                 "canScrollDown": False,
             }
+            self.last_scroll_capabilities = []
+            self.last_device_collection = {}
             return parsed
 
         raise RuntimeError("DUMP_TREE JSON 형식이 올바르지 않습니다.")
+
+    def dump_scroll_capabilities(
+        self,
+        dev: Any = None,
+        wait_seconds: float = 5.0,
+    ) -> list[dict[str, Any]]:
+        """Request the opt-in raw-node scroll action diagnostics."""
+        self.dump_tree(
+            dev=dev,
+            wait_seconds=wait_seconds,
+            include_scroll_capabilities=True,
+        )
+        return list(self.last_scroll_capabilities)
 
 
     @staticmethod
@@ -2041,7 +2083,18 @@ class A11yAdbClient:
         self.last_target_action_result = {"success": False, "reason": "timeout"}
         return False
 
-    def scroll(self, dev, direction, step_=50, time_=1000, bounds_=None) -> bool:
+    def scroll(
+        self,
+        dev,
+        direction,
+        step_=50,
+        time_=1000,
+        bounds_=None,
+        *,
+        accessibility_fallback: bool = False,
+        device_list_normalization: bool = False,
+    ) -> bool:
+        self.last_scroll_result = {}
         if not self.check_helper_status(dev=dev):
             return False
         _ = (step_, time_, bounds_)
@@ -2061,17 +2114,19 @@ class A11yAdbClient:
 
         self.clear_logcat(dev=dev)
         req_id = str(uuid.uuid4())[:8]
-        self._broadcast(
-            dev,
-            ACTION_SCROLL,
-            [
-                "--ez", "forward", "true" if forward else "false",
-                "--es", "direction", normalized_direction,
-                "--es", "reqId", req_id,
-            ],
-        )
+        extras = [
+            "--ez", "forward", "true" if forward else "false",
+            "--es", "direction", normalized_direction,
+            "--es", "reqId", req_id,
+        ]
+        if accessibility_fallback:
+            extras += ["--ez", "preferTreeSearch", "true"]
+        if device_list_normalization:
+            extras += ["--ez", "deviceListNormalization", "true"]
+        self._broadcast(dev, ACTION_SCROLL, extras)
         time.sleep(1.5)
         result = self._read_log_result(dev, "SCROLL_RESULT", req_id)
+        self.last_scroll_result = result if isinstance(result, dict) else {}
         return bool(result.get("success"))
 
     @staticmethod
@@ -2101,11 +2156,15 @@ class A11yAdbClient:
         max_swipes: int = 5,
         pause: float = 0.6,
         top_evidence: Any = None,
+        device_list_normalization: bool = False,
     ) -> dict[str, Any]:
         attempts = max(1, int(max_swipes))
         print(f"[SCROLL_TOP] start max_swipes={attempts}")
         try:
-            before_nodes = self.dump_tree(dev=dev)
+            before_nodes = self.dump_tree(
+                dev=dev,
+                include_device_collection=device_list_normalization,
+            )
         except Exception as exc:
             print(f"[SCROLL_TOP] skipped reason='screen_not_scrollable' detail='dump_tree_failed:{exc}'")
             return {
@@ -2162,20 +2221,77 @@ class A11yAdbClient:
 
         for attempt in range(1, attempts + 1):
             print(f"[SCROLL_TOP] swipe attempt={attempt}/{attempts}")
-            scrolled = self.scroll(dev, "up")
+            scrolled = self.scroll(
+                dev,
+                "up",
+                device_list_normalization=device_list_normalization,
+            )
             if not scrolled:
-                print("[SCROLL_TOP] reached_top=false reason='scroll_failed'")
-                return {
-                    "ok": False,
-                    "reached_top": False,
-                    "status": "FAILED",
-                    "attempts": attempt,
-                    "reason": "scroll_failed",
-                }
+                if device_list_normalization and self.last_scroll_result.get("topBoundaryEvidence"):
+                    try:
+                        boundary_nodes = self.dump_tree(
+                            dev=dev,
+                            include_device_collection=True,
+                        )
+                    except Exception as exc:
+                        print(f"[SCROLL_TOP] reached_top=false reason='top_boundary_dump_failed' detail='{exc}'")
+                        return {
+                            "ok": False,
+                            "reached_top": False,
+                            "status": "FAILED",
+                            "attempts": attempt,
+                            "reason": "top_boundary_dump_failed",
+                        }
+                    boundary_verified, boundary_reason = verified_top(boundary_nodes)
+                    if boundary_verified:
+                        print(
+                            f"[SCROLL_TOP] reached_top=true reason='validated_collection_top_boundary' "
+                            f"evidence='{boundary_reason}'"
+                        )
+                        return {
+                            "ok": True,
+                            "reached_top": True,
+                            "status": "VERIFIED_TOP",
+                            "attempts": attempt,
+                            "reason": "validated_collection_top_boundary",
+                            "evidence": boundary_reason,
+                        }
+                    print(
+                        "[SCROLL_TOP] reached_top=false "
+                        f"reason='validated_collection_boundary_unverified' evidence='{boundary_reason}'"
+                    )
+                    return {
+                        "ok": False,
+                        "reached_top": False,
+                        "status": "TOP_BOUNDARY_UNVERIFIED",
+                        "attempts": attempt,
+                        "reason": "validated_collection_boundary_unverified",
+                        "evidence": boundary_reason,
+                    }
+                print("[SCROLL_TOP] primary_failed fallback='accessibility_tree_search'")
+                scrolled = self.scroll(
+                    dev,
+                    "up",
+                    accessibility_fallback=True,
+                    device_list_normalization=device_list_normalization,
+                )
+                if not scrolled:
+                    print("[SCROLL_TOP] reached_top=false reason='scroll_failed'")
+                    return {
+                        "ok": False,
+                        "reached_top": False,
+                        "status": "FAILED",
+                        "attempts": attempt,
+                        "reason": "scroll_failed",
+                    }
+                print("[SCROLL_TOP] fallback_action=true method='accessibility_tree_search'")
 
             time.sleep(max(0.0, pause))
             try:
-                after_nodes = self.dump_tree(dev=dev)
+                after_nodes = self.dump_tree(
+                    dev=dev,
+                    include_device_collection=device_list_normalization,
+                )
                 after_fp = self._top_visible_fingerprint(after_nodes) if isinstance(after_nodes, list) else ""
             except Exception as exc:
                 print(f"[SCROLL_TOP] reached_top=false reason='dump_tree_failed' detail='{exc}'")

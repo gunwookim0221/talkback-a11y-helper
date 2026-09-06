@@ -1,4 +1,10 @@
-from tb_runner.diagnostics import classify_step_result, detect_step_mismatch, is_global_nav_row, should_stop
+from tb_runner.diagnostics import (
+    classify_local_tab_probe,
+    classify_step_result,
+    detect_step_mismatch,
+    is_global_nav_row,
+    should_stop,
+)
 
 
 def test_detect_step_mismatch_returns_speech_visible_diverged():
@@ -253,6 +259,159 @@ def test_classify_step_result_marks_scrolled_with_payload_as_pass():
     assert summary["traversal_result"] == "PASS_SCROLLED"
     assert summary["final_result"] == "PASS"
     assert summary["failure_reason"] == ""
+
+
+def test_local_tab_probe_ordinary_move_failure_remains_fail_move():
+    summary = classify_step_result(
+        {
+            "visible_label": "Current",
+            "merged_announcement": "Current",
+            "move_result": "failed",
+        },
+        mismatch_reasons=[],
+        no_progress=False,
+        stop_reason="",
+        terminal_signal=False,
+    )
+
+    assert summary["traversal_result"] == "FAIL_MOVE"
+    assert summary["failure_reason"] == "move_failed"
+
+
+def test_local_tab_probe_ordinary_move_success_remains_pass_moved():
+    summary = classify_step_result(
+        {
+            "visible_label": "Next",
+            "merged_announcement": "Next",
+            "move_result": "moved",
+        },
+        mismatch_reasons=[],
+        no_progress=False,
+        stop_reason="",
+        terminal_signal=False,
+    )
+
+    assert summary["traversal_result"] == "PASS_MOVED"
+    assert summary["final_result"] == "PASS"
+
+
+def test_local_tab_probe_success_without_move_result_is_not_fail_move():
+    row = {
+        "row_type": "local_tab_probe",
+        "local_tab_probe": True,
+        "local_tab_content_entry_probe_result": "success",
+        "visible_label": "Device usage",
+        "merged_announcement": "Device usage",
+    }
+
+    assert classify_local_tab_probe(row) == "success"
+    summary = classify_step_result(
+        row,
+        mismatch_reasons=[],
+        no_progress=False,
+        stop_reason="",
+        terminal_signal=False,
+    )
+
+    assert summary["traversal_result"] == "PASS_LOCAL_TAB_PROBE"
+    assert summary["traversal_result"] != "FAIL_MOVE"
+
+
+def test_local_tab_probe_success_without_step_index_is_not_fail_move():
+    summary = classify_step_result(
+        {
+            "row_type": "local_tab_probe",
+            "local_tab_content_visit_source": "content_entry_probe:content_like_focused_row",
+            "visible_label": "Smoke detector",
+            "merged_announcement": "Smoke detector",
+        },
+        mismatch_reasons=[],
+        no_progress=False,
+        stop_reason="",
+        terminal_signal=False,
+    )
+
+    assert summary["traversal_result"] == "PASS_LOCAL_TAB_PROBE"
+
+
+def test_local_tab_probe_failure_remains_failure():
+    summary = classify_step_result(
+        {
+            "row_type": "local_tab_probe",
+            "local_tab_probe": True,
+            "local_tab_content_entry_probe_result": "failed",
+            "local_tab_content_traversal_fail_reason": "focus_action_failed",
+            "visible_label": "Routines",
+            "merged_announcement": "Routines",
+        },
+        mismatch_reasons=[],
+        no_progress=False,
+        stop_reason="",
+        terminal_signal=False,
+    )
+
+    assert summary["traversal_result"] == "FAIL_LOCAL_TAB_PROBE"
+    assert summary["final_result"] == "FAIL"
+    assert summary["failure_reason"] == "focus_action_failed"
+
+
+def test_local_tab_probe_success_is_represented_as_probe_success():
+    summary = classify_step_result(
+        {
+            "local_tab_probe": True,
+            "local_tab_content_entry_probe_result": "success",
+            "visible_label": "History",
+            "merged_announcement": "History",
+        },
+        mismatch_reasons=[],
+        no_progress=False,
+        stop_reason="",
+        terminal_signal=False,
+    )
+
+    assert summary["traversal_result"] == "PASS_LOCAL_TAB_PROBE"
+    assert summary["final_result"] == "PASS"
+
+
+def test_local_tab_probe_incomplete_evidence_is_not_silent_pass():
+    summary = classify_step_result(
+        {
+            "row_type": "local_tab_probe",
+            "visible_label": "Unknown content",
+            "merged_announcement": "Unknown content",
+        },
+        mismatch_reasons=[],
+        no_progress=False,
+        stop_reason="",
+        terminal_signal=False,
+    )
+
+    assert summary["traversal_result"] == "WARN_LOCAL_TAB_PROBE"
+    assert summary["final_result"] == "WARN"
+    assert summary["failure_reason"] == "local_tab_probe_evidence_incomplete"
+
+
+def test_local_tab_probe_consumer_keeps_normal_smart_nav_fields_compatible():
+    summary = classify_step_result(
+        {
+            "visible_label": "History",
+            "merged_announcement": "History",
+            "move_result": {"success": True, "status": "moved"},
+            "post_move_verdict_source": "smart_nav_result_resource_match",
+        },
+        mismatch_reasons=[],
+        no_progress=False,
+        stop_reason="",
+        terminal_signal=False,
+    )
+
+    assert summary == {
+        "move_result": "moved",
+        "speech_match_result": "PASS_SMART_NAV",
+        "traversal_result": "PASS_MOVED",
+        "final_result": "PASS",
+        "failure_reason": "",
+    }
 
 
 def test_should_stop_content_global_nav_entry():

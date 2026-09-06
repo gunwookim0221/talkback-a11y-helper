@@ -83,4 +83,47 @@ class FocusSnapshotTest {
         assertEquals(JSONObject.NULL, json.get("packageName"))
         assertEquals(JSONObject.NULL, json.get("text"))
     }
+
+    @Test
+    fun transportJson_keepsRootIdentity_withoutSerializingChildren() {
+        val child = FocusChildNode(
+            text = "Home Monitor",
+            contentDescription = null,
+            className = "android.view.View",
+            viewIdResourceName = "com.test:id/title",
+            clickable = false,
+            focusable = false,
+            accessibilityFocused = false,
+            visibleToUser = true,
+            boundsInScreen = Rect(10, 20, 100, 120),
+            children = emptyList()
+        )
+        val snapshot = FocusSnapshot(
+            timestamp = 1L,
+            schemaVersion = "1.2.0",
+            snapshotBuilderVersion = "1.2.0",
+            packageName = "com.test",
+            className = "android.webkit.WebView",
+            viewIdResourceName = null,
+            text = null,
+            contentDescription = null,
+            mergedLabel = "Home Monitor",
+            talkbackLabel = "Home Monitor",
+            clickable = false,
+            focusable = true,
+            focused = false,
+            accessibilityFocused = true,
+            visibleToUser = true,
+            selected = false,
+            checkable = false,
+            checked = false,
+            enabled = true,
+            boundsInScreen = Rect(0, 94, 1080, 2496),
+            children = listOf(child)
+        )
+
+        assertEquals(1, snapshot.toJson().getJSONArray("children").length())
+        assertEquals(0, snapshot.toTransportJson().getJSONArray("children").length())
+        assertEquals("Home Monitor", snapshot.toTransportJson().getString("mergedLabel"))
+    }
 }

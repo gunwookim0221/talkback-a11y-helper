@@ -42,6 +42,10 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val EXTRA_IS_LONG_CLICK = "isLongClick"
         private const val EXTRA_FORWARD = "forward"
         private const val EXTRA_DIRECTION = "direction"
+        private const val EXTRA_PREFER_TREE_SEARCH = "preferTreeSearch"
+        private const val EXTRA_INCLUDE_SCROLL_CAPABILITIES = "includeScrollCapabilities"
+        private const val EXTRA_INCLUDE_DEVICE_COLLECTION = "includeDeviceCollection"
+        private const val EXTRA_DEVICE_LIST_NORMALIZATION = "deviceListNormalization"
         private const val EXTRA_TEXT = "text"
         private const val EXTRA_LOCALE = "locale"
         private const val EXTRA_CURRENT_LOCALE = "currentLocale"
@@ -117,7 +121,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
             A11yStateStore.saveToExternalFile(context)
         }
 
-        val jsonObj = runCatching { org.json.JSONObject(A11yStateStore.lastFocusJson) }
+        val jsonObj = runCatching { org.json.JSONObject(A11yStateStore.lastFocusTransportJson) }
             .getOrDefault(org.json.JSONObject())
             .apply { put("reqId", reqId) }
         val json = jsonObj.toString()
@@ -140,7 +144,13 @@ class A11yCommandReceiver : BroadcastReceiver() {
         }
         executeDumpTreeSafely(
             reqId = reqId,
-            dumpTree = { service.dumpTree(reqId) },
+            dumpTree = {
+                service.dumpTree(
+                    reqId = reqId,
+                    includeScrollCapabilities = intent.getBooleanExtra(EXTRA_INCLUDE_SCROLL_CAPABILITIES, false),
+                    includeDeviceCollection = intent.getBooleanExtra(EXTRA_INCLUDE_DEVICE_COLLECTION, false)
+                )
+            },
             reportFailure = { reason -> logDumpTreeFailure(reqId, reason) }
         )
     }
@@ -461,7 +471,9 @@ class A11yCommandReceiver : BroadcastReceiver() {
 
         val forward = intent.getBooleanExtra(EXTRA_FORWARD, true)
         val direction = intent.getStringExtra(EXTRA_DIRECTION)?.trim().orEmpty()
-        service.performScroll(forward, direction, reqId)
+        val preferTreeSearch = intent.getBooleanExtra(EXTRA_PREFER_TREE_SEARCH, false)
+        val deviceListNormalization = intent.getBooleanExtra(EXTRA_DEVICE_LIST_NORMALIZATION, false)
+        service.performScroll(forward, direction, reqId, preferTreeSearch, deviceListNormalization)
     }
 
     private fun handleSetText(intent: Intent) {

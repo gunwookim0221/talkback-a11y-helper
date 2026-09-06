@@ -84,6 +84,63 @@ object A11yNavigator {
         ).toJson()
     }
 
+    /**
+     * Optional diagnostics for RCA only. This does not feed any traversal or
+     * scroll-selection path; it reports bounded structural candidates and the
+     * actionList exposed by each raw AccessibilityNodeInfo.
+     */
+    fun dumpScrollCapabilities(
+        root: AccessibilityNodeInfo?,
+        maxNodes: Int = 512
+    ): List<A11yScrollCapability> {
+        if (root == null || maxNodes <= 0) return emptyList()
+
+        data class PendingNode(
+            val node: AccessibilityNodeInfo,
+            val path: String,
+            val parentPath: String?
+        )
+
+        val queue = ArrayDeque<PendingNode>()
+        queue.add(PendingNode(root, "0", null))
+        val capabilities = mutableListOf<A11yScrollCapability>()
+        var visited = 0
+
+        while (queue.isNotEmpty() && visited < maxNodes) {
+            val pending = queue.removeFirst()
+            val node = pending.node
+            visited += 1
+
+            val children = mutableListOf<Pair<String, AccessibilityNodeInfo>>()
+            for (index in 0 until node.childCount) {
+                node.getChild(index)?.let { child ->
+                    children += "${pending.path}.$index" to child
+                }
+            }
+            if (isScrollDiagnosticCandidate(node)) {
+                capabilities += A11yScrollCapability.fromNode(
+                    node = node,
+                    path = pending.path,
+                    parentPath = pending.parentPath,
+                    childPaths = children.map { it.first }
+                )
+            }
+
+            children.forEach { (childPath, child) ->
+                queue.add(PendingNode(child, childPath, pending.path))
+            }
+        }
+        return capabilities
+    }
+
+    private fun isScrollDiagnosticCandidate(node: AccessibilityNodeInfo): Boolean {
+        val className = node.className?.toString()?.lowercase().orEmpty()
+        val viewId = node.viewIdResourceName?.lowercase().orEmpty()
+        val structuralToken = listOf("scroll", "recycler", "gridview", "listview", "viewpager", "pager")
+            .any { token -> className.contains(token) || viewId.contains(token) }
+        return node.isScrollable || structuralToken
+    }
+
 
     private fun collectNodes(root: AccessibilityNodeInfo): List<FocusedNode> = A11yTraversalAnalyzer.buildTalkBackLikeFocusNodes(root)
 
@@ -453,6 +510,7 @@ object A11yNavigator {
             "[DECIDE][WEBVIEW_FIX] originalCurrentIndex=$originalCurrentIndex correctedIndex=$currentIndex nextCandidateIndex=$nextIndex"
         )
         return CurrentPosition(
+            actualCurrent = rawCurrentNode,
             resolvedCurrent = resolvedCurrent,
             currentIndex = currentIndex,
             fallbackIndex = fallbackIndex,
@@ -1444,6 +1502,32 @@ object A11yNavigator {
             )
             nextIndex = promotedOverlayTitleIndex
             targetDecisionReason = "overlay_row_promote"
+        }
+        val distinctNextIndex = advancePastCurrentCandidateIndex(
+            traversalList = traversalList,
+            currentIndex = currentIndex,
+            nextIndex = nextIndex,
+            isSameCandidate = { current, candidate ->
+                A11yFocusExecutor.sameStableFocusIdentity(
+                    A11yFocusExecutor.snapshotFocusIdentity(current),
+                    A11yFocusExecutor.snapshotFocusIdentity(candidate)
+                )
+            },
+            actualCurrent = state.currentPosition.actualCurrent,
+            isSameAsActualCurrent = { actual, candidate ->
+                A11yFocusExecutor.sameStableFocusIdentity(
+                    A11yFocusExecutor.snapshotFocusIdentity(actual),
+                    A11yFocusExecutor.snapshotFocusIdentity(candidate)
+                )
+            }
+        )
+        if (distinctNextIndex != nextIndex) {
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT][candidate_advance] current_index=$currentIndex rejected_index=$nextIndex next_index=$distinctNextIndex reason='same_focus_candidate_rejected' rejected='${summarizeTraversalCandidate(traversalList, nextIndex, state)}' selected='${summarizeTraversalCandidate(traversalList, distinctNextIndex, state)}'"
+            )
+            nextIndex = distinctNextIndex
+            targetDecisionReason = "same_focus_candidate_rejected"
         }
         if (SMART_NEXT_REPEAT_DEBUG) {
             val repeatDebugFinalNode = traversalList.getOrNull(nextIndex)
@@ -2552,6 +2636,37 @@ object A11yNavigator {
             onForcedAdvance = onForcedAdvance
         )
     }
+
+    internal fun <T> advancePastCurrentCandidateIndex(
+        traversalList: List<T>,
+        currentIndex: Int,
+        nextIndex: Int,
+        isSameCandidate: (T, T) -> Boolean?,
+        actualCurrent: T? = null,
+        isSameAsActualCurrent: ((T, T) -> Boolean?)? = null
+    ): Int {
+        if (traversalList.isEmpty()) return nextIndex
+        if (currentIndex !in traversalList.indices) {
+            return if (actualCurrent != null) traversalList.size else nextIndex
+        }
+        var candidateIndex = maxOf(nextIndex, currentIndex + 1)
+        while (candidateIndex in traversalList.indices) {
+            val sameResolvedCandidate = isSameCandidate(
+                traversalList[currentIndex],
+                traversalList[candidateIndex]
+            ) ?: return traversalList.size
+            val sameActualCandidate = actualCurrent?.let { actual ->
+                (isSameAsActualCurrent ?: isSameCandidate)(actual, traversalList[candidateIndex])
+                    ?: return traversalList.size
+            }
+            if (!sameResolvedCandidate && sameActualCandidate != true) {
+                return candidateIndex
+            }
+            candidateIndex += 1
+        }
+        return traversalList.size
+    }
+
     internal fun <T> skipCoordinateDuplicateTraversalIndices(
         nodes: List<T>,
         currentBounds: Rect,

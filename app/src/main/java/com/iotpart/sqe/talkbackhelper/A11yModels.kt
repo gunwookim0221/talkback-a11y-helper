@@ -76,6 +76,7 @@ internal data class FocusAttemptResult(
 )
 
 internal data class CurrentPosition(
+    val actualCurrent: AccessibilityNodeInfo?,
     val resolvedCurrent: AccessibilityNodeInfo?,
     val currentIndex: Int,
     val fallbackIndex: Int,
@@ -443,6 +444,139 @@ data class A11yNodeInfo(
     }
 }
 
+/**
+ * Diagnostic-only view of AccessibilityNodeInfo.actionList.
+ *
+ * This is intentionally separate from A11yNodeInfo so the normal flattened
+ * traversal payload and all production navigation decisions remain unchanged.
+ */
+data class A11yScrollActionCapability(
+    val id: Int,
+    val name: String
+) {
+    fun toJson(): JSONObject {
+        return JSONObject().apply {
+            put("id", id)
+            put("name", name)
+        }
+    }
+}
+
+data class A11yScrollActionCapabilities(
+    val actions: List<A11yScrollActionCapability>,
+    val scrollForwardSupported: Boolean,
+    val scrollBackwardSupported: Boolean,
+    val scrollUpSupported: Boolean,
+    val scrollDownSupported: Boolean
+) {
+    companion object {
+        // AccessibilityAction ids are part of the Android accessibility
+        // contract. The directional ids are not exposed as int constants by
+        // compileSdk 34, so keep the diagnostic mapping explicit and stable.
+        private const val ACTION_SCROLL_FORWARD_ID = 4096
+        private const val ACTION_SCROLL_BACKWARD_ID = 8192
+        private const val ACTION_SCROLL_UP_ID = 16908344
+        private const val ACTION_SCROLL_DOWN_ID = 16908346
+
+        fun fromActionIds(actionIds: Iterable<Int>): A11yScrollActionCapabilities {
+            val ids = actionIds.toSet().sorted()
+
+            return A11yScrollActionCapabilities(
+                actions = ids.map { id ->
+                    A11yScrollActionCapability(id = id, name = actionName(id))
+                },
+                scrollForwardSupported = ACTION_SCROLL_FORWARD_ID in ids,
+                scrollBackwardSupported = ACTION_SCROLL_BACKWARD_ID in ids,
+                scrollUpSupported = ACTION_SCROLL_UP_ID in ids,
+                scrollDownSupported = ACTION_SCROLL_DOWN_ID in ids
+            )
+        }
+
+        private fun actionName(id: Int): String {
+            return when (id) {
+                ACTION_SCROLL_FORWARD_ID -> "ACTION_SCROLL_FORWARD"
+                ACTION_SCROLL_BACKWARD_ID -> "ACTION_SCROLL_BACKWARD"
+                ACTION_SCROLL_UP_ID -> "ACTION_SCROLL_UP"
+                ACTION_SCROLL_DOWN_ID -> "ACTION_SCROLL_DOWN"
+                else -> "ACTION_$id"
+            }
+        }
+    }
+}
+
+data class A11yScrollCapability(
+    val path: String,
+    val parentPath: String?,
+    val childPaths: List<String>,
+    val className: String?,
+    val viewIdResourceName: String?,
+    val boundsInScreen: Rect,
+    val scrollable: Boolean,
+    val visibleToUser: Boolean,
+    val enabled: Boolean,
+    val actions: List<A11yScrollActionCapability>,
+    val scrollForwardSupported: Boolean,
+    val scrollBackwardSupported: Boolean,
+    val scrollUpSupported: Boolean,
+    val scrollDownSupported: Boolean
+) {
+    fun toJson(): JSONObject {
+        return JSONObject().apply {
+            put("path", path)
+            put("parentPath", parentPath ?: JSONObject.NULL)
+            put("childPaths", JSONArray().apply { childPaths.forEach(::put) })
+            put("className", className ?: JSONObject.NULL)
+            put("viewIdResourceName", viewIdResourceName ?: JSONObject.NULL)
+            put(
+                "boundsInScreen", JSONObject().apply {
+                    put("l", boundsInScreen.left)
+                    put("t", boundsInScreen.top)
+                    put("r", boundsInScreen.right)
+                    put("b", boundsInScreen.bottom)
+                }
+            )
+            put("isScrollable", scrollable)
+            put("isVisibleToUser", visibleToUser)
+            put("isEnabled", enabled)
+            put("actions", JSONArray().apply { actions.forEach { put(it.toJson()) } })
+            put("scroll_forward_supported", scrollForwardSupported)
+            put("scroll_backward_supported", scrollBackwardSupported)
+            put("scroll_up_supported", scrollUpSupported)
+            put("scroll_down_supported", scrollDownSupported)
+        }
+    }
+
+    companion object {
+        fun fromNode(
+            node: AccessibilityNodeInfo,
+            path: String,
+            parentPath: String?,
+            childPaths: List<String>
+        ): A11yScrollCapability {
+            val bounds = Rect().also { node.getBoundsInScreen(it) }
+            val actionCapabilities = A11yScrollActionCapabilities.fromActionIds(
+                runCatching { node.actionList.map { it.id } }.getOrDefault(emptyList())
+            )
+            return A11yScrollCapability(
+                path = path,
+                parentPath = parentPath,
+                childPaths = childPaths,
+                className = node.className?.toString(),
+                viewIdResourceName = node.viewIdResourceName,
+                boundsInScreen = bounds,
+                scrollable = node.isScrollable,
+                visibleToUser = node.isVisibleToUser,
+                enabled = node.isEnabled,
+                actions = actionCapabilities.actions,
+                scrollForwardSupported = actionCapabilities.scrollForwardSupported,
+                scrollBackwardSupported = actionCapabilities.scrollBackwardSupported,
+                scrollUpSupported = actionCapabilities.scrollUpSupported,
+                scrollDownSupported = actionCapabilities.scrollDownSupported
+            )
+        }
+    }
+}
+
 data class A11yDumpResponse(
     val algorithmVersion: String,
     val canScrollDown: Boolean,
@@ -484,7 +618,7 @@ data class FocusSnapshot(
     val boundsInScreen: Rect,
     val children: List<FocusChildNode>
 ) {
-    fun toJson(): JSONObject {
+    fun toJson(includeChildren: Boolean = true): JSONObject {
         return JSONObject().apply {
             put("timestamp", timestamp)
             put("schemaVersion", schemaVersion)
@@ -520,11 +654,15 @@ data class FocusSnapshot(
             )
             put(
                 "children", JSONArray().apply {
-                    children.forEach { put(it.toJson()) }
+                    if (includeChildren) {
+                        children.forEach { put(it.toJson()) }
+                    }
                 }
             )
         }
     }
+
+    fun toTransportJson(): JSONObject = toJson(includeChildren = false)
 
     companion object {
         private const val TAG = "A11Y_FOCUS_SNAPSHOT"

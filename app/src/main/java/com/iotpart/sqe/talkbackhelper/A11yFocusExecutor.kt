@@ -24,6 +24,118 @@ object A11yFocusExecutor {
         val hardFailureSignal: Boolean
     )
 
+    internal data class FocusIdentitySnapshot(
+        val windowId: Int,
+        val packageName: String?,
+        val className: String?,
+        val viewIdResourceName: String?,
+        val text: String?,
+        val contentDescription: String?,
+        val bounds: Rect?
+    )
+
+    internal enum class FocusCommitDisposition {
+        MOVED_TO_INTENDED,
+        MOVED_TO_VALID_ALTERNATE,
+        SAME_FOCUS,
+        FOCUS_UNAVAILABLE,
+        STALE_TARGET,
+        ACTION_FAILED,
+        AMBIGUOUS_POST_FOCUS
+    }
+
+    internal data class FocusCommitDecision(
+        val success: Boolean,
+        val disposition: FocusCommitDisposition,
+        val reason: String
+    )
+
+    internal fun snapshotFocusIdentity(node: AccessibilityNodeInfo?): FocusIdentitySnapshot? {
+        node ?: return null
+        return FocusIdentitySnapshot(
+            windowId = node.windowId,
+            packageName = node.packageName?.toString(),
+            className = node.className?.toString(),
+            viewIdResourceName = node.viewIdResourceName,
+            text = node.text?.toString(),
+            contentDescription = node.contentDescription?.toString(),
+            bounds = Rect().also(node::getBoundsInScreen)
+        )
+    }
+
+    /**
+     * Returns null when the available snapshot fields cannot prove identity.
+     * Bounds alone are deliberately not enough for a successful transition.
+     */
+    internal fun sameStableFocusIdentity(
+        first: FocusIdentitySnapshot?,
+        second: FocusIdentitySnapshot?
+    ): Boolean? {
+        if (first == null || second == null) return null
+        if (first.windowId != second.windowId) return false
+        if (first.packageName != second.packageName || first.className != second.className) return false
+
+        val firstId = first.viewIdResourceName?.trim().orEmpty()
+        val secondId = second.viewIdResourceName?.trim().orEmpty()
+        if (firstId.isNotEmpty() || secondId.isNotEmpty()) {
+            if (firstId.isEmpty() || secondId.isEmpty() || firstId != secondId) return false
+        }
+
+        val firstText = first.text?.trim().orEmpty()
+        val secondText = second.text?.trim().orEmpty()
+        val firstDescription = first.contentDescription?.trim().orEmpty()
+        val secondDescription = second.contentDescription?.trim().orEmpty()
+        if (firstText != secondText || firstDescription != secondDescription) return false
+
+        val firstBounds = first.bounds ?: return null
+        val secondBounds = second.bounds ?: return null
+        return firstBounds.left == secondBounds.left &&
+            firstBounds.top == secondBounds.top &&
+            firstBounds.right == secondBounds.right &&
+            firstBounds.bottom == secondBounds.bottom
+    }
+
+    internal fun decideFocusCommit(
+        actionSucceeded: Boolean,
+        preActionFocus: FocusIdentitySnapshot?,
+        postActionFocus: FocusIdentitySnapshot?,
+        intendedTarget: FocusIdentitySnapshot?,
+        intendedCandidateAvailable: Boolean,
+        preActionCandidateAvailable: Boolean = true,
+        postFocusIsValidCandidate: Boolean
+    ): FocusCommitDecision {
+        if (!actionSucceeded) {
+            return FocusCommitDecision(false, FocusCommitDisposition.ACTION_FAILED, "focus_action_failed")
+        }
+        if (!intendedCandidateAvailable || intendedTarget == null) {
+            return FocusCommitDecision(false, FocusCommitDisposition.STALE_TARGET, "stale_target")
+        }
+        if (preActionFocus != null && !preActionCandidateAvailable) {
+            return FocusCommitDecision(false, FocusCommitDisposition.STALE_TARGET, "stale_current_candidate")
+        }
+        if (postActionFocus == null) {
+            return FocusCommitDecision(false, FocusCommitDisposition.FOCUS_UNAVAILABLE, "actual_focus_missing")
+        }
+
+        val prePostMatch = sameStableFocusIdentity(preActionFocus, postActionFocus)
+        if (preActionFocus != null && prePostMatch == null) {
+            return FocusCommitDecision(false, FocusCommitDisposition.AMBIGUOUS_POST_FOCUS, "ambiguous_post_focus_identity")
+        }
+        if (preActionFocus != null && prePostMatch == true) {
+            return FocusCommitDecision(false, FocusCommitDisposition.SAME_FOCUS, "same_focus_after_action")
+        }
+
+        return when (sameStableFocusIdentity(intendedTarget, postActionFocus)) {
+            true -> FocusCommitDecision(true, FocusCommitDisposition.MOVED_TO_INTENDED, "success_basis=post_focus_advanced_to_intended")
+            false -> if (postFocusIsValidCandidate) {
+                FocusCommitDecision(true, FocusCommitDisposition.MOVED_TO_VALID_ALTERNATE, "success_basis=post_focus_advanced_to_valid_candidate")
+            } else {
+                FocusCommitDecision(false, FocusCommitDisposition.STALE_TARGET, "post_focus_not_a_valid_candidate")
+            }
+            null -> FocusCommitDecision(false, FocusCommitDisposition.AMBIGUOUS_POST_FOCUS, "ambiguous_post_focus_identity")
+        }
+    }
+
     internal data class PreFocusAlignmentResult(
         val adjusted: Boolean = false,
         val bottomClipped: Boolean = false,
@@ -212,7 +324,17 @@ object A11yFocusExecutor {
             A11yHistoryManager.clearTopChromeTransientSystemUiSuppression("not_top_chrome_transition")
         }
         if (A11yNavigator.shouldReuseExistingAccessibilityFocus(label, isScrollAction, currentFocusedBounds, targetBounds)) {
-            val commitDecision = resolveFocusRetargetDecision(root, target, label, traversalListSnapshot, traversalIndex, isScrollAction, status)
+            val commitDecision = resolveFocusRetargetDecision(
+                root,
+                target,
+                label,
+                traversalListSnapshot,
+                traversalIndex,
+                isScrollAction,
+                status,
+                preActionFocusedNode = currentFocusedNode,
+                preActionCandidateAvailable = currentFocusIndexHint >= 0 || currentFocusedNode == null
+            )
             return commitFinalFocusCandidate(
                 decision = commitDecision,
                 reason = "focus_reused_existing_target",
@@ -276,8 +398,18 @@ object A11yFocusExecutor {
             return ActionResult(false, "failed_external_focus_departure", target)
         }
 
-        val commitDecision = resolveFocusRetargetDecision(root, target, label, traversalListSnapshot, traversalIndex, isScrollAction, status)
-        if (!commitDecision.success && focusExecution.success && focusVerification.resolved) {
+        val commitDecision = resolveFocusRetargetDecision(
+            root,
+            target,
+            label,
+            traversalListSnapshot,
+            traversalIndex,
+            isScrollAction,
+            status,
+            preActionFocusedNode = currentFocusedNode,
+            preActionCandidateAvailable = currentFocusIndexHint >= 0 || currentFocusedNode == null
+        )
+        if (!commitDecision.success && isScrollAction && focusExecution.success && focusVerification.resolved) {
             Log.i("A11Y_HELPER", "[FOCUS_VERIFY] keeping_prior_attempt_success despite settle mismatch")
             return commitFinalFocusCandidate(
                 FocusRetargetDecision(
@@ -315,7 +447,9 @@ object A11yFocusExecutor {
         traversalListSnapshot: List<AccessibilityNodeInfo>?,
         intendedIndex: Int,
         isScrollAction: Boolean,
-        requestedStatus: String
+        requestedStatus: String,
+        preActionFocusedNode: AccessibilityNodeInfo? = null,
+        preActionCandidateAvailable: Boolean = true
     ): FocusRetargetDecision {
         val actualFocusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         val actualCandidateIndex = if (actualFocusedNode != null && traversalListSnapshot != null) {
@@ -391,9 +525,36 @@ object A11yFocusExecutor {
             "A11Y_HELPER",
             "[FOCUS_VERIFY] focus_retarget_eval intended=${A11yNavigator.formatBoundsForLog(Rect().also(intendedTarget::getBoundsInScreen))} actual=${A11yNavigator.formatBoundsForLog(actualBounds)} actualCandidateIndex=$actualCandidateIndex retarget=$retarget reason=$reason"
         )
+        val intendedCandidateAvailable = traversalListSnapshot == null || intendedIndex in traversalListSnapshot.indices
+        val postFocusIsValidCandidate = actualFocusedNode != null && (
+            identityMatched ||
+                actualCandidateIndex >= 0 && isPostScrollValidCandidate
+            )
+        val focusCommit = decideFocusCommit(
+            actionSucceeded = true,
+            preActionFocus = snapshotFocusIdentity(preActionFocusedNode),
+            postActionFocus = snapshotFocusIdentity(actualFocusedNode),
+            intendedTarget = snapshotFocusIdentity(intendedTarget),
+            intendedCandidateAvailable = intendedCandidateAvailable,
+            preActionCandidateAvailable = preActionCandidateAvailable,
+            postFocusIsValidCandidate = postFocusIsValidCandidate
+        )
+        val legacyScrollNoiseCommit = shouldSuppressTopNoise && isScrollAction &&
+            preActionFocusedNode != null &&
+            sameStableFocusIdentity(
+                snapshotFocusIdentity(preActionFocusedNode),
+                snapshotFocusIdentity(actualFocusedNode)
+            ) == false
+        val committed = focusCommit.success || legacyScrollNoiseCommit
+        val committedReason = if (focusCommit.success) focusCommit.reason else if (legacyScrollNoiseCommit) {
+            "success_basis=suppressed_top_resurfaced_noise_after_focus_advance"
+        } else {
+            focusCommit.reason
+        }
+        val retargetedCommit = focusCommit.disposition == FocusCommitDisposition.MOVED_TO_VALID_ALTERNATE
         val finalTarget = when {
             shouldSuppressTopNoise -> intendedTarget
-            retarget -> actualFocusedNode!!
+            retargetedCommit -> actualFocusedNode!!
             else -> intendedTarget
         }
         val finalLabel = A11yNavigator.resolvePrimaryLabel(finalTarget)
@@ -420,22 +581,20 @@ object A11yFocusExecutor {
                 "[FOCUS_VERIFY] suppression_window_event type=A11Y_ANNOUNCEMENT suppressed=true reason=top_resurfaced_header_during_authoritative_window label=${A11yNavigator.resolvePrimaryLabel(actualFocusedNode) ?: A11yTraversalAnalyzer.recoverDescendantLabel(actualFocusedNode) ?: "<no-label>"}"
             )
         }
-        val success = when {
-            shouldSuppressTopNoise -> true
-            retarget -> true
-            actualFocusedNode == null -> false
-            identityMatched -> true
-            else -> false
-        }
+        val success = committed && (
+            retargetedCommit ||
+                focusCommit.disposition == FocusCommitDisposition.MOVED_TO_INTENDED ||
+                legacyScrollNoiseCommit
+            )
         val commitStatus = if (success) requestedStatus else "failed"
-        val finalReason = if (success) "success_basis=committed_candidate" else reason
+        val finalReason = if (success) committedReason else focusCommit.reason
         Log.i(
             "A11Y_HELPER",
             "[SMART_NEXT][trace_enter] stage='before_focus_commit' intended_view_id='${intendedTarget.viewIdResourceName.orEmpty()}' commit_status='$commitStatus'"
         )
         Log.i(
             "A11Y_HELPER",
-            "[SMART_NEXT][focus_commit] is_scroll_action=$isScrollAction intended_index=$intendedIndex intended_view_id='${intendedTarget.viewIdResourceName.orEmpty()}' actual_candidate_index=$actualCandidateIndex actual_view_id='${actualFocusedNode?.viewIdResourceName.orEmpty()}' identity_matched=$identityMatched retarget_allowed=$retarget commit_status='$commitStatus' reason='$finalReason' action_success=$success"
+            "[SMART_NEXT][focus_commit] is_scroll_action=$isScrollAction intended_index=$intendedIndex intended_view_id='${intendedTarget.viewIdResourceName.orEmpty()}' actual_candidate_index=$actualCandidateIndex actual_view_id='${actualFocusedNode?.viewIdResourceName.orEmpty()}' identity_matched=$identityMatched retarget_allowed=$retarget commit_status='$commitStatus' reason='$finalReason' action_success=$success focus_commit_disposition=${focusCommit.disposition}"
         )
         Log.i(
             "A11Y_HELPER",
@@ -445,7 +604,7 @@ object A11yFocusExecutor {
             finalTarget = finalTarget,
             finalLabel = finalLabel,
             source = source,
-            retargeted = retarget,
+            retargeted = retargetedCommit,
             commitStatus = commitStatus,
             success = success,
             reason = finalReason

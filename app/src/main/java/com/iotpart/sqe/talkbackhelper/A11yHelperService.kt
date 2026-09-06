@@ -11,6 +11,7 @@ import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -192,10 +193,30 @@ class A11yHelperService : AccessibilityService() {
         return snapshot
     }
 
-    fun dumpTree(reqId: String = "none") {
+    fun dumpTree(
+        reqId: String = "none",
+        includeScrollCapabilities: Boolean = false,
+        includeDeviceCollection: Boolean = false
+    ) {
         Log.i(TAG, "[DUMP_TREE_ACTION][before_dump] req_id='$reqId'")
         Log.i("A11Y_HELPER", "[SMART_NEXT][canary] stage='before_dump_tree'")
-        val dumpArray = A11yNavigator.dumpTreeFlat(rootInActiveWindow)
+        val root = rootInActiveWindow
+        val dumpArray = A11yNavigator.dumpTreeFlat(root)
+        if (includeScrollCapabilities) {
+            dumpArray.put(
+                "scrollCapabilities",
+                JSONArray().apply {
+                    A11yNavigator.dumpScrollCapabilities(root).forEach { put(it.toJson()) }
+                }
+            )
+        }
+        if (includeDeviceCollection) {
+            dumpArray.put(
+                "deviceCollection",
+                A11yDeviceCollection.findValidated(root)?.toJson()
+                    ?: JSONObject().put("verified", false)
+            )
+        }
         val dumpString = dumpArray.toString()
         val chunkSize = 3000
 
@@ -2855,24 +2876,40 @@ class A11yHelperService : AccessibilityService() {
         return !bounds.isEmpty
     }
 
-    private fun findFirstScrollableNode(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
-        if (root == null) return null
+    internal fun <T> findFirstScrollableInTree(
+        root: T?,
+        maxNodes: Int = 512,
+        childCountOf: (T) -> Int,
+        childAt: (T, Int) -> T?,
+        isScrollable: (T) -> Boolean
+    ): T? {
+        if (root == null || maxNodes <= 0) return null
+        val genericQueue = ArrayDeque<T>()
+        genericQueue.add(root)
+        var visited = 0
 
-        val queue = ArrayDeque<AccessibilityNodeInfo>()
-        queue.add(root)
-
-        while (queue.isNotEmpty()) {
-            val node = queue.removeFirst()
-            if (node.isScrollable) {
+        while (genericQueue.isNotEmpty() && visited < maxNodes) {
+            val node = genericQueue.removeFirst()
+            visited += 1
+            if (isScrollable(node)) {
                 return node
             }
 
-            for (index in 0 until node.childCount) {
-                node.getChild(index)?.let { queue.add(it) }
+            for (index in 0 until childCountOf(node)) {
+                childAt(node, index)?.let { genericQueue.add(it) }
             }
         }
 
         return null
+    }
+
+    private fun findFirstScrollableNode(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        return findFirstScrollableInTree(
+            root = root,
+            childCountOf = { it.childCount },
+            childAt = { node, index -> node.getChild(index) },
+            isScrollable = { it.isScrollable }
+        )
     }
 
     private fun normalizeScrollDirection(direction: String, forward: Boolean): String {
@@ -2885,24 +2922,70 @@ class A11yHelperService : AccessibilityService() {
         }
     }
 
-    fun performScroll(forward: Boolean, direction: String, reqId: String = "none"): JSONObject {
-        val focusedNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-        var scrollNode = focusedNode
+    fun performScroll(
+        forward: Boolean,
+        direction: String,
+        reqId: String = "none",
+        preferTreeSearch: Boolean = false,
+        deviceListNormalization: Boolean = false
+    ): JSONObject {
+        val root = rootInActiveWindow
+        val focusedNode = root?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        var scrollNode = if (deviceListNormalization || preferTreeSearch) null else focusedNode
 
-        while (scrollNode != null && !scrollNode.isScrollable) {
-            scrollNode = scrollNode.parent
+        if (!deviceListNormalization && !preferTreeSearch) {
+            while (scrollNode != null && !scrollNode.isScrollable) {
+                scrollNode = scrollNode.parent
+            }
         }
 
         var fallbackUsed = false
-        if (scrollNode == null) {
+        var validatedDeviceCollection = false
+        var topBoundaryEvidence = false
+        var actionSupported = false
+        var actionAttempted = false
+        if (deviceListNormalization) {
+            val validatedCollection = A11yDeviceCollection.findValidated(root)
+            if (validatedCollection != null) {
+                // Use the node captured by the same fresh validation pass. A
+                // path refetch can resolve a different/stale subtree after a
+                // Fold layout update and would weaken the ownership proof.
+                scrollNode = validatedCollection.node
+                validatedDeviceCollection = true
+                val normalizedDirection = normalizeScrollDirection(direction, forward)
+                val isForwardDirection = normalizedDirection == "down" || normalizedDirection == "right"
+                val candidate = A11yDeviceCollectionCandidate(
+                    value = scrollNode,
+                    key = validatedCollection.path,
+                    visible = validatedCollection.isVisibleToUser,
+                    enabled = validatedCollection.isEnabled,
+                    scrollable = validatedCollection.isScrollable,
+                    directCardCount = validatedCollection.cards.size,
+                    ownedCardCount = validatedCollection.cards.size,
+                    minimumCardDepth = 1,
+                    supportsForward = validatedCollection.scrollForwardSupported,
+                    supportsBackward = validatedCollection.scrollBackwardSupported
+                )
+                when (A11yDeviceCollectionActionPolicy.decide(candidate, backward = !isForwardDirection)) {
+                    A11yDeviceCollectionScrollDecision.PERFORM_FORWARD,
+                    A11yDeviceCollectionScrollDecision.PERFORM_BACKWARD -> {
+                        actionSupported = true
+                    }
+                    A11yDeviceCollectionScrollDecision.TOP_BOUNDARY -> {
+                        topBoundaryEvidence = true
+                    }
+                    A11yDeviceCollectionScrollDecision.REJECT -> Unit
+                }
+            }
+        }
+        if (scrollNode == null && !deviceListNormalization) {
             fallbackUsed = true
-            scrollNode = findFirstScrollableNode(rootInActiveWindow)
+            scrollNode = findFirstScrollableNode(root)
         }
 
-        val fallbackToLargestUsed = scrollNode == null
-        if (scrollNode == null) {
-            scrollNode = A11yNodeUtils.findBestScrollableContainer(rootInActiveWindow)
-        }
+        // The tree fallback is intentionally bounded by findFirstScrollableInTree.
+        // Do not fall through to an unbounded second traversal for a failed lookup.
+        val fallbackToLargestUsed = false
 
         val normalizedDirection = normalizeScrollDirection(direction, forward)
         val isForwardDirection = normalizedDirection == "down" || normalizedDirection == "right"
@@ -2911,7 +2994,15 @@ class A11yHelperService : AccessibilityService() {
         } else {
             AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
         }
-        val success = scrollNode?.performAction(action) == true
+        if (!deviceListNormalization) {
+            actionSupported = scrollNode != null
+        }
+        val success = if (scrollNode != null && actionSupported) {
+            actionAttempted = true
+            scrollNode.performAction(action)
+        } else {
+            false
+        }
 
         val resultJson = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
@@ -2923,6 +3014,12 @@ class A11yHelperService : AccessibilityService() {
             put("scrollableNodeFound", scrollNode != null)
             put("fallbackToTreeSearchScrollable", fallbackUsed)
             put("fallbackToLargestScrollable", fallbackToLargestUsed)
+            put("preferTreeSearch", preferTreeSearch)
+            put("deviceListNormalization", deviceListNormalization)
+            put("validatedDeviceCollection", validatedDeviceCollection)
+            put("actionSupported", actionSupported)
+            put("actionAttempted", actionAttempted)
+            put("topBoundaryEvidence", topBoundaryEvidence)
         }
 
         Log.i(TAG, "SCROLL_RESULT $resultJson")

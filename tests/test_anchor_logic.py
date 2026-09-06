@@ -13,6 +13,28 @@ class FakeAnchorClient:
         self.collect_focus_step = Mock(return_value={})
 
 
+def test_select_anchor_candidate_does_not_treat_failed_dict_as_success_and_uses_accessibility_bounds_fallback():
+    client = FakeAnchorClient()
+    client.select.return_value = {"success": False, "reason": "Target node not found"}
+    client.focus_in_bounds = Mock(return_value={"success": True, "reason": "accessibility_focus"})
+
+    selected, attempted = anchor_logic._select_anchor_candidate(
+        client,
+        "SERIAL",
+        {
+            "resource_id": "missing_id",
+            "text": "Video",
+            "announcement": "Video, No clips detected today",
+            "bounds": "[84,420][1164,861]",
+        },
+    )
+
+    assert selected is True
+    assert attempted is True
+    assert client.select.call_count == 3
+    assert client.focus_in_bounds.call_args.kwargs["bounds"] == "[84,420][1164,861]"
+
+
 def _tab_cfg():
     return {
         "scenario_id": "s1",

@@ -1745,6 +1745,8 @@ def _content_entry_bounds_from_tab_bounds(raw_bounds: str) -> str:
 def _focus_snapshot_to_probe_row(snapshot: dict[str, Any]) -> dict[str, Any]:
     label = _extract_cta_node_label(snapshot) or _node_label_blob(snapshot)
     return {
+        "row_type": "local_tab_probe",
+        "local_tab_probe": True,
         "focus_node": snapshot,
         "visible_label": label,
         "merged_announcement": label,
@@ -1789,6 +1791,8 @@ def _apply_content_entry_probe_success(
     row["local_tab_content_candidate_visited"] = True
     row["local_tab_content_visit_source"] = f"content_entry_probe:{source}"
     row["local_tab_content_entry_probe_result"] = "success"
+    row["row_type"] = "local_tab_probe"
+    row["local_tab_probe"] = True
     return row
 
 
@@ -1833,6 +1837,9 @@ def _probe_forced_local_tab_activation_content(
     )
     if not (empty_success or content_success):
         return None
+    probe_row["row_type"] = "local_tab_probe"
+    probe_row["local_tab_probe"] = True
+    probe_row["local_tab_content_entry_probe_result"] = "success"
     probe_row["local_tab_activation_evidence"] = "observed_content_after_activation"
     probe_row["local_tab_content_entered"] = True
     probe_row["local_tab_content_candidate_visited"] = True
@@ -1856,6 +1863,7 @@ def _attempt_local_tab_content_entry_probe(
     raw_tab_bounds = str(getattr(state, "last_selected_local_tab_bounds", "") or getattr(state, "forced_local_tab_target_bounds", "") or "").strip()
     content_bounds = _content_entry_bounds_from_tab_bounds(raw_tab_bounds)
     _mark_current_local_tab_content_entry_probe_attempted(state)
+    setattr(state, "current_local_tab_content_entry_probe_result", "unknown")
     if not content_bounds:
         log(
             f"[STEP][local_tab_content_entry_probe_skip] active='{_truncate_debug_text(active_display, 96)}' "
@@ -1876,6 +1884,7 @@ def _attempt_local_tab_content_entry_probe(
     try:
         result = focus_in_bounds(dev=dev, bounds=content_bounds, wait_=_TRANSITION_FAST_ACTION_WAIT_SECONDS)
     except Exception as exc:
+        setattr(state, "current_local_tab_content_entry_probe_result", "failed")
         log(
             f"[STEP][local_tab_content_entry_probe_fail] active='{_truncate_debug_text(active_display, 96)}' "
             f"reason='helper_exception:{exc.__class__.__name__}'"
@@ -1884,6 +1893,7 @@ def _attempt_local_tab_content_entry_probe(
     raw = _probe_result_raw_payload(result)
     helper_reason = str(raw.get("reason", "") or result.get("detail", "") if isinstance(result, dict) else "").strip()
     if not bool(result.get("success")):
+        setattr(state, "current_local_tab_content_entry_probe_result", "failed")
         log(
             f"[STEP][local_tab_content_entry_probe_fail] active='{_truncate_debug_text(active_display, 96)}' "
             f"reason='{_truncate_debug_text(helper_reason or 'helper_focus_failed', 96)}'"
@@ -1908,6 +1918,7 @@ def _attempt_local_tab_content_entry_probe(
         current_row_is_top_chrome=_is_row_top_chrome_candidate(probe_row),
     )
     if empty_success or content_success:
+        setattr(state, "current_local_tab_content_entry_probe_result", "success")
         source = "empty_state_focused_row" if empty_success else "content_like_focused_row"
         log(
             f"[STEP][local_tab_content_entry_probe_success] active='{_truncate_debug_text(active_display, 96)}' "
@@ -1916,6 +1927,7 @@ def _attempt_local_tab_content_entry_probe(
         )
         return _apply_content_entry_probe_success(state=state, row=probe_row, source=source)
     visible = str(probe_row.get("visible_label", "") or probe_row.get("merged_announcement", "") or "").strip()
+    setattr(state, "current_local_tab_content_entry_probe_result", "failed")
     log(
         f"[STEP][local_tab_content_entry_probe_fail] active='{_truncate_debug_text(active_display, 96)}' "
         f"reason='focused_row_not_content_like' visible='{_truncate_debug_text(visible, 96)}'"

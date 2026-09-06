@@ -792,28 +792,57 @@ def _build_verify_cfg_for_fallback(candidate: dict[str, Any]) -> dict[str, Any]:
 
 
 def _select_anchor_candidate(client: A11yAdbClient, dev: str, candidate: dict[str, Any]) -> tuple[bool, bool]:
+    def action_succeeded(result: Any) -> bool:
+        if isinstance(result, dict):
+            return bool(result.get("success"))
+        return bool(result)
+
     select_attempted = False
     selected = False
     resource_id = str(candidate.get("resource_id", "") or "").strip()
     if resource_id:
         select_attempted = True
-        selected = client.select(
+        selected = action_succeeded(client.select(
             dev=dev,
             name=f"^{re.escape(resource_id)}$",
             type_="r",
             wait_=8,
-        )
+        ))
+    if selected:
+        return True, True
+    text = str(candidate.get("text", "") or "").strip()
+    if text:
+        select_attempted = True
+        selected = action_succeeded(client.select(
+            dev=dev,
+            name=f"^{re.escape(text)}$",
+            type_="t",
+            wait_=8,
+        ))
     if selected:
         return True, True
     announcement = str(candidate.get("announcement", "") or "").strip()
     if announcement:
         select_attempted = True
-        selected = client.select(
+        selected = action_succeeded(client.select(
             dev=dev,
             name=f"^{re.escape(announcement)}$",
             type_="a",
             wait_=8,
-        )
+        ))
+    if selected:
+        return True, True
+
+    bounds = str(candidate.get("bounds", "") or "").strip()
+    focus_in_bounds = getattr(client, "focus_in_bounds", None)
+    if bounds and callable(focus_in_bounds):
+        select_attempted = True
+        selected = action_succeeded(focus_in_bounds(
+            dev=dev,
+            bounds=bounds,
+            wait_=8,
+            prefer_empty_state=False,
+        ))
     return selected, select_attempted
 
 

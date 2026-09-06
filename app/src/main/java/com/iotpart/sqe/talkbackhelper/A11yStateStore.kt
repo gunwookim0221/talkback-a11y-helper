@@ -13,6 +13,10 @@ object A11yStateStore {
         private set
 
     @Volatile
+    var lastFocusTransportJson: String = "{}"
+        private set
+
+    @Volatile
     var lastUpdatedAt: Long = 0L
         private set
 
@@ -22,8 +26,9 @@ object A11yStateStore {
 
     fun update(snapshot: FocusSnapshot) {
         lastFocusJson = snapshot.toJson().toString()
+        lastFocusTransportJson = snapshot.toTransportJson().toString()
         lastUpdatedAt = snapshot.timestamp
-        Log.i(TAG, "FOCUS_UPDATE $lastFocusJson")
+        Log.i(TAG, "FOCUS_UPDATE $lastFocusTransportJson")
     }
 
     fun updateLastRequestedFocusIndex(index: Int) {
@@ -39,6 +44,7 @@ object A11yStateStore {
                 put("note", "No focus event captured yet")
             }.toString()
             lastFocusJson = json
+            lastFocusTransportJson = json
         }
     }
 
