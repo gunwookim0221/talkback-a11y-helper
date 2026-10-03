@@ -142,6 +142,18 @@ def classify_step_result(
     elif local_tab_probe == "unknown":
         traversal_result = "WARN_LOCAL_TAB_PROBE"
         failure_reason = "local_tab_probe_evidence_incomplete"
+    elif (
+        str(row.get("command_ack_status", "") or "").strip().upper() == "FAIL"
+        and str(row.get("focus_transition_status", "") or "").strip().upper() == "CONFIRMED_MOVED"
+    ):
+        traversal_result = "MOVE_COMMAND_FAILED_BUT_FOCUS_MOVED"
+        failure_reason = "command_ack_failed_after_confirmed_focus_move"
+    elif (
+        str(row.get("command_ack_status", "") or "").strip().upper() == "SUCCESS"
+        and str(row.get("focus_transition_status", "") or "").strip().upper() == "CONFIRMED_UNCHANGED"
+    ):
+        traversal_result = "MOVE_ACK_SUCCESS_WITHOUT_FOCUS_CHANGE"
+        failure_reason = "focus_unchanged_after_move_ack"
     elif move_result in {"moved", "edge_realign_then_moved"}:
         traversal_result = "PASS_MOVED"
         failure_reason = ""
@@ -175,6 +187,8 @@ def classify_step_result(
         "WARN_TERMINAL_BY_REPEAT_STOP",
         "WARN_PLUGIN_BOUNDARY",
         "WARN_LOCAL_TAB_PROBE",
+        "MOVE_COMMAND_FAILED_BUT_FOCUS_MOVED",
+        "MOVE_ACK_SUCCESS_WITHOUT_FOCUS_CHANGE",
     } or speech_match_result == "WARN_CONTEXT_ADDED":
         final_result = "WARN"
     elif traversal_result in {"PASS_MOVED", "PASS_SCROLLED", "PASS_LOCAL_TAB_PROBE"} and speech_match_result in {"PASS_EXACT", "PASS_CONTAINS", "PASS_SMART_NAV"}:
@@ -236,6 +250,53 @@ def normalize_move_result(row: dict[str, Any]) -> str:
     if smart_nav_success and smart_nav_status:
         return smart_nav_status
     return status
+
+
+def classify_command_ack(row: dict[str, Any]) -> dict[str, str]:
+    """Classify the command response without projecting observed focus movement."""
+    raw = row.get("move_result")
+    raw_status = ""
+    raw_success: bool | None = None
+    if isinstance(raw, dict):
+        raw_status = str(raw.get("status", "") or "").strip().lower()
+        if isinstance(raw.get("success"), bool):
+            raw_success = raw["success"]
+        raw_text = str(raw)
+    else:
+        raw_text = str(raw or "").strip()
+        raw_status, raw_success = _extract_move_result_from_text(raw_text)
+        if not raw_status:
+            raw_status = raw_text.lower()
+    smart_status = str(row.get("last_smart_nav_result", "") or "").strip().lower()
+    if not raw_status and smart_status:
+        raw_status = smart_status
+        raw_text = smart_status
+    smart_success = row.get("smart_nav_success")
+    normalized_result = normalize_move_result(row)
+    failure_text = any(token in raw_status for token in ("fail", "error", "cannot_move", "no_focus"))
+    success_text = raw_status in _MOVE_SUCCESS_RESULTS
+    if raw_success is False:
+        status = "FAIL"
+    elif raw_success is True:
+        status = "SUCCESS"
+    elif failure_text:
+        status = "FAIL"
+    elif success_text or normalized_result in _MOVE_SUCCESS_RESULTS:
+        status = "SUCCESS"
+    elif smart_success is False:
+        status = "FAIL"
+    elif smart_success is True:
+        status = "SUCCESS"
+    elif raw_status in _MOVE_TERMINAL_RESULTS or normalized_result in _MOVE_TERMINAL_RESULTS:
+        status = "TERMINAL"
+    else:
+        status = "UNKNOWN"
+    return {
+        "status": status,
+        "result": raw_status or normalized_result,
+        "normalized_result": normalized_result,
+        "raw_result": raw_text,
+    }
 
 
 def _bounds_changed_significantly(prev_bounds: str, curr_bounds: str) -> bool:

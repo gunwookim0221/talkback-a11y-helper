@@ -1,10 +1,15 @@
 package com.iotpart.sqe.talkbackhelper
 
 import android.graphics.Rect
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class A11yTargetFinderTest {
 
     @Test

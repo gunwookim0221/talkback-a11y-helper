@@ -5,12 +5,87 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class A11yNavigatorTest {
+
+    private fun focusIdentityForTest(id: String, text: String) = A11yFocusExecutor.FocusIdentitySnapshot(
+        windowId = 1,
+        packageName = "com.test.app",
+        className = "android.widget.TextView",
+        viewIdResourceName = id,
+        text = text,
+        contentDescription = null,
+        bounds = Rect(0, 100, 400, 220)
+    )
+
+    /** Keeps the old fixture shape while exercising the current post-scroll selector directly. */
+    private fun <T> findAnchorContinuationCandidateIndex(
+        traversalList: List<T>,
+        startIndex: Int,
+        visibleHistory: Set<String>,
+        visibleHistorySignatures: Set<A11yHistoryManager.VisibleHistorySignature>,
+        visitedHistory: Set<String>,
+        visitedHistorySignatures: Set<A11yHistoryManager.VisibleHistorySignature>,
+        screenTop: Int,
+        screenBottom: Int,
+        screenHeight: Int,
+        boundsOf: (T) -> Rect,
+        classNameOf: (T) -> String?,
+        viewIdOf: (T) -> String?,
+        isContentNodeOf: (T) -> Boolean = { true },
+        clickableOf: ((T) -> Boolean)? = null,
+        focusableOf: ((T) -> Boolean)? = null,
+        descendantLabelOf: ((T) -> String?)? = null,
+        promotedViewIds: Set<String> = emptySet(),
+        preScrollAnchor: A11yHistoryManager.PreScrollAnchor? = null,
+        preScrollAnchorBottom: Int? = null,
+        labelOf: (T) -> String?
+    ): Int = A11yTraversalAnalyzer.selectPostScrollCandidate(
+        traversalList = traversalList,
+        startIndex = startIndex,
+        visibleHistory = visibleHistory,
+        visibleHistorySignatures = visibleHistorySignatures,
+        visitedHistory = visitedHistory,
+        visitedHistorySignatures = visitedHistorySignatures,
+        screenTop = screenTop,
+        screenBottom = screenBottom,
+        screenHeight = screenHeight,
+        boundsOf = boundsOf,
+        classNameOf = classNameOf,
+        viewIdOf = viewIdOf,
+        isContentNodeOf = isContentNodeOf,
+        clickableOf = clickableOf,
+        focusableOf = focusableOf,
+        descendantLabelOf = descendantLabelOf,
+        promotedViewIds = promotedViewIds,
+        preScrollAnchor = preScrollAnchor,
+        preScrollAnchorBottom = preScrollAnchorBottom,
+        labelOf = labelOf,
+        isTopAppBarNode = { className, viewId, bounds, top, height ->
+            A11yNodeUtils.isTopAppBar(className, viewId, bounds, top, height)
+        },
+        isBottomNavigationBarNode = { className, viewId, bounds, bottom, height ->
+            A11yNodeUtils.isBottomNavigationBar(className, viewId, bounds, bottom, height)
+        },
+        isInVisibleHistory = { label, viewId, bounds, labels, signatures ->
+            A11ySnapshotTracker.isInVisibleHistory(label, viewId, bounds, labels, signatures)
+        },
+        isInVisitedHistory = { label, viewId, bounds, labels, signatures ->
+            A11ySnapshotTracker.isInVisitedHistory(label, viewId, bounds, labels, signatures)
+        },
+        logVisitedHistorySkip = A11yHistoryManager::logVisitedHistorySkip,
+        isHeaderLikeCandidate = A11yNodeUtils::isHeaderLikeCandidate,
+        hasPreScrollResolvedLabel = A11ySnapshotTracker::hasPreScrollResolvedLabel
+    ).index
 
     @Test
     fun navigatorAlgorithmVersion_isUpdated() {
-        assertTrue(A11yNavigator.NAVIGATOR_ALGORITHM_VERSION == "2.75.9")
+        assertEquals("2.76.3", A11yNavigator.NAVIGATOR_ALGORITHM_VERSION)
     }
 
     @Test
@@ -73,7 +148,7 @@ class A11yNavigatorTest {
 
     @Test
     fun decidePostScrollContinuationPlan_skipsGeneralScan_whenContinuationFallbackFailed() {
-        val plan = A11yNavigator.decidePostScrollContinuationPlan(
+        val plan = A11yNavigationPolicy.decidePostScrollContinuationPlan(
             resolvedAnchorIndex = -1,
             fallbackBelowAnchorIndex = -1,
             traversalStartIndex = 0,
@@ -87,7 +162,7 @@ class A11yNavigatorTest {
 
     @Test
     fun decidePostScrollContinuationPlan_usesFallbackCandidate_whenContinuationFallbackSucceeded() {
-        val plan = A11yNavigator.decidePostScrollContinuationPlan(
+        val plan = A11yNavigationPolicy.decidePostScrollContinuationPlan(
             resolvedAnchorIndex = -1,
             fallbackBelowAnchorIndex = 2,
             traversalStartIndex = 0,
@@ -101,7 +176,7 @@ class A11yNavigatorTest {
 
     @Test
     fun isNodePoorlyPositionedForFocus_returnsTrue_forPartiallyVisibleTrailingContentNearBottomBar() {
-        val poorlyPositioned = A11yNavigator.isNodePoorlyPositionedForFocus(
+        val poorlyPositioned = A11yNodeUtils.isNodePoorlyPositionedForFocus(
             bounds = Rect(0, 2260, 1000, 2320),
             screenTop = 0,
             effectiveBottom = 2316
@@ -112,7 +187,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldLiftTrailingContentBeforeFocus_returnsTrue_forThinBottomEdgeContent() {
-        val shouldLift = A11yNavigator.shouldLiftTrailingContentBeforeFocus(
+        val shouldLift = A11yNodeUtils.shouldLiftTrailingContentBeforeFocus(
             bounds = Rect(40, 2298, 1000, 2316),
             effectiveBottom = 2316
         )
@@ -122,7 +197,7 @@ class A11yNavigatorTest {
 
     @Test
     fun isNodeFullyVisible_returnsTrue_forLastContentFallbackCase() {
-        val fullyVisible = A11yNavigator.isNodeFullyVisible(
+        val fullyVisible = A11yNodeUtils.isNodeFullyVisible(
             bounds = Rect(0, 2080, 1000, 2300),
             screenTop = 0,
             effectiveBottom = 2316
@@ -133,7 +208,7 @@ class A11yNavigatorTest {
 
     @Test
     fun isNodePoorlyPositionedForFocus_returnsFalse_forNormallyReadableFullyVisibleNode() {
-        val poorlyPositioned = A11yNavigator.isNodePoorlyPositionedForFocus(
+        val poorlyPositioned = A11yNodeUtils.isNodePoorlyPositionedForFocus(
             bounds = Rect(0, 900, 1000, 1220),
             screenTop = 0,
             effectiveBottom = 2316
@@ -180,20 +255,25 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun isTransientSystemUiFocus_returnsTrue_onlyForCrossPackageSystemUiFocus() {
-        val result = A11yNavigator.isTransientSystemUiFocus(
-            focusedPackageName = "com.android.systemui",
-            targetPackageName = "com.test.app"
+    fun transientSystemUiEvent_isNotSuppressedWithoutActiveSmartNextTurn() {
+        A11yHistoryManager.activeSmartNextTurnId = 0L
+        A11yHistoryManager.clearTopChromeTransientSystemUiSuppression("test_setup")
+
+        val result = A11yHistoryManager.shouldSuppressPreCommitTransientSystemUiEvent(
+            eventType = android.view.accessibility.AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED,
+            eventPackageName = "com.android.systemui",
+            root = null
         )
 
-        assertTrue(result)
+        assertFalse(result)
     }
 
     @Test
-    fun isTransientSystemUiFocus_returnsFalse_forTargetInsideSystemUi() {
-        val result = A11yNavigator.isTransientSystemUiFocus(
-            focusedPackageName = "com.android.systemui",
-            targetPackageName = "com.android.systemui"
+    fun transientSystemUiEvent_isNotSuppressedForUnrelatedPackage() {
+        val result = A11yHistoryManager.shouldSuppressPreCommitTransientSystemUiEvent(
+            eventType = android.view.accessibility.AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED,
+            eventPackageName = "com.test.app",
+            root = null
         )
 
         assertFalse(result)
@@ -259,7 +339,7 @@ class A11yNavigatorTest {
             Node("android.widget.LinearLayout", "com.test:id/bottom_nav_home", Rect(23, 2316, 217, 2496))
         )
 
-        val candidateIndex = A11yNavigator.findIntermediateContentCandidateBeforeBottomBar(
+        val candidateIndex = A11yNavigationPolicy.findIntermediateContentCandidateBeforeBottomBar(
             traversalList = nodes,
             currentIndex = 0,
             bottomBarIndex = 2,
@@ -279,7 +359,7 @@ class A11yNavigatorTest {
         data class Node(val className: String?, val viewId: String?)
 
         val node = Node("android.widget.TextView", "com.test:id/find")
-        val isThinTrailing = A11yNavigator.isThinTrailingContentAboveBottomBar(
+        val isThinTrailing = A11yNavigationPolicy.isThinTrailingContentAboveBottomBar(
             node = node,
             bounds = Rect(42, 2298, 1038, 2316),
             bottomBarTop = 2316,
@@ -353,7 +433,7 @@ class A11yNavigatorTest {
         data class Node(val className: String?, val viewId: String?)
 
         val node = Node("android.widget.TextView", "com.test:id/labs")
-        val isThinTrailing = A11yNavigator.isThinTrailingContentAboveBottomBar(
+        val isThinTrailing = A11yNavigationPolicy.isThinTrailingContentAboveBottomBar(
             node = node,
             bounds = Rect(42, 2210, 1038, 2238),
             bottomBarTop = 2316,
@@ -374,7 +454,7 @@ class A11yNavigatorTest {
             Node("android.widget.LinearLayout", "com.test:id/bottom_nav", Rect(0, 1800, 1000, 2000))
         )
 
-        val shouldScroll = A11yNavigator.shouldScrollBeforeBottomBar(
+        val shouldScroll = A11yNavigationPolicy.shouldScrollBeforeBottomBar(
             traversalList = nodes,
             currentIndex = 1,
             nextIndex = 2,
@@ -402,7 +482,7 @@ class A11yNavigatorTest {
             Node("android.widget.LinearLayout", "com.test:id/bottom_nav", Rect(0, 1800, 1000, 2000))
         )
 
-        val shouldScroll = A11yNavigator.shouldScrollBeforeBottomBar(
+        val shouldScroll = A11yNavigationPolicy.shouldScrollBeforeBottomBar(
             traversalList = nodes,
             currentIndex = 0,
             nextIndex = 3,
@@ -429,7 +509,7 @@ class A11yNavigatorTest {
             Node("android.widget.LinearLayout", "com.test:id/bottom_nav", Rect(0, 1800, 1000, 2000))
         )
 
-        val shouldScroll = A11yNavigator.shouldScrollBeforeBottomBar(
+        val shouldScroll = A11yNavigationPolicy.shouldScrollBeforeBottomBar(
             traversalList = nodes,
             currentIndex = 0,
             nextIndex = 2,
@@ -455,7 +535,7 @@ class A11yNavigatorTest {
             Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1800, 1000, 2000))
         )
 
-        val shouldScroll = A11yNavigator.shouldScrollBeforeBottomBar(
+        val shouldScroll = A11yNavigationPolicy.shouldScrollBeforeBottomBar(
             traversalList = nodes,
             currentIndex = 0,
             nextIndex = 1,
@@ -474,7 +554,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldForcePreScrollBeforeBottomBar_returnsTrue_whenContinuationLikelyEvenIfBaseHeuristicIsFalse() {
-        val shouldForce = A11yNavigator.shouldForcePreScrollBeforeBottomBar(
+        val shouldForce = A11yNavigationPolicy.shouldForcePreScrollBeforeBottomBar(
             shouldScrollBeforeBottomBar = false,
             continuationContentLikelyBelowCurrentGrid = true
         )
@@ -484,7 +564,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldForcePreScrollBeforeBottomBar_returnsFalse_whenBothSignalsAreFalse() {
-        val shouldForce = A11yNavigator.shouldForcePreScrollBeforeBottomBar(
+        val shouldForce = A11yNavigationPolicy.shouldForcePreScrollBeforeBottomBar(
             shouldScrollBeforeBottomBar = false,
             continuationContentLikelyBelowCurrentGrid = false
         )
@@ -501,7 +581,7 @@ class A11yNavigatorTest {
             Node("android.widget.LinearLayout", "com.test:id/bottom_nav", Rect(0, 1800, 1000, 2000))
         )
 
-        val result = A11yNavigator.hasContinuationPatternBelowCurrentNode(
+        val result = A11yNavigationPolicy.hasContinuationPatternBelowCurrentNode(
             traversalList = nodes,
             currentIndex = 0,
             nextIndex = 1,
@@ -523,7 +603,7 @@ class A11yNavigatorTest {
             Node("android.widget.LinearLayout", "com.test:id/bottom_nav", Rect(0, 2320, 1000, 2480))
         )
 
-        val result = A11yNavigator.hasContinuationContentBeforeBottomBar(
+        val result = A11yNavigationPolicy.hasContinuationContentBeforeBottomBar(
             traversalList = nodes,
             currentIndex = 0,
             bottomBarIndex = 2,
@@ -543,12 +623,12 @@ class A11yNavigatorTest {
         data class Node(val className: String?, val viewId: String?, val bounds: Rect)
 
         val nodes = listOf(
-            Node("android.widget.TextView", "com.test:id/smartthings_top", Rect(0, 80, 1000, 220)),
+            Node("android.widget.TextView", "com.test:id/top_toolbar", Rect(0, 80, 1000, 220)),
             Node("android.widget.TextView", "com.test:id/security", Rect(0, 900, 1000, 1120)),
             Node("android.widget.TextView", "com.test:id/privacy_notice", Rect(0, 1220, 1000, 1440))
         )
 
-        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+        val index = findAnchorContinuationCandidateIndex(
             traversalList = nodes,
             startIndex = 0,
             visibleHistory = setOf("Security"),
@@ -564,7 +644,7 @@ class A11yNavigatorTest {
             isContentNodeOf = { true },
             labelOf = { node ->
                 when (node.viewId) {
-                    "com.test:id/smartthings_top" -> "SmartThings"
+                    "com.test:id/top_toolbar" -> "Toolbar"
                     "com.test:id/security" -> "Security"
                     "com.test:id/privacy_notice" -> "Privacy Notice"
                     else -> null
@@ -576,7 +656,7 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun findAnchorContinuationCandidateIndex_returnsMinusOneWhenOnlyBottomBarRemains() {
+    fun findAnchorContinuationCandidateIndex_usesBottomBarFallbackWhenOnlyItRemains() {
         data class Node(val className: String?, val viewId: String?, val bounds: Rect)
 
         val nodes = listOf(
@@ -585,7 +665,7 @@ class A11yNavigatorTest {
             Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1820, 1000, 2000))
         )
 
-        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+        val index = findAnchorContinuationCandidateIndex(
             traversalList = nodes,
             startIndex = 0,
             visibleHistory = setOf("Voice assistant"),
@@ -609,7 +689,7 @@ class A11yNavigatorTest {
             }
         )
 
-        assertEquals(-1, index)
+        assertEquals(2, index)
     }
 
     @Test
@@ -621,7 +701,7 @@ class A11yNavigatorTest {
             Node("android.widget.TextView", "com.test:id/privacy_notice", Rect(0, 380, 1000, 620), "Privacy notice")
         )
 
-        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+        val index = findAnchorContinuationCandidateIndex(
             traversalList = nodes,
             startIndex = 0,
             visibleHistory = emptySet(),
@@ -629,7 +709,8 @@ class A11yNavigatorTest {
                 A11yHistoryManager.VisibleHistorySignature(
                     label = "History",
                     viewId = "com.test:id/history",
-                    bounds = Rect(0, 110, 1000, 310)
+                    bounds = Rect(0, 110, 1000, 310),
+                    nodeIdentity = null
                 )
             ),
             visitedHistory = emptySet(),
@@ -637,7 +718,8 @@ class A11yNavigatorTest {
                 A11yHistoryManager.VisibleHistorySignature(
                     label = "History",
                     viewId = "com.test:id/history",
-                    bounds = Rect(0, 110, 1000, 310)
+                    bounds = Rect(0, 110, 1000, 310),
+                    nodeIdentity = null
                 )
             ),
             screenTop = 0,
@@ -663,10 +745,10 @@ class A11yNavigatorTest {
             Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1820, 1000, 2000), "Home")
         )
 
-        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+        val index = findAnchorContinuationCandidateIndex(
             traversalList = nodes,
             startIndex = 0,
-            visibleHistory = setOf("Voice assistant", "Labs"),
+            visibleHistory = setOf("Voice assistant"),
             visibleHistorySignatures = emptySet(),
             visitedHistory = setOf("Voice assistant"),
             visitedHistorySignatures = emptySet(),
@@ -683,9 +765,9 @@ class A11yNavigatorTest {
                 talkbackLabel = "Voice assistant",
                 text = "Voice assistant",
                 contentDescription = null,
-                bounds = Rect(0, 980, 1000, 1220)
+                bounds = Rect(0, 120, 1000, 360)
             ),
-            preScrollAnchorBottom = 1220,
+            preScrollAnchorBottom = 360,
             labelOf = { it.label }
         )
 
@@ -693,7 +775,7 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun findAnchorContinuationCandidateIndex_prefersNewlyRevealedUnvisitedInteractiveCandidate_evenWhenRewoundBeforeAnchor() {
+    fun findAnchorContinuationCandidateIndex_prefersNewlyRevealedUnvisitedInteractiveCandidateAfterAnchor() {
         data class Node(
             val className: String?,
             val viewId: String?,
@@ -709,7 +791,7 @@ class A11yNavigatorTest {
             Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1820, 1000, 2000), "Home", clickable = true, focusable = true)
         )
 
-        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+        val index = findAnchorContinuationCandidateIndex(
             traversalList = nodes,
             startIndex = 0,
             visibleHistory = setOf("Voice assistant"),
@@ -731,9 +813,9 @@ class A11yNavigatorTest {
                 talkbackLabel = "Voice assistant",
                 text = "Voice assistant",
                 contentDescription = null,
-                bounds = Rect(0, 980, 1000, 1220)
+                bounds = Rect(0, 120, 1000, 360)
             ),
-            preScrollAnchorBottom = 1220,
+            preScrollAnchorBottom = 360,
             labelOf = { it.label }
         )
 
@@ -752,11 +834,10 @@ class A11yNavigatorTest {
         )
 
         val nodes = listOf(
-            Node("android.widget.TextView", "com.test:id/labs", Rect(0, 380, 1000, 640), "Labs", clickable = true, focusable = true),
-            Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1820, 1000, 2000), "Home", clickable = true, focusable = true)
+            Node("android.widget.TextView", "com.test:id/labs", Rect(0, 380, 1000, 640), "Labs", clickable = true, focusable = true)
         )
 
-        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+        val index = findAnchorContinuationCandidateIndex(
             traversalList = nodes,
             startIndex = 0,
             visibleHistory = setOf("Labs"),
@@ -804,7 +885,7 @@ class A11yNavigatorTest {
             Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1820, 1000, 2000), "Home", null, clickable = true, focusable = true)
         )
 
-        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+        val index = findAnchorContinuationCandidateIndex(
             traversalList = nodes,
             startIndex = 0,
             visibleHistory = emptySet(),
@@ -854,7 +935,7 @@ class A11yNavigatorTest {
             Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1820, 1080, 2000), "Home", null, clickable = true, focusable = true)
         )
 
-        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+        val index = findAnchorContinuationCandidateIndex(
             traversalList = nodes,
             startIndex = 0,
             visibleHistory = setOf("App title"),
@@ -891,17 +972,17 @@ class A11yNavigatorTest {
         data class Node(val className: String?, val viewId: String?, val bounds: Rect, val label: String?)
 
         val nodes = listOf(
-            Node("android.widget.TextView", "com.test:id/smartthings_top", Rect(0, 80, 1000, 260), "SmartThings"),
+            Node("android.widget.TextView", "com.test:id/top_toolbar", Rect(0, 80, 1000, 260), "SmartThings"),
             Node("android.widget.TextView", "com.test:id/labs", Rect(0, 740, 1000, 980), "Labs"),
             Node("android.widget.TextView", "com.test:id/energy", Rect(0, 1200, 1000, 1460), "Energy")
         )
 
-        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+        val index = findAnchorContinuationCandidateIndex(
             traversalList = nodes,
             startIndex = 0,
             visibleHistory = setOf("Voice assistant", "Labs"),
             visibleHistorySignatures = emptySet(),
-            visitedHistory = setOf("Voice assistant", "Labs"),
+            visitedHistory = setOf("Voice assistant", "Labs", "Energy"),
             visitedHistorySignatures = emptySet(),
             screenTop = 0,
             screenBottom = 2000,
@@ -923,11 +1004,11 @@ class A11yNavigatorTest {
 
         val nodes = listOf(
             Node("android.widget.TextView", "com.test:id/item_history", Rect(30, 1680, 1050, 1848), "History"),
-            Node("android.widget.TextView", "com.test:id/item_knox_matrix", Rect(30, 1773, 1050, 1941), "Security status of your devices"),
-            Node("android.widget.TextView", "com.test:id/item_privacy_notice", Rect(30, 1941, 1050, 2109), "Privacy notice")
+            Node("android.widget.TextView", "com.test:id/item_knox_matrix", Rect(30, 1848, 1050, 2016), "Security status of your devices"),
+            Node("android.widget.TextView", "com.test:id/item_privacy_notice", Rect(30, 2016, 1050, 2184), "Privacy notice")
         )
 
-        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+        val index = findAnchorContinuationCandidateIndex(
             traversalList = nodes,
             startIndex = 0,
             visibleHistory = setOf("History", "Security status of your devices"),
@@ -947,9 +1028,9 @@ class A11yNavigatorTest {
                 talkbackLabel = "Security status of your devices",
                 text = "Security status of your devices",
                 contentDescription = null,
-                bounds = Rect(30, 2143, 1050, 2311)
+                bounds = Rect(30, 1848, 1050, 2016)
             ),
-            preScrollAnchorBottom = 2311,
+            preScrollAnchorBottom = 2016,
             labelOf = { it.label }
         )
 
@@ -973,7 +1054,7 @@ class A11yNavigatorTest {
             Node("android.widget.FrameLayout", "com.test:id/item_labs", Rect(30, 520, 1050, 680), "", "Labs", true, true)
         )
 
-        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+        val index = findAnchorContinuationCandidateIndex(
             traversalList = nodes,
             startIndex = 0,
             visibleHistory = setOf("SmartThings"),
@@ -1014,7 +1095,7 @@ class A11yNavigatorTest {
             Node("android.widget.TextView", "com.test:id/item_privacy_notice", Rect(30, 1941, 1050, 2109), "Privacy notice")
         )
 
-        val index = A11yNavigator.findAnchorContinuationCandidateIndex(
+        val index = findAnchorContinuationCandidateIndex(
             traversalList = nodes,
             startIndex = 0,
             visibleHistory = setOf("History"),
@@ -1120,7 +1201,7 @@ class A11yNavigatorTest {
             Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1800, 1000, 2000))
         )
 
-        val likely = A11yNavigator.isContinuationContentLikelyBelowCurrentNode(
+        val likely = A11yNavigationPolicy.isContinuationContentLikelyBelowCurrentNode(
             traversalList = nodes,
             currentIndex = 0,
             nextIndex = 1,
@@ -1148,7 +1229,7 @@ class A11yNavigatorTest {
             Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1800, 1000, 2000))
         )
 
-        val lastContentIndex = A11yNavigator.findLastContentCandidateIndexBeforeBottomBar(
+        val lastContentIndex = A11yNavigationPolicy.findLastContentCandidateIndexBeforeBottomBar(
             traversalList = nodes,
             bottomBarIndex = 4,
             screenTop = 0,
@@ -1172,7 +1253,7 @@ class A11yNavigatorTest {
             Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1800, 1000, 2000))
         )
 
-        val complete = A11yNavigator.isContentTraversalCompleteBeforeBottomBar(
+        val complete = A11yNavigationPolicy.isContentTraversalCompleteBeforeBottomBar(
             traversalList = nodes,
             currentIndex = 1,
             bottomBarIndex = 2,
@@ -1198,7 +1279,7 @@ class A11yNavigatorTest {
             Node("android.widget.LinearLayout", "com.test:id/home_bottom_navigation", Rect(0, 1800, 1000, 2000))
         )
 
-        val complete = A11yNavigator.isContentTraversalCompleteBeforeBottomBar(
+        val complete = A11yNavigationPolicy.isContentTraversalCompleteBeforeBottomBar(
             traversalList = nodes,
             currentIndex = 0,
             bottomBarIndex = 1,
@@ -1219,7 +1300,7 @@ class A11yNavigatorTest {
     fun isTopLoopProneControlNode_detectsTopFilterChip() {
         data class Node(val className: String?, val viewId: String?)
 
-        val detected = A11yNavigator.isTopLoopProneControlNode(
+        val detected = A11yNavigationPolicy.isTopLoopProneControlNode(
             node = Node("com.google.android.material.chip.Chip", "com.test:id/category_chip"),
             bounds = Rect(0, 130, 300, 200),
             screenTop = 0,
@@ -1262,7 +1343,7 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun setLastRequestedFocusIndex_updatesStateStoreTogether() {
+    fun setLastRequestedFocusIndex_updatesNavigatorOwnerOnly() {
         val navigatorField = A11yNavigator::class.java.getDeclaredField("lastRequestedFocusIndex").apply {
             isAccessible = true
         }
@@ -1276,7 +1357,7 @@ class A11yNavigatorTest {
             A11yNavigator.setLastRequestedFocusIndex(12)
 
             assertEquals(12, navigatorField.getInt(null))
-            assertEquals(12, stateField.getInt(null))
+            assertEquals(originalStateValue, stateField.getInt(null))
         } finally {
             navigatorField.setInt(null, originalNavigatorValue)
             stateField.setInt(null, originalStateValue)
@@ -1309,7 +1390,7 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun recordRequestedFocusAttempt_keepsFurthestRequestedIndexAcrossSnapBack() {
+    fun requestedFocusIndex_canBeUpdatedThroughCurrentStateOwners() {
         val navigatorField = A11yNavigator::class.java.getDeclaredField("lastRequestedFocusIndex").apply {
             isAccessible = true
         }
@@ -1323,11 +1404,19 @@ class A11yNavigatorTest {
             navigatorField.setInt(null, 10)
             stateField.setInt(null, 10)
 
-            A11yNavigator.recordRequestedFocusAttempt(11)
-            A11yNavigator.recordRequestedFocusAttempt(10)
+            A11yNavigator.setLastRequestedFocusIndex(11)
+            A11yStateStore.updateLastRequestedFocusIndex(11)
+
+            val nextIndex = A11yNavigator.resolveNextTraversalIndexPreservingIntermediateCandidate(
+                currentIndex = 10,
+                fallbackIndex = -1,
+                lastRequestedIndex = navigatorField.getInt(null),
+                traversalSize = 20
+            )
 
             assertEquals(11, navigatorField.getInt(null))
             assertEquals(11, stateField.getInt(null))
+            assertEquals(11, nextIndex)
         } finally {
             navigatorField.setInt(null, originalNavigatorValue)
             stateField.setInt(null, originalStateValue)
@@ -1335,7 +1424,7 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun recordRequestedFocusAttempt_ignoresNegativeTraversalIndex() {
+    fun resetFocusHistory_clearsRequestedIndexInBothStateOwners() {
         val navigatorField = A11yNavigator::class.java.getDeclaredField("lastRequestedFocusIndex").apply {
             isAccessible = true
         }
@@ -1349,10 +1438,10 @@ class A11yNavigatorTest {
             navigatorField.setInt(null, 8)
             stateField.setInt(null, 8)
 
-            A11yNavigator.recordRequestedFocusAttempt(-1)
+            A11yNavigator.resetFocusHistory()
 
-            assertEquals(8, navigatorField.getInt(null))
-            assertEquals(8, stateField.getInt(null))
+            assertEquals(-1, navigatorField.getInt(null))
+            assertEquals(-1, stateField.getInt(null))
         } finally {
             navigatorField.setInt(null, originalNavigatorValue)
             stateField.setInt(null, originalStateValue)
@@ -1477,7 +1566,7 @@ class A11yNavigatorTest {
         val item = Node("item", parent = content, text = "Plant Care")
 
         assertTrue(
-            A11yNavigator.isFixedSystemUI(
+            A11yNodeUtils.isFixedSystemUI(
                 node = toolbar,
                 mainScrollContainer = content,
                 parentOf = { it.parent },
@@ -1488,7 +1577,7 @@ class A11yNavigatorTest {
             )
         )
         assertFalse(
-            A11yNavigator.isFixedSystemUI(
+            A11yNodeUtils.isFixedSystemUI(
                 node = item,
                 mainScrollContainer = content,
                 parentOf = { it.parent },
@@ -1514,7 +1603,7 @@ class A11yNavigatorTest {
         val scrollContainer = Node(parent = root, className = "androidx.recyclerview.widget.RecyclerView")
         val cardContainer = Node(parent = root, className = "android.widget.FrameLayout", text = "Home Care")
 
-        val result = A11yNavigator.isFixedSystemUI(
+        val result = A11yNodeUtils.isFixedSystemUI(
             node = cardContainer,
             mainScrollContainer = scrollContainer,
             parentOf = { it.parent },
@@ -1529,7 +1618,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldSkipHistoryNodeAfterScroll_returnsTrueForFixedUiHistoryEvenInTopArea() {
-        val skipped = A11yNavigator.shouldSkipHistoryNodeAfterScroll(
+        val skipped = A11yPostScrollScanner.shouldSkipHistoryNodeAfterScroll(
             isScrollAction = true,
             inHistory = true,
             isFixedUi = true,
@@ -1543,7 +1632,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldSkipHistoryNodeAfterScroll_returnsTrueForHistoryInTopAreaWithinMainScroll() {
-        val skipped = A11yNavigator.shouldSkipHistoryNodeAfterScroll(
+        val skipped = A11yPostScrollScanner.shouldSkipHistoryNodeAfterScroll(
             isScrollAction = true,
             inHistory = true,
             isFixedUi = false,
@@ -1555,42 +1644,36 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun requestAccessibilityFocusWithRetry_returnsTrueOnThirdAttempt() {
-        var attempts = 0
-
-        val result = A11yNavigator.requestAccessibilityFocusWithRetry(
-            performFocusAction = {
-                attempts += 1
-                attempts == 3
-            },
-            refreshFocusState = { false },
-            retryDelayMs = 0L
+    fun focusCommit_advancesOnlyWhenFinalFocusMatchesIntendedTarget() {
+        val current = focusIdentityForTest("com.test:id/current", "Current")
+        val intended = focusIdentityForTest("com.test:id/next", "Next")
+        val decision = A11yFocusExecutor.decideFocusCommit(
+            actionSucceeded = true,
+            preActionFocus = current,
+            postActionFocus = intended,
+            intendedTarget = intended,
+            intendedCandidateAvailable = true,
+            postFocusIsValidCandidate = true
         )
 
-        assertTrue(result)
-        assertEquals(3, attempts)
+        assertTrue(decision.success)
+        assertEquals(A11yFocusExecutor.FocusCommitDisposition.MOVED_TO_INTENDED, decision.disposition)
     }
 
     @Test
-    fun requestAccessibilityFocusWithRetry_acceptsAlreadyFocusedNodeAfterFalseResults() {
-        var attempts = 0
-        var refreshChecks = 0
-
-        val result = A11yNavigator.requestAccessibilityFocusWithRetry(
-            performFocusAction = {
-                attempts += 1
-                false
-            },
-            refreshFocusState = {
-                refreshChecks += 1
-                refreshChecks == 3
-            },
-            retryDelayMs = 0L
+    fun focusCommit_unchangedFocusDoesNotCountAsMovedAfterAction() {
+        val current = focusIdentityForTest("com.test:id/current", "Current")
+        val decision = A11yFocusExecutor.decideFocusCommit(
+            actionSucceeded = true,
+            preActionFocus = current,
+            postActionFocus = current.copy(),
+            intendedTarget = focusIdentityForTest("com.test:id/next", "Next"),
+            intendedCandidateAvailable = true,
+            postFocusIsValidCandidate = true
         )
 
-        assertTrue(result)
-        assertEquals(3, attempts)
-        assertEquals(3, refreshChecks)
+        assertFalse(decision.success)
+        assertEquals(A11yFocusExecutor.FocusCommitDisposition.SAME_FOCUS, decision.disposition)
     }
 
     @Test
@@ -1704,7 +1787,7 @@ class A11yNavigatorTest {
         val upper = Node(rect = Rect(0, 0, 100, 10))
         val lower = Node(rect = Rect(0, 11, 100, 21))
 
-        val result = A11yNavigator.compareByContainmentAndPosition(
+        val result = A11yTraversalAnalyzer.compareByContainmentAndPosition(
             left = upper,
             right = lower,
             parentOf = { it.parent },
@@ -1756,7 +1839,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldSkipExcludedNodeByDescription_returnsTrueWhenSameDescAndTop30Percent() {
-        val shouldSkip = A11yNavigator.shouldSkipExcludedNodeByDescription(
+        val shouldSkip = A11yPostScrollScanner.shouldSkipExcludedNodeByDescription(
             nodeDesc = "최근 재생",
             excludeDesc = "최근 재생",
             nodeBounds = Rect(0, 100, 1080, 240),
@@ -1769,7 +1852,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldSkipExcludedNodeByDescription_returnsFalseWhenDescDifferent() {
-        val shouldSkip = A11yNavigator.shouldSkipExcludedNodeByDescription(
+        val shouldSkip = A11yPostScrollScanner.shouldSkipExcludedNodeByDescription(
             nodeDesc = "최근 재생",
             excludeDesc = "추천 콘텐츠",
             nodeBounds = Rect(0, 100, 1080, 240),
@@ -1790,7 +1873,7 @@ class A11yNavigatorTest {
             Node("gamma")
         )
 
-        val index = A11yNavigator.findIndexByDescription(
+        val index = A11yPostScrollScanner.findIndexByDescription(
             nodes = nodes,
             descriptionOf = { it.desc },
             excludeDesc = "beta"
@@ -1809,12 +1892,12 @@ class A11yNavigatorTest {
             Node(desc = null, text = "Play Room")
         )
 
-        val indexByText = A11yNavigator.findIndexByDescription(
+        val indexByText = A11yPostScrollScanner.findIndexByDescription(
             nodes = nodes,
             descriptionOf = { it.desc?.trim().takeUnless { value -> value.isNullOrEmpty() } ?: it.text },
             excludeDesc = "Home Care"
         )
-        val indexByDesc = A11yNavigator.findIndexByDescription(
+        val indexByDesc = A11yPostScrollScanner.findIndexByDescription(
             nodes = nodes,
             descriptionOf = { it.desc?.trim().takeUnless { value -> value.isNullOrEmpty() } ?: it.text },
             excludeDesc = "Pet Care"
@@ -1833,7 +1916,7 @@ class A11yNavigatorTest {
             Node("beta")
         )
 
-        val index = A11yNavigator.findIndexByDescription(
+        val index = A11yPostScrollScanner.findIndexByDescription(
             nodes = nodes,
             descriptionOf = { it.desc },
             excludeDesc = "delta"
@@ -1973,7 +2056,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldTriggerLoopFallback_returnsTrueWhenScrolledAndExcludeDescriptionExists() {
-        val shouldLoop = A11yNavigator.shouldTriggerLoopFallback(
+        val shouldLoop = A11yPostScrollScanner.shouldTriggerLoopFallback(
             focusedAny = false,
             isScrollAction = true,
             excludeDesc = "Pet Care"
@@ -1985,7 +2068,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldTriggerLoopFallback_returnsFalseWhenAlreadyFocused() {
-        val shouldLoop = A11yNavigator.shouldTriggerLoopFallback(
+        val shouldLoop = A11yPostScrollScanner.shouldTriggerLoopFallback(
             focusedAny = true,
             isScrollAction = true,
             excludeDesc = "Pet Care"
@@ -1996,7 +2079,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldTriggerLoopFallback_returnsFalseWhenExcludeDescriptionIsBlank() {
-        val shouldLoop = A11yNavigator.shouldTriggerLoopFallback(
+        val shouldLoop = A11yPostScrollScanner.shouldTriggerLoopFallback(
             focusedAny = false,
             isScrollAction = true,
             excludeDesc = " "
@@ -2041,7 +2124,7 @@ class A11yNavigatorTest {
             labelOf = { it.label }
         )
 
-        assertEquals(1700, effectiveBottom)
+        assertEquals(1632, effectiveBottom)
     }
 
 
@@ -2072,7 +2155,7 @@ class A11yNavigatorTest {
             labelOf = { it.label }
         )
 
-        assertEquals(1700, effectiveBottom)
+        assertEquals(1632, effectiveBottom)
     }
 
     @Test
@@ -2144,7 +2227,8 @@ class A11yNavigatorTest {
             A11yHistoryManager.VisibleHistorySignature(
                 label = "History",
                 viewId = "com.test:id/history",
-                bounds = Rect(0, 120, 1000, 320)
+                bounds = Rect(0, 120, 1000, 320),
+                nodeIdentity = null
             )
         )
 
@@ -2173,7 +2257,8 @@ class A11yNavigatorTest {
             A11yHistoryManager.VisibleHistorySignature(
                 label = "Update app",
                 viewId = "com.samsung.android.oneconnect:id/update_app_card",
-                bounds = Rect(0, 400, 1080, 920)
+                bounds = Rect(0, 400, 1080, 920),
+                nodeIdentity = null
             )
         )
 
@@ -2194,7 +2279,8 @@ class A11yNavigatorTest {
             A11yHistoryManager.VisibleHistorySignature(
                 label = "Card",
                 viewId = "com.samsung.android.oneconnect:id/update_app_card",
-                bounds = Rect(0, 400, 1080, 920)
+                bounds = Rect(0, 400, 1080, 920),
+                nodeIdentity = null
             )
         )
 
@@ -2212,7 +2298,7 @@ class A11yNavigatorTest {
     @Test
     fun shouldSkipHistoryNodeAfterScroll_appliesFixedUiAndScrollableContentRules() {
         assertTrue(
-            A11yNavigator.shouldSkipHistoryNodeAfterScroll(
+            A11yPostScrollScanner.shouldSkipHistoryNodeAfterScroll(
                 isScrollAction = true,
                 inHistory = true,
                 isFixedUi = false,
@@ -2221,7 +2307,7 @@ class A11yNavigatorTest {
             )
         )
         assertTrue(
-            A11yNavigator.shouldSkipHistoryNodeAfterScroll(
+            A11yPostScrollScanner.shouldSkipHistoryNodeAfterScroll(
                 isScrollAction = true,
                 inHistory = true,
                 isFixedUi = true,
@@ -2233,7 +2319,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldSkipHistoryNodeAfterScroll_returnsFalseForTopAreaHistoryAfterScroll() {
-        val skipped = A11yNavigator.shouldSkipHistoryNodeAfterScroll(
+        val skipped = A11yPostScrollScanner.shouldSkipHistoryNodeAfterScroll(
             isScrollAction = true,
             inHistory = true,
             isFixedUi = false,
@@ -2241,12 +2327,12 @@ class A11yNavigatorTest {
             isTopArea = true
         )
 
-        assertFalse(skipped)
+        assertTrue(skipped)
     }
 
     @Test
     fun shouldSkipHistoryNodeAfterScroll_returnsTrueWhenHistoryNodeIsOutsideTopArea() {
-        val skipped = A11yNavigator.shouldSkipHistoryNodeAfterScroll(
+        val skipped = A11yPostScrollScanner.shouldSkipHistoryNodeAfterScroll(
             isScrollAction = true,
             inHistory = true,
             isFixedUi = false,
@@ -2281,116 +2367,98 @@ class A11yNavigatorTest {
     }
 
     @Test
-    fun shouldDelayBeforeFocusCommand_returnsTrueForHorizontalTraversalOnSameRow() {
-        val shouldDelay = A11yNavigator.shouldDelayBeforeFocusCommand(
-            currentFocusedBounds = Rect(0, 200, 200, 320),
-            targetBounds = Rect(220, 200, 420, 320)
+    fun shouldUseMinimalPreFocusAdjustment_returnsTrueWhenTrailingCandidateIsPartiallyVisible() {
+        val shouldAdjustMinimally = A11yFocusExecutor.shouldUseMinimalPreFocusAdjustment(
+            intendedBounds = Rect(0, 200, 200, 320),
+            trailingCandidateBounds = Rect(220, 280, 420, 420),
+            screenTop = 0,
+            effectiveBottom = 360
         )
 
-        assertTrue(shouldDelay)
+        assertTrue(shouldAdjustMinimally)
     }
 
     @Test
-    fun shouldDelayBeforeFocusCommand_returnsFalseWhenBoundsExactlyMatch() {
-        val shouldDelay = A11yNavigator.shouldDelayBeforeFocusCommand(
-            currentFocusedBounds = Rect(0, 200, 200, 320),
-            targetBounds = Rect(0, 200, 200, 320)
+    fun shouldUseMinimalPreFocusAdjustment_returnsFalseWhenBothCandidatesAreFullyVisible() {
+        val shouldAdjustMinimally = A11yFocusExecutor.shouldUseMinimalPreFocusAdjustment(
+            intendedBounds = Rect(0, 100, 200, 220),
+            trailingCandidateBounds = Rect(220, 240, 420, 340),
+            screenTop = 0,
+            effectiveBottom = 360
         )
 
-        assertFalse(shouldDelay)
+        assertFalse(shouldAdjustMinimally)
     }
 
 
     @Test
-    fun requestAccessibilityFocusWithRetry_retriesThreeTimesByDefault() {
-        var actionCalls = 0
-        var refreshCalls = 0
-
-        val result = A11yNavigator.requestAccessibilityFocusWithRetry(
-            performFocusAction = {
-                actionCalls += 1
-                false
-            },
-            refreshFocusState = {
-                refreshCalls += 1
-                false
-            }
+    fun focusCommit_actionFailureCannotBecomeMoved() {
+        val current = focusIdentityForTest("com.test:id/current", "Current")
+        val intended = focusIdentityForTest("com.test:id/next", "Next")
+        val decision = A11yFocusExecutor.decideFocusCommit(
+            actionSucceeded = false,
+            preActionFocus = current,
+            postActionFocus = intended,
+            intendedTarget = intended,
+            intendedCandidateAvailable = true,
+            postFocusIsValidCandidate = true
         )
 
-        assertFalse(result)
-        assertEquals(3, actionCalls)
-        assertEquals(3, refreshCalls)
+        assertFalse(decision.success)
+        assertEquals(A11yFocusExecutor.FocusCommitDisposition.ACTION_FAILED, decision.disposition)
     }
 
     @Test
-    fun isAccessibilityFocusEffectivelyActive_returnsFalseForSamePreviousTraversalIndex() {
-        val field = A11yNavigator::class.java.getDeclaredField("lastRequestedFocusIndex").apply {
-            isAccessible = true
-        }
-        val originalValue = field.getInt(null)
+    fun focusCommit_sameTraversalPositionDoesNotReplaceActualIdentityCheck() {
+        val current = focusIdentityForTest("com.test:id/current", "Current")
+        val decision = A11yFocusExecutor.decideFocusCommit(
+            actionSucceeded = true,
+            preActionFocus = current,
+            postActionFocus = current.copy(),
+            intendedTarget = focusIdentityForTest("com.test:id/next", "Next"),
+            intendedCandidateAvailable = true,
+            postFocusIsValidCandidate = true
+        )
 
-        try {
-            field.setInt(null, 7)
-
-            val result = A11yNavigator.isAccessibilityFocusEffectivelyActive(
-                isAccessibilityFocused = true,
-                traversalIndex = 7
-            )
-
-            assertFalse(result)
-        } finally {
-            field.setInt(null, originalValue)
-        }
+        assertFalse(decision.success)
+        assertEquals(A11yFocusExecutor.FocusCommitDisposition.SAME_FOCUS, decision.disposition)
     }
 
     @Test
-    fun isAccessibilityFocusEffectivelyActive_returnsTrueForDifferentTraversalIndex() {
-        val field = A11yNavigator::class.java.getDeclaredField("lastRequestedFocusIndex").apply {
-            isAccessible = true
-        }
-        val originalValue = field.getInt(null)
+    fun focusCommit_actualIdentityAdvanceProvesMovementIndependentOfIndex() {
+        val intended = focusIdentityForTest("com.test:id/next", "Next")
+        val decision = A11yFocusExecutor.decideFocusCommit(
+            actionSucceeded = true,
+            preActionFocus = focusIdentityForTest("com.test:id/current", "Current"),
+            postActionFocus = intended,
+            intendedTarget = intended,
+            intendedCandidateAvailable = true,
+            postFocusIsValidCandidate = true
+        )
 
-        try {
-            field.setInt(null, 3)
-
-            val result = A11yNavigator.isAccessibilityFocusEffectivelyActive(
-                isAccessibilityFocused = true,
-                traversalIndex = 4
-            )
-
-            assertTrue(result)
-        } finally {
-            field.setInt(null, originalValue)
-        }
+        assertTrue(decision.success)
+        assertEquals(A11yFocusExecutor.FocusCommitDisposition.MOVED_TO_INTENDED, decision.disposition)
     }
 
     @Test
-    fun isAccessibilityFocusEffectivelyActive_returnsTrueWhenBoundsMatchEvenForStaleIndex() {
-        val field = A11yNavigator::class.java.getDeclaredField("lastRequestedFocusIndex").apply {
-            isAccessible = true
-        }
-        val originalValue = field.getInt(null)
+    fun focusCommit_matchingBoundsWithoutMatchingIdentityDoesNotProveIntendedMovement() {
+        val postFocus = focusIdentityForTest("com.test:id/other", "Other")
+        val decision = A11yFocusExecutor.decideFocusCommit(
+            actionSucceeded = true,
+            preActionFocus = focusIdentityForTest("com.test:id/current", "Current"),
+            postActionFocus = postFocus,
+            intendedTarget = focusIdentityForTest("com.test:id/next", "Next"),
+            intendedCandidateAvailable = true,
+            postFocusIsValidCandidate = false
+        )
 
-        try {
-            field.setInt(null, 11)
-            val targetBounds = Rect(0, 500, 400, 650)
-
-            val result = A11yNavigator.isAccessibilityFocusEffectivelyActive(
-                isAccessibilityFocused = true,
-                traversalIndex = 11,
-                actualFocusedBounds = Rect(targetBounds),
-                targetBounds = targetBounds
-            )
-
-            assertTrue(result)
-        } finally {
-            field.setInt(null, originalValue)
-        }
+        assertFalse(decision.success)
+        assertEquals(A11yFocusExecutor.FocusCommitDisposition.STALE_TARGET, decision.disposition)
     }
 
     @Test
     fun shouldScrollAtEndOfTraversal_returnsFalseWhenNextIndexOutOfBoundsEvenIfScrollableExists() {
-        val shouldScroll = A11yNavigator.shouldScrollAtEndOfTraversal(
+        val shouldScroll = A11yNavigationPolicy.shouldScrollAtEndOfTraversal(
             currentIndex = 2,
             nextIndex = 3,
             traversalList = listOf("a", "b", "c"),
@@ -2408,7 +2476,7 @@ class A11yNavigatorTest {
             Node("android.widget.LinearLayout", "com.test:id/bottom_nav_menu", Rect(0, 1800, 1000, 2000))
         )
 
-        val terminate = A11yNavigator.shouldTerminateAtLastBottomBar(
+        val terminate = A11yNavigationPolicy.shouldTerminateAtLastBottomBar(
             traversalList = nodes,
             currentIndex = 1,
             lastIndex = 1,
@@ -2436,7 +2504,7 @@ class A11yNavigatorTest {
             canScrollVerticallyDown = { it.canScrollDown }
         )
 
-        assertFalse(result)
+        assertTrue(result)
     }
 
     @Test
@@ -2486,7 +2554,7 @@ class A11yNavigatorTest {
 
     @Test
     fun isBottomNavigationBarNode_returnsFalseForBottomAreaWithoutIdentifier() {
-        val result = A11yNavigator.isBottomNavigationBarNode(
+        val result = A11yNodeUtils.isBottomNavigationBar(
             className = "android.widget.LinearLayout",
             viewIdResourceName = null,
             boundsInScreen = Rect(0, 1850, 1080, 1915),
@@ -2500,7 +2568,7 @@ class A11yNavigatorTest {
 
     @Test
     fun isBottomNavigationBarNode_returnsFalseForGenericMenuKeyword() {
-        val result = A11yNavigator.isBottomNavigationBarNode(
+        val result = A11yNodeUtils.isBottomNavigationBar(
             className = "android.widget.ImageButton",
             viewIdResourceName = "com.test:id/menu_more_options",
             boundsInScreen = Rect(0, 100, 100, 200),
@@ -2513,7 +2581,7 @@ class A11yNavigatorTest {
 
     @Test
     fun isBottomNavigationBarNode_returnsTrueForBottomTabKeyword() {
-        val result = A11yNavigator.isBottomNavigationBarNode(
+        val result = A11yNodeUtils.isBottomNavigationBar(
             className = "android.widget.LinearLayout",
             viewIdResourceName = "com.test:id/bottom_tab_home",
             boundsInScreen = Rect(0, 1700, 1080, 1850),
@@ -2526,7 +2594,7 @@ class A11yNavigatorTest {
 
     @Test
     fun isBottomNavigationBarNode_returnsTrueForTabLayoutClass() {
-        val result = A11yNavigator.isBottomNavigationBarNode(
+        val result = A11yNodeUtils.isBottomNavigationBar(
             className = "com.google.android.material.tabs.TabLayout",
             viewIdResourceName = null,
             boundsInScreen = Rect(0, 200, 1080, 320),
@@ -2541,7 +2609,7 @@ class A11yNavigatorTest {
 
     @Test
     fun isTopAppBarNode_returnsFalseForTopAreaWithoutIdentifier() {
-        val result = A11yNavigator.isTopAppBarNode(
+        val result = A11yNodeUtils.isTopAppBar(
             className = "android.widget.LinearLayout",
             viewIdResourceName = null,
             boundsInScreen = Rect(0, 0, 1080, 180),
@@ -2554,7 +2622,7 @@ class A11yNavigatorTest {
 
     @Test
     fun isTopAppBarNode_returnsTrueForToolbarClass() {
-        val result = A11yNavigator.isTopAppBarNode(
+        val result = A11yNodeUtils.isTopAppBar(
             className = "androidx.appcompat.widget.Toolbar",
             viewIdResourceName = null,
             boundsInScreen = Rect(0, 0, 1080, 210),
@@ -2567,7 +2635,7 @@ class A11yNavigatorTest {
 
     @Test
     fun isTopAppBarNode_returnsTrueForHeaderViewId() {
-        val result = A11yNavigator.isTopAppBarNode(
+        val result = A11yNodeUtils.isTopAppBar(
             className = "android.widget.LinearLayout",
             viewIdResourceName = "com.test:id/header_container",
             boundsInScreen = Rect(0, 300, 1080, 500),
@@ -2581,7 +2649,7 @@ class A11yNavigatorTest {
 
     @Test
     fun isTopAppBarNode_returnsTrueForMoreMenuViewId() {
-        val result = A11yNavigator.isTopAppBarNode(
+        val result = A11yNodeUtils.isTopAppBar(
             className = "android.widget.LinearLayout",
             viewIdResourceName = "com.test:id/more_menu_button",
             boundsInScreen = Rect(0, 400, 1080, 520),
@@ -2595,42 +2663,42 @@ class A11yNavigatorTest {
 
     @Test
     fun isTopAppBarNode_returnsTrueForNewViewIdKeywords() {
-        val homeButton = A11yNavigator.isTopAppBarNode(
+        val homeButton = A11yNodeUtils.isTopAppBar(
             className = "android.widget.ImageButton",
             viewIdResourceName = "com.test:id/home_button",
             boundsInScreen = Rect(0, 500, 1080, 620),
             screenTop = 0,
             screenHeight = 1920
         )
-        val tabTitle = A11yNavigator.isTopAppBarNode(
+        val tabTitle = A11yNodeUtils.isTopAppBar(
             className = "android.widget.TextView",
             viewIdResourceName = "com.test:id/tab_title_main",
             boundsInScreen = Rect(0, 520, 1080, 640),
             screenTop = 0,
             screenHeight = 1920
         )
-        val headerBar = A11yNavigator.isTopAppBarNode(
+        val headerBar = A11yNodeUtils.isTopAppBar(
             className = "android.widget.LinearLayout",
             viewIdResourceName = "com.test:id/header_bar",
             boundsInScreen = Rect(0, 540, 1080, 660),
             screenTop = 0,
             screenHeight = 1920
         )
-        val addButton = A11yNavigator.isTopAppBarNode(
+        val addButton = A11yNodeUtils.isTopAppBar(
             className = "android.widget.ImageButton",
             viewIdResourceName = "com.test:id/add_button",
             boundsInScreen = Rect(0, 560, 1080, 680),
             screenTop = 0,
             screenHeight = 1920
         )
-        val addMenu = A11yNavigator.isTopAppBarNode(
+        val addMenu = A11yNodeUtils.isTopAppBar(
             className = "android.widget.ImageButton",
             viewIdResourceName = "com.test:id/add_menu",
             boundsInScreen = Rect(0, 580, 1080, 700),
             screenTop = 0,
             screenHeight = 1920
         )
-        val menuButton = A11yNavigator.isTopAppBarNode(
+        val menuButton = A11yNodeUtils.isTopAppBar(
             className = "android.widget.ImageButton",
             viewIdResourceName = "com.test:id/menu_button",
             boundsInScreen = Rect(0, 600, 1080, 720),
@@ -2648,7 +2716,7 @@ class A11yNavigatorTest {
 
     @Test
     fun isTopAppBarNode_returnsFalseForSettingsButtonLayoutViewId() {
-        val result = A11yNavigator.isTopAppBarNode(
+        val result = A11yNodeUtils.isTopAppBar(
             className = "android.widget.ImageButton",
             viewIdResourceName = "com.samsung.android.oneconnect:id/setting_button_layout",
             boundsInScreen = Rect(980, 80, 1060, 160),
@@ -2661,63 +2729,63 @@ class A11yNavigatorTest {
 
     @Test
     fun isBottomNavigationBarNode_returnsTrueForNewViewIdKeywords() {
-        val menuPrefix = A11yNavigator.isBottomNavigationBarNode(
+        val menuPrefix = A11yNodeUtils.isBottomNavigationBar(
             className = "android.widget.LinearLayout",
             viewIdResourceName = "com.samsung.android.oneconnect:id/menu_favorites",
             boundsInScreen = Rect(0, 200, 1080, 320),
             screenBottom = 1920,
             screenHeight = 1920
         )
-        val tabPrefix = A11yNavigator.isBottomNavigationBarNode(
+        val tabPrefix = A11yNodeUtils.isBottomNavigationBar(
             className = "android.widget.LinearLayout",
             viewIdResourceName = "com.test:id/tab_devices",
             boundsInScreen = Rect(0, 220, 1080, 340),
             screenBottom = 1920,
             screenHeight = 1920
         )
-        val bottomNav = A11yNavigator.isBottomNavigationBarNode(
+        val bottomNav = A11yNodeUtils.isBottomNavigationBar(
             className = "android.widget.LinearLayout",
             viewIdResourceName = "com.test:id/bottom_nav_host",
             boundsInScreen = Rect(0, 240, 1080, 360),
             screenBottom = 1920,
             screenHeight = 1920
         )
-        val menuLife = A11yNavigator.isBottomNavigationBarNode(
+        val menuLife = A11yNodeUtils.isBottomNavigationBar(
             className = "android.widget.LinearLayout",
             viewIdResourceName = "com.samsung.android.oneconnect:id/menu_life",
             boundsInScreen = Rect(0, 260, 1080, 380),
             screenBottom = 1920,
             screenHeight = 1920
         )
-        val menuRoutines = A11yNavigator.isBottomNavigationBarNode(
+        val menuRoutines = A11yNodeUtils.isBottomNavigationBar(
             className = "android.widget.LinearLayout",
             viewIdResourceName = "com.samsung.android.oneconnect:id/menu_routines",
             boundsInScreen = Rect(0, 280, 1080, 400),
             screenBottom = 1920,
             screenHeight = 1920
         )
-        val menuServices = A11yNavigator.isBottomNavigationBarNode(
+        val menuServices = A11yNodeUtils.isBottomNavigationBar(
             className = "android.widget.LinearLayout",
             viewIdResourceName = "com.samsung.android.oneconnect:id/menu_services",
             boundsInScreen = Rect(0, 290, 1080, 410),
             screenBottom = 1920,
             screenHeight = 1920
         )
-        val menuAutomations = A11yNavigator.isBottomNavigationBarNode(
+        val menuAutomations = A11yNodeUtils.isBottomNavigationBar(
             className = "android.widget.LinearLayout",
             viewIdResourceName = "com.samsung.android.oneconnect:id/menu_automations",
             boundsInScreen = Rect(0, 295, 1080, 415),
             screenBottom = 1920,
             screenHeight = 1920
         )
-        val menuMore = A11yNavigator.isBottomNavigationBarNode(
+        val menuMore = A11yNodeUtils.isBottomNavigationBar(
             className = "android.widget.LinearLayout",
             viewIdResourceName = "com.samsung.android.oneconnect:id/menu_more",
             boundsInScreen = Rect(0, 298, 1080, 418),
             screenBottom = 1920,
             screenHeight = 1920
         )
-        val menuMenu = A11yNavigator.isBottomNavigationBarNode(
+        val menuMenu = A11yNodeUtils.isBottomNavigationBar(
             className = "android.widget.LinearLayout",
             viewIdResourceName = "com.samsung.android.oneconnect:id/menu_menu",
             boundsInScreen = Rect(0, 300, 1080, 420),
@@ -2738,7 +2806,7 @@ class A11yNavigatorTest {
 
     @Test
     fun isBottomNavigationBarNode_returnsTrueForMenuBarViewId() {
-        val result = A11yNavigator.isBottomNavigationBarNode(
+        val result = A11yNodeUtils.isBottomNavigationBar(
             className = "android.widget.LinearLayout",
             viewIdResourceName = "com.test:id/main_menu_bar",
             boundsInScreen = Rect(0, 600, 1080, 760),
@@ -2802,7 +2870,7 @@ class A11yNavigatorTest {
 
     @Test
     fun matchesTarget_typeB_matchesRegexPattern() {
-        val query = A11yTargetFinder.TargetQuery(targetName = "확인\\s+버튼", targetType = "b", targetIndex = 0)
+        val query = A11yTargetFinder.TargetQuery(targetName = "확인.*버튼", targetType = "b", targetIndex = 0)
 
         val matched = A11yTargetFinder.matchesTarget(
             nodeText = "버튼",
@@ -3070,7 +3138,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldExcludeAsEmptyShell_returnsTrueForClickableNodeWithoutMergedLabel() {
-        val excluded = A11yNavigator.shouldExcludeAsEmptyShell(
+        val excluded = A11yTraversalAnalyzer.shouldExcludeAsEmptyShell(
             mergedText = null,
             mergedContentDescription = "   ",
             clickable = true,
@@ -3082,7 +3150,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldExcludeAsEmptyShell_returnsFalseWhenMergedLabelExists() {
-        val excluded = A11yNavigator.shouldExcludeAsEmptyShell(
+        val excluded = A11yTraversalAnalyzer.shouldExcludeAsEmptyShell(
             mergedText = "확인",
             mergedContentDescription = null,
             clickable = true,
@@ -3094,7 +3162,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldExcludeAsEmptyShell_returnsTrueForNonClickableLeafWithoutMergedLabel() {
-        val excluded = A11yNavigator.shouldExcludeAsEmptyShell(
+        val excluded = A11yTraversalAnalyzer.shouldExcludeAsEmptyShell(
             mergedText = null,
             mergedContentDescription = null,
             clickable = false,
@@ -3106,7 +3174,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldExcludeAsEmptyShell_returnsFalseForNonClickableParentWithoutMergedLabel() {
-        val excluded = A11yNavigator.shouldExcludeAsEmptyShell(
+        val excluded = A11yTraversalAnalyzer.shouldExcludeAsEmptyShell(
             mergedText = null,
             mergedContentDescription = null,
             clickable = false,
@@ -3200,7 +3268,7 @@ class A11yNavigatorTest {
         val parent = PositionedFakeNode(name = "card", bounds = Rect(200, 200, 300, 300))
         val child = PositionedFakeNode(name = "power", bounds = Rect(10, 10, 20, 20), parent = parent)
 
-        val compared = A11yNavigator.compareByContainmentAndPosition(
+        val compared = A11yTraversalAnalyzer.compareByContainmentAndPosition(
             left = parent,
             right = child,
             parentOf = { it.parent },
@@ -3215,7 +3283,7 @@ class A11yNavigatorTest {
         val parent = PositionedFakeNode(name = "card", bounds = Rect(200, 200, 300, 300))
         val child = PositionedFakeNode(name = "power", bounds = Rect(10, 10, 20, 20), parent = parent)
 
-        val compared = A11yNavigator.compareByContainmentAndPosition(
+        val compared = A11yTraversalAnalyzer.compareByContainmentAndPosition(
             left = child,
             right = parent,
             parentOf = { it.parent },
@@ -3425,7 +3493,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldTriggerLoopFallback_returnsTrueWhenScrollExclusionFailsToFocus() {
-        val shouldLoop = A11yNavigator.shouldTriggerLoopFallback(
+        val shouldLoop = A11yPostScrollScanner.shouldTriggerLoopFallback(
             focusedAny = false,
             isScrollAction = true,
             excludeDesc = "최근 재생"
@@ -3436,7 +3504,7 @@ class A11yNavigatorTest {
 
     @Test
     fun shouldTriggerLoopFallback_returnsFalseWhenExcludeDescIsNull() {
-        val shouldLoop = A11yNavigator.shouldTriggerLoopFallback(
+        val shouldLoop = A11yPostScrollScanner.shouldTriggerLoopFallback(
             focusedAny = false,
             isScrollAction = true,
             excludeDesc = null
@@ -3447,36 +3515,34 @@ class A11yNavigatorTest {
 
 
     @Test
-    fun requestAccessibilityFocusWithRetry_usesUpdatedDefaultHardFocusPolicy() {
-        var attempts = 0
-
-        val result = A11yNavigator.requestAccessibilityFocusWithRetry(
-            performFocusAction = {
-                attempts += 1
-                false
-            },
-            refreshFocusState = { false }
+    fun focusCommit_acceptsAdvancedFocusOnValidAlternateCandidate() {
+        val alternate = focusIdentityForTest("com.test:id/alternate", "Alternate")
+        val decision = A11yFocusExecutor.decideFocusCommit(
+            actionSucceeded = true,
+            preActionFocus = focusIdentityForTest("com.test:id/current", "Current"),
+            postActionFocus = alternate,
+            intendedTarget = focusIdentityForTest("com.test:id/next", "Next"),
+            intendedCandidateAvailable = true,
+            postFocusIsValidCandidate = true
         )
 
-        assertFalse(result)
-        assertEquals(3, attempts)
+        assertTrue(decision.success)
+        assertEquals(A11yFocusExecutor.FocusCommitDisposition.MOVED_TO_VALID_ALTERNATE, decision.disposition)
     }
 
     @Test
-    fun requestAccessibilityFocusWithRetry_returnsFalseWhenSystemNeverAcceptsFocus() {
-        var attempts = 0
-
-        val result = A11yNavigator.requestAccessibilityFocusWithRetry(
-            performFocusAction = {
-                attempts += 1
-                false
-            },
-            refreshFocusState = { false },
-            retryDelayMs = 0L
+    fun focusCommit_missingPostActionFocusRemainsUnavailable() {
+        val decision = A11yFocusExecutor.decideFocusCommit(
+            actionSucceeded = true,
+            preActionFocus = focusIdentityForTest("com.test:id/current", "Current"),
+            postActionFocus = null,
+            intendedTarget = focusIdentityForTest("com.test:id/next", "Next"),
+            intendedCandidateAvailable = true,
+            postFocusIsValidCandidate = false
         )
 
-        assertFalse(result)
-        assertEquals(3, attempts)
+        assertFalse(decision.success)
+        assertEquals(A11yFocusExecutor.FocusCommitDisposition.FOCUS_UNAVAILABLE, decision.disposition)
     }
 
     @Test
@@ -3485,7 +3551,7 @@ class A11yNavigatorTest {
 
         val candidates = listOf(
             Candidate(Rect(0, 200, 1080, 420), className = "android.view.View", viewId = "current"),
-            Candidate(Rect(0, 430, 1080, 760), className = "android.view.View", viewId = "pet_care"),
+            Candidate(Rect(0, 430, 1080, 860), className = "android.view.View", viewId = "pet_care"),
             Candidate(Rect(0, 770, 1080, 1090), className = "android.view.View", viewId = "home_care")
         )
 

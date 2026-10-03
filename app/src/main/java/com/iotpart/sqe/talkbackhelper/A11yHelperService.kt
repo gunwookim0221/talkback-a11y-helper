@@ -202,6 +202,7 @@ class A11yHelperService : AccessibilityService() {
         Log.i("A11Y_HELPER", "[SMART_NEXT][canary] stage='before_dump_tree'")
         val root = rootInActiveWindow
         val dumpArray = A11yNavigator.dumpTreeFlat(root)
+        dumpArray.put("scrollAxisContract", "axis-v1")
         if (includeScrollCapabilities) {
             dumpArray.put(
                 "scrollCapabilities",
@@ -1337,6 +1338,9 @@ class A11yHelperService : AccessibilityService() {
             boundsOf = boundsOf
         )
         if (descendant != null && performClick(descendant)) {
+            log?.invoke(
+                "[click_focused_descendant_candidate_seen] resourceId='${resourceIdOf(descendant).orEmpty()}' class='${classNameOf(descendant).orEmpty()}' source='resolved_raw_focus'"
+            )
             return ClickExecutionResult(
                 success = true,
                 reason = "Clickable descendant clicked",
@@ -2633,6 +2637,21 @@ class A11yHelperService : AccessibilityService() {
             if (!isNodeClickableCandidate(node, isClickable, isVisible, isEnabled, boundsOf)) continue
 
             val candidateBounds = boundsOf(node)
+            val candidateArea = maxOf(1, candidateBounds.width() * candidateBounds.height())
+            val areaRatio = candidateArea.toDouble() / focusedArea.toDouble()
+            val rootRatio = candidateArea.toDouble() / rootArea.toDouble()
+            val candidateClassName = classNameOf(node).orEmpty().lowercase()
+            val heavyContainer = candidateClassName.endsWith("scrollview") ||
+                candidateClassName.endsWith("recyclerview") ||
+                candidateClassName.endsWith("listview") ||
+                candidateClassName.endsWith("nestedscrollview")
+            val giantContainer = areaRatio >= 28.0 ||
+                (rootRatio >= 0.62 &&
+                    candidateBounds.width() >= (rootBounds.width() * 0.88).toInt() &&
+                    candidateBounds.height() >= (rootBounds.height() * 0.58).toInt()) ||
+                (heavyContainer && rootRatio >= 0.62)
+            if (giantContainer) continue
+
             val candidateCenterX = candidateBounds.centerX()
             val candidateCenterY = candidateBounds.centerY()
             val inside = focusedBounds.contains(candidateBounds) || focusedBounds.contains(candidateCenterX, candidateCenterY)
@@ -2645,7 +2664,6 @@ class A11yHelperService : AccessibilityService() {
             } else {
                 0
             }
-            val candidateArea = maxOf(1, candidateBounds.width() * candidateBounds.height())
             val overlapByFocused = overlapArea.toDouble() / focusedArea.toDouble()
             val overlapByCandidate = overlapArea.toDouble() / candidateArea.toDouble()
             val overlap = overlapArea > 0 && (overlapByFocused >= 0.2 || overlapByCandidate >= 0.1)
@@ -2927,7 +2945,9 @@ class A11yHelperService : AccessibilityService() {
         direction: String,
         reqId: String = "none",
         preferTreeSearch: Boolean = false,
-        deviceListNormalization: Boolean = false
+        deviceListNormalization: Boolean = false,
+        scrollContainerPath: String? = null,
+        scrollContainerBounds: String? = null
     ): JSONObject {
         val root = rootInActiveWindow
         val focusedNode = root?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
@@ -2978,9 +2998,30 @@ class A11yHelperService : AccessibilityService() {
                 }
             }
         }
-        if (scrollNode == null && !deviceListNormalization) {
+        if (scrollContainerPath != null) {
+            // Explicit vertical target: a stale path/bounds must fail rather
+            // than silently selecting a horizontal tab strip or pager.
+            var target = root
+            val parts = scrollContainerPath.split(".")
+            if (parts.firstOrNull() != "0") target = null
+            for (part in parts.drop(1)) {
+                val index = part.toIntOrNull()
+                target = if (index != null && index >= 0 && target != null && index < target.childCount) target.getChild(index) else null
+            }
+            val targetBounds = Rect().also { target?.getBoundsInScreen(it) }
+            val boundsText = "${targetBounds.left},${targetBounds.top},${targetBounds.right},${targetBounds.bottom}"
+            scrollNode = target?.takeIf {
+                it.isVisibleToUser && it.isEnabled && A11yNavigator.isEligibleVerticalScrollNode(it)
+                    && (scrollContainerBounds == null || scrollContainerBounds == boundsText)
+            }
+        }
+        if (scrollNode == null && !deviceListNormalization && scrollContainerPath == null) {
             fallbackUsed = true
-            scrollNode = findFirstScrollableNode(root)
+            scrollNode = if (preferTreeSearch && normalizeScrollDirection(direction, forward) in listOf("down", "up")) {
+                findFirstScrollableInTree(root = root, childCountOf = { it.childCount },
+                    childAt = { node, index -> node.getChild(index) },
+                    isScrollable = { A11yNavigator.isEligibleVerticalScrollNode(it) })
+            } else findFirstScrollableNode(root)
         }
 
         // The tree fallback is intentionally bounded by findFirstScrollableInTree.
@@ -2989,15 +3030,20 @@ class A11yHelperService : AccessibilityService() {
 
         val normalizedDirection = normalizeScrollDirection(direction, forward)
         val isForwardDirection = normalizedDirection == "down" || normalizedDirection == "right"
-        val action = if (isForwardDirection) {
+        val legacyAction = if (isForwardDirection) {
             AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
         } else {
             AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
         }
+        val action = if (!deviceListNormalization && (scrollContainerPath != null || preferTreeSearch)
+            && normalizedDirection in listOf("down", "up")) {
+            A11yNavigator.verticalScrollAction(normalizedDirection, scrollNode?.actionList?.map { it.id } ?: emptyList())
+        } else legacyAction
         if (!deviceListNormalization) {
-            actionSupported = scrollNode != null
+            actionSupported = action != null && (if (scrollContainerPath != null || preferTreeSearch)
+                scrollNode?.actionList?.any { it.id == action } == true else scrollNode != null)
         }
-        val success = if (scrollNode != null && actionSupported) {
+        val success = if (scrollNode != null && actionSupported && action != null) {
             actionAttempted = true
             scrollNode.performAction(action)
         } else {
@@ -3020,6 +3066,10 @@ class A11yHelperService : AccessibilityService() {
             put("actionSupported", actionSupported)
             put("actionAttempted", actionAttempted)
             put("topBoundaryEvidence", topBoundaryEvidence)
+            put("scrollContainerPath", scrollContainerPath ?: JSONObject.NULL)
+            put("scrollContainerClass", scrollNode?.className?.toString() ?: JSONObject.NULL)
+            put("explicitTarget", scrollContainerPath != null)
+            put("performedActionId", action ?: JSONObject.NULL)
         }
 
         Log.i(TAG, "SCROLL_RESULT $resultJson")

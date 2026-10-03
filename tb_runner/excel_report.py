@@ -106,6 +106,15 @@ RESULT_SHEET_COLUMNS = [
     "probe_captured_visible_text",
     "failure_reason",
     "review_note",
+    "command_ack_status",
+    "command_ack_result",
+    "focus_transition_status",
+    "actual_focus_before_id",
+    "actual_focus_instance_id",
+    "focus_reconciliation_confidence",
+    "focus_reconciliation_candidate_in_expected_population",
+    "visit_record_status",
+    "progress_status",
     "focus_view_id",
     "focus_confidence",
     "semantic_card_id",
@@ -821,6 +830,15 @@ def make_summary_df(raw_df: pd.DataFrame, filtered_df: pd.DataFrame) -> pd.DataF
         )
         scenario_df["section"] = "scenario_id"
         rows.extend(scenario_df[["section", "metric", "value"]].to_dict("records"))
+        terminal_fields = ["termination_status", "termination_reason", "termination_step",
+                           "remaining_unseen_count", "scroll_exhausted", "viewport_stable",
+                           "active_candidates", "active_unseen", "stale_candidates", "stale_unseen_candidates",
+                           "historical_unseen_count", "vertical_can_scroll_forward", "horizontal_can_scroll_forward",
+                           "scroll_axis_source", "unknown_axis_containers"]
+        for scenario, group in raw_df.groupby("scenario_id", dropna=False):
+            final = group.iloc[-1]
+            rows.extend({"section": "content_terminal:" + str(scenario), "metric": key, "value": final[key]}
+                        for key in terminal_fields if key in raw_df.columns)
 
     return pd.DataFrame(rows)
 
@@ -1725,6 +1743,8 @@ def _collapse_repeated_issue_groups(result: pd.DataFrame) -> pd.DataFrame:
 
 
 def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
+    if "row_source" in filtered_df.columns:
+        filtered_df = filtered_df.loc[filtered_df["row_source"] != "global_navigation_state"].copy()
     status_series = (
         filtered_df["status"].fillna("").astype(str).str.strip().str.upper()
         if "status" in filtered_df.columns
@@ -1814,6 +1834,15 @@ def make_result_df(filtered_df: pd.DataFrame) -> pd.DataFrame:
     _pick_col("_traversal_result", ["traversal_result"])
     _pick_col("_speech_match_result", ["speech_match_result"])
     _pick_col("_raw_final_result", ["final_result"])
+    _pick_col("command_ack_status", ["command_ack_status"], default="")
+    _pick_col("command_ack_result", ["command_ack_result"], default="")
+    _pick_col("focus_transition_status", ["focus_transition_status"], default="")
+    _pick_col("actual_focus_before_id", ["actual_focus_before_id"], default="")
+    _pick_col("actual_focus_instance_id", ["actual_focus_instance_id"], default="")
+    _pick_col("focus_reconciliation_confidence", ["focus_reconciliation_confidence"], default="")
+    _pick_col("focus_reconciliation_candidate_in_expected_population", ["focus_reconciliation_candidate_in_expected_population"], default=False)
+    _pick_col("visit_record_status", ["visit_record_status"], default="")
+    _pick_col("progress_status", ["progress_status"], default="")
     _pick_col("row_source", ["row_source"], default="")
     _pick_col("probe_validation_status", ["probe_validation_status"], default="")
     _pick_col("probe_success_source", ["probe_success_source"], default="")
@@ -2827,6 +2856,37 @@ def save_excel(rows: list[dict], output_path: str, with_images: bool = True) -> 
         filtered_df.to_excel(writer, sheet_name="filtered", index=False)
         summary_df.to_excel(writer, sheet_name="summary", index=False)
         result_export_df.to_excel(writer, sheet_name="result", index=False)
+        traversal_columns = ["scenario_id", "attempted_steps", "successful_moves", "failed_moves",
+                             "indeterminate_moves", "recorded_result_rows", "unique_visited_instances",
+                             "unique_candidate_instances", "semantic_covered_instances",
+                             "termination_status", "termination_reason", "terminal_step",
+                             "traversal_complete", "coverage_complete"]
+        traversal_columns += ["initial_visible_instances", "initial_scroll_capability", "initial_scroll_source",
+                                "scroll_attempts", "scroll_moved", "scroll_new_instances"]
+        traversal_columns += ["termination_step", "content_terminal_contract", "visible_candidates", "visited_candidates",
+                              "active_candidates", "active_unseen", "stale_candidates", "stale_unseen_candidates", "historical_unseen_count",
+                              "vertical_can_scroll_forward", "horizontal_can_scroll_forward", "scroll_axis_source", "unknown_axis_containers",
+                              "semantically_covered_candidates", "unseen_candidates", "excluded_candidates",
+                              "remaining_unseen_count", "scroll_exhausted", "viewport_stable", "can_scroll_forward",
+                              "stable_observations", "stable_scroll_attempts", "new_instances", "last_progress_step",
+                              "no_progress_steps", "pending_transition", "scope_verified", "volatile_candidates",
+                              "strict_viewport_signature", "semantic_viewport_signature"]
+        traversal_columns += ["nav_items_discovered", "nav_items_expected", "nav_items_verified", "nav_activation_attempts",
+                              "nav_activation_failures", "destination_verification_failures", "candidate_policy"]
+        completeness_columns = [c for c in raw_df.columns if c.startswith("completeness_") or c == "identity_confidence"]
+        traversal_columns += completeness_columns
+        if completeness_columns:
+            raw_df[["scenario_id", *completeness_columns]].drop_duplicates(subset=["scenario_id"], keep="last").to_excel(
+                writer, sheet_name="completeness", index=False)
+        if "nav_logical_name" in raw_df.columns:
+            nav_columns = ["scenario_id", "nav_logical_name", "nav_instance_id", "nav_state", "nav_activation_attempted",
+                           "nav_selected_confirmed", "nav_destination_verified", "nav_transition", "termination_status"]
+            raw_df.loc[raw_df["nav_logical_name"].notna(), [c for c in nav_columns if c in raw_df.columns]].to_excel(
+                writer, sheet_name="global_nav", index=False)
+        if "termination_status" in raw_df.columns:
+            available = [column for column in traversal_columns if column in raw_df.columns]
+            raw_df[available].drop_duplicates(subset=["scenario_id"], keep="last").to_excel(
+                writer, sheet_name="traversal", index=False)
         _apply_result_crop_hyperlinks(writer, result_df)
         _apply_result_debug_log_hyperlinks(writer, result_df)
         _apply_result_visual_enhancements(writer, result_df, with_images=with_images)

@@ -396,6 +396,15 @@ def test_save_excel_adds_result_crop_hyperlink(tmp_path):
             "visible_label": "Home",
             "merged_announcement": "Home updated",
             "move_result": "moved",
+            "command_ack_status": "FAIL",
+            "command_ack_result": "failed_single_target",
+            "focus_transition_status": "CONFIRMED_MOVED",
+            "actual_focus_before_id": "focus-a",
+            "actual_focus_instance_id": "focus-b",
+            "focus_reconciliation_confidence": "EXACT",
+            "focus_reconciliation_candidate_in_expected_population": True,
+            "visit_record_status": "RECORDED",
+            "progress_status": "PROGRESS",
             "focus_view_id": "id/home",
             "focus_bounds": "[0,0][10,10]",
             "fallback_used": False,
@@ -425,6 +434,12 @@ def test_save_excel_adds_result_crop_hyperlink(tmp_path):
     assert crop_cell.value == crop_file.name
     assert crop_cell.hyperlink is not None
     assert crop_cell.hyperlink.target == str(crop_file.resolve())
+    result_values = dict(zip(headers, result_row))
+    assert result_values["command_ack_status"] == "FAIL"
+    assert result_values["command_ack_result"] == "failed_single_target"
+    assert result_values["focus_transition_status"] == "CONFIRMED_MOVED"
+    assert result_values["visit_record_status"] == "RECORDED"
+    assert result_values["progress_status"] == "PROGRESS"
 
 
 def test_save_excel_writes_semantic_value_coverage_summary(tmp_path):

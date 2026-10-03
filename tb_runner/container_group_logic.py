@@ -4,11 +4,11 @@ import re
 from typing import Any, Callable
 
 from tb_runner.utils import parse_bounds_str
+from tb_runner.traversal_reliability import instance_id
 
 
 def _build_candidate_object_signature(*, rid: str, bounds: str, label: str) -> str:
-    normalized_label = re.sub(r"\s+", " ", str(label or "").strip()).lower()
-    return "||".join([str(rid or "").strip().lower(), str(bounds or "").strip(), normalized_label])
+    return instance_id(dict(view_id=rid, bounds=bounds, label=label))
 
 
 def _candidate_object_signature(candidate: dict[str, Any]) -> str:
@@ -32,8 +32,10 @@ def _normalize_logical_text(value: str) -> str:
 def _candidate_cluster_logical_signature(candidate: dict[str, Any]) -> str:
     cluster_rid = str(candidate.get("cluster_rid", "") or candidate.get("rid", "") or "").strip().lower()
     label = str(candidate.get("cluster_label", "") or candidate.get("label", "") or "").strip()
-    logical_label = _normalize_logical_text(label)
-    return "||".join([cluster_rid or "none", logical_label or "none"])
+    if not cluster_rid and not label:
+        return "none||none"
+    return instance_id(dict(view_id=cluster_rid, label=_normalize_logical_text(label),
+                            bounds=candidate.get("cluster_bounds") or candidate.get("bounds", "")))
 
 
 def _candidate_container_group_visual_order_key(candidate: dict[str, Any]) -> tuple[int, int]:

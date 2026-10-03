@@ -19,8 +19,12 @@ from tb_runner.constants import (
     MAIN_STEP_WAIT_SECONDS,
 )
 from tb_runner.core_preflight import ensure_smartthings_foreground
-from tb_runner.diagnostics import classify_step_result, detect_step_mismatch, normalize_move_result, should_stop
+from tb_runner.diagnostics import classify_command_ack, classify_step_result, detect_step_mismatch, normalize_move_result, should_stop
 from tb_runner.diagnostics import is_global_nav_row
+from tb_runner import scroll_reliability
+from tb_runner.traversal_reliability import (
+    TraversalMetrics, focus_instance, identity_collisions, instance_id, normalized_bounds, termination_status,
+)
 from tb_runner.excel_report import save_excel
 from tb_runner.image_utils import maybe_capture_focus_crop
 from tb_runner.label_matcher import (
@@ -59,6 +63,7 @@ from tb_runner import crash_recovery
 from tb_runner import coverage_probe_engine
 from tb_runner import device_tab_logic
 from tb_runner import focus_realign_logic
+from tb_runner import focus_reconciliation
 from tb_runner import local_tab_logic
 from tb_runner import scroll_exhaustion_logic
 from tb_runner.traversal_evidence_gate import (
@@ -229,6 +234,192 @@ def _resolve_traversal_evidence_decision(
         f"representative_only={str(visit.representative_only).lower()} reason='{progress.reason}'"
     )
     return progress, visit
+
+
+def _emit_move_outcome(client: Any, row: dict[str, Any], result: dict[str, Any], ack: dict[str, str]) -> None:
+    scenario_id = str(row.get("scenario_id", "") or "").strip()
+    movement_payload = {
+        "scenario_id": scenario_id,
+        "step_index": row.get("step_index"),
+        "selected": result.get("selection_candidate_instance_id", ""),
+        "command_ack_status": ack["status"],
+        "command_ack_result": ack["result"],
+        "command_ack_normalized_result": ack["normalized_result"],
+        "actual_focus_before_id": result.get("actual_focus_before_id", ""),
+        "actual_focus_instance_id": result.get("actual_focus_instance_id", ""),
+        "focus_transition_status": result.get("focus_transition_status", "UNAVAILABLE"),
+        "mapping_confidence": result.get("mapping_confidence", "UNMATCHED"),
+        "candidate_in_expected_population": bool(result.get("candidate_in_expected_population", False)),
+        "visit_record_status": result.get("visit_record_status", "UNAVAILABLE"),
+        "progress_status": result.get("progress_status", "UNAVAILABLE"),
+        "progress": result.get("progress_status") == "PROGRESS",
+    }
+    row["move_outcome_evidence"] = json.dumps(
+        movement_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    log(
+        f"[MOVE_OUTCOME] scenario='{scenario_id}' step={row.get('step_index')} "
+        f"ack={ack['status']}:{ack['result']} before='{movement_payload['actual_focus_before_id']}' "
+        f"after='{movement_payload['actual_focus_instance_id']}' transition={movement_payload['focus_transition_status']} "
+        f"visit={movement_payload['visit_record_status']} progress={str(movement_payload['progress']).lower()}"
+    )
+    _emit_row_evidence(client, row, "MOVE_OUTCOME", phase="movement_outcome", payload=movement_payload)
+
+
+def _apply_focus_reconciliation(
+    *,
+    client: Any,
+    dev: str = "",
+    row: dict[str, Any],
+    previous_row: dict[str, Any] | None,
+    state: "MainLoopState",
+    progress_decision: ProgressDecision | None,
+    visit_decision: VisitDecision | None,
+) -> dict[str, Any] | None:
+    """Record command ACK and actual focus outcome as separate traversal facts."""
+    if str(row.get("scenario_type", "content") or "content").strip().lower() == "global_nav":
+        return None
+    scenario_id = str(row.get("scenario_id", "") or "").strip()
+    actual_node = row.get("actual_focus_node")
+    if not isinstance(actual_node, dict):
+        actual_node = row.get("focus_node")
+    if isinstance(actual_node, str):
+        try:
+            actual_node = json.loads(actual_node)
+        except (TypeError, ValueError):
+            actual_node = {}
+    actual_node = actual_node if isinstance(actual_node, dict) else {}
+    has_strict_focus_payload = (
+        row.get("actual_focus_accessibility_focused") is True
+        or actual_node.get("accessibilityFocused") is True
+        or str(row.get("row_source", "") or "") == "representative"
+    )
+    if not has_strict_focus_payload:
+        ack = classify_command_ack(row)
+        row.update({
+            "command_ack_status": ack["status"],
+            "command_ack_result": ack["result"],
+            "command_ack_normalized_result": ack["normalized_result"],
+            "command_ack_raw_result": ack["raw_result"],
+        })
+        metrics = getattr(state, "reliability_metrics", None)
+        tracking = VisitTracker.resolve(
+            progress=progress_decision,
+            visit=visit_decision,
+            legacy_move_result=normalize_move_result(row) or str(row.get("move_result", "") or "").strip().lower(),
+        )
+        result = focus_reconciliation.reconcile_focus(
+            row=row,
+            previous_row=previous_row,
+            scenario_id=scenario_id,
+            inventory=[],
+            expected_candidates=[],
+            physical_visit_confirmed=tracking.physical_visited,
+            planning_consumed=tracking.planning_consumed,
+            physical_progress_confirmed=(
+                bool(progress_decision.physical_progress)
+                if progress_decision is not None and progress_decision.gate_applied else None
+            ),
+            visited_instance_ids_before=set(getattr(metrics, "visited", set()) or set()),
+            consumed_cluster_signatures=set(getattr(state, "consumed_cluster_signatures", set()) or set()),
+        )
+        focus_reconciliation.apply_reconciliation_to_row(row, result)
+        row["focus_reconciliation_evidence"] = json.dumps(
+            {key: value for key, value in result.items() if key not in {"mapped_candidate", "actual_item"}},
+            ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        )
+        _emit_move_outcome(client, row, result, ack)
+        return result
+
+    nodes = row.get("dump_tree_nodes")
+    nodes = nodes if isinstance(nodes, list) else []
+    inventory_source = "step_dump" if nodes else "focusable_inventory_only"
+    if not nodes:
+        dump_tree_fn = getattr(client, "dump_tree", None)
+        if callable(dump_tree_fn):
+            try:
+                fresh_nodes = dump_tree_fn(dev=dev)
+                if isinstance(fresh_nodes, list):
+                    nodes = fresh_nodes
+                    inventory_source = "current_viewport_dump"
+            except Exception as exc:
+                log(f"[FOCUS_RECONCILIATION][viewport_fallback] reason='{type(exc).__name__}'")
+    observed_inventory = getattr(client, "_focusable_inventory", [])
+    observed_inventory = observed_inventory if isinstance(observed_inventory, list) else []
+    content_candidates: list[dict[str, Any]] = []
+    bottom_candidates: list[dict[str, Any]] = []
+    if nodes:
+        try:
+            content_candidates, bottom_candidates, _meta = _collect_step_candidate_priority_groups(
+                nodes,
+                scenario_id=scenario_id,
+                # Reconciliation inventory describes the full current candidate
+                # population, including objects already consumed for planning.
+                consumed_cluster_signatures=set(),
+                consumed_cluster_logical_signatures=set(),
+            )
+        except Exception as exc:
+            log(f"[FOCUS_RECONCILIATION][inventory_fallback] reason='{type(exc).__name__}'")
+
+    tracking = VisitTracker.resolve(
+        progress=progress_decision,
+        visit=visit_decision,
+        legacy_move_result=normalize_move_result(row) or str(row.get("move_result", "") or "").strip().lower(),
+    )
+    metrics = getattr(state, "reliability_metrics", None)
+    ack = classify_command_ack(row)
+    result = focus_reconciliation.reconcile_focus(
+        row=row,
+        previous_row=previous_row,
+        scenario_id=scenario_id,
+        inventory=[*content_candidates, *bottom_candidates, *nodes, *observed_inventory],
+        expected_candidates=content_candidates,
+        physical_visit_confirmed=tracking.physical_visited,
+        planning_consumed=tracking.planning_consumed,
+        physical_progress_confirmed=(
+            bool(progress_decision.physical_progress)
+            if progress_decision is not None and progress_decision.gate_applied else None
+        ),
+        visited_instance_ids_before=set(getattr(metrics, "visited", set()) or set()),
+        consumed_cluster_signatures=set(getattr(state, "consumed_cluster_signatures", set()) or set()),
+    )
+    row.update({
+        "command_ack_status": ack["status"],
+        "command_ack_result": ack["result"],
+        "command_ack_normalized_result": ack["normalized_result"],
+        "command_ack_raw_result": ack["raw_result"],
+    })
+    result["inventory_source"] = inventory_source
+    focus_reconciliation.apply_reconciliation_to_row(row, result)
+    observe_reconciliation = getattr(metrics, "observe_reconciliation", None)
+    if callable(observe_reconciliation):
+        observe_reconciliation(row)
+    evidence_payload = {
+        key: value
+        for key, value in result.items()
+        if key not in {"mapped_candidate", "actual_item"}
+    }
+    payload = json.dumps(evidence_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    log(
+        f"[FOCUS_RECONCILIATION] scenario='{scenario_id}' step={row.get('step_index')} "
+        f"selected='{result['selection_candidate_instance_id']}' actual='{result['actual_focus_instance_id']}' "
+        f"mapping='{result['mapping_confidence']}' classification='{result['classification']}' "
+        f"visited='{result['reconciled_visit_instance_id']}' "
+        f"selected_consumed={str(result['selected_candidate_consumed']).lower()} "
+        f"planning_consumed={str(result['planning_consumed']).lower()} "
+        f"inventory='{inventory_source}' "
+        f"cases='{','.join(result['cases']) or 'none'}'"
+    )
+    _emit_row_evidence(
+        client,
+        row,
+        "FOCUS_RECONCILIATION",
+        phase="focus_reconciliation",
+        payload=evidence_payload,
+    )
+    row["focus_reconciliation_evidence"] = payload
+    _emit_move_outcome(client, row, result, ack)
+    return result
 
 
 def _emit_row_evidence(
@@ -674,6 +865,7 @@ class MainLoopState:
     recovery_attempted_candidate_ids: set[str] = field(default_factory=set)
     recovery_hard_failed_candidate_ids: set[str] = field(default_factory=set)
     recovery_visited_candidate_ids: set[str] = field(default_factory=set)
+    reliability_metrics: TraversalMetrics = field(default_factory=TraversalMetrics)
 
 
 @dataclass
@@ -1170,7 +1362,15 @@ def _capture_focusable_inventory_snapshot(
 
     before_count = len(getattr(client, "_focusable_inventory", []) or [])
     try:
-        nodes = dump_tree_fn(dev=dev)
+        nodes = scroll_reliability.dump_with_capabilities(client, dev)
+        if step_index == "post_anchor_snapshot":
+            initial = scroll_reliability.capture(client, dev, str(tab_cfg.get("scenario_id", "")), nodes=nodes)
+            observations = dict(getattr(client, "_initial_scroll_observations", {}))
+            observations[str(tab_cfg.get("scenario_id", ""))] = initial
+            client._initial_scroll_observations = observations
+            scroll_reliability.emit(client, "SCROLL_CAPABILITY", initial)
+            log(f"[SCROLL_CAPABILITY] scenario='{tab_cfg.get('scenario_id', '')}' source={initial['capability']['source']} "
+                f"status={initial['capability']['status']} visible_instances={initial['viewport']['count']}")
     except Exception as exc:
         log(
             f"[AUDIT_V7][focusable_snapshot] scenario='{scenario_id}' "
@@ -1479,20 +1679,11 @@ def _focusable_coverage_row_bounds(row: dict[str, Any]) -> set[str]:
 
 
 def _normalize_focusable_bounds_value(value: Any) -> str:
-    bounds = parse_bounds_str(str(value or "").strip())
-    if not bounds:
-        return _normalize_focusable_inventory_value(value)
-    return ",".join(str(part) for part in bounds)
+    return normalized_bounds(value) or _normalize_focusable_inventory_value(value)
 
 
 def _canonical_focusable_id(item: dict[str, Any]) -> str:
-    scenario_id = _normalize_focusable_inventory_value(item.get("scenario_id", ""))
-    view_id = _normalize_focusable_inventory_value(item.get("view_id", ""))
-    if view_id:
-        return "|".join([scenario_id, "view_id", view_id])
-    label = _normalize_focusable_inventory_value(item.get("label", ""))
-    bounds = _normalize_focusable_bounds_value(item.get("bounds", ""))
-    return "|".join([scenario_id, "label_bounds", label, bounds])
+    return instance_id(item)
 
 
 def _bounds_related(left_raw: Any, right_raw: Any) -> bool:
@@ -1540,12 +1731,23 @@ def _focusable_coverage_candidate_rows(
     semantic_matches: list[dict[str, Any]] = []
     bounds_matches: list[dict[str, Any]] = []
     for row in scoped_rows:
+        # A representative is a plan, not a focus observation. Select all fields
+        # from the actual payload together so a planned sibling cannot match.
+        observed = focus_instance(row)
+        if observed:
+            row = dict(row, focus_view_id=observed["view_id"], focus_bounds=observed["bounds"],
+                       visible_label=observed["label"], merged_announcement=observed["label"])
+        elif str(row.get("row_source", "")) in {"representative", "representative_fallback"} or row.get("physical_visited") is False:
+            continue
         row_view_ids = _focusable_coverage_row_view_ids(row)
         row_labels = _focusable_coverage_row_labels(row)
         row_bounds = _focusable_coverage_row_bounds(row)
-        if item_view_id and item_view_id in row_view_ids:
+        spatial_match = not item_bounds or not row_bounds or item_bounds in row_bounds
+        if item.get("_require_instance_bounds") and not row_bounds:
+            spatial_match = False
+        if item_view_id and item_view_id in row_view_ids and spatial_match:
             view_id_matches.append(row)
-        if item_label and item_label in row_labels:
+        if item_label and item_label in row_labels and (spatial_match or (item_view_id and row_view_ids and item_view_id not in row_view_ids)):
             label_matches.append(row)
         if (
             item_taxonomy_reason == "percentage_value"
@@ -1561,7 +1763,8 @@ def _focusable_coverage_candidate_rows(
             linked_compound_matches.append(row)
         if _focusable_coverage_representative_compound_match(item, row):
             representative_compound_matches.append(row)
-        if item_semantic_card_id and item_semantic_card_id == _normalize_focusable_inventory_value(row.get("semantic_card_id", "")):
+        if (item_semantic_card_id and item_semantic_card_id == _normalize_focusable_inventory_value(row.get("semantic_card_id", ""))
+                and _bounds_related(item.get("bounds", ""), row.get("semantic_card_bounds", ""))):
             semantic_matches.append(row)
         if item_bounds and (item_bounds in row_bounds or any(_bounds_related(item.get("bounds", ""), row_bounds_raw) for row_bounds_raw in row_bounds)):
             bounds_matches.append(row)
@@ -1720,11 +1923,16 @@ def _build_focusable_coverage_payload(
     records: list[dict[str, Any]] = []
     summary_by_scenario: dict[str, dict[str, Any]] = {}
     canonical_items = _canonicalize_focusable_inventory(inventory if isinstance(inventory, list) else [])
+    rid_instances: dict[tuple[str, str], set[str]] = {}
+    observed_ids = {instance_id(observed) for row in rows if (observed := focus_instance(row))}
+    for candidate in canonical_items:
+        rid_instances.setdefault((candidate.get("scenario_id", ""), candidate.get("view_id", "")), set()).add(candidate["canonical_id"])
     for item in canonical_items:
         if not isinstance(item, dict):
             continue
+        scoped_item = dict(item, raw_records=[dict(raw, _require_instance_bounds=len(rid_instances[(item.get("scenario_id", ""), item.get("view_id", ""))]) > 1) for raw in item["raw_records"]])
         match = _focusable_coverage_canonical_match(
-            item,
+            scoped_item,
             rows if isinstance(rows, list) else [],
             evidence_runtime=evidence_runtime,
             evidence_transaction_for_step=evidence_transaction_for_step,
@@ -1735,6 +1943,11 @@ def _build_focusable_coverage_payload(
         taxonomy, taxonomy_reason = _focusable_taxonomy(item)
         record = {
             "canonical_id": str(item.get("canonical_id", "") or ""),
+            "instance_id": str(item.get("canonical_id", "") or ""),
+            "visit_status": ("VISITED" if item["canonical_id"] in observed_ids else
+                             "SEMANTICALLY_COVERED" if status == "COVERED" and match.get("reason") in {
+                                 "percentage_compound_label", "linked_compound_announcement",
+                                 "representative_compound_parent", "semantic_card_id"} else "UNVISITED"),
             "scenario_id": scenario_id,
             "tab_name": str(item.get("tab_name", "") or "").strip(),
             "label": str(item.get("label", "") or "").strip(),
@@ -1805,12 +2018,25 @@ def _build_focusable_coverage_payload(
         expected = int(summary.get("expected_count", 0) or 0)
         covered = int(summary.get("covered_count", 0) or 0)
         summary["coverage_rate"] = round((covered / expected) * 100.0, 1) if expected else 0.0
+        scenario_records = [record for record in records if record["scenario_id"] == summary["scenario_id"]]
+        summary["unique_candidate_instances"] = len(scenario_records)
+        summary["unique_visited_instances"] = sum(record["visit_status"] == "VISITED" for record in scenario_records)
+        summary["semantic_covered_instances"] = sum(record["visit_status"] == "SEMANTICALLY_COVERED" for record in scenario_records)
+        summary["coverage_complete"] = False  # Audit inventory is not a reachability oracle.
+        scenario_rows = [row for row in rows if row.get("scenario_id") == summary["scenario_id"]]
+        if scenario_rows:
+            for key in ("termination_status", "termination_reason", "termination_step", "attempted_steps", "successful_moves", "failed_moves", "recorded_result_rows",
+                        "remaining_unseen_count", "scroll_exhausted", "viewport_stable", "content_terminal_contract"):
+                if key in scenario_rows[-1]:
+                    summary[key] = scenario_rows[-1][key]
 
     return {
         "schema_version": "audit-v7-focusable-coverage-v1",
         "output_path": str(output_path),
         "summary": list(summary_by_scenario.values()),
         "records": records,
+        "identity_schema_version": "instance-v1",
+        "identity_collisions": identity_collisions(inventory),
     }
 
 
@@ -1927,6 +2153,10 @@ def _save_focusable_coverage(client: Any, output_path: str, rows: list[dict[str,
         evidence_runtime=getattr(client, "evidence_runtime", None),
         evidence_transaction_for_step=getattr(client, "_evidence_transaction_for_step", None),
     )
+    payload["completeness_reconciliation"] = list(getattr(client, "_completeness_scenarios", {}).values())
+    # The legacy coverage summary counts persisted matching rows. The runner
+    # cohort also includes observations made before row suppression/rewrite.
+    payload["traversal_summary"] = list(getattr(client, "_traversal_summaries", {}).values())
     try:
         target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as exc:
@@ -12322,6 +12552,22 @@ def _apply_cta_node_to_row(
     selected_class: str,
     normalized_label: str,
 ) -> dict[str, Any]:
+    observed_node = row.get("focus_node")
+    if isinstance(observed_node, dict):
+        if row.get("actual_focus_accessibility_focused") is None:
+            row["actual_focus_accessibility_focused"] = observed_node.get("accessibilityFocused")
+        if row.get("actual_focus_input_focused") is None:
+            row["actual_focus_input_focused"] = observed_node.get("focused")
+        row.setdefault("actual_focus_class_name", observed_node.get("className", "") or observed_node.get("class", ""))
+        row.setdefault("actual_focus_role", observed_node.get("role", "") or observed_node.get("accessibilityRole", ""))
+        row.setdefault(
+            "actual_focus_container_id",
+            observed_node.get("containerId", "") or observed_node.get("ancestorId", "") or observed_node.get("parentResourceId", ""),
+        )
+        row.setdefault(
+            "actual_focus_node_path",
+            observed_node.get("stableNodePath", "") or observed_node.get("nodePath", "") or observed_node.get("path", ""),
+        )
     if not str(row.get("actual_focus_visible", "") or "").strip():
         row["actual_focus_visible"] = str(row.get("visible_label", "") or "").strip()
     if not str(row.get("actual_focus_speech", "") or "").strip():
@@ -12395,6 +12641,8 @@ def _capture_audit_v4_xml_for_row(
         phase_name = "entry"
     elif local_tab_transition_applied:
         phase_name = "local_tab_transition"
+    elif isinstance(row.get("scroll_transition"), dict):
+        phase_name = "after_scroll"
     elif bool(row.get("scroll_fallback_resumed_content", False)):
         phase_name = "after_scroll"
     elif bool(row.get("viewport_exhausted_eval_result", False)) or stop:
@@ -13268,11 +13516,11 @@ def _semantic_card_consumed_identity(item: dict[str, Any]) -> str:
         parts = semantic_id.split("||")
         if len(parts) >= 3:
             family = parts[0]
-            return "||".join([family, title or parts[-1] or "none"])
+            return instance_id(dict(view_id=family, label=title or parts[-1], bounds=item.get("semantic_card_bounds", "") or parts[-2]))
         if title:
-            return "||".join([semantic_id, title])
-        return semantic_id
-    return title
+            return instance_id(dict(view_id=semantic_id, label=title, bounds=item.get("semantic_card_bounds", "")))
+        return instance_id(dict(view_id=semantic_id, bounds=item.get("semantic_card_bounds", "")))
+    return instance_id(dict(label=title, bounds=item.get("semantic_card_bounds", ""))) if title else ""
 
 
 def _semantic_card_consumed_signature(item: dict[str, Any], state: Any) -> str:
@@ -13367,17 +13615,22 @@ def _record_recent_representative_signature(
         progress=progress_decision,
         visit=visit_decision,
         legacy_move_result=move_result,
+        focus_transition_status=str(row.get("focus_transition_status", "") or ""),
     )
     gate_applied = tracking.gate_applied
     planning_consumed = tracking.planning_consumed
     physical_visited = tracking.physical_visited
+    observation = focus_instance(row)
+    row["physical_visited"] = bool(physical_visited and observation)
+    if hasattr(state, "reliability_metrics") and row["physical_visited"]:
+        state.reliability_metrics.observe_focus(row)
     visited_row = row
-    if gate_applied and physical_visited:
+    if row["physical_visited"] and observation:
         visited_row = dict(row)
-        visited_row["visible_label"] = str(row.get("actual_focus_visible", "") or row.get("actual_focus_speech", "") or row.get("visible_label", "") or "")
-        visited_row["merged_announcement"] = str(row.get("actual_focus_speech", "") or row.get("actual_focus_visible", "") or row.get("merged_announcement", "") or "")
-        visited_row["focus_view_id"] = str(row.get("actual_focus_resource_id", "") or row.get("focus_view_id", "") or "")
-        visited_row["focus_bounds"] = str(row.get("actual_focus_bounds", "") or row.get("focus_bounds", "") or "")
+        visited_row["visible_label"] = observation["label"]
+        visited_row["merged_announcement"] = observation["label"]
+        visited_row["focus_view_id"] = observation["view_id"]
+        visited_row["focus_bounds"] = observation["bounds"]
         if str(row.get("row_source", "") or "").strip() == "representative":
             visited_row["focus_class_name"] = ""
     visited_logical_signature = _row_logical_signature(visited_row)
@@ -13400,15 +13653,16 @@ def _record_recent_representative_signature(
     if signature and planning_consumed:
         state.recent_representative_signatures.append(signature)
         state.consumed_representative_signatures.add(signature)
-    if physical_visited:
+    if row["physical_visited"]:
         if visited_logical_signature and visited_logical_signature != "none||none||none":
             visited_logical_signatures.add(visited_logical_signature)
             state.visited_logical_signatures = visited_logical_signatures
-    if cluster_signature and planning_consumed:
+    cluster_consumed = planning_consumed and _semantic_card_role(row) not in {"title", "heading"}
+    if cluster_signature and cluster_consumed:
         consumed_clusters.add(cluster_signature)
         state.consumed_cluster_signatures = consumed_clusters
         log(f"[STEP][cluster_consumed] cluster='{_truncate_debug_text(cluster_signature, 120)}'")
-    if cluster_logical_signature and planning_consumed:
+    if cluster_logical_signature and cluster_consumed:
         consumed_cluster_logical.add(cluster_logical_signature)
         state.consumed_cluster_logical_signatures = consumed_cluster_logical
     semantic_consumed_signature = _semantic_card_consumed_signature(row, state)
@@ -13506,7 +13760,8 @@ def _candidate_logical_signature(candidate: dict[str, Any]) -> str:
     role_hint = str(candidate.get("cluster_role", "") or "").strip().lower()
     if not role_hint:
         role_hint = str(node.get("className", "") or node.get("class", "") or "").strip().lower().split(".")[-1]
-    return "||".join([logical_owner or "none", logical_label or "none", role_hint or "none"])
+    return instance_id(dict(view_id=rid, label=candidate.get("label", ""),
+                            bounds=candidate.get("bounds", "") or node.get("boundsInScreen", "")))
 
 
 def _candidate_cluster_logical_signature(candidate: dict[str, Any]) -> str:
@@ -13551,7 +13806,7 @@ def _row_logical_signature(row: dict[str, Any]) -> str:
     label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
     logical_label = _normalize_logical_text(label)
     class_hint = str(row.get("focus_class_name", "") or "").strip().lower().split(".")[-1]
-    return "||".join([rid or "none", logical_label or "none", class_hint or "none"])
+    return instance_id(dict(view_id=rid, label=label, bounds=row.get("focus_bounds", ""))) if rid or label else "none||none||none"
 
 
 def _row_is_low_value_leaf(row: dict[str, Any]) -> bool:
@@ -14547,12 +14802,9 @@ def _collect_step_candidate_priority_groups(
         cluster_signature = _build_candidate_cluster_signature_from_root(cluster_root)
         cluster_rid = str(cluster_root.get("viewIdResourceName", "") or cluster_root.get("resourceId", "") or "").strip()
         cluster_label = _extract_cta_node_label(cluster_root) or _node_label_blob(cluster_root) or cluster_rid or label
-        candidate_cluster_logical_signature = "||".join(
-            [
-                str(cluster_rid or resource_id or "").strip().lower() or "none",
-                _normalize_logical_text(cluster_label or label) or "none",
-            ]
-        )
+        candidate_cluster_logical_signature = _candidate_cluster_logical_signature(dict(
+            cluster_rid=cluster_rid or resource_id, cluster_label=cluster_label or label,
+            cluster_bounds=cluster_root.get("boundsInScreen", "") or cluster_root.get("bounds", "")))
         if (
             cluster_signature in consumed_cluster_signatures
             or candidate_cluster_logical_signature in consumed_cluster_logical_signatures
@@ -17194,7 +17446,18 @@ def _apply_stop_evaluation_phase_impl(
         stop_policy=tab_cfg.get("stop_policy", {}),
         scenario_cfg=tab_cfg,
     )
-    if progress_decision is not None and progress_decision.gate_applied:
+    focus_transition_status = str(row.get("focus_transition_status", "") or "").strip().upper()
+    if focus_transition_status in {"CONFIRMED_MOVED", "CONFIRMED_UNCHANGED", "AMBIGUOUS"}:
+        actual_progress = bool(
+            focus_transition_status == "CONFIRMED_MOVED"
+            and str(row.get("progress_status", "") or "").strip().upper() == "PROGRESS"
+        )
+        stop_kwargs["progress_override"] = {
+            "physical_progress": actual_progress,
+            "semantic_progress": actual_progress,
+            "source": "actual_accessibility_focus_transition",
+        }
+    elif progress_decision is not None and progress_decision.gate_applied:
         stop_kwargs["progress_override"] = progress_decision
     stop, state.fail_count, state.same_count, reason, state.prev_fingerprint, stop_details = should_stop_fn(**stop_kwargs)
     stop_eval_inputs = build_inputs_fn(stop_details=stop_details, row=row, tab_cfg=tab_cfg)
@@ -17437,6 +17700,118 @@ def _maybe_dismiss_runtime_popup(
     }
 
 
+def _initialize_content_terminal(client, dev, tab_cfg, state):
+    from tb_runner.content_terminal import ContentTerminal, enabled
+    if not enabled(tab_cfg):
+        return
+    scenario = str(tab_cfg.get("scenario_id", ""))
+    initial = getattr(client, "_initial_scroll_observations", {}).get(scenario)
+    if not isinstance(initial, dict):
+        return
+    from tb_runner.global_navigation import discover, expected_destinations, xml_nodes
+    scope_nodes = initial.get("nodes", [])
+    raw = ""
+    if callable(getattr(client, "_run", None)):
+        try:
+            client._run(["shell", "uiautomator", "dump", "/sdcard/phase0eb_scope.xml"], dev=dev, timeout=10)
+            raw = client._run(["shell", "cat", "/sdcard/phase0eb_scope.xml"], dev=dev, timeout=10)
+            if isinstance(raw, str) and "<hierarchy" in raw:
+                scope_nodes = xml_nodes(raw)
+        except Exception as exc:
+            log(f"[CONTENT_SCOPE] scenario='{scenario}' error='{type(exc).__name__}'")
+    destinations = discover(scope_nodes, tab_cfg)
+    expected = expected_destinations(tab_cfg)
+    tracker = ContentTerminal(scenario, nav_regions=[i["bounds"] for i in destinations],
+                              scope_verified=not expected or set(expected) <= {i["logical_name"] for i in destinations})
+    output_base = getattr(client, "_scroll_output_base_dir", "")
+    if output_base:
+        folder = Path(output_base) / scenario / "content_scope"
+        folder.mkdir(parents=True, exist_ok=True)
+        index = len(list(folder.glob("snapshot_*.json"))) + 1
+        path = folder / f"snapshot_{index:03d}.json"
+        path.write_text(json.dumps(dict(scenario_id=scenario, expected_destinations=expected,
+            nav_items=destinations, scope_verified=tracker.scope_verified,
+            source="raw_accessibility_xml" if isinstance(raw, str) and "<hierarchy" in raw else "helper_nodes"),
+            ensure_ascii=False, indent=2), encoding="utf-8")
+        tracker.scope_snapshot_path = str(path)
+        if isinstance(raw, str) and "<hierarchy" in raw:
+            path.with_suffix(".xml").write_text(raw, encoding="utf-8")
+    tracker.observe(initial, 0, focus_observations=state.reliability_metrics.focus_observations.values())
+    tracker.transition_count = sum(t.get("scenario_id") == scenario for t in getattr(client, "_scroll_transitions", []))
+    state.content_terminal = tracker
+    trackers = getattr(client, "_content_terminal_trackers", {})
+    trackers[scenario] = tracker
+    client._content_terminal_trackers = trackers
+
+
+def _apply_content_terminal_phase(client, dev, state, row, phase_ctx, step_idx, stop, reason, pending=False):
+    from tb_runner.content_terminal import failed_scroll_reason
+    tracker = getattr(state, "content_terminal", None)
+    if tracker is None:
+        return stop, reason
+    try:
+        observation = scroll_reliability.capture(client, dev, tracker.scenario_id,
+            step_index=step_idx, evidence="content_terminal_evaluation")
+        scoped = [i for i in _ensure_focusable_inventory(client, phase_ctx.output_path)
+                  if i.get("scenario_id") == tracker.scenario_id]
+        coverage = _build_focusable_coverage_payload(scoped, [*phase_ctx.all_rows, row], phase_ctx.output_path,
+            evidence_runtime=getattr(client, "evidence_runtime", None),
+            evidence_transaction_for_step=getattr(client, "_evidence_transaction_for_step", None))
+        semantic_ids = [r.get("canonical_id", "") for r in coverage["records"]
+                        if r.get("visit_status") == "SEMANTICALLY_COVERED"]
+        transitions = [t for t in getattr(client, "_scroll_transitions", []) if t.get("scenario_id") == tracker.scenario_id]
+        new_transition = transitions[-1] if len(transitions) > getattr(tracker, "transition_count", 0) else None
+        tracker.transition_count = len(transitions)
+        reconciliation_count = len(tracker.lifecycle.events)
+        evaluation = tracker.observe(observation, step_idx,
+            focus_observations=state.reliability_metrics.focus_observations.values(),
+            semantic_ids=semantic_ids, scroll=new_transition, pending=pending,
+            focus_sequence_progress=str(row.get("progress_status", "") or "").strip().upper() == "PROGRESS")
+        if new_transition and not new_transition.get("action_success"):
+            selected_reason = failed_scroll_reason(new_transition)
+        else:
+            selected_reason = tracker.decision()
+        runtime_error = bool(stop and reason and termination_status(reason) == "INCOMPLETE_ERROR")
+        if not runtime_error and not selected_reason and tracker.scroll_opportunity():
+            transition, after = scroll_reliability.verified_scroll(client, dev, tracker.scenario_id, step_idx,
+                before=observation, output_base_dir=phase_ctx.output_base_dir)
+            tracker.transition_count += 1
+            row["scroll_transition"] = transition
+            row["scroll_status"] = transition["status"]
+            row["scroll_new_instances"] = transition["new_count"]
+            row["dump_tree_nodes"] = after["nodes"]
+            evaluation = tracker.observe(after, step_idx,
+                focus_observations=state.reliability_metrics.focus_observations.values(),
+                semantic_ids=semantic_ids, scroll=transition,
+                focus_sequence_progress=str(row.get("progress_status", "") or "").strip().upper() == "PROGRESS")
+            selected_reason = tracker.decision() if transition["action_success"] else failed_scroll_reason(transition)
+        row.update(tracker.summary(selected_reason or "safety_limit", step_idx))
+        row["content_terminal_evidence"] = evaluation
+        for relation in tracker.lifecycle.events[reconciliation_count:]:
+            log("[INSTANCE_RECONCILIATION] " + json.dumps(relation, ensure_ascii=False))
+            scroll_reliability.emit(client,"INSTANCE_RECONCILIATION",dict(scenario_id=tracker.scenario_id,**relation))
+        scroll_reliability.emit(client, "CONTENT_TERMINAL_EVALUATION", evaluation)
+        log(f"[CONTENT_TERMINAL_EVAL] scenario='{tracker.scenario_id}' step={step_idx} "
+            f"visible={evaluation['visible_candidates']} visited={evaluation['visited_candidates']} "
+            f"semantic={evaluation['semantically_covered_candidates']} unseen={evaluation['unseen_candidates']} "
+            f"can_scroll_forward={evaluation['can_scroll_forward']} scroll_exhausted={evaluation['scroll_exhausted']} "
+            f"viewport_stable={evaluation['viewport_stable']} new_instances={evaluation['new_instances']} "
+            f"focus_sequence_progress={str(evaluation['focus_sequence_progress']).lower()} "
+            f"no_progress_steps={evaluation['no_progress_steps']} pending={pending} decision='{selected_reason or 'continue'}'")
+        # Runtime/entry/crash errors must not be converted into completion.
+        if stop and reason and termination_status(reason) == "INCOMPLETE_ERROR":
+            return True, reason
+        if stop and reason == "scroll_error":
+            return True, selected_reason or "content_error"
+        return bool(selected_reason), selected_reason
+    except Exception as exc:
+        row["content_terminal_error"] = f"{type(exc).__name__}: {exc}"
+        tracker.latest["observation_valid"] = False
+        tracker.latest["runtime_error"] = row["content_terminal_error"]
+        log(f"[CONTENT_TERMINAL_ERROR] scenario='{tracker.scenario_id}' step={step_idx} error='{exc}'")
+        return True, "content_error"
+
+
 def _main_loop_phase(
     client: A11yAdbClient,
     dev: str,
@@ -17448,8 +17823,11 @@ def _main_loop_phase(
     scenario_perf = phase_ctx.scenario_perf
     state = phase_ctx.state
     start_step_index = max(1, int(getattr(phase_ctx, "start_step_index", 1) or 1))
+    if not hasattr(state, "reliability_metrics"):
+        state.reliability_metrics = TraversalMetrics()
     state.local_tab_revisit_guard_state = LocalTabRevisitGuardState()
     for step_idx in range(start_step_index, tab_cfg["max_steps"] + 1):
+        state.reliability_metrics.begin_step(step_idx)
         revisit_guard_state = _local_tab_revisit_guard_state(state)
         revisit_guard_state.current_representative_signatures = set()
         revisit_guard_state.representative_observation_available = False
@@ -17470,6 +17848,7 @@ def _main_loop_phase(
             profiler.record("focus_in_bounds", float(row.get("move_elapsed_sec", 0.0) or 0.0) * 1000.0)
             profiler.record("verification_poll", float(row.get("get_focus_elapsed_sec", 0.0) or 0.0) * 1000.0)
         step_elapsed = float(row.get("step_elapsed_sec", 0.0) or 0.0)
+        state.reliability_metrics.observe_move(row)
 
         _apply_scroll_ready_record_phase(
             row=row,
@@ -17636,6 +18015,16 @@ def _main_loop_phase(
                 client=client,
                 row=row,
                 state=state,
+            )
+        if str(tab_cfg.get("scenario_type", "content") or "content").strip().lower() != "global_nav":
+            _apply_focus_reconciliation(
+                client=client,
+                dev=dev,
+                row=row,
+                previous_row=state.previous_step_row,
+                state=state,
+                progress_decision=progress_decision,
+                visit_decision=visit_decision,
             )
         mismatch_reasons, low_confidence_reasons = _apply_row_quality_phase(
             row=row,
@@ -17895,6 +18284,12 @@ def _main_loop_phase(
             step_idx=step_idx,
             scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
         )
+        scroll_reason = str(row.get("scroll_termination_reason", "") or "")
+        if scroll_reason:
+            stop, reason = True, scroll_reason
+        elif (row.get("viewport_exhausted_eval_result") is True and row.get("scroll_capability") == "SCROLL_NOT_CAPABLE"
+              and row.get("local_tab_block_reason") == "no_unvisited_local_tab"):
+            stop, reason = True, "scroll_exhausted"
         recovery_started = time.perf_counter()
         with measure_runtime("recovery_executor"):
             recovery_outcome = TRAVERSAL_COORDINATOR.recover(
@@ -18081,6 +18476,12 @@ def _main_loop_phase(
                 f"reason='{boundary_reason}' action='stop'"
             )
 
+        stop, reason = _apply_content_terminal_phase(
+            client, dev, state, row, phase_ctx, step_idx, stop, reason,
+            pending=bool(local_tab_transition_applied or row.get("scroll_fallback_resumed_content")
+                         or (row.get("cta_focus_align_requested") and not row.get("cta_focus_align_success"))),
+        )
+
         _annotate_food_onboarding_complete(
             client,
             dev,
@@ -18229,11 +18630,19 @@ def _persist_phase(phase_ctx: CollectionPhaseContext) -> None:
     tab_cfg = phase_ctx.tab_cfg
     state = phase_ctx.state
     scenario_perf = phase_ctx.scenario_perf
-    if not state.stop_triggered and rows:
-        state.stop_step = int(rows[-1].get("step_index", -1) or -1)
+    if not state.stop_triggered:
+        state.stop_step = state.reliability_metrics.terminal_step
         state.stop_reason = "safety_limit"
-        rows[-1]["stop_triggered"] = False
-        rows[-1]["stop_step"] = state.stop_step
+        if rows:
+            rows[-1]["stop_triggered"] = False
+            rows[-1]["stop_step"] = state.stop_step
+    summary = state.reliability_metrics.summary(rows, state.stop_reason)
+    if getattr(state, "content_terminal", None) is not None:
+        summary.update(state.content_terminal.summary(state.stop_reason, state.stop_step))
+    for row in rows:
+        row.update(summary)
+    if scenario_perf is not None:
+        scenario_perf.traversal_summary = summary
     log(
         f"[STOP][summary] scenario='{tab_cfg.get('scenario_id', '')}' "
         f"stop_triggered={str(state.stop_triggered).lower()} stop_step={state.stop_step} "
@@ -18372,7 +18781,7 @@ def _build_main_loop_state_from_anchor(
         stall_escape_attempted=False,
         recent_representative_signatures=deque([object_signature] if object_signature else [], maxlen=_RECENT_DUPLICATE_WINDOW),
         consumed_representative_signatures=set([object_signature] if object_signature else []),
-        visited_logical_signatures=set([logical_signature] if logical_signature != "none||none||none" else []),
+        visited_logical_signatures=set([logical_signature] if logical_signature != "none||none||none" and focus_instance(anchor_row) else []),
         consumed_cluster_logical_signatures=set(),
         consumed_cluster_signatures=set([cluster_signature]) if cluster_signature else set(),
         consumed_semantic_card_signatures=set(),
@@ -18890,7 +19299,7 @@ def _run_start_pipeline(
     return result
 
 
-def _collect_tab_rows_impl(
+def _collect_tab_rows_inner(
     client: A11yAdbClient,
     dev: str,
     tab_cfg: dict,
@@ -19028,6 +19437,7 @@ def _collect_tab_rows_impl(
 
     anchor_row = start_result.start_row
     anchor_row = _annotate_report_row_context(anchor_row, tab_cfg)
+    anchor_row["physical_visited"] = bool(focus_instance(anchor_row))
     _register_focusable_inventory_from_row(
         client,
         output_path=output_path,
@@ -19048,6 +19458,8 @@ def _collect_tab_rows_impl(
         anchor_repeat_count=start_result.anchor_repeat_count,
         step_index=0,
     )
+    state.reliability_metrics = client._active_traversal_metrics
+    state.reliability_metrics.observe_focus(anchor_row)
     state.prev_fingerprint = start_result.prev_fingerprint
     state.recent_fingerprint_history = start_result.recent_fingerprint_history
     state.recent_semantic_fingerprint_history = start_result.recent_semantic_fingerprint_history
@@ -19062,6 +19474,7 @@ def _collect_tab_rows_impl(
     )
     _save_focusable_inventory(client, output_path)
     _save_focusable_coverage(client, output_path, all_rows)
+    _initialize_content_terminal(client, dev, tab_cfg, state)
     phase_ctx = CollectionPhaseContext(
         tab_cfg=tab_cfg,
         rows=rows,
@@ -19103,6 +19516,9 @@ def _collect_tab_rows_impl(
                 phase="scenario_end",
                 payload={
                     "reason": "TRAVERSAL_STOPPED" if state.stop_reason else "TRAVERSAL_COMPLETED",
+                    **state.reliability_metrics.summary(rows, state.stop_reason),
+                    **(state.content_terminal.summary(state.stop_reason, state.stop_step)
+                       if getattr(state, "content_terminal", None) is not None else {}),
                     "legacy_stop_reason": str(state.stop_reason or ""),
                     "main_steps_completed": int(main_steps_completed),
                     "traversal_started": True,
@@ -19112,6 +19528,150 @@ def _collect_tab_rows_impl(
             pass
 
     return rows
+
+
+def _collect_tab_rows_impl(
+    client: A11yAdbClient,
+    dev: str,
+    tab_cfg: dict,
+    all_rows: list[dict],
+    output_path: str,
+    output_base_dir: str,
+    scenario_perf: ScenarioPerfStats | None = None,
+    checkpoint_save_every: int = CHECKPOINT_SAVE_EVERY_STEPS,
+) -> list[dict]:
+    """Finalize additive contracts on normal, early-return and exception paths."""
+    metrics = TraversalMetrics()
+    client._active_traversal_metrics = metrics
+    client._scroll_output_base_dir = output_base_dir
+    start_index = len(all_rows)
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    reason = "runtime_error"
+    client.last_main_traversal_summary = {}
+    getattr(client, "_content_terminal_trackers", {}).pop(scenario_id, None)
+    getattr(client, "_initial_scroll_observations", {}).pop(scenario_id, None)
+    snapshot_keys = getattr(client, "_focusable_inventory_snapshot_keys", set())
+    client._focusable_inventory_snapshot_keys = {key for key in snapshot_keys
+        if not key.startswith(str(output_path) + "|" + scenario_id + "|")}
+    history = getattr(client, "_completeness_observations", {})
+    history[scenario_id] = []
+    client._completeness_observations = history
+    try:
+        collector = _collect_tab_rows_inner
+        if str(tab_cfg.get("scenario_type", "content")).lower() == "global_nav":
+            from tb_runner.global_navigation import collect as collect_global_navigation
+            collector = collect_global_navigation
+        result = collector(
+            client, dev, tab_cfg, all_rows, output_path, output_base_dir,
+            scenario_perf=scenario_perf, **({"checkpoint_save_every": checkpoint_save_every} if collector is _collect_tab_rows_inner else {}),
+        )
+        reason = str(getattr(client, "last_main_traversal_summary", {}).get("stop_reason", "") or "")
+        if not reason:
+            reason = str(result[-1].get("stop_reason", "") or "aborted_before_collection") if result else "aborted_before_collection"
+        return result
+    finally:
+        rows = all_rows[start_index:]
+        summary = metrics.summary(rows, reason)
+        tracker = getattr(client, "_content_terminal_trackers", {}).get(scenario_id)
+        from tb_runner.content_terminal import ContentTerminal, enabled as content_terminal_enabled
+        if tracker is None and content_terminal_enabled(tab_cfg):
+            # An entry/dump failure is an unobserved population, not zero unseen.
+            tracker = ContentTerminal(scenario_id, scope_verified=False)
+            tracker.observe(dict(nodes=[], capability={}, viewport={"valid": False}), metrics.terminal_step)
+            for key in ("visible_candidates", "visited_candidates", "semantically_covered_candidates",
+                        "unseen_candidates", "excluded_candidates", "remaining_unseen_count", "new_instances"):
+                tracker.latest[key] = None
+            tracker.history[-1] = dict(tracker.latest)
+            if summary["termination_status"] == "COMPLETED":
+                reason = "content_error"
+                summary = metrics.summary(rows, reason)
+        if tracker is not None:
+            summary.update(tracker.summary(reason, metrics.terminal_step))
+        inventory = _ensure_focusable_inventory(client, output_path)
+        scoped_inventory = [item for item in inventory if item.get("scenario_id") == scenario_id]
+        summary["unique_candidate_instances"] = len(_canonicalize_focusable_inventory(scoped_inventory))
+        coverage = _build_focusable_coverage_payload(scoped_inventory, rows, output_path,
+            evidence_runtime=getattr(client, "evidence_runtime", None),
+            evidence_transaction_for_step=getattr(client, "_evidence_transaction_for_step", None))
+        summary["semantic_covered_instances"] = sum(record["visit_status"] == "SEMANTICALLY_COVERED" for record in coverage["records"])
+        summary["scenario_id"] = scenario_id
+        if str(tab_cfg.get("scenario_type", "content")).lower() == "global_nav":
+            nav_summary = getattr(client, "last_main_traversal_summary", {})
+            summary.update({key: value for key, value in nav_summary.items() if key.startswith("nav_") or key in {
+                "destination_verification_failures", "candidate_policy", "termination_status"}})
+        transitions = [item for item in getattr(client, "_scroll_transitions", []) if item.get("scenario_id") == scenario_id]
+        initial = getattr(client, "_initial_scroll_observations", {}).get(scenario_id, {})
+        summary.update(scroll_attempts=len(transitions), scroll_moved=sum(t["status"] == "SCROLL_MOVED" for t in transitions),
+                       scroll_new_instances=len({key for t in transitions for key in t.get("newly_observed", t["new"])}),
+                       initial_visible_instances=initial.get("viewport", {}).get("count"),
+                       initial_scroll_capability=initial.get("capability", {}).get("status", "SCROLL_CAPABILITY_UNKNOWN"),
+                       initial_scroll_source=initial.get("capability", {}).get("source", "unknown"))
+        from tb_runner.completeness import reconcile
+        completeness = reconcile(scenario_id, scoped_inventory, rows,
+            observations=getattr(client, "_completeness_observations", {}).get(scenario_id, []),
+            coverage_records=coverage["records"], termination=summary["termination_status"],
+            focus_observations=list(metrics.focus_observations.values()),
+            stale_aliases=tracker.lifecycle.aliases if tracker is not None else None)
+        summary.update(completeness["summary"])
+        if tracker is not None:
+            completeness["summary"].update(tracker.summary(reason, metrics.terminal_step))
+            completeness["content_terminal"] = tracker.artifact(reason, metrics.terminal_step)
+        completeness_scenarios = dict(getattr(client, "_completeness_scenarios", {}))
+        completeness_scenarios[scenario_id] = completeness
+        client._completeness_scenarios = completeness_scenarios
+        log(f"[COMPLETENESS_SUMMARY] scenario='{scenario_id}' " + " ".join(
+            f"{key}={summary[key]}" for key in ("completeness_expected", "completeness_actual_visited",
+            "completeness_semantic_covered", "completeness_missed", "completeness_unknown", "completeness_viewports")))
+        for row in rows:
+            row.update(summary)
+        previous = getattr(client, "last_main_traversal_summary", {})
+        client.last_main_traversal_summary = {**previous, **summary}
+        summaries = dict(getattr(client, "_traversal_summaries", {}))
+        summaries[scenario_id] = summary
+        client._traversal_summaries = summaries
+        if scenario_perf is not None:
+            scenario_perf.traversal_summary = summary
+            log(format_perf_summary("scenario_contract_summary", scenario_perf.summary_dict()))
+        log(f"[TRAVERSAL_SUMMARY] scenario='{scenario_id}' attempted={metrics.attempted_steps} "
+            f"moved={metrics.successful_moves} failed={metrics.failed_moves} rows={len(rows)} "
+            f"unique_visited={len(metrics.visited)} candidates={summary['unique_candidate_instances']} "
+            f"semantic_covered={summary['semantic_covered_instances']} termination={summary['termination_status']} "
+            f"reason='{reason}' terminal_step={metrics.terminal_step}")
+        collisions = identity_collisions(scoped_inventory)
+        for collision in collisions:
+            log("[IDENTITY_COLLISION_WARNING] " + " ".join(f"{key}={value}" for key, value in collision.items()))
+        runtime = getattr(client, "evidence_runtime", None)
+        if bool(getattr(runtime, "is_enabled", False)):
+            try:
+                runtime.emit("TRAVERSAL_SUMMARY", producer="runner", phase="scenario_end", payload=summary)
+                runtime.emit("COMPLETENESS_RECONCILIATION", producer="runner", phase="scenario_end", payload=completeness)
+                if tracker is not None:
+                    runtime.emit("CONTENT_TERMINAL", producer="runner", phase="scenario_end", payload=summary)
+            except Exception as exc:
+                log(f"[TRAVERSAL_SUMMARY][evidence_failed] error='{type(exc).__name__}'")
+        target = Path(output_path).with_suffix(".traversal_summary.json")
+        if tracker is not None:
+            log("[CONTENT_TERMINAL] " + " ".join(f"{key}={value}" for key, value in tracker.summary(reason, metrics.terminal_step).items()))
+        if str(target.parent) not in {"", "."}:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.with_suffix(".completeness.json").write_text(json.dumps(dict(
+                schema_version="phase0d-completeness-v1", scenarios=list(completeness_scenarios.values())),
+                ensure_ascii=False, indent=2), encoding="utf-8")
+            target.write_text(json.dumps(dict(schema_version="phase0a-traversal-v1", scenarios=list(summaries.values())), ensure_ascii=False, indent=2), encoding="utf-8")
+            target.with_suffix(".scroll_evidence.json").write_text(json.dumps(dict(schema_version="phase0b-scroll-v1",
+                initial=getattr(client,"_initial_scroll_observations",{}), transitions=getattr(client,"_scroll_transitions",[])),
+                ensure_ascii=False, indent=2),encoding="utf-8")
+            terminal_artifacts = getattr(client, "_content_terminal_artifacts", {})
+            if tracker is not None:
+                terminal_artifacts[scenario_id] = tracker.artifact(reason, metrics.terminal_step)
+            client._content_terminal_artifacts = terminal_artifacts
+            if terminal_artifacts:
+                target.with_suffix(".content_terminal.json").write_text(json.dumps(dict(
+                    schema_version="phase0eb-content-terminal-v1", scenarios=list(terminal_artifacts.values())),
+                    ensure_ascii=False, indent=2), encoding="utf-8")
+        _save_focusable_coverage(client, output_path, all_rows)
+        if rows:
+            save_excel_with_perf(save_excel, all_rows, output_path, with_images=False, scenario_perf=scenario_perf)
 
 
 def collect_tab_rows(

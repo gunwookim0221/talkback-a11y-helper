@@ -1070,6 +1070,7 @@ class A11yAdbClient:
         include_device_collection: bool = False,
     ) -> list[dict[str, Any]]:
         self.last_scroll_capabilities = []
+        self.last_dump_metadata = {}  # Failed/legacy dumps must not reuse stale capability.
         self.last_device_collection = {}
         if not self.check_helper_status(dev=dev):
             return []
@@ -1126,7 +1127,8 @@ class A11yAdbClient:
                 raise RuntimeError("DUMP_TREE JSON 형식이 올바르지 않습니다.")
             self.last_dump_metadata = {
                 "algorithmVersion": parsed.get("algorithmVersion"),
-                "canScrollDown": bool(parsed.get("canScrollDown", False)),
+                "canScrollDown": parsed.get("canScrollDown") if isinstance(parsed.get("canScrollDown"), bool) else None,
+                "scrollAxisContract": parsed.get("scrollAxisContract"),
             }
             self.last_scroll_capabilities = (
                 parsed.get("scrollCapabilities", [])
@@ -1143,7 +1145,7 @@ class A11yAdbClient:
         if isinstance(parsed, list):
             self.last_dump_metadata = {
                 "algorithmVersion": None,
-                "canScrollDown": False,
+                "canScrollDown": None,
             }
             self.last_scroll_capabilities = []
             self.last_device_collection = {}
@@ -2093,6 +2095,8 @@ class A11yAdbClient:
         *,
         accessibility_fallback: bool = False,
         device_list_normalization: bool = False,
+        container_path: str | None = None,
+        container_bounds: str | None = None,
     ) -> bool:
         self.last_scroll_result = {}
         if not self.check_helper_status(dev=dev):
@@ -2123,6 +2127,10 @@ class A11yAdbClient:
             extras += ["--ez", "preferTreeSearch", "true"]
         if device_list_normalization:
             extras += ["--ez", "deviceListNormalization", "true"]
+        if container_path is not None:
+            extras += ["--es", "scrollContainerPath", container_path]
+        if container_bounds is not None:
+            extras += ["--es", "scrollContainerBounds", container_bounds]
         self._broadcast(dev, ACTION_SCROLL, extras)
         time.sleep(1.5)
         result = self._read_log_result(dev, "SCROLL_RESULT", req_id)

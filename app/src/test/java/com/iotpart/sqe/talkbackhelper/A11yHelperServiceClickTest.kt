@@ -8,7 +8,12 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class A11yHelperServiceClickTest {
 
     private data class TestNode(
@@ -78,7 +83,7 @@ class A11yHelperServiceClickTest {
         val result = runExecute(focusedWrapper, root)
 
         assertTrue(result.success)
-        assertEquals(A11yHelperService.ClickPath.WRAPPER_RECOVERY, result.path)
+        assertEquals(A11yHelperService.ClickPath.MIRROR_DESCENDANT, result.path)
         assertEquals(insideClickable, result.clickedNode)
     }
 
@@ -139,9 +144,10 @@ class A11yHelperServiceClickTest {
         root.addChild(giantContainer)
         root.addChild(farTopTiny)
 
-        val result = runExecute(focusedWrapper, root)
+        val logs = mutableListOf<String>()
+        val result = runExecute(focusedWrapper, root, logs = logs)
 
-        assertFalse(result.success)
+        assertFalse("path=${result.path} clicked=${result.clickedNode?.id} reason=${result.reason} logs=${logs.joinToString(" || ")}", result.success)
         assertEquals(A11yHelperService.ClickPath.NONE, result.path)
         assertEquals(focusedWrapper, result.attemptedNode)
     }
@@ -161,7 +167,7 @@ class A11yHelperServiceClickTest {
             id = "inside_clickable",
             className = "android.widget.ImageButton",
             clickable = true,
-            clickResult = true,
+            clickResult = false,
             bounds = Rect(944, 176, 1016, 248)
         )
         root.addChild(focusedWrapper)
@@ -224,7 +230,7 @@ class A11yHelperServiceClickTest {
             resourceId = "com.example:id/setting_button_layout",
             className = "android.widget.FrameLayout",
             contentDesc = "Settings",
-            clickable = false,
+            clickable = true,
             clickResult = false,
             bounds = Rect(100, 100, 260, 260)
         )
@@ -297,7 +303,8 @@ class A11yHelperServiceClickTest {
         val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
         val focused = TestNode(
             id = "focused_parent",
-            clickable = false,
+            clickable = true,
+            clickResult = false,
             bounds = Rect(930, 163, 1032, 265)
         )
         val insideClickable = TestNode(
@@ -329,7 +336,8 @@ class A11yHelperServiceClickTest {
         val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
         val focused = TestNode(
             id = "focused_parent",
-            clickable = false,
+            clickable = true,
+            clickResult = false,
             bounds = Rect(930, 163, 1032, 265)
         )
         val overlapClickable = TestNode(
@@ -361,7 +369,8 @@ class A11yHelperServiceClickTest {
         val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
         val focused = TestNode(
             id = "focused_parent",
-            clickable = false,
+            clickable = true,
+            clickResult = false,
             bounds = Rect(930, 163, 1032, 265)
         )
         val localBandClickable = TestNode(
@@ -393,7 +402,8 @@ class A11yHelperServiceClickTest {
         val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
         val focused = TestNode(
             id = "focused_parent",
-            clickable = false,
+            clickable = true,
+            clickResult = false,
             bounds = Rect(930, 163, 1032, 265)
         )
         val giantCard = TestNode(
@@ -417,7 +427,8 @@ class A11yHelperServiceClickTest {
         val root = TestNode(id = "root", bounds = Rect(0, 0, 1080, 2400))
         val focused = TestNode(
             id = "focused_parent",
-            clickable = false,
+            clickable = true,
+            clickResult = false,
             bounds = Rect(930, 163, 1032, 265)
         )
         val overlapClickable = TestNode(
@@ -838,7 +849,7 @@ class A11yHelperServiceClickTest {
         assertEquals(A11yHelperService.ClickPath.DESCENDANT, result.path)
         assertEquals(rawChildTarget, result.clickedNode)
         assertNotNull(logs.find { it.contains("[click_focused_raw_focus_resolve]") && it.contains("resolved=true") })
-        assertNotNull(logs.find { it.contains("[click_focused_descendant_candidate_seen]") && it.contains("com.samsung.android.oneconnect:id/settings_image") })
+        assertNotNull("descendant evidence missing; logs=${logs.joinToString(" || ")}", logs.find { it.contains("[click_focused_descendant_candidate_seen]") && it.contains("com.samsung.android.oneconnect:id/settings_image") })
     }
 
     @Test
@@ -1243,7 +1254,7 @@ class A11yHelperServiceClickTest {
             id = "toolbar_neighbor",
             clickable = true,
             clickResult = true,
-            bounds = Rect(760, 120, 900, 240)
+            bounds = Rect(400, 120, 540, 240)
         )
         val farGlobalClickable = TestNode(
             id = "content_card",
@@ -1269,7 +1280,8 @@ class A11yHelperServiceClickTest {
             id = "focused_wrapper_leaf",
             resourceId = "com.example:id/setting_button_layout",
             className = "android.widget.RelativeLayout",
-            clickable = false,
+            clickable = true,
+            clickResult = false,
             bounds = Rect(930, 163, 1032, 265)
         )
         val semanticTarget = TestNode(
@@ -1298,7 +1310,8 @@ class A11yHelperServiceClickTest {
             id = "focused_alias_wrapper",
             resourceId = "com.example:id/profile_button_layout",
             className = "android.widget.FrameLayout",
-            clickable = false,
+            clickable = true,
+            clickResult = false,
             bounds = Rect(900, 140, 1010, 250)
         )
         val aliasTarget = TestNode(
@@ -1363,7 +1376,7 @@ class A11yHelperServiceClickTest {
             className = "android.widget.Button",
             clickable = true,
             clickResult = true,
-            bounds = Rect(600, 180, 740, 320)
+            bounds = Rect(400, 180, 540, 320)
         )
         root.addChild(focused)
         root.addChild(weakCandidate)

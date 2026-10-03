@@ -44,14 +44,20 @@ class VisitTracker:
         progress: ProgressDecision | None,
         visit: VisitDecision | None,
         legacy_move_result: str,
+        focus_transition_status: str = "",
     ) -> VisitTrackingDecision:
         gate_applied = bool(progress is not None and progress.gate_applied and visit is not None)
         planning_consumed = bool(visit.consumed) if gate_applied and visit is not None else True
-        physical_visited = (
-            bool(visit.visited)
-            if gate_applied and visit is not None
-            else legacy_move_result in {"moved", "scrolled", "edge_realign_then_moved"}
-        )
+        if focus_transition_status == "CONFIRMED_MOVED":
+            physical_visited = True
+        elif focus_transition_status in {"CONFIRMED_UNCHANGED", "AMBIGUOUS"}:
+            physical_visited = False
+        else:
+            physical_visited = (
+                bool(visit.visited)
+                if gate_applied and visit is not None
+                else legacy_move_result in {"moved", "scrolled", "edge_realign_then_moved"}
+            )
         return VisitTrackingDecision(
             gate_applied=gate_applied,
             planning_consumed=planning_consumed,

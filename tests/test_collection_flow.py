@@ -21,6 +21,18 @@ except ImportError:
 from tb_runner import collection_flow
 from tb_runner.evidence import EvidenceRuntime
 from tb_runner.scenario_config import TAB_CONFIGS
+
+
+@pytest.fixture
+def legacy_stop_policy(monkeypatch):
+    """Isolate legacy guard/CTA units from the new root-content closure layer.
+
+    These units mock should_stop and provide no viewport oracle. Public closure,
+    legacy false-completion override, and artifact integration are exercised in
+    test_content_terminal with valid snapshots and actual focus evidence.
+    """
+    monkeypatch.setattr(collection_flow, "_apply_content_terminal_phase",
+                        lambda client, dev, state, row, ctx, step, stop, reason, **kw: (stop, reason))
 from tb_runner.tab_logic import (
     _expected_bottom_tab_from_tab_pattern,
     match_tab_candidate,
@@ -2021,10 +2033,10 @@ def test_collect_tab_rows_adds_tab_open_failed_and_saves(monkeypatch):
     )
 
     assert rows[0]["status"] == "TAB_OPEN_FAILED"
-    assert len(save_calls) == 1
+    assert len(save_calls) == 2  # failure row + finalized termination contract
 
 
-def test_collect_tab_rows_sets_end_status_when_should_stop(monkeypatch):
+def test_collect_tab_rows_sets_end_status_when_should_stop(monkeypatch, legacy_stop_policy):
     client = DummyClient([_anchor_row(), _main_row(1)])
     monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)
     monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda *a, **k: a[2])
@@ -2060,7 +2072,7 @@ def test_collect_tab_rows_promotes_card_container_to_actionable_cta_child(monkey
     assert any("[STEP][cta_promote]" in line and "suggestion_card_container" in line and "Later" in line for line in logs)
 
 
-def test_collect_tab_rows_progresses_to_cta_sibling_when_same_button_repeats(monkeypatch):
+def test_collect_tab_rows_progresses_to_cta_sibling_when_same_button_repeats(monkeypatch, legacy_stop_policy):
     repeated_first = _cta_row(2, "Later", "com.example.plugin:id/first_button")
     repeated_first["move_result"] = "failed"
     client = DummyClient([_anchor_row(), _card_container_with_cta_children_row(1), repeated_first])
@@ -2092,7 +2104,7 @@ def test_collect_tab_rows_progresses_to_cta_sibling_when_same_button_repeats(mon
     assert any(call.get("name") == "com.example.plugin:id/second_button" for call in client.select_calls)
 
 
-def test_collect_tab_rows_keeps_committed_cta_sibling_on_next_container_step(monkeypatch):
+def test_collect_tab_rows_keeps_committed_cta_sibling_on_next_container_step(monkeypatch, legacy_stop_policy):
     repeated_first = _cta_row(2, "Later", "com.example.plugin:id/first_button")
     repeated_first["move_result"] = "failed"
     client = DummyClient(
@@ -2126,7 +2138,7 @@ def test_collect_tab_rows_keeps_committed_cta_sibling_on_next_container_step(mon
     assert any("[STEP][cta_promote_keep]" in line and "second_button" in line for line in logs)
 
 
-def test_collect_tab_rows_logs_cta_focus_align_fail_when_focus_never_matches(monkeypatch):
+def test_collect_tab_rows_logs_cta_focus_align_fail_when_focus_never_matches(monkeypatch, legacy_stop_policy):
     repeated_first = _cta_row(2, "Later", "com.example.plugin:id/first_button")
     repeated_first["move_result"] = "failed"
     client = DummyClient([_anchor_row(), _card_container_with_cta_children_row(1), repeated_first])
@@ -2365,7 +2377,7 @@ def test_family_care_onboarding_does_not_click_generic_korean_later_without_evid
     assert client.click_focused_calls == []
 
 
-def test_collect_tab_rows_allows_bounded_cta_descend_grace_for_card_container(monkeypatch):
+def test_collect_tab_rows_allows_bounded_cta_descend_grace_for_card_container(monkeypatch, legacy_stop_policy):
     client = DummyClient(
         [
             _anchor_row(),
@@ -2456,7 +2468,7 @@ def test_collect_tab_rows_allows_bounded_cta_descend_grace_for_card_container(mo
     assert any("Later" in line and "Set up" in line for line in descend_logs)
 
 
-def test_collect_tab_rows_keeps_repeat_stop_for_non_cta_end_state(monkeypatch):
+def test_collect_tab_rows_keeps_repeat_stop_for_non_cta_end_state(monkeypatch, legacy_stop_policy):
     client = DummyClient([_anchor_row(), _main_row(1)])
     logs = []
 
@@ -2518,7 +2530,7 @@ def test_collect_tab_rows_checkpoint_save_called_by_interval(monkeypatch):
         checkpoint_save_every=2,
     )
 
-    assert len(save_calls) == 2  # anchor + checkpoint at step2
+    assert len(save_calls) == 3  # anchor + checkpoint + finalized traversal summary
 
 
 def test_collect_tab_rows_overlay_branch_calls_expand_and_realign(monkeypatch):
@@ -2708,7 +2720,7 @@ def test_overlay_realign_rejects_shell_anchor(monkeypatch):
     assert result.post_realign_pending_steps_delta == 0
 
 
-def test_collect_tab_rows_global_nav_start_gate_abort_on_non_bottom_focus(monkeypatch):
+def test_legacy_inner_global_nav_start_gate_abort_on_non_bottom_focus(monkeypatch):
     client = DummyClient([_anchor_row()])
     client.focus_sequence = [
         {"viewIdResourceName": "com.samsung.android.oneconnect:id/home_button"},
@@ -2719,7 +2731,8 @@ def test_collect_tab_rows_global_nav_start_gate_abort_on_non_bottom_focus(monkey
     monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
 
-    rows = collection_flow.collect_tab_rows(
+    client._active_traversal_metrics = collection_flow.TraversalMetrics()
+    rows = collection_flow._collect_tab_rows_inner(
         client=client,
         dev="SERIAL",
         tab_cfg=_global_nav_tab_cfg(),
@@ -2734,7 +2747,7 @@ def test_collect_tab_rows_global_nav_start_gate_abort_on_non_bottom_focus(monkey
     assert len(client.select_calls) == 1
 
 
-def test_collect_tab_rows_global_nav_start_gate_allows_bottom_focus(monkeypatch):
+def test_legacy_inner_global_nav_start_gate_allows_bottom_focus(monkeypatch):
     client = DummyClient([_anchor_row(), _main_row(1)])
     client.focus_sequence = [
         {"viewIdResourceName": "com.samsung.android.oneconnect:id/menu_favorites"},
@@ -2758,7 +2771,8 @@ def test_collect_tab_rows_global_nav_start_gate_allows_bottom_focus(monkeypatch)
     monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
     monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (False, "not_in_global_candidates"))
 
-    rows = collection_flow.collect_tab_rows(client, "SERIAL", _global_nav_tab_cfg(max_steps=1), [], "o.xlsx", "out")
+    client._active_traversal_metrics = collection_flow.TraversalMetrics()
+    rows = collection_flow._collect_tab_rows_inner(client, "SERIAL", _global_nav_tab_cfg(max_steps=1), [], "o.xlsx", "out")
 
     assert rows[0]["status"] == "ANCHOR"
     assert len(client.select_calls) == 0
@@ -3088,7 +3102,7 @@ def test_collect_tab_rows_previous_step_not_updated_after_stop_break(monkeypatch
     assert previous_steps == [0]
 
 
-def test_collect_tab_rows_global_nav_only_skips_non_global_nav_rows(monkeypatch):
+def test_legacy_inner_global_nav_only_skips_non_global_nav_rows(monkeypatch):
     client = DummyClient([_anchor_row(), _main_row(1), _main_row(2)])
     client.focus_sequence = [{"viewIdResourceName": "id.2"}]
     tab_cfg = {
@@ -3109,13 +3123,14 @@ def test_collect_tab_rows_global_nav_only_skips_non_global_nav_rows(monkeypatch)
     monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
     monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (True, "matched_global_candidates"))
 
-    rows = collection_flow.collect_tab_rows(client, "SERIAL", tab_cfg, [], "o.xlsx", "out")
+    client._active_traversal_metrics = collection_flow.TraversalMetrics()
+    rows = collection_flow._collect_tab_rows_inner(client, "SERIAL", tab_cfg, [], "o.xlsx", "out")
 
     assert [row["step_index"] for row in rows] == [0, 2]
     assert rows[1]["is_global_nav"] is True
 
 
-def test_collect_tab_rows_global_nav_only_disables_overlay(monkeypatch):
+def test_collect_tab_rows_global_nav_only_disables_overlay(monkeypatch, tmp_path):
     client = DummyClient([_anchor_row(), _main_row(1)])
     client.focus_sequence = [{"viewIdResourceName": "id.1"}]
     called = {"is_overlay_candidate": 0}
@@ -3137,7 +3152,7 @@ def test_collect_tab_rows_global_nav_only_disables_overlay(monkeypatch):
 
     monkeypatch.setattr(collection_flow, "is_overlay_candidate", _overlay_candidate)
 
-    collection_flow.collect_tab_rows(client, "SERIAL", tab_cfg, [], "o.xlsx", "out")
+    collection_flow.collect_tab_rows(client, "SERIAL", tab_cfg, [], str(tmp_path / "o.xlsx"), str(tmp_path))
 
     assert called["is_overlay_candidate"] == 0
 
@@ -5740,11 +5755,11 @@ def test_maybe_select_next_local_tab_only_advances_after_scroll_fallback_finds_n
         step_idx=15,
     )
 
-    assert advanced is True
-    assert client.scroll_calls[0] == "down"
-    assert client.select_calls[0]["name"] == "com.example:id/location_button"
-    assert any("[STEP][scroll_fallback_result]" in line and "resumed_content_phase=false" in line for line in logs)
-    assert any("[STEP][local_tab_select]" in line and "Location" in line for line in logs)
+    assert advanced is False
+    assert client.scroll_calls == ["down"]
+    assert client.select_calls == []
+    assert client._scroll_transitions[-1]["termination_reason"] == "scroll_unverified"
+
 
 
 def test_maybe_select_next_local_tab_does_not_repeat_scroll_fallback_for_same_signature(monkeypatch):
@@ -5958,9 +5973,9 @@ def test_maybe_select_next_local_tab_last_scroll_no_content_marks_global_exhaust
     assert client.scroll_calls == ["down"]
     assert client.select_calls == []
     assert row["last_scroll_fallback_resumed_content"] is False
-    assert row["last_scroll_global_exhausted"] is True
-    assert row["local_tab_block_reason"] == "no_unvisited_local_tab"
-    assert any("[STEP][last_scroll_fallback_result]" in line and "global_exhausted=true" in line for line in logs)
+    assert row["last_scroll_global_exhausted"] is False
+    assert row["scroll_termination_reason"] == "scroll_unverified"
+    assert row["scroll_status"] == "SCROLL_NO_CHANGE"
 
 
 def test_maybe_select_next_local_tab_last_scroll_uses_dump_bottom_strip_evidence(monkeypatch):
@@ -5996,12 +6011,12 @@ def test_maybe_select_next_local_tab_last_scroll_uses_dump_bottom_strip_evidence
         step_idx=20,
     )
 
-    assert advanced is False
-    assert client.scroll_calls == ["down"]
-    assert row["last_scroll_fallback_allowed"] is True
-    assert row["last_scroll_fallback_resumed_content"] is True
-    assert any("[STEP][bottom_strip_context_eval]" in line and "dump_strip_seen=true" in line for line in logs)
-    assert any("[STEP][last_scroll_fallback_eval]" in line and "bottom_strip_context_scrollable_uncertain" in line for line in logs)
+    # Bottom strip alone does not establish a vertical scroll target.
+    assert client.scroll_calls == []
+    assert row["last_scroll_fallback_allowed"] is False
+    assert row["scroll_capability"] == "SCROLL_CAPABILITY_UNKNOWN"
+    assert any("dump_strip_seen=true" in line for line in logs)
+
 
 
 def test_maybe_select_next_local_tab_prefers_rightward_progression_over_visited(monkeypatch):
@@ -7058,7 +7073,7 @@ def test_apply_spatial_priority_to_candidates_prefers_continuity_from_previous_r
     ]
 
 
-def test_candidate_logical_signature_ignores_bounds_for_same_logical_object():
+def test_candidate_logical_signature_distinguishes_same_label_instances_by_bounds():
     candidate_a = {
         "label": "Weather information",
         "rid": "com.example:id/weather_card_title",
@@ -7076,7 +7091,7 @@ def test_candidate_logical_signature_ignores_bounds_for_same_logical_object():
         "bounds": "40,920,1040,1260",
     }
 
-    assert collection_flow._candidate_logical_signature(candidate_a) == collection_flow._candidate_logical_signature(candidate_b)
+    assert collection_flow._candidate_logical_signature(candidate_a) != collection_flow._candidate_logical_signature(candidate_b)
 
 
 def test_filter_content_candidates_for_phase_rejects_visited_logical_candidates_before_ranking():
@@ -7160,7 +7175,7 @@ def test_filter_content_candidates_for_phase_rejects_cluster_consumed_members():
     assert [candidate["label"] for candidate in filtered["selection_candidates"]] == ["Latest activity"]
 
 
-def test_filter_content_candidates_for_phase_rejects_consumed_cluster_logical_child_with_new_bounds():
+def test_filter_content_candidates_keeps_sibling_cluster_with_different_bounds():
     consumed_root = {
         "label": "Weather information",
         "rid": "com.example:id/weather_title",
@@ -7203,8 +7218,8 @@ def test_filter_content_candidates_for_phase_rejects_consumed_cluster_logical_ch
 
     filtered = collection_flow._filter_content_candidates_for_phase([child_candidate, next_candidate], state=state)
 
-    assert [candidate["label"] for candidate in filtered["cluster_consumed_rejected"]] == ["Weather information"]
-    assert [candidate["label"] for candidate in filtered["selection_candidates"]] == ["Latest activity"]
+    assert filtered["cluster_consumed_rejected"] == []
+    assert [candidate["label"] for candidate in filtered["selection_candidates"]] == ["Weather information", "Latest activity"]
 
 
 def _semantic_candidate(
@@ -7469,7 +7484,8 @@ def test_collect_step_candidate_priority_groups_skips_consumed_cluster_logical_e
 
     content_candidates, bottom_strip_candidates, meta = collection_flow._collect_step_candidate_priority_groups(
         nodes,
-        consumed_cluster_logical_signatures={"com.example:id/weather_card||weather information"},
+        consumed_cluster_logical_signatures={collection_flow._candidate_cluster_logical_signature(dict(
+            cluster_rid="com.example:id/weather_card", cluster_label="Weather information", cluster_bounds="40,420,1040,760"))},
     )
 
     assert [candidate["label"] for candidate in content_candidates] == ["Latest activity"]
@@ -11290,7 +11306,7 @@ def test_open_scenario_tab_stabilization_launcher_focus_creates_crash_event(monk
     assert any("[CRASH_GUARD] event_created crash_event_id='CRASH-0001'" in line for line in logs)
 
 
-def test_collect_tab_rows_uses_app_terminated_reason_for_pre_main_guard(monkeypatch, tmp_path):
+def test_legacy_inner_uses_app_terminated_reason_for_pre_main_guard(monkeypatch, tmp_path):
     monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
     monkeypatch.setattr(collection_flow, "save_excel_with_perf", lambda *_args, **_kwargs: None)
     logs = []
@@ -11323,7 +11339,8 @@ def test_collect_tab_rows_uses_app_terminated_reason_for_pre_main_guard(monkeypa
     )
 
     client = DummyClient([])
-    rows = collection_flow.collect_tab_rows(client, "SERIAL", _global_nav_tab_cfg(), [], str(tmp_path / "o.xlsx"), str(tmp_path))
+    client._active_traversal_metrics = collection_flow.TraversalMetrics()
+    rows = collection_flow._collect_tab_rows_inner(client, "SERIAL", _global_nav_tab_cfg(), [], str(tmp_path / "o.xlsx"), str(tmp_path))
 
     assert len(rows) == 1
     assert rows[0]["status"] == "TAB_OPEN_FAILED"
@@ -12472,7 +12489,7 @@ def test_build_row_fingerprint_prefers_resource_id():
     assert fingerprint.startswith("com.example:id/title|visible label|speech value|20,30")
 
 
-def test_collect_tab_rows_sets_duplicate_flag_for_repeated_fingerprint(monkeypatch):
+def test_collect_tab_rows_sets_duplicate_flag_for_repeated_fingerprint(monkeypatch, legacy_stop_policy):
     repeated_row = {
         "step_index": 1,
         "move_result": "moved",
@@ -12511,7 +12528,7 @@ def test_collect_tab_rows_sets_duplicate_flag_for_repeated_fingerprint(monkeypat
     assert rows[2]["recent_duplicate_of_step"] == 1
 
 
-def test_collect_tab_rows_marks_non_consecutive_recent_duplicate(monkeypatch):
+def test_collect_tab_rows_marks_non_consecutive_recent_duplicate(monkeypatch, legacy_stop_policy):
     row_b = {
         "step_index": 1,
         "move_result": "moved",
@@ -12559,7 +12576,7 @@ def test_collect_tab_rows_marks_non_consecutive_recent_duplicate(monkeypatch):
     assert rows[3]["recent_duplicate_of_step"] == 0
 
 
-def test_collect_tab_rows_marks_recent_duplicate_false_when_no_match(monkeypatch):
+def test_collect_tab_rows_marks_recent_duplicate_false_when_no_match(monkeypatch, legacy_stop_policy):
     row_b = {
         "step_index": 1,
         "move_result": "moved",
@@ -13718,7 +13735,7 @@ def test_collect_tab_rows_stall_escape_is_only_attempted_once_per_scenario(monke
     assert rows[2]["stop_reason"] == "repeat_semantic_stall_after_escape"
 
 
-def test_collect_tab_rows_main_tabs_do_not_apply_stall_escape(monkeypatch):
+def test_collect_tab_rows_main_tabs_do_not_apply_stall_escape(monkeypatch, legacy_stop_policy):
     client = DummyClient([_anchor_row(), _main_row(1)])
     calls = {"escape": 0}
     monkeypatch.setattr(collection_flow, "open_scenario", lambda *a, **k: True)

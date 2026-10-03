@@ -548,11 +548,7 @@ object A11yNavigationPolicy {
             !A11yNodeUtils.isTopAppBar(classNameOf(candidate), viewIdOf(candidate), bounds, screenTop, screenHeight) &&
                 !A11yNodeUtils.isBottomNavigationBar(classNameOf(candidate), viewIdOf(candidate), bounds, screenBottom, screenHeight)
         }
-        if (contentIndicesBeforeBottomBar.isEmpty()) return false
-
         val remainingContentCount = contentIndicesBeforeBottomBar.count { it > currentIndex }
-        if (remainingContentCount <= 0) return false
-
         val isCurrentNearEffectiveBottom = currentBounds.bottom >= (effectiveBottom - nearBottomThresholdPx)
         val continuationLikelyBelowCurrentNode = isContinuationContentLikelyBelowCurrentNode(
             traversalList = traversalList,
@@ -566,6 +562,7 @@ object A11yNavigationPolicy {
             classNameOf = classNameOf,
             viewIdOf = viewIdOf
         )
+        if (remainingContentCount <= 0) return continuationLikelyBelowCurrentNode
         if (remainingContentCount <= 1 && isCurrentNearEffectiveBottom && !continuationLikelyBelowCurrentNode) {
             return false
         }

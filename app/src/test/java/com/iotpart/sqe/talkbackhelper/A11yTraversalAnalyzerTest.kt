@@ -5,8 +5,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import kotlin.random.Random
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class A11yTraversalAnalyzerTest {
 
     private class ComparatorNode(
@@ -66,7 +71,7 @@ class A11yTraversalAnalyzerTest {
 
     @Test
     fun version_isUpdated() {
-        assertEquals("1.11.0", A11yTraversalAnalyzer.VERSION)
+        assertEquals("1.11.1", A11yTraversalAnalyzer.VERSION)
     }
 
     @Test

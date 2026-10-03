@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from talkback_lib import A11yAdbClient
+from tb_runner.focus_reconciliation import has_strict_post_move_focus
 from tb_runner.label_matcher import EMPTY_STATE_LABEL_ALIASES, canonicalize_label
 from tb_runner.logging_utils import log
 from tb_runner.perf_stats import ScenarioPerfStats
@@ -3366,7 +3367,13 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         force_reason = "anchor_mismatch"
         if strip_focus_context or current_row_is_low_value_leaf or current_row_recent_revisit:
             force_reason = "strip_or_stale_focus_context"
-        if selected_signature in failed_realign_signatures:
+        authoritative_focus_move = has_strict_post_move_focus(row, move_result)
+        if authoritative_focus_move:
+            log(
+                f"[STEP][focus_realign_skip] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
+                "reason='strict_post_move_focus_authoritative'"
+            )
+        elif selected_signature in failed_realign_signatures:
             log(
                 f"[STEP][focus_realign_skip] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
                 "reason='recent_realign_failed'"
@@ -3532,6 +3539,7 @@ def _maybe_select_next_local_tab(
     scenario_id: str,
     step_idx: int,
 ) -> bool:
+    from tb_runner.scroll_reliability import capture, dump_with_capabilities, verified_scroll
     _maybe_commit_pending_local_tab_progression(state, row)
     local_tab_signature = str(state.current_local_tab_signature or "").strip()
     dump_tree_fn = getattr(client, "dump_tree", None)
@@ -3542,7 +3550,7 @@ def _maybe_select_next_local_tab(
     current_bottom_strip_candidates: list[dict[str, Any]] = []
     if callable(dump_tree_fn):
         try:
-            nodes = dump_tree_fn(dev=dev)
+            nodes = dump_with_capabilities(client, dev)
             content_candidates, current_bottom_strip_candidates, candidate_groups_meta = _collect_step_candidate_priority_groups(
                 nodes,
                 scenario_id=scenario_id,
@@ -3749,6 +3757,16 @@ def _maybe_select_next_local_tab(
         scrollable, scrollable_nodes, content_area_bounds = _describe_scrollable_content_phase(nodes)
     else:
         scrollable = False
+    observation = capture(client, dev, scenario_id, nodes=nodes if 'nodes' in locals() else [],
+                          step_index=step_idx, evidence="local_scroll_evaluation")
+    scroll_capability = observation["capability"]
+    row["scroll_capability"] = scroll_capability["status"]
+    row["scroll_capability_source"] = scroll_capability["source"]
+    row["scroll_capability_details"] = scroll_capability
+    scrollable = scroll_capability["can_scroll_forward"] is True or (
+        scroll_capability["can_scroll_forward"] is None and scrollable)
+    if scroll_capability["container"]:
+        content_area_bounds = str(scroll_capability["container"].get("boundsInScreen", ""))
     scroll_state = _scroll_state(state)
     attempted_signatures = set(getattr(scroll_state, "recent_scroll_fallback_signatures", set()) or set())
     scroll_allowed = bool(scrollable and scroll_fallback_signature and scroll_fallback_signature not in attempted_signatures)
@@ -3783,7 +3801,7 @@ def _maybe_select_next_local_tab(
     last_attempted_signatures = set(getattr(scroll_state, "last_scroll_fallback_attempted_signatures", set()) or set())
     last_scroll_signature = scroll_fallback_signature or _build_row_object_signature(row) or local_tab_signature or "viewport_exhausted"
     last_scroll_evaluated = bool(viewport_exhausted and bottom_strip_context)
-    scrollable_uncertain = bool(last_scroll_evaluated and not scrollable and (content_area_bounds or dump_strip_seen or previous_row_strip))
+    scrollable_uncertain = bool(last_scroll_evaluated and scroll_capability["can_scroll_forward"] is None and content_area_bounds)
     last_scroll_allowed = bool(
         last_scroll_evaluated
         and last_scroll_signature
@@ -3878,20 +3896,23 @@ def _maybe_select_next_local_tab(
             attempted_signatures.add(scroll_fallback_signature)
             scroll_state.recent_scroll_fallback_signatures = attempted_signatures
             log("[STEP][scroll_fallback] reason='viewport_exhausted_before_local_tab' attempt=1")
-        try:
-            scrolled = bool(scroll_fn(dev=dev, direction="down"))
-        except Exception:
-            scrolled = False
+        verified, refreshed = verified_scroll(client, dev, scenario_id, step_idx,
+            before=observation, output_base_dir=getattr(client, "_scroll_output_base_dir", ""))
+        row["scroll_transition"] = verified
+        row["scroll_status"] = verified["status"]
+        row["scroll_termination_reason"] = verified["termination_reason"]
+        row["scroll_new_instances"] = verified["new_count"]
+        scrolled = verified["status"] == "SCROLL_MOVED"
+        if last_scroll_allowed:
+            row["last_scroll_fallback_resumed_content"] = False
+            row["last_scroll_global_exhausted"] = bool(verified["viewport_end"])
+        if verified["termination_reason"]:
+            return False  # Do not navigate a tab and conceal an unverified/failed scroll.
         if scrolled:
             _clear_active_container_group(state, reason="scroll")
             state.completed_container_groups = set()
-            time.sleep(0.25)
-            refreshed_nodes = []
-            if callable(dump_tree_fn):
-                try:
-                    refreshed_nodes = dump_tree_fn(dev=dev)
-                except Exception:
-                    refreshed_nodes = []
+            refreshed_nodes = refreshed["nodes"]
+            row["dump_tree_nodes"] = refreshed_nodes
             refreshed_content, _, refreshed_meta = _collect_step_candidate_priority_groups(
                 refreshed_nodes,
                 scenario_id=scenario_id,
@@ -3905,7 +3926,7 @@ def _maybe_select_next_local_tab(
             if last_scroll_allowed:
                 row["last_scroll_fallback_resumed_content"] = resumed_content_phase
                 row["last_scroll_fallback_representative"] = new_representative
-                row["last_scroll_global_exhausted"] = not resumed_content_phase
+                row["last_scroll_global_exhausted"] = bool(verified["viewport_end"])
                 log(
                     f"[STEP][last_scroll_fallback_result] new_representative='{_truncate_debug_text(new_representative, 120)}' "
                     f"resumed_content_phase={str(resumed_content_phase).lower()} "

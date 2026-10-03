@@ -473,7 +473,8 @@ class A11yCommandReceiver : BroadcastReceiver() {
         val direction = intent.getStringExtra(EXTRA_DIRECTION)?.trim().orEmpty()
         val preferTreeSearch = intent.getBooleanExtra(EXTRA_PREFER_TREE_SEARCH, false)
         val deviceListNormalization = intent.getBooleanExtra(EXTRA_DEVICE_LIST_NORMALIZATION, false)
-        service.performScroll(forward, direction, reqId, preferTreeSearch, deviceListNormalization)
+        service.performScroll(forward, direction, reqId, preferTreeSearch, deviceListNormalization,
+            intent.getStringExtra("scrollContainerPath"), intent.getStringExtra("scrollContainerBounds"))
     }
 
     private fun handleSetText(intent: Intent) {

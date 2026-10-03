@@ -806,4 +806,5 @@ def test_candidate_cluster_logical_signature_prefers_cluster_label_over_label():
         "label": "Speech Label",
     }
 
-    assert container_group_logic._candidate_cluster_logical_signature(candidate) == "cluster||visible cluster"
+    from tb_runner.traversal_reliability import instance_id
+    assert container_group_logic._candidate_cluster_logical_signature(candidate) == instance_id(dict(view_id="cluster", label="visible cluster"))

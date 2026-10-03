@@ -39,6 +39,7 @@ class ScenarioPerfStats:
     step_dump_used_count: int = 0
     realign_attempt_count: int = 0
     realign_success_count: int = 0
+    traversal_summary: dict[str, Any] = field(default_factory=dict)
 
     _sum_get_focus_sec: float = 0.0
     _sum_get_focus_main_sec: float = 0.0
@@ -128,6 +129,7 @@ class ScenarioPerfStats:
             "realign_attempt_count": self.realign_attempt_count,
             "realign_success_count": self.realign_success_count,
             "realign_success_rate": round((self.realign_success_count / realign_attempt_count) * 100.0, 1),
+            **self.traversal_summary,
         }
 
 

@@ -1,4 +1,5 @@
 from tb_runner.diagnostics import (
+    classify_command_ack,
     classify_local_tab_probe,
     classify_step_result,
     detect_step_mismatch,
@@ -17,6 +18,54 @@ def test_detect_step_mismatch_returns_speech_visible_diverged():
 
     assert "speech_visible_diverged" in mismatch
     assert low == []
+
+
+def test_failed_command_ack_with_confirmed_focus_move_is_reported_as_warning_with_progress():
+    result = classify_step_result(
+        {
+            "move_result": {"success": False, "status": "failed_single_target"},
+            "command_ack_status": "FAIL",
+            "focus_transition_status": "CONFIRMED_MOVED",
+            "progress_status": "PROGRESS",
+            "visible_label": "Device B",
+            "merged_announcement": "Device B",
+        },
+        mismatch_reasons=[], no_progress=False, stop_reason="", terminal_signal=False,
+    )
+    assert result["move_result"] == "failed_single_target"
+    assert result["traversal_result"] == "MOVE_COMMAND_FAILED_BUT_FOCUS_MOVED"
+    assert result["final_result"] == "WARN"
+    assert result["failure_reason"] == "command_ack_failed_after_confirmed_focus_move"
+
+
+def test_successful_ack_without_focus_change_is_not_reported_as_move_pass():
+    result = classify_step_result(
+        {
+            "move_result": {"success": True, "status": "moved"},
+            "command_ack_status": "SUCCESS",
+            "focus_transition_status": "CONFIRMED_UNCHANGED",
+            "progress_status": "NO_PROGRESS_UNCHANGED",
+            "visible_label": "Device A",
+            "merged_announcement": "Device A",
+        },
+        mismatch_reasons=[], no_progress=False, stop_reason="", terminal_signal=False,
+    )
+    assert result["traversal_result"] == "MOVE_ACK_SUCCESS_WITHOUT_FOCUS_CHANGE"
+    assert result["final_result"] == "WARN"
+    assert result["failure_reason"] == "focus_unchanged_after_move_ack"
+
+
+def test_explicit_move_ack_beats_conflicting_smart_navigation_projection():
+    assert classify_command_ack({
+        "move_result": {"success": True, "status": "moved"},
+        "last_smart_nav_result": "failed_single_target",
+        "smart_nav_success": False,
+    })["status"] == "SUCCESS"
+    assert classify_command_ack({
+        "move_result": {"success": False, "status": "failed_single_target"},
+        "last_smart_nav_result": "moved",
+        "smart_nav_success": True,
+    })["status"] == "FAIL"
 
 
 def test_detect_step_mismatch_skips_speech_mismatch_when_smart_nav_is_primary_verdict():

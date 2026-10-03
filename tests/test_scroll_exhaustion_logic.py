@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-sys.modules.setdefault("pandas", SimpleNamespace(DataFrame=object, ExcelWriter=object))
+sys.modules.setdefault("pandas", SimpleNamespace(DataFrame=object, Series=object, ExcelWriter=object))
 sys.modules.setdefault("openpyxl", SimpleNamespace(load_workbook=lambda *_args, **_kwargs: None))
 sys.modules.setdefault("openpyxl.drawing.image", SimpleNamespace(Image=object))
 
@@ -39,6 +39,21 @@ class FailingScrollClient(DummyClient):
         _ = (dev, step_, time_, bounds_)
         self.scroll_calls.append(direction)
         return False
+
+
+@pytest.mark.parametrize("can_scroll,expected_calls", [(True,["down"]),(False,[])])
+def test_phase0b_helper_metadata_controls_actual_scroll_gate(can_scroll,expected_calls):
+    client=DummyClient()
+    client.last_dump_metadata={"canScrollDown":can_scroll}
+    client.dump_tree_sequence=[[_scrollable_node()],[_scrollable_node(),_content_node("new","card")]]
+    row={}
+    collection_flow._maybe_select_next_local_tab(client=client,dev="SERIAL",state=_state(),row=row,
+                                               scenario_id="life_family_care_plugin",step_idx=12)
+    assert client.scroll_calls == expected_calls
+    assert row["scroll_capability_source"] == "helper_metadata"
+    assert row["scroll_capability"] == ("SCROLL_CAPABLE" if can_scroll else "SCROLL_NOT_CAPABLE")
+    if can_scroll:
+        assert row["scroll_status"] == "SCROLL_MOVED" and row["scroll_fallback_resumed_content"]
 
 
 @pytest.fixture(autouse=True)
@@ -629,11 +644,11 @@ def test_last_scroll_no_content_marks_global_exhausted_without_completing_group(
     assert client.scroll_calls == ["down"]
     assert row["last_scroll_fallback_allowed"] is True
     assert row["last_scroll_fallback_resumed_content"] is False
-    assert row["last_scroll_global_exhausted"] is True
-    assert row["local_tab_block_reason"] == "no_unvisited_local_tab"
+    assert row["last_scroll_global_exhausted"] is False
+    assert row["scroll_termination_reason"] == "scroll_unverified"
     assert state.active_container_group_signature == ""
     assert state.active_container_group_remaining == set()
-    assert state.completed_container_groups == set()
+    assert state.completed_container_groups == {"already||completed"}
 
 
 def test_last_scroll_new_signature_allowed_when_previous_signature_attempted():
@@ -672,8 +687,8 @@ def test_last_scroll_new_signature_allowed_when_previous_signature_attempted():
     assert client.scroll_calls == ["down"]
     assert row["last_scroll_fallback_allowed"] is True
     assert row["last_scroll_block_reason"] == ""
-    assert row["last_scroll_global_exhausted"] is True
-    assert row["local_tab_block_reason"] == "no_unvisited_local_tab"
+    assert row["last_scroll_global_exhausted"] is False
+    assert row["scroll_termination_reason"] == "scroll_unverified"
     assert row.get("local_tab_transition") is not True
     assert state.last_scroll_fallback_attempted_signatures != {"old||last"}
 
@@ -699,13 +714,14 @@ def test_scroll_failure_does_not_complete_active_container_group():
         step_idx=18,
     )
 
-    assert advanced is True
+    assert advanced is False
     assert client.scroll_calls == ["down"]
     assert row["scroll_fallback_allowed"] is True
     assert row.get("scroll_fallback_resumed_content") is not True
     assert state.active_container_group_signature == ""
     assert state.active_container_group_remaining == set()
-    assert state.completed_container_groups == set()
+    assert state.completed_container_groups == {"already||completed"}
+
 
 
 def test_scroll_ready_continue_does_not_override_safety_limit_stop_reason():

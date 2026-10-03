@@ -6,12 +6,17 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class A11yHistoryManagerTest {
 
     @Test
     fun version_isUpdated() {
-        assertEquals("1.5.0", A11yHistoryManager.VERSION)
+        assertEquals("1.5.1", A11yHistoryManager.VERSION)
     }
 
     @Test

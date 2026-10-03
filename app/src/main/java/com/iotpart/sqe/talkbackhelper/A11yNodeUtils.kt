@@ -45,7 +45,7 @@ object A11yNodeUtils {
         "menu_life",
         "menu_services",
         "menu_automations",
-        "menu_more",
+        "tab_devices",
         "menu_routines",
         "menu_menu",
         "bottom_menu",
@@ -123,7 +123,9 @@ object A11yNodeUtils {
             return true
         }
 
-        return BOTTOM_NAV_VIEW_ID_KEYWORDS.any { keyword -> normalizedViewId.contains(keyword) }
+        val viewIdSuffix = normalizedViewId.substringAfterLast('/')
+        return viewIdSuffix == "menu_more" ||
+            BOTTOM_NAV_VIEW_ID_KEYWORDS.any { keyword -> normalizedViewId.contains(keyword) }
     }
 
     fun isOneConnectBottomTabNode(node: AccessibilityNodeInfo?): Boolean {

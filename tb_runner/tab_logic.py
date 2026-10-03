@@ -11,6 +11,7 @@ from tb_runner.context_verifier import verify_context
 from tb_runner.label_matcher import LABEL_ALIASES, canonicalize_label, normalize_label
 from tb_runner.logging_utils import _should_log, log
 from tb_runner.utils import parse_bounds_str
+from tb_runner.traversal_reliability import normalized_bounds
 
 _BOTTOM_GLOBAL_NAV_RESOURCE_REGEX = re.compile(
     r"com\.samsung\.android\.oneconnect:id/"
@@ -459,8 +460,8 @@ def stabilize_tab_selection(
             best_resource = str(candidate.get("resource_id", "") or "")
             semantic_bottom_nav = bool(candidate.get("_bottom_nav_candidate", False))
             raw_bounds = candidate.get("bounds", "")
-            best_bounds = str(raw_bounds or "")
-            parsed_bounds = parse_bounds_str(raw_bounds)
+            best_bounds = normalized_bounds(raw_bounds)
+            parsed_bounds = parse_bounds_str(best_bounds)
             center_x: int | None = None
             center_y: int | None = None
             touch_eligible = bool(parsed_bounds)

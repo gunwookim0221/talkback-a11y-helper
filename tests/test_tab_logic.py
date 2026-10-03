@@ -1,4 +1,5 @@
 from unittest.mock import Mock
+import pytest
 
 from tb_runner import tab_logic
 from tb_runner.bottom_nav import annotate_bottom_nav_candidates
@@ -13,6 +14,24 @@ class FakeTabClient:
         self.touch_bounds_center = Mock(return_value=False)
         self.get_focus = Mock(return_value={})
         self.collect_focus_step = Mock(return_value={})
+
+
+@pytest.mark.parametrize("destination,index", [("home",0),("devices",1),("life",2),("routines",3),("menu",4)])
+def test_xml_bottom_tab_bounds_are_normalized_for_activation(monkeypatch, destination, index):
+    client = FakeTabClient()
+    nodes = _r2_bottom_nav_nodes()
+    for i, n in enumerate(nodes):
+        n["boundsInScreen"] = f"[{i*180},900][{i*180+150},1000]"
+    monkeypatch.setattr(tab_logic, "_read_window_xml_nodes", lambda *a: nodes)
+    monkeypatch.setattr(tab_logic, "verify_context", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(tab_logic.time, "sleep", lambda *a: None)
+    client.touch_point.return_value = True
+    cfg = {"scenario_id": destination+"_main", "tab_name": destination,"tab_type":"b",
+           "global_nav":{"labels":["Home","Devices","Life","Routines","Menu"]}}
+    result = tab_logic.stabilize_tab_selection(client,"SERIAL",cfg,max_retries=1)
+    assert result["ok"] is True
+    client.touch_point.assert_called_once_with(dev="SERIAL",x=index*180+75,y=950)
+    client.touch_bounds_center.assert_not_called()
 
 
 def _tab_cfg():

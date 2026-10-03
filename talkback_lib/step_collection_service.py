@@ -135,10 +135,23 @@ class StepCollectionService:
 
     @staticmethod
     def _snapshot_actual_focus_fields(step: dict[str, Any]) -> None:
+        node = step.get("focus_node")
+        node = node if isinstance(node, dict) else {}
         step["actual_focus_visible"] = str(step.get("visible_label", "") or "").strip()
         step["actual_focus_speech"] = str(step.get("merged_announcement", "") or "").strip()
         step["actual_focus_resource_id"] = str(step.get("focus_view_id", "") or "").strip()
         step["actual_focus_bounds"] = str(step.get("focus_bounds", "") or "").strip()
+        step["actual_focus_node"] = dict(node)
+        step["actual_focus_accessibility_focused"] = node.get("accessibilityFocused")
+        step["actual_focus_input_focused"] = node.get("focused")
+        step["actual_focus_class_name"] = str(node.get("className", "") or node.get("class", ""))
+        step["actual_focus_role"] = str(node.get("role", "") or node.get("accessibilityRole", ""))
+        step["actual_focus_container_id"] = str(
+            node.get("containerId", "") or node.get("ancestorId", "") or node.get("parentResourceId", "")
+        )
+        step["actual_focus_node_path"] = str(
+            node.get("stableNodePath", "") or node.get("nodePath", "") or node.get("path", "")
+        )
         step["actual_focus_payload_source"] = str(step.get("focus_payload_source", "none") or "none")
         step["row_source"] = str(step.get("row_source", "") or "actual_focus")
         step["crop_source"] = str(step.get("crop_source", "") or "actual_focus")

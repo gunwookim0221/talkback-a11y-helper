@@ -2566,8 +2566,9 @@ object A11yNavigator {
                 reason = "scroll_target_missing:$reason"
             )
         }
-        val scrolled = scrollTarget.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
-        Log.i("A11Y_HELPER", "[PRE_SCROLL] ACTION_SCROLL_FORWARD result=$scrolled reason=$reason")
+        val action = verticalScrollAction("down", scrollTarget.actionList.map { it.id })
+        val scrolled = action != null && scrollTarget.performAction(action)
+        Log.i("A11Y_HELPER", "[PRE_SCROLL] vertical_action_id=$action result=$scrolled reason=$reason")
         return PreScrollResult(
             attempted = true,
             success = scrolled,
@@ -3464,7 +3465,7 @@ object A11yNavigator {
                 isVisibleToUser = { it.isVisibleToUser },
                 isScrollable = { isEligibleVerticalScrollNode(it) },
                 hasScrollForwardAction = {
-                    it.actionList.contains(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_FORWARD)
+                    verticalScrollAction("down", it.actionList.map { action -> action.id }) != null
                 }
             )
             if (hasScrollableDown) {
@@ -3484,15 +3485,43 @@ object A11yNavigator {
             parentOf = { it.parent },
             isScrollable = { isEligibleVerticalScrollNode(it) },
             hasScrollForwardAction = {
-                it.actionList.contains(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_FORWARD)
+                verticalScrollAction("down", it.actionList.map { action -> action.id }) != null
             }
         )
     }
 
     internal fun isEligibleVerticalScrollNode(node: AccessibilityNodeInfo): Boolean {
         if (!node.isScrollable) return false
-        val className = node.className?.toString()?.lowercase() ?: ""
-        return !className.contains("horizontal") && !className.contains("viewpager")
+        return scrollAxis(node.className?.toString().orEmpty(), node.actionList.map { it.id }) in
+            setOf("VERTICAL", "BIDIRECTIONAL")
+    }
+
+    internal fun scrollAxis(className: String, actionIds: List<Int>): String {
+        val value = className.lowercase()
+        if (value.contains("pager")) return "PAGER"
+        val vertical = actionIds.any { it == 16908344 || it == 16908346 }
+        val horizontal = actionIds.any { it == 16908345 || it == 16908347 }
+        if (vertical && horizontal) return "BIDIRECTIONAL"
+        if (horizontal) return "HORIZONTAL"
+        if (vertical) return "VERTICAL"
+        if (value.contains("horizontal")) return "HORIZONTAL"
+        if (listOf("recyclerview", "gridview", "listview", "scrollview").any { value.contains(it) }) return "VERTICAL"
+        return "UNKNOWN"
+    }
+
+    internal fun isVerticalScrollClass(className: String): Boolean {
+        val value = className.lowercase()
+        return scrollAxis(value, emptyList()) == "VERTICAL"
+    }
+
+    internal fun verticalScrollAction(direction: String, actionIds: List<Int>): Int? {
+        // Generic FORWARD on a mixed-axis node can refer to its horizontal axis.
+        if (actionIds.any { it == 16908345 || it == 16908347 }) {
+            val directional = if (direction == "down") 16908346 else 16908344
+            return directional.takeIf { it in actionIds }
+        }
+        val candidates = if (direction == "down") listOf(4096, 16908346) else listOf(8192, 16908344)
+        return candidates.firstOrNull { it in actionIds }
     }
 
     internal fun <T> findScrollableForwardAncestorCandidate(

@@ -543,6 +543,12 @@ data class A11yScrollCapability(
             put("scroll_backward_supported", scrollBackwardSupported)
             put("scroll_up_supported", scrollUpSupported)
             put("scroll_down_supported", scrollDownSupported)
+            val axis = A11yNavigator.scrollAxis(className.orEmpty(), actions.map { it.id })
+            put("axis", axis)
+            put("axis_source", if (actions.any { it.id in 16908344..16908347 }) "directional_actions" else "class_or_unknown")
+            put("axis_confidence", if (axis == "UNKNOWN") "unknown" else "explicit")
+            put("vertical_can_scroll_forward", if (axis in setOf("VERTICAL", "BIDIRECTIONAL"))
+                A11yNavigator.verticalScrollAction("down", actions.map { it.id }) != null else if (axis == "UNKNOWN") JSONObject.NULL else false)
         }
     }
 
