@@ -1,0 +1,3075 @@
+{
+  "schema_version": "state-replay-suite-v1",
+  "review_note": "Expected relations/groups specified in tests/state_model_fixtures.py; synthetic, not real device evidence.",
+  "datasets": [
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "exact",
+      "namespace": "exact",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        },
+        {
+          "key": "b",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": "base",
+        "b": "base"
+      },
+      "pairs": [
+        {
+          "name": "exact",
+          "left": "a",
+          "right": "b",
+          "expected": "SAME",
+          "use_continuity": false,
+          "viewport_equal": true
+        }
+      ],
+      "continuities": []
+    },
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "focus",
+      "namespace": "focus",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        },
+        {
+          "key": "b",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false,
+                "accessibilityFocused": true
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context",
+            "focus_node": {
+              "viewIdResourceName": "pkg:id/card",
+              "text": "Device",
+              "className": "android.widget.TextView",
+              "boundsInScreen": "0,100,500,200",
+              "visibleToUser": true,
+              "enabled": true,
+              "checked": false,
+              "selected": false,
+              "clickable": true,
+              "focusable": true,
+              "scrollable": false,
+              "accessibilityFocused": true
+            }
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": "base",
+        "b": "base"
+      },
+      "pairs": [
+        {
+          "name": "focus",
+          "left": "a",
+          "right": "b",
+          "expected": "SAME",
+          "use_continuity": false,
+          "viewport_equal": true
+        }
+      ],
+      "continuities": []
+    },
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "home-devices",
+      "namespace": "home-devices",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        },
+        {
+          "key": "b",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_devices",
+                "text": "devices",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "devices"
+            },
+            "selected_tab": {
+              "name": "devices",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": "home",
+        "b": "devices"
+      },
+      "pairs": [
+        {
+          "name": "home-devices",
+          "left": "a",
+          "right": "b",
+          "expected": "DIFFERENT",
+          "use_continuity": false
+        }
+      ],
+      "continuities": []
+    },
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "home-life",
+      "namespace": "home-life",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        },
+        {
+          "key": "b",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_services",
+                "text": "life",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "life"
+            },
+            "selected_tab": {
+              "name": "life",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": "home",
+        "b": "life"
+      },
+      "pairs": [
+        {
+          "name": "home-life",
+          "left": "a",
+          "right": "b",
+          "expected": "DIFFERENT",
+          "use_continuity": false
+        }
+      ],
+      "continuities": []
+    },
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "scroll",
+      "namespace": "scroll",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context",
+            "capability": {
+              "status": "SCROLL_CAPABLE",
+              "source": "helper_metadata",
+              "can_scroll_forward": true,
+              "container": {
+                "className": "android.widget.ScrollView",
+                "path": "0.1",
+                "boundsInScreen": "0,0,1000,1000",
+                "scroll_forward_supported": true,
+                "kind": "VERTICAL_CONTENT_SCROLL",
+                "axis": "VERTICAL",
+                "axis_source": "class",
+                "axis_confidence": "class",
+                "instance_id": "[\"instance-v1\",\"\",\"\",\"bounds\",\"0,0,1000,1000\"]"
+              },
+              "containers": [
+                {
+                  "className": "android.widget.ScrollView",
+                  "path": "0.1",
+                  "boundsInScreen": "0,0,1000,1000",
+                  "scroll_forward_supported": true,
+                  "kind": "VERTICAL_CONTENT_SCROLL",
+                  "axis": "VERTICAL",
+                  "axis_source": "class",
+                  "axis_confidence": "class",
+                  "instance_id": "[\"instance-v1\",\"\",\"\",\"bounds\",\"0,0,1000,1000\"]"
+                }
+              ],
+              "confidence": "explicit_action",
+              "contradictory": false,
+              "vertical_can_scroll_forward": true,
+              "axis_contract": "axis-v1",
+              "axis": "VERTICAL",
+              "axis_source": "container_actions_and_class",
+              "unknown_axis_containers": 0,
+              "legacy_axis_filtered": false,
+              "horizontal_can_scroll_forward": false
+            },
+            "viewport": {
+              "signature": "7a5fc9e7ccc72ce64a8e8114b481c4277822ed5e2d26c6cd9a091284c5ebd6da",
+              "stable_signature": "17ba49d67c1dbcea4f31b3a33f472e131b404654cff6b729e2b7a2a7c6e71248",
+              "instances": [
+                "[\"instance-v1\",\"synthetic_scroll\",\"pkg:id/card\",\"bounds\",\"0,100,500,200\"]",
+                "[\"instance-v1\",\"synthetic_scroll\",\"pkg:id/menu_favorites\",\"bounds\",\"0,900,200,1000\"]"
+              ],
+              "count": 2,
+              "valid": true
+            }
+          }
+        },
+        {
+          "key": "b",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,300,500,400",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 1,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context",
+            "capability": {
+              "status": "SCROLL_CAPABLE",
+              "source": "helper_metadata",
+              "can_scroll_forward": true,
+              "container": {
+                "className": "android.widget.ScrollView",
+                "path": "0.1",
+                "boundsInScreen": "0,0,1000,1000",
+                "scroll_forward_supported": true,
+                "kind": "VERTICAL_CONTENT_SCROLL",
+                "axis": "VERTICAL",
+                "axis_source": "class",
+                "axis_confidence": "class",
+                "instance_id": "[\"instance-v1\",\"\",\"\",\"bounds\",\"0,0,1000,1000\"]"
+              },
+              "containers": [
+                {
+                  "className": "android.widget.ScrollView",
+                  "path": "0.1",
+                  "boundsInScreen": "0,0,1000,1000",
+                  "scroll_forward_supported": true,
+                  "kind": "VERTICAL_CONTENT_SCROLL",
+                  "axis": "VERTICAL",
+                  "axis_source": "class",
+                  "axis_confidence": "class",
+                  "instance_id": "[\"instance-v1\",\"\",\"\",\"bounds\",\"0,0,1000,1000\"]"
+                }
+              ],
+              "confidence": "explicit_action",
+              "contradictory": false,
+              "vertical_can_scroll_forward": true,
+              "axis_contract": "axis-v1",
+              "axis": "VERTICAL",
+              "axis_source": "container_actions_and_class",
+              "unknown_axis_containers": 0,
+              "legacy_axis_filtered": false,
+              "horizontal_can_scroll_forward": false
+            },
+            "viewport": {
+              "signature": "5dd805ae60f060e2a5f8f9eefee4f5a3d0fd20c650a31254406c6aa70eec27b3",
+              "stable_signature": "00b88ed9366c346a52d274e1532035c48d50c3199fef68f899bb82378a64ccd9",
+              "instances": [
+                "[\"instance-v1\",\"synthetic_scroll\",\"pkg:id/card\",\"bounds\",\"0,300,500,400\"]",
+                "[\"instance-v1\",\"synthetic_scroll\",\"pkg:id/menu_favorites\",\"bounds\",\"0,900,200,1000\"]"
+              ],
+              "count": 2,
+              "valid": true
+            }
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": "base",
+        "b": "base"
+      },
+      "pairs": [
+        {
+          "name": "scroll",
+          "left": "a",
+          "right": "b",
+          "expected": "SAME",
+          "use_continuity": true,
+          "viewport_equal": false
+        }
+      ],
+      "continuities": [
+        {
+          "evidence": {
+            "action_success": true,
+            "after_observation_id": "51d4125216e02448a2b3f79e327fa740d31e0d027fc0f3b343ba7a3a917de664",
+            "after_viewport_signature": "5dd805ae60f060e2a5f8f9eefee4f5a3d0fd20c650a31254406c6aa70eec27b3",
+            "axis": "VERTICAL",
+            "before_observation_id": "324b42b0c5d8e8369ef7f2d2c92cf60a1b787a983220d8f8194796c148d13a2a",
+            "before_viewport_signature": "7a5fc9e7ccc72ce64a8e8114b481c4277822ed5e2d26c6cd9a091284c5ebd6da",
+            "container_path": "0.1",
+            "kind": "VERIFIED_SCROLL",
+            "movement_status": "SCROLL_MOVED",
+            "schema_version": "state-scroll-continuity-v1",
+            "source": "helper_metadata",
+            "viewport_changed": true
+          }
+        }
+      ]
+    },
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "unlinked-viewport",
+      "namespace": "unlinked-viewport",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context",
+            "capability": {
+              "status": "SCROLL_CAPABLE",
+              "source": "helper_metadata",
+              "can_scroll_forward": true,
+              "container": {
+                "className": "android.widget.ScrollView",
+                "path": "0.1",
+                "boundsInScreen": "0,0,1000,1000",
+                "scroll_forward_supported": true,
+                "kind": "VERTICAL_CONTENT_SCROLL",
+                "axis": "VERTICAL",
+                "axis_source": "class",
+                "axis_confidence": "class",
+                "instance_id": "[\"instance-v1\",\"\",\"\",\"bounds\",\"0,0,1000,1000\"]"
+              },
+              "containers": [
+                {
+                  "className": "android.widget.ScrollView",
+                  "path": "0.1",
+                  "boundsInScreen": "0,0,1000,1000",
+                  "scroll_forward_supported": true,
+                  "kind": "VERTICAL_CONTENT_SCROLL",
+                  "axis": "VERTICAL",
+                  "axis_source": "class",
+                  "axis_confidence": "class",
+                  "instance_id": "[\"instance-v1\",\"\",\"\",\"bounds\",\"0,0,1000,1000\"]"
+                }
+              ],
+              "confidence": "explicit_action",
+              "contradictory": false,
+              "vertical_can_scroll_forward": true,
+              "axis_contract": "axis-v1",
+              "axis": "VERTICAL",
+              "axis_source": "container_actions_and_class",
+              "unknown_axis_containers": 0,
+              "legacy_axis_filtered": false,
+              "horizontal_can_scroll_forward": false
+            },
+            "viewport": {
+              "signature": "7a5fc9e7ccc72ce64a8e8114b481c4277822ed5e2d26c6cd9a091284c5ebd6da",
+              "stable_signature": "17ba49d67c1dbcea4f31b3a33f472e131b404654cff6b729e2b7a2a7c6e71248",
+              "instances": [
+                "[\"instance-v1\",\"synthetic_scroll\",\"pkg:id/card\",\"bounds\",\"0,100,500,200\"]",
+                "[\"instance-v1\",\"synthetic_scroll\",\"pkg:id/menu_favorites\",\"bounds\",\"0,900,200,1000\"]"
+              ],
+              "count": 2,
+              "valid": true
+            }
+          }
+        },
+        {
+          "key": "b",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,300,500,400",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 1,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context",
+            "capability": {
+              "status": "SCROLL_CAPABLE",
+              "source": "helper_metadata",
+              "can_scroll_forward": true,
+              "container": {
+                "className": "android.widget.ScrollView",
+                "path": "0.1",
+                "boundsInScreen": "0,0,1000,1000",
+                "scroll_forward_supported": true,
+                "kind": "VERTICAL_CONTENT_SCROLL",
+                "axis": "VERTICAL",
+                "axis_source": "class",
+                "axis_confidence": "class",
+                "instance_id": "[\"instance-v1\",\"\",\"\",\"bounds\",\"0,0,1000,1000\"]"
+              },
+              "containers": [
+                {
+                  "className": "android.widget.ScrollView",
+                  "path": "0.1",
+                  "boundsInScreen": "0,0,1000,1000",
+                  "scroll_forward_supported": true,
+                  "kind": "VERTICAL_CONTENT_SCROLL",
+                  "axis": "VERTICAL",
+                  "axis_source": "class",
+                  "axis_confidence": "class",
+                  "instance_id": "[\"instance-v1\",\"\",\"\",\"bounds\",\"0,0,1000,1000\"]"
+                }
+              ],
+              "confidence": "explicit_action",
+              "contradictory": false,
+              "vertical_can_scroll_forward": true,
+              "axis_contract": "axis-v1",
+              "axis": "VERTICAL",
+              "axis_source": "container_actions_and_class",
+              "unknown_axis_containers": 0,
+              "legacy_axis_filtered": false,
+              "horizontal_can_scroll_forward": false
+            },
+            "viewport": {
+              "signature": "5dd805ae60f060e2a5f8f9eefee4f5a3d0fd20c650a31254406c6aa70eec27b3",
+              "stable_signature": "00b88ed9366c346a52d274e1532035c48d50c3199fef68f899bb82378a64ccd9",
+              "instances": [
+                "[\"instance-v1\",\"synthetic_scroll\",\"pkg:id/card\",\"bounds\",\"0,300,500,400\"]",
+                "[\"instance-v1\",\"synthetic_scroll\",\"pkg:id/menu_favorites\",\"bounds\",\"0,900,200,1000\"]"
+              ],
+              "count": 2,
+              "valid": true
+            }
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": "base",
+        "b": null
+      },
+      "pairs": [
+        {
+          "name": "unlinked-viewport",
+          "left": "a",
+          "right": "b",
+          "expected": "AMBIGUOUS",
+          "use_continuity": false
+        }
+      ],
+      "continuities": []
+    },
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "overlay",
+      "namespace": "overlay",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        },
+        {
+          "key": "b",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context",
+            "overlay": {
+              "kind": "dialog",
+              "observed": true,
+              "nodes": [
+                {
+                  "viewIdResourceName": "dialog",
+                  "text": "Permission",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": "base",
+        "b": "overlay"
+      },
+      "pairs": [
+        {
+          "name": "overlay",
+          "left": "a",
+          "right": "b",
+          "expected": "DIFFERENT",
+          "use_continuity": false,
+          "viewport_equal": true
+        }
+      ],
+      "continuities": []
+    },
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "temperature",
+      "namespace": "temperature",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "23°C",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        },
+        {
+          "key": "b",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "24°C",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": "base",
+        "b": "base"
+      },
+      "pairs": [
+        {
+          "name": "temperature",
+          "left": "a",
+          "right": "b",
+          "expected": "SAME",
+          "use_continuity": false
+        }
+      ],
+      "continuities": []
+    },
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "battery",
+      "namespace": "battery",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "battery 75%",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        },
+        {
+          "key": "b",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "battery 74%",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": "base",
+        "b": "base"
+      },
+      "pairs": [
+        {
+          "name": "battery",
+          "left": "a",
+          "right": "b",
+          "expected": "SAME",
+          "use_continuity": false
+        }
+      ],
+      "continuities": []
+    },
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "clock",
+      "namespace": "clock",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "time 10:31",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        },
+        {
+          "key": "b",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "time 10:32",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": "base",
+        "b": "base"
+      },
+      "pairs": [
+        {
+          "name": "clock",
+          "left": "a",
+          "right": "b",
+          "expected": "SAME",
+          "use_continuity": false
+        }
+      ],
+      "continuities": []
+    },
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "locked",
+      "namespace": "locked",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "locked",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        },
+        {
+          "key": "b",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "unlocked",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": "before",
+        "b": "after"
+      },
+      "pairs": [
+        {
+          "name": "locked",
+          "left": "a",
+          "right": "b",
+          "expected": "DIFFERENT",
+          "use_continuity": false
+        }
+      ],
+      "continuities": []
+    },
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "connected",
+      "namespace": "connected",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "connected",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        },
+        {
+          "key": "b",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "disconnected",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": "before",
+        "b": "after"
+      },
+      "pairs": [
+        {
+          "name": "connected",
+          "left": "a",
+          "right": "b",
+          "expected": "DIFFERENT",
+          "use_continuity": false
+        }
+      ],
+      "continuities": []
+    },
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "enabled",
+      "namespace": "enabled",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        },
+        {
+          "key": "b",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": false,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": "before",
+        "b": "after"
+      },
+      "pairs": [
+        {
+          "name": "enabled",
+          "left": "a",
+          "right": "b",
+          "expected": "DIFFERENT",
+          "use_continuity": false
+        }
+      ],
+      "continuities": []
+    },
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "checked",
+      "namespace": "checked",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        },
+        {
+          "key": "b",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": true,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": "before",
+        "b": "after"
+      },
+      "pairs": [
+        {
+          "name": "checked",
+          "left": "a",
+          "right": "b",
+          "expected": "DIFFERENT",
+          "use_continuity": false
+        }
+      ],
+      "continuities": []
+    },
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "ordering",
+      "namespace": "ordering",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        },
+        {
+          "key": "b",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": "base",
+        "b": "base"
+      },
+      "pairs": [
+        {
+          "name": "ordering",
+          "left": "a",
+          "right": "b",
+          "expected": "SAME",
+          "use_continuity": false,
+          "viewport_equal": true
+        }
+      ],
+      "continuities": []
+    },
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "locale",
+      "namespace": "locale",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "장치",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "홈",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context",
+            "locale": "ko-KR"
+          }
+        },
+        {
+          "key": "b",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context",
+            "locale": "en-US"
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": "base",
+        "b": "base"
+      },
+      "pairs": [
+        {
+          "name": "locale",
+          "left": "a",
+          "right": "b",
+          "expected": "SAME",
+          "use_continuity": false,
+          "viewport_equal": true
+        }
+      ],
+      "continuities": []
+    },
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "coarse-collision",
+      "namespace": "coarse-collision",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Settings subpage",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        },
+        {
+          "key": "b",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Details subpage",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": "known",
+        "b": null
+      },
+      "pairs": [
+        {
+          "name": "coarse-collision",
+          "left": "a",
+          "right": "b",
+          "expected": "AMBIGUOUS",
+          "use_continuity": false
+        }
+      ],
+      "continuities": []
+    },
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "missing-activity",
+      "namespace": "missing-activity",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": null,
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        },
+        {
+          "key": "b",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": null,
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": null,
+        "b": null
+      },
+      "pairs": [
+        {
+          "name": "missing-activity",
+          "left": "a",
+          "right": "b",
+          "expected": "AMBIGUOUS",
+          "use_continuity": false
+        }
+      ],
+      "continuities": []
+    },
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "partial-full",
+      "namespace": "partial-full",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        },
+        {
+          "key": "b",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context",
+            "observation_coverage": "OBSERVED_FULL"
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": "base",
+        "b": null
+      },
+      "pairs": [
+        {
+          "name": "partial-full",
+          "left": "a",
+          "right": "b",
+          "expected": "AMBIGUOUS",
+          "use_continuity": false
+        }
+      ],
+      "continuities": []
+    },
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "partial-subset",
+      "namespace": "partial-subset",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/card",
+                "text": "Device",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,100,500,200",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": false,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              },
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        },
+        {
+          "key": "b",
+          "raw": {
+            "package_name": "pkg",
+            "activity_name": "pkg.MainActivity",
+            "display_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "nodes": [
+              {
+                "viewIdResourceName": "pkg:id/menu_favorites",
+                "text": "home",
+                "className": "android.widget.TextView",
+                "boundsInScreen": "0,900,200,1000",
+                "visibleToUser": true,
+                "enabled": true,
+                "checked": false,
+                "selected": true,
+                "clickable": true,
+                "focusable": true,
+                "scrollable": false
+              }
+            ],
+            "navigation_context": {
+              "bottom_tab": "home"
+            },
+            "selected_tab": {
+              "name": "home",
+              "verified": true
+            },
+            "timestamp": "2026-10-05T01:00:00+09:00",
+            "scenario_id": "synthetic",
+            "step": 0,
+            "source": "reviewed_synthetic_fixture",
+            "context_source": "synthetic_observed_context"
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": "base",
+        "b": null
+      },
+      "pairs": [
+        {
+          "name": "partial-subset",
+          "left": "a",
+          "right": "b",
+          "expected": "AMBIGUOUS",
+          "use_continuity": false
+        }
+      ],
+      "continuities": []
+    },
+    {
+      "schema_version": "state-replay-manifest-v1",
+      "name": "fingerprint-only",
+      "namespace": "fingerprint-only",
+      "fixture_kind": "REVIEWED_SYNTHETIC",
+      "observations": [
+        {
+          "key": "a",
+          "fingerprint": {
+            "schema_version": "state-fingerprint-v1",
+            "core_signature": "7c2db90d83decc1191771b32838b32ea61cd692810609d33c4642a0bf26358cc",
+            "viewport_signature": "e2a6e01ac3c3f43131de43cc2e789f6fbdc624d3f1115e85f70bfcdb6b34f3a9",
+            "overlay_signature": "edd79abea6af62e7d2d0dd0a3590d2e7fb0987236acb18bcd28540ed6d3fa488",
+            "fingerprint_hash": "22647643c09e17ed3b5b4136572320fc4d02cbe61e676c5d9852ae84cc0fc923",
+            "core": {
+              "activity_name": "pkg.MainActivity",
+              "navigation_context": {
+                "bottom_tab": "home"
+              },
+              "normalization_version": "semantic-values-v1-relative32",
+              "package_name": "pkg",
+              "screen_markers": [],
+              "selected_tab": "home",
+              "selected_tab_status": "explicit_verified"
+            },
+            "viewport": {
+              "bounds_strategy": "relative-grid32",
+              "observation_status": "OBSERVED_PARTIAL",
+              "scroll": {
+                "axis": null,
+                "axis_contract": null,
+                "can_scroll_forward": null,
+                "contradictory": null,
+                "horizontal_can_scroll_forward": null,
+                "status": null,
+                "vertical_can_scroll_forward": null
+              },
+              "semantic_nodes": [
+                {
+                  "class_name": "android.widget.TextView",
+                  "flags": {
+                    "checked": false,
+                    "clickable": true,
+                    "enabled": true,
+                    "focusable": true,
+                    "scrollable": false,
+                    "selected": false
+                  },
+                  "layout_bucket": [
+                    0,
+                    3,
+                    16,
+                    6
+                  ],
+                  "resource_id": "pkg:id/card",
+                  "role": null,
+                  "semantic_state": null,
+                  "state_description": null,
+                  "text_fallback": null
+                },
+                {
+                  "class_name": "android.widget.TextView",
+                  "flags": {
+                    "checked": false,
+                    "clickable": true,
+                    "enabled": true,
+                    "focusable": true,
+                    "scrollable": false,
+                    "selected": true
+                  },
+                  "layout_bucket": [
+                    0,
+                    29,
+                    6,
+                    32
+                  ],
+                  "resource_id": "pkg:id/menu_favorites",
+                  "role": null,
+                  "semantic_state": null,
+                  "state_description": null,
+                  "text_fallback": null
+                }
+              ]
+            },
+            "overlay": {
+              "kind": "unknown",
+              "observed": false,
+              "semantic_nodes": []
+            },
+            "transient": {
+              "context_source": "synthetic_observed_context",
+              "focused_element_summary": {
+                "accessibility_focused": null,
+                "bounds": null,
+                "input_focused": null,
+                "normalized_label": "",
+                "resource_id": null
+              },
+              "invalid_bounds_count": 0,
+              "legacy_viewport": null,
+              "missing_fields": [],
+              "notes": [],
+              "overlay_source": "unspecified",
+              "positional_instance_ids": [
+                "[\"instance-v1\",\"synthetic\",\"pkg:id/card\",\"bounds\",\"0,100,500,200\"]",
+                "[\"instance-v1\",\"synthetic\",\"pkg:id/menu_favorites\",\"bounds\",\"0,900,200,1000\"]"
+              ],
+              "raw_context": {
+                "activity_name": "pkg.MainActivity",
+                "package_name": "pkg"
+              },
+              "raw_observation_digest": "612285b17f3ef605e0730f33262429d58e8db3c132974092469fafb206fc5f4d",
+              "scenario_id": "synthetic",
+              "scroll_source": null,
+              "selected_tab_source": null,
+              "source": "reviewed_synthetic_fixture",
+              "step": 0,
+              "timestamp": "2026-10-05T01:00:00+09:00",
+              "unknown_node_fields": {
+                "checked": 0,
+                "clickable": 0,
+                "enabled": 0,
+                "focusable": 0,
+                "scrollable": 0,
+                "selected": 0
+              },
+              "unknown_visibility_count": 0
+            }
+          }
+        },
+        {
+          "key": "b",
+          "fingerprint": {
+            "schema_version": "state-fingerprint-v1",
+            "core_signature": "7c2db90d83decc1191771b32838b32ea61cd692810609d33c4642a0bf26358cc",
+            "viewport_signature": "e2a6e01ac3c3f43131de43cc2e789f6fbdc624d3f1115e85f70bfcdb6b34f3a9",
+            "overlay_signature": "edd79abea6af62e7d2d0dd0a3590d2e7fb0987236acb18bcd28540ed6d3fa488",
+            "fingerprint_hash": "22647643c09e17ed3b5b4136572320fc4d02cbe61e676c5d9852ae84cc0fc923",
+            "core": {
+              "activity_name": "pkg.MainActivity",
+              "navigation_context": {
+                "bottom_tab": "home"
+              },
+              "normalization_version": "semantic-values-v1-relative32",
+              "package_name": "pkg",
+              "screen_markers": [],
+              "selected_tab": "home",
+              "selected_tab_status": "explicit_verified"
+            },
+            "viewport": {
+              "bounds_strategy": "relative-grid32",
+              "observation_status": "OBSERVED_PARTIAL",
+              "scroll": {
+                "axis": null,
+                "axis_contract": null,
+                "can_scroll_forward": null,
+                "contradictory": null,
+                "horizontal_can_scroll_forward": null,
+                "status": null,
+                "vertical_can_scroll_forward": null
+              },
+              "semantic_nodes": [
+                {
+                  "class_name": "android.widget.TextView",
+                  "flags": {
+                    "checked": false,
+                    "clickable": true,
+                    "enabled": true,
+                    "focusable": true,
+                    "scrollable": false,
+                    "selected": false
+                  },
+                  "layout_bucket": [
+                    0,
+                    3,
+                    16,
+                    6
+                  ],
+                  "resource_id": "pkg:id/card",
+                  "role": null,
+                  "semantic_state": null,
+                  "state_description": null,
+                  "text_fallback": null
+                },
+                {
+                  "class_name": "android.widget.TextView",
+                  "flags": {
+                    "checked": false,
+                    "clickable": true,
+                    "enabled": true,
+                    "focusable": true,
+                    "scrollable": false,
+                    "selected": true
+                  },
+                  "layout_bucket": [
+                    0,
+                    29,
+                    6,
+                    32
+                  ],
+                  "resource_id": "pkg:id/menu_favorites",
+                  "role": null,
+                  "semantic_state": null,
+                  "state_description": null,
+                  "text_fallback": null
+                }
+              ]
+            },
+            "overlay": {
+              "kind": "unknown",
+              "observed": false,
+              "semantic_nodes": []
+            },
+            "transient": {
+              "context_source": "synthetic_observed_context",
+              "focused_element_summary": {
+                "accessibility_focused": null,
+                "bounds": null,
+                "input_focused": null,
+                "normalized_label": "",
+                "resource_id": null
+              },
+              "invalid_bounds_count": 0,
+              "legacy_viewport": null,
+              "missing_fields": [],
+              "notes": [],
+              "overlay_source": "unspecified",
+              "positional_instance_ids": [
+                "[\"instance-v1\",\"synthetic\",\"pkg:id/card\",\"bounds\",\"0,100,500,200\"]",
+                "[\"instance-v1\",\"synthetic\",\"pkg:id/menu_favorites\",\"bounds\",\"0,900,200,1000\"]"
+              ],
+              "raw_context": {
+                "activity_name": "pkg.MainActivity",
+                "package_name": "pkg"
+              },
+              "raw_observation_digest": "612285b17f3ef605e0730f33262429d58e8db3c132974092469fafb206fc5f4d",
+              "scenario_id": "synthetic",
+              "scroll_source": null,
+              "selected_tab_source": null,
+              "source": "reviewed_synthetic_fixture",
+              "step": 0,
+              "timestamp": "2026-10-05T01:00:00+09:00",
+              "unknown_node_fields": {
+                "checked": 0,
+                "clickable": 0,
+                "enabled": 0,
+                "focusable": 0,
+                "scrollable": 0,
+                "selected": 0
+              },
+              "unknown_visibility_count": 0
+            }
+          }
+        }
+      ],
+      "expected_groups": {
+        "a": null,
+        "b": null
+      },
+      "pairs": [
+        {
+          "name": "fingerprint-only",
+          "left": "a",
+          "right": "b",
+          "expected": "AMBIGUOUS",
+          "use_continuity": false
+        }
+      ],
+      "continuities": []
+    }
+  ]
+}
