@@ -244,6 +244,7 @@ class StepCollectionService:
         get_focus_mode: str = "normal",
     ) -> dict[str, Any]:
         step_started = time.monotonic()
+        self.client.last_native_speech_evidence = []
         baseline_announcement = str(self.client.last_merged_announcement or "").strip()
         baseline_announcement_ts = round(step_started, 3)
         baseline_norm = self.client.normalize_for_comparison(baseline_announcement)
@@ -496,6 +497,9 @@ class StepCollectionService:
 
         merged_announcement = str(selected_merged_announcement or self.client._merge_announcements(partial_announcements))
         step["merged_announcement"] = merged_announcement
+        native_speech_evidence = getattr(self.client, "last_native_speech_evidence", [])
+        if native_speech_evidence:
+            step["native_speech_evidence"] = self.client._json_safe_value(native_speech_evidence)
         step["normalized_announcement"] = self.client.normalize_for_comparison(merged_announcement)
         step["trim_considered"] = bool(trim_considered)
         step["trim_applied"] = bool(trim_applied)

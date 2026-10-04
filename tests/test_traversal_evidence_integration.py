@@ -129,6 +129,7 @@ def test_legacy_recording_is_unchanged_without_gate_decision():
         "focus_bounds": "[0,0][100,100]",
         "focus_cluster_signature": "cluster",
     }
+    row["actual_focus_accessibility_focused"] = True
     collection_flow._record_recent_representative_signature(state, row)
     assert collection_flow._row_logical_signature(row) in state.visited_logical_signatures
     assert state.consumed_representative_signatures
@@ -170,6 +171,7 @@ def test_confirmed_move_visits_actual_focus_not_representative():
         "actual_focus_bounds": "[0,0][100,100]",
     }
     progress, visit = _decision("MOVE_CONFIRMED", row)
+    row["actual_focus_accessibility_focused"] = True
     collection_flow._record_recent_representative_signature(
         state, row, progress_decision=progress, visit_decision=visit
     )

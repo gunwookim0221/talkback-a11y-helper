@@ -25,6 +25,10 @@ ACTION_EVIDENCE_EVENTS = "com.iotpart.sqe.talkbackhelper.EVIDENCE_EVENTS"
 
 LOG_TAG = "A11Y_HELPER"
 LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]
+# Samsung TalkBack uses component tags containing ':', which logcat filter
+# expressions cannot address. Bound the fallback read by native message shape.
+NATIVE_SPEECH_LOGCAT_ARGS = ["logcat", "-v", "time", "-d", "*:V", "-e",
+                             "Speaking fragment text=|EventType: TYPE_VIEW_ACCESSIBILITY_FOCUSED;"]
 LOGCAT_TIME_PATTERN = re.compile(r"^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
 
 RED_TEXT = "\033[91m"

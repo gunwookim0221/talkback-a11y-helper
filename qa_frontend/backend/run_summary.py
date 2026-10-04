@@ -12,7 +12,7 @@ from .runtime_dashboard import parse_runtime_log
 from .runtime_dashboard import extract_validation_scenario_evidence_from_log
 
 SUMMARY_SCHEMA_VERSION = 1
-SAVED_EXCEL_PATTERN = re.compile(r"saved excel:\s+output/(?P<filename>[^/\s]+\.xlsx)", re.IGNORECASE)
+SAVED_EXCEL_PATTERN = re.compile(r"saved excel:\s+(?:.*?[\\/]output[\\/]|output[\\/])(?P<filename>.+?\.xlsx)(?:\s|$)", re.IGNORECASE)
 RUN_LOG_PATTERN = re.compile(r"^(?P<run_id>\d{8}_\d{6})_(?P<mode>smoke|full)\.log$")
 ENVIRONMENT_PROFILE_PATTERN = re.compile(
     r"\[ENVIRONMENT\]\s+profile\s+"
@@ -329,6 +329,9 @@ def _scenario_summaries(parsed: dict[str, object]) -> list[dict[str, object]]:
             "availability_reason": item.get("availability_reason"),
             "availability_target": item.get("availability_target"),
         }
+        for field in ("execution_status", "comparison_status", "termination_status", "termination_reason"):
+            if item.get(field) is not None:
+                scenario[field] = item[field]
         if item.get("terminal_provenance") is not None:
             scenario["terminal_provenance"] = item.get("terminal_provenance")
         if item.get("availability_evidence") is not None:

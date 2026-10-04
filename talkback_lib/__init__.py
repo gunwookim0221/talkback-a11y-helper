@@ -21,6 +21,7 @@ from PIL import Image, ImageDraw, ImageFont
 from talkback_lib.action_result_parser import ActionResultParser
 from talkback_lib.adb_executor import AdbExecutor
 from talkback_lib.adb_device import AdbDevice
+from talkback_lib.native_speech import native_focus_speech
 from talkback_lib.constants import (
     ACTION_CHECK_TARGET,
     ACTION_CLICK_FOCUSED,
@@ -43,6 +44,7 @@ from talkback_lib.constants import (
     DEFAULT_PACKAGE_NAME,
     DEFAULT_TIMEOUT_SECONDS,
     LOGCAT_FILTER_SPECS,
+    NATIVE_SPEECH_LOGCAT_ARGS,
     LOGCAT_TIME_PATTERN,
     LOG_LEVEL,
     LOG_LEVEL_ORDER,
@@ -92,6 +94,7 @@ class A11yAdbClient:
         self.needs_update = True
         self.last_announcements: list[str] = []
         self.last_merged_announcement: str = ""
+        self.last_native_speech_evidence: list[dict[str, Any]] = []
         self._state_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._monitor_proc: subprocess.Popen[str] | None = None
@@ -490,7 +493,8 @@ class A11yAdbClient:
                 producer="runner",
                 phase=transaction_phase,
                 transaction=transaction,
-                payload={"text": announcement, "normalized_text": self.normalize_for_comparison(announcement), "association": "step_collection"},
+                payload={"text": announcement, "normalized_text": self.normalize_for_comparison(announcement), "association": "step_collection",
+                         **({"native_speech_evidence": step["native_speech_evidence"]} if step.get("native_speech_evidence") else {})},
             )
         runtime.emit(
             "FOCUS_STABILITY_WINDOW_CLOSED",
@@ -3065,6 +3069,7 @@ class A11yAdbClient:
         start_time = time.monotonic()
         announcements: list[str] = []
         seen: set[str] = set()
+        native_records: list[dict[str, Any]] = []
 
         with self._state_lock:
             last_log_marker = self._last_log_marker
@@ -3073,6 +3078,7 @@ class A11yAdbClient:
 
         while True:
             logs = self._run(["logcat", "-v", "time", "-d", *LOGCAT_FILTER_SPECS], dev=dev)
+            native_records = []
             for line_index, line in enumerate(logs.splitlines(), start=1):
                 parsed_time = self._parse_logcat_time(line)
                 if parsed_time is None:
@@ -3094,6 +3100,20 @@ class A11yAdbClient:
                     seen.add(message)
                     announcements.append(message)
 
+            if not announcements:
+                native_logs = self._run(NATIVE_SPEECH_LOGCAT_ARGS, dev=dev)
+                for record in native_focus_speech(native_logs):
+                    parsed_time = self._parse_logcat_time(record["log_line"])
+                    if parsed_time is None:
+                        continue
+                    marker = (parsed_time, record["line_index"])
+                    if newest_log_marker is None or marker > newest_log_marker:
+                        newest_log_marker = marker
+                    if only_new and last_log_marker is not None and marker <= last_log_marker:
+                        continue
+                    if record not in native_records:
+                        native_records.append(record)
+
             elapsed = time.monotonic() - start_time
             if elapsed >= wait_seconds:
                 break
@@ -3103,6 +3123,14 @@ class A11yAdbClient:
         with self._state_lock:
             self._last_log_marker = newest_log_marker
 
+        # Keep the existing event capture authoritative when present. For an
+        # unnamed focused control, native TalkBack's observed utterance can be
+        # non-empty even though its accessibility event carries no text.
+        if not announcements and native_records:
+            announcements = list(dict.fromkeys(r["text"] for r in native_records))
+            for record in native_records:
+                if record not in self.last_native_speech_evidence:
+                    self.last_native_speech_evidence.append(record)
         self.last_announcements = announcements
         self.last_merged_announcement = self._merge_announcements(announcements)
         return announcements

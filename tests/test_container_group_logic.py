@@ -389,6 +389,7 @@ def test_active_group_with_priority_candidates_progresses_without_completion():
         "focus_cluster_logical_signature": "medication||medication",
     }
 
+    row["actual_focus_accessibility_focused"] = True
     collection_flow._record_recent_representative_signature(state, row)
 
     assert selected_signature not in state.active_container_group_remaining
@@ -767,6 +768,7 @@ def test_record_recent_representative_marks_cluster_and_logical_visited():
         "focus_cluster_logical_signature": "medication||medication",
     }
 
+    row["actual_focus_accessibility_focused"] = True
     collection_flow._record_recent_representative_signature(state, row)
 
     assert collection_flow._build_row_object_signature(row) in state.consumed_representative_signatures

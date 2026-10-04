@@ -4,7 +4,7 @@ The five primary buckets partition observed in-scope instances. UNKNOWN retains
 uncertain eligibility. Semantic coverage never proves an actual focus visit.
 """
 from collections import defaultdict
-from tb_runner.traversal_reliability import focus_instance, instance_id, normalized_bounds
+from tb_runner.traversal_reliability import focus_instance, observed_focus_instance, instance_id, normalized_bounds
 from tb_runner.utils import parse_bounds_str
 
 
@@ -38,22 +38,8 @@ def eligibility(item):
 
 
 def confirmed_focus(row):
-    observed = focus_instance(row)
-    if observed is None:
-        return None
-    node = row.get("focus_node", {})
-    if isinstance(node, str):
-        import json
-        try:
-            node = json.loads(node)
-        except (ValueError, TypeError):
-            node = {}
-    node = node if isinstance(node, dict) else {}
-    a11y = row.get("actual_focus_accessibility_focused")
-    if a11y is None and row.get("row_source") not in {"representative", "representative_fallback"}:
-        a11y = node.get("accessibilityFocused")
-    # Input focus alone is not a TalkBack accessibility-focus oracle.
-    return observed if a11y is True else None
+    # The primary ledger and strict completeness share the same focus oracle.
+    return focus_instance(row)
 
 
 def reconcile(scenario_id, inventory, rows, observations=(), coverage_records=(), termination="", focus_observations=(), stale_aliases=None):
@@ -122,7 +108,7 @@ def reconcile(scenario_id, inventory, rows, observations=(), coverage_records=()
             key, _ = observe(dict(observed, focusable=True, source="actual_accessibility_focus"))
             visited.add(key)
         else:
-            weaker = focus_instance(row)
+            weaker = observed_focus_instance(row)
             if weaker:
                 uncertain_focus.add(instance_id(weaker))
     semantic = {r.get("canonical_id", r.get("instance_id", "")) for r in coverage_records

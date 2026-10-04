@@ -168,7 +168,7 @@ def _read_window_xml_selected_bottom_tab(
     dev: str,
     expected_tab: str | None,
 ) -> str:
-    if client is None or not dev or not expected_tab:
+    if client is None or not expected_tab:
         return ""
     runner = getattr(client, "_run", None)
     if not callable(runner):
@@ -341,7 +341,7 @@ def verify_context(
         dump_source = "step_cache"
         lazy_dump_node_count = 0
         if not isinstance(nodes, list) or not nodes:
-            if client and dev:
+            if client is not None:
                 lazy_nodes = client.dump_tree(dev=dev)
                 if isinstance(lazy_nodes, list):
                     nodes = lazy_nodes
@@ -355,6 +355,25 @@ def verify_context(
                 nodes,
                 expected_count=_expected_bottom_nav_count(scenario_cfg),
             )
+        # A focus snapshot is not necessarily a complete screen snapshot.
+        # None is a supported ADB default device, not a missing connection.
+        if (
+            dump_source == "step_cache"
+            and client is not None
+            and not any(
+                _is_bottom_nav_resource_id(str(n.get("viewIdResourceName", "") or ""), scenario_cfg)
+                or is_annotated_bottom_nav_candidate(n)
+                for n in nodes if isinstance(n, dict)
+            )
+        ):
+            fresh_nodes = client.dump_tree(dev=dev)
+            if isinstance(fresh_nodes, list):
+                nodes = annotate_bottom_nav_candidates(
+                    fresh_nodes, expected_count=_expected_bottom_nav_count(scenario_cfg)
+                )
+                step["dump_tree_nodes"] = fresh_nodes
+                dump_source = "refreshed_incomplete_step_cache"
+                lazy_dump_node_count = len(fresh_nodes)
         semantic_target = step.get("_selected_bottom_nav_candidate", {})
         if isinstance(semantic_target, dict) and is_annotated_bottom_nav_candidate(semantic_target):
             target_label = str(

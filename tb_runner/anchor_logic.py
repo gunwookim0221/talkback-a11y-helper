@@ -4,9 +4,10 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from talkback_lib import A11yAdbClient
-from tb_runner.context_verifier import verify_context
+from tb_runner.context_verifier import verify_context, _is_bottom_nav_resource_id
+from tb_runner.bottom_nav import annotate_bottom_nav_candidates, is_annotated_bottom_nav_candidate
 from tb_runner.constants import MAIN_ANNOUNCEMENT_WAIT_SECONDS, MAIN_STEP_WAIT_SECONDS
-from tb_runner.label_matcher import expand_verify_token_aliases
+from tb_runner.label_matcher import expand_verify_token_aliases, matches_alias
 from tb_runner.logging_utils import log
 from tb_runner.utils import _safe_regex_search, parse_bounds_str
 
@@ -420,6 +421,7 @@ def choose_best_anchor_candidate(matches: list[dict[str, Any]], tie_breaker: str
             matches,
             key=lambda item: (
                 -int(item.get("score", 0)),
+                -int(bool(item["candidate"].get("focusable", False))),
                 int(item["candidate"].get("top", 10**9)),
                 int(item["candidate"].get("left", 10**9)),
             ),
@@ -436,7 +438,9 @@ def _has_explicit_anchor(tab_cfg: dict[str, Any], anchor_cfg: dict[str, Any]) ->
     return False
 
 
-def _is_fallback_chrome_candidate(candidate: dict[str, Any], screen_width: int, screen_height: int) -> bool:
+def _is_fallback_chrome_candidate(
+    candidate: dict[str, Any], screen_width: int, screen_height: int, *, exclude_top_dismiss: bool = False
+) -> bool:
     top = int(candidate.get("top", 10**9))
     bottom = int(candidate.get("bottom", -1))
     left = int(candidate.get("left", 10**9))
@@ -451,6 +455,11 @@ def _is_fallback_chrome_candidate(candidate: dict[str, Any], screen_width: int, 
     ).strip()
 
     if screen_height > 0 and top <= int(screen_height * 0.1):
+        if exclude_top_dismiss and any(
+            matches_alias(candidate.get(field), "dismiss", mode="exact")
+            for field in ("text", "announcement")
+        ):
+            return True
         if any(token in f"{resource_id} {class_name} {label_blob}" for token in ("toolbar", "actionbar", "search", "뒤로", "back")):
             return True
     if screen_height > 0 and top >= int(screen_height * 0.78):
@@ -544,6 +553,7 @@ def _pick_top_content_fallback_candidate(
     verify_tokens: list[str] | None = None,
     negative_verify_tokens: list[str] | None = None,
     diagnostics: list[dict[str, Any]] | None = None,
+    exclude_top_dismiss: bool = False,
 ) -> tuple[dict[str, Any] | None, str, str]:
     if not candidates:
         return None, "", "no_candidates"
@@ -556,7 +566,7 @@ def _pick_top_content_fallback_candidate(
         and (bool(c.get("focusable", False)) or bool(c.get("clickable", False)))
         and int(c.get("top", 10**9)) >= 0
         and int(c.get("left", 10**9)) >= 0
-        and not _is_fallback_chrome_candidate(c, screen_width, screen_height)
+        and not _is_fallback_chrome_candidate(c, screen_width, screen_height, exclude_top_dismiss=exclude_top_dismiss)
     ]
     readable_content_candidates = [
         c
@@ -569,7 +579,7 @@ def _pick_top_content_fallback_candidate(
             or str(c.get("text", "") or "").strip()
             or str(c.get("resource_id", "") or "").strip()
         )
-        and not _is_fallback_chrome_candidate(c, screen_width, screen_height)
+        and not _is_fallback_chrome_candidate(c, screen_width, screen_height, exclude_top_dismiss=exclude_top_dismiss)
     ]
     content_candidates = actionable_content_candidates or (readable_content_candidates if allow_readable_only_fallback else [])
     if not content_candidates:
@@ -859,6 +869,7 @@ def stabilize_anchor_focus(
     attempt: int,
     max_retries: int,
     transition_fast_path: bool,
+    require_accessibility_focus: bool = False,
 ) -> dict[str, Any]:
     verify_rows: list[dict[str, Any]] = []
     verify_matches: list[dict[str, Any]] = []
@@ -882,7 +893,12 @@ def stabilize_anchor_focus(
         verify_rows.append(verify_row)
         verify_match = match_anchor(_extract_candidate_from_step(verify_row), anchor_cfg)
         verify_matches.append(verify_match)
-        verify_flags.append(_is_anchor_verify_match(verify_match, anchor_cfg))
+        focus_node = verify_row.get("actual_focus_node") or verify_row.get("focus_node") or {}
+        actual_focus = verify_row.get("actual_focus_accessibility_focused", focus_node.get("accessibilityFocused"))
+        verify_flags.append(
+            _is_anchor_verify_match(verify_match, anchor_cfg)
+            and (not require_accessibility_focus or actual_focus is True)
+        )
 
     verify1_matched = bool(verify_flags[0]) if verify_flags else False
     verify2_matched = bool(verify_flags[1]) if len(verify_flags) > 1 else False
@@ -896,6 +912,53 @@ def stabilize_anchor_focus(
         "verify1_matched": verify1_matched,
         "verify2_matched": verify2_matched,
     }
+
+
+def wait_for_root_entry_ready(client, dev, tab_cfg, *, max_reads=3, timeout_seconds=15.0):
+    """Observe fresh destination state before trying to establish body focus.
+
+    Helper READY alone cannot establish screen readiness. Reads are bounded;
+    ADB's default device (dev=None) follows the same path as an explicit serial.
+    """
+    started = time.monotonic()
+    observations = []
+    nodes = []
+    context = {"ok": False}
+    for index in range(max_reads):
+        if index and time.monotonic() - started >= timeout_seconds:
+            break
+        error = ""
+        try:
+            nodes = client.dump_tree(dev=dev)
+            nodes = nodes if isinstance(nodes, list) else []
+            annotated = annotate_bottom_nav_candidates(
+                nodes, expected_count=len(tab_cfg.get("global_nav", {}).get("labels", []))
+            )
+            nav = [n for n in annotated if is_annotated_bottom_nav_candidate(n)
+                   or _is_bottom_nav_resource_id(str(n.get("viewIdResourceName", "") or ""), tab_cfg)]
+            context = (verify_context({"dump_tree_nodes": nodes}, tab_cfg, client=client, dev=dev)
+                       if nav else {"ok": False, "reason": "nav_not_ready"})
+            anchor, _, _ = _pick_top_content_fallback_candidate(
+                [_extract_candidate_from_node(n, i) for i, n in enumerate(nodes)], exclude_top_dismiss=True
+            )
+            selected_confirmed = bool(context.get("ok")) and context.get("actual_source") in {
+                "selected_candidate", "window_xml_selected_bottom_tab", "focus_payload_fast_path"
+            }
+            ready = bool(nodes and nav and selected_confirmed and anchor)
+        except RuntimeError as exc:
+            nav, anchor, selected_confirmed, ready = [], None, False, False
+            error = str(exc)
+        observation = dict(read=index + 1, elapsed_seconds=round(time.monotonic() - started, 3),
+                           tree_nodes=len(nodes), nav_candidates=len(nav),
+                           selected_confirmed=selected_confirmed, content_anchor_ready=bool(anchor),
+                           context=context, ready=ready, error=error)
+        observations.append(observation)
+        log(f"[ENTRY][readiness] scenario='{tab_cfg.get('scenario_id', '')}' observation={observation}")
+        if ready:
+            return dict(ok=True, reason="destination_ready", nodes=nodes, observations=observations)
+        if index + 1 < max_reads:
+            time.sleep(_ANCHOR_VERIFY_SETTLE_SECONDS)
+    return dict(ok=False, reason="root_entry_readiness_timeout", nodes=nodes, observations=observations)
 
 def stabilize_anchor(
     client: A11yAdbClient,
@@ -941,9 +1004,18 @@ def stabilize_anchor(
     last_verify_row: dict[str, Any] = {}
     landing_evidence = PostEntryLandingEvidence(False, "not_evaluated")
 
+    root_entry = phase == "scenario_start" and tab_cfg.get("screen_context_mode") == "bottom_tab"
+    readiness = None
+    if root_entry:
+        readiness = wait_for_root_entry_ready(client, dev, tab_cfg)
+        setattr(client, "last_root_entry_readiness", readiness)
+        if not readiness["ok"]:
+            return dict(ok=False, reason=readiness["reason"], readiness=readiness,
+                        context=readiness["observations"][-1]["context"], phase=phase)
+
     for attempt in range(1, max_retries + 1):
         log(f"[ANCHOR][stabilize] attempt={attempt}/{max_retries} scenario='{scenario_id}'", level="DEBUG")
-        dump_nodes = client.dump_tree(dev=dev)
+        dump_nodes = readiness["nodes"] if readiness and attempt == 1 else client.dump_tree(dev=dev)
         candidates = [
             _extract_candidate_from_node(node, index=i)
             for i, node in enumerate(dump_nodes if isinstance(dump_nodes, list) else [])
@@ -971,6 +1043,7 @@ def stabilize_anchor(
                 verify_tokens=tab_cfg.get("verify_tokens", []),
                 negative_verify_tokens=tab_cfg.get("negative_verify_tokens", []),
                 diagnostics=fallback_diagnostics,
+                exclude_top_dismiss=root_entry,
             )
             if fallback_candidate:
                 active_anchor_cfg = _build_verify_cfg_for_fallback(fallback_candidate)
@@ -1114,6 +1187,7 @@ def stabilize_anchor(
             attempt=attempt,
             max_retries=max_retries,
             transition_fast_path=transition_fast_path,
+            **({"require_accessibility_focus": True} if root_entry else {}),
         )
         verify_rows = list(verify_results.get("verify_rows", []))
         if verify_rows and isinstance(verify_rows[-1], dict):

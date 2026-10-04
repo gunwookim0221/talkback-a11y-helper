@@ -42,7 +42,7 @@ def instance_id(item: dict[str, Any]) -> str:
     return json.dumps(["instance-v1", scope, rid, *discriminator], ensure_ascii=False, separators=(",", ":"))
 
 
-def focus_instance(row: dict[str, Any]) -> dict[str, Any] | None:
+def observed_focus_instance(row: dict[str, Any]) -> dict[str, Any] | None:
     """Use one coherent observation; never mix planned and observed fields."""
     actual = any(str(row.get(key, "") or "").strip() for key in
                  ("actual_focus_resource_id", "actual_focus_bounds", "actual_focus_visible", "actual_focus_speech"))
@@ -74,6 +74,36 @@ def focus_instance(row: dict[str, Any]) -> dict[str, Any] | None:
     if not (rid or label) or not normalized_bounds(bounds):
         return None
     return dict(scenario_id=row.get("scenario_id", ""), view_id=rid, bounds=bounds, label=label)
+
+
+def focus_instance(row: dict[str, Any]) -> dict[str, Any] | None:
+    """Physical visit identity requires coherent actual accessibility focus.
+
+    Observation/planning identity is available separately and cannot credit a
+    visit. Explicit conflicting flags and ambiguous reconciliation fail closed.
+    """
+    node = row.get("actual_focus_node")
+    if not isinstance(node, dict):
+        node = {} if normalized(row.get("row_source")) in {"representative", "representative_fallback"} else row.get("focus_node", {})
+    if isinstance(node, str):
+        try:
+            node = json.loads(node)
+        except (ValueError, TypeError):
+            node = {}
+    node = node if isinstance(node, dict) else {}
+    flag = row.get("actual_focus_accessibility_focused")
+    node_flag = node.get("accessibilityFocused")
+    if isinstance(flag, bool) and isinstance(node_flag, bool) and flag is not node_flag:
+        return None
+    if flag is not True:
+        if flag is not None or node_flag is not True:
+            return None
+    if (normalized(row.get("focus_transition_status")) == "ambiguous"
+            or normalized(row.get("focus_reconciliation_confidence")) == "ambiguous"):
+        return None
+    # Canonicalize the proven actual-node flag for identity extraction only.
+    # The source row remains unchanged, including auxiliary input focus.
+    return observed_focus_instance(dict(row, actual_focus_accessibility_focused=True))
 
 
 def termination_status(reason: str) -> str:
@@ -167,6 +197,8 @@ class TraversalMetrics:
             focused = row.get("actual_focus_input_focused")
             if a11y is None and normalized(row.get("row_source")) not in {"representative", "representative_fallback"}:
                 a11y, focused = node.get("accessibilityFocused"), node.get("focused")
+            # focus_instance already requires strict coherent accessibility focus.
+            a11y = True
             proof = dict(scenario_id=observed["scenario_id"], step_index=row.get("step_index"),
                          actual_focus_resource_id=observed["view_id"],
                          actual_focus_bounds=normalized_bounds(observed["bounds"]), actual_focus_visible=observed["label"],

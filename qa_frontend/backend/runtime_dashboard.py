@@ -22,7 +22,7 @@ PREFLIGHT_FINAL_RE = re.compile(r"\[QA_FRONTEND\]\[preflight\] final_result='([^
 PRE_STATUS_RE = re.compile(r"\[QA_FRONTEND\]\[preflight\]\[(adb|helper)\] status='([^']*)'")
 RUN_START_RE = re.compile(r"\[QA_FRONTEND\] start mode='([^']*)'.*launch_mode='([^']*)'(?:.*language_mode='([^']*)')?")
 LANGUAGE_RE = re.compile(r"\[QA_FRONTEND\]\[language\].*language_mode='([^']*)'.*device_locale='([^']*)'")
-SAVED_EXCEL_RE = re.compile(r"saved excel:\s+output/(?P<filename>[^/\s]+\.xlsx)", re.IGNORECASE)
+SAVED_EXCEL_RE = re.compile(r"saved excel:\s+(?:.*?[\\/]output[\\/]|output[\\/])(?P<filename>.+?\.xlsx)(?:\s|$)", re.IGNORECASE)
 ACCESSIBILITY_PASS_MISMATCH_TYPES = {
     "EXACT_MATCH",
     "NORMALIZED_MATCH",
@@ -117,6 +117,14 @@ def parse_runtime_log(
     validation_failed_scenarios: set[str] | None = None,
     validation_warning_scenarios: set[str] | None = None,
 ) -> dict[str, object]:
+    filename = _extract_saved_excel_filename(log_text)
+    comparison_failed, comparison_warning, comparison_passed = (
+        _validation_result_populations(OUTPUT_DIR / filename) if filename else (set(), set(), set())
+    )
+    if validation_failed_scenarios is None:
+        validation_failed_scenarios = comparison_failed
+    if validation_warning_scenarios is None:
+        validation_warning_scenarios = comparison_warning
     lines = log_text.splitlines()
     selected_ids = list(scenario_ids or []) or _extract_enabled_ids(log_text)
     selected_filter = set(selected_ids)
@@ -156,9 +164,15 @@ def parse_runtime_log(
     availability_signals: dict[str, dict[str, object]] = {}
     fatal_or_crash_like_scenarios: set[str] = set()
 
+    execution_contracts: dict[str, dict[str, object]] = {}
+
     for index, line in enumerate(lines):
         raw_scenario = _extract_scenario(line)
         scenario = raw_scenario if raw_scenario and (not selected_filter or raw_scenario in selected_filter) else None
+        if scenario and "[PERF][scenario_contract_summary]" in line:
+            fields = dict(re.findall(r"\b(termination_status|termination_reason|nav_items_expected|nav_items_verified)=([^\s]+)", line))
+            if fields.get("termination_status"):
+                execution_contracts[scenario] = fields
         step = _extract_step(line)
         if scenario:
             current_scenario = scenario
@@ -410,6 +424,18 @@ def parse_runtime_log(
         elif item.get("status") not in {"failed", "warning"}:
             item["status"] = "passed"
 
+    # Primary execution facts override placeholder/presentation heuristics.
+    # Shared by live dashboard, persisted summaries and batch consumers.
+    for scenario_id, contract in execution_contracts.items():
+        item = progress[scenario_id]
+        comparison = "FAIL" if scenario_id in (validation_failed_scenarios or set()) else (
+            "WARN" if scenario_id in (validation_warning_scenarios or set()) else (
+                "PASS" if scenario_id in comparison_passed else "N/A"))
+        item.update(contract)
+        item["execution_status"] = contract["termination_status"]
+        item["comparison_status"] = comparison
+        item["status"] = scenario_contract_status(scenario_id, contract, comparison)
+
     passed_count = len([item for item in progress.values() if item["status"] == "passed"])
     warning_count = len([item for item in progress.values() if item["status"] == "warning"])
     failed_count = len([item for item in progress.values() if item["status"] == "failed"])
@@ -421,7 +447,9 @@ def parse_runtime_log(
         [
             item
             for item in progress.values()
-            if item.get("terminal_provenance") == "availability_terminal"
+            if item.get("status") in {"not_available", "not_available_candidate", "no_target_candidate"}
+            and (item.get("terminal_provenance") == "availability_terminal"
+                 or item.get("execution_status") == "NOT_AVAILABLE")
         ]
     )
     executed_count = (
@@ -647,38 +675,47 @@ def extract_validation_scenario_evidence_from_log(log_text: str) -> tuple[set[st
 
 
 def extract_validation_scenario_evidence_from_xlsx(path: Path) -> tuple[set[str], set[str]]:
+    failed, warning, _passed = _validation_result_populations(path)
+    return failed, warning
+
+
+def _validation_result_populations(path: Path) -> tuple[set[str], set[str], set[str]]:
     if not path.exists():
-        return set(), set()
+        return set(), set(), set()
     try:
         import openpyxl
     except ImportError:
-        return set(), set()
+        return set(), set(), set()
     try:
         workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
         if "result" not in workbook.sheetnames:
-            return set(), set()
+            return set(), set(), set()
         sheet = workbook["result"]
-        headers = [sheet.cell(1, column).value for column in range(1, sheet.max_column + 1)]
+        values = sheet.iter_rows(values_only=True)
+        headers = list(next(values, ()))
         scenario_col = headers.index("scenario_id") + 1
         result_col = headers.index("final_result") + 1
         failure_col = headers.index("failure_reason") + 1 if "failure_reason" in headers else None
         mismatch_col = headers.index("mismatch_type") + 1 if "mismatch_type" in headers else None
     except (OSError, ValueError, KeyError):
-        return set(), set()
+        return set(), set(), set()
 
     failed: set[str] = set()
     warning: set[str] = set()
+    passed: set[str] = set()
     try:
-        for row in range(2, sheet.max_row + 1):
-            result = str(sheet.cell(row, result_col).value or "").strip().upper()
-            scenario = str(sheet.cell(row, scenario_col).value or "").strip()
+        for row in values:
+            result = str(row[result_col - 1] or "").strip().upper()
+            scenario = str(row[scenario_col - 1] or "").strip()
             if not scenario:
                 continue
-            if result == "WARN":
+            if result == "PASS":
+                passed.add(scenario)
+            elif result == "WARN":
                 warning.add(scenario)
             elif result == "FAIL":
-                failure_reason = str(sheet.cell(row, failure_col).value or "").strip() if failure_col else ""
-                mismatch_type = str(sheet.cell(row, mismatch_col).value or "").strip().upper() if mismatch_col else ""
+                failure_reason = str(row[failure_col - 1] or "").strip() if failure_col else ""
+                mismatch_type = str(row[mismatch_col - 1] or "").strip().upper() if mismatch_col else ""
                 normalized_failure = failure_reason.lower()
                 if mismatch_type in SCENARIO_HARD_MISMATCH_TYPES:
                     failed.add(scenario)
@@ -696,7 +733,7 @@ def extract_validation_scenario_evidence_from_xlsx(path: Path) -> tuple[set[str]
             workbook.close()
         except Exception:
             pass
-    return failed, warning
+    return failed, warning, passed
 
 
 def _extract_saved_excel_filename(log_text: str) -> str | None:
@@ -829,3 +866,21 @@ def _elapsed_seconds(started_at: str | None, finished_at: str | None) -> int:
     if started.tzinfo is not None:
         finished = finished.replace(tzinfo=timezone.utc) if finished.tzinfo is None else finished
     return max(0, int((finished - started).total_seconds()))
+
+
+def scenario_contract_status(scenario_id: str, contract: dict[str, object], comparison: str) -> str:
+    """UI-compatible execution/comparison precedence for closed scenarios."""
+    execution = str(contract.get("termination_status") or "")
+    if execution == "NOT_AVAILABLE":
+        return "not_available"
+    if execution in {"INCOMPLETE_ERROR", "INCOMPLETE_SCROLL_ERROR"}:
+        return "failed"
+    if scenario_id == "global_nav_main" and execution == "COMPLETED":
+        if str(contract.get("nav_items_expected")) == str(contract.get("nav_items_verified")) == "5":
+            return "passed"
+        return "failed"
+    if comparison == "FAIL":
+        return "failed"
+    if execution.startswith("INCOMPLETE_") or comparison == "WARN":
+        return "warning"
+    return "passed" if execution == "COMPLETED" else "failed"

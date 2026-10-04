@@ -4161,9 +4161,12 @@ def _collect_post_open_visible_text(client: A11yAdbClient, dev: str) -> str:
         if not _node_is_visible(node):
             continue
         label_blob = _node_label_blob(node)
-        if not label_blob:
+        resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip()
+        if not label_blob and not resource_id:
             continue
-        visible_fragments.append(label_blob)
+        # Destination verification already accepts resource IDs for the focused
+        # node. Preserve the same semantic evidence for visible body nodes.
+        visible_fragments.append(" ".join(value for value in (resource_id, label_blob) if value))
         if len(visible_fragments) >= 30:
             break
     return " ".join(visible_fragments).strip()
@@ -5382,7 +5385,14 @@ def _row_plugin_shell_chrome_boundary(row: dict[str, Any], tab_cfg: dict[str, An
         return True, view_id, "shell_chrome_resource"
     label_values = _row_label_values(row)
     label_text = _label_blob(label_values)
-    if any(token in label_text for token in _PLUGIN_SHELL_CHROME_LABEL_TOKENS):
+    shell_labels = [token for token in _PLUGIN_SHELL_CHROME_LABEL_TOKENS if token in label_text]
+    if shell_labels:
+        context = dict(tab_cfg.get("context_verify", {}) or {})
+        expected = str(context.get("text_regex", "") or "").strip()
+        if context.get("type") == "screen_text" and expected and all(
+            _safe_regex_search(expected, token) for token in shell_labels
+        ):
+            return False, " | ".join(value for value in label_values if value), "expected_destination_label"
         return True, " | ".join(value for value in label_values if value), "shell_chrome_label"
     # These are menu/root-shell content signals; require prior overlay realign to avoid blocking plugin content by name alone.
     if str(row.get("overlay_recovery_status", "") or "") == "after_realign" and any(
@@ -5920,6 +5930,32 @@ def _confirm_click_focused_transition(
                 if strict_life_energy_mode and signal == "anchor_match" and not energy_signature_seen:
                     continue
                 return True, signal
+        # XML entry may have loaded before the first (post-tap) baseline dump.
+        # Verify that destination directly using the same body identity contract
+        # as post-open verification, rather than requiring another repaint.
+        if tab_cfg.get("screen_context_mode") == "new_screen" and not (
+            strict_life_energy_mode or strict_life_air_care_mode
+        ):
+            visible_nodes = [n for n, _ in _iter_tree_nodes_with_parent(current_nodes) if _node_is_visible(n)]
+            has_global_nav = any(
+                n.get("isBottomNavigationBar") or any(
+                    token in str(n.get("viewIdResourceName", "") or n.get("resourceId", "") or "").lower()
+                    for token in _GLOBAL_BOTTOM_NAV_RESOURCE_TOKENS
+                ) for n in visible_nodes
+            )
+            up_nodes = [n for n in visible_nodes if any(
+                matches_alias(n.get(field), "navigate_up", mode="exact")
+                or matches_alias(n.get(field), "back", mode="exact")
+                for field in ("text", "contentDescription")
+            )]
+            body = " ".join(
+                str(n.get("viewIdResourceName", "") or n.get("resourceId", "") or "") + " " + _node_label_blob(n)
+                for n in visible_nodes if n not in up_nodes
+            )
+            if up_nodes and not has_global_nav and _matches_post_open_verify(
+                tab_cfg, "", "", "", extra_candidates=[body]
+            ) and not _has_post_open_negative_verify_token(tab_cfg, "", "", "", extra_candidates=[body]):
+                return True, "destination_body_verify"
         if strict_life_energy_mode and not energy_signature_seen:
             for node, _ in _iter_tree_nodes_with_parent(current_nodes):
                 if _safe_regex_search(_LIFE_ENERGY_FAMILY_CARE_REGEX, _node_label_blob(node)):

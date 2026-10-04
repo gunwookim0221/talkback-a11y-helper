@@ -107,7 +107,7 @@ def normalize_tab_config(tab_cfg: dict[str, Any]) -> dict[str, Any]:
 
 def _read_window_xml_nodes(client: A11yAdbClient, dev: str) -> list[dict[str, Any]]:
     runner = getattr(client, "_run", None)
-    if not callable(runner) or not dev:
+    if not callable(runner):
         return []
     remote_path = "/sdcard/tb_runner_tab_selection.xml"
     try:
@@ -452,7 +452,22 @@ def stabilize_tab_selection(
         tab_action_mode = "legacy_touch"
         tab_action_reason = ""
         semantic_bottom_nav = False
-        if best and (
+        # Observing an already selected destination must not activate it again
+        # (which can reset its viewport). Do not infer selected state from ACK.
+        current_context = {}
+        if best and tab_cfg.get("screen_context_mode") == "bottom_tab":
+            current_context = verify_context(
+                {"dump_tree_nodes": node_list}, tab_cfg, client=client, dev=dev
+            )
+        already_selected = bool(current_context.get("ok")) and current_context.get("actual_source") in {
+            "selected_candidate", "window_xml_selected_bottom_tab", "focus_payload_fast_path"
+        }
+        if already_selected:
+            selected = True
+            tab_action_mode = "already_selected"
+            semantic_bottom_nav = bool(best.get("candidate", {}).get("_bottom_nav_candidate"))
+            log(f"[TAB][action] scenario='{scenario_id}' mode='already_selected' reason='verified_current_destination'")
+        elif best and (
             best.get("candidate", {}).get("resource_id")
             or best.get("candidate", {}).get("_bottom_nav_candidate")
         ):
@@ -575,11 +590,11 @@ def stabilize_tab_selection(
                     level="DEBUG",
                 )
                 time.sleep(settle_wait_seconds)
-            if semantic_bottom_nav:
+            if semantic_bottom_nav or already_selected:
                 focus_align_result = {
-                    "attempted": True,
+                    "attempted": not already_selected,
                     "ok": True,
-                    "reason": "semantic_touch_target",
+                    "reason": "verified_current_destination" if already_selected else "semantic_touch_target",
                     "attempt": 1,
                 }
             else:

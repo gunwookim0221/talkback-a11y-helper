@@ -16,8 +16,12 @@ def item(bounds="0,0,100,100", label="Card", rid="card"):
 
 
 def focus(bounds="0,0,100,100", **extra):
-    return dict(scenario_id="screen", focus_view_id="card", focus_bounds=bounds,
-                visible_label="Card", move_result="moved", **extra)
+    row = dict(scenario_id="screen", focus_view_id="card", focus_bounds=bounds,
+               visible_label="Card", move_result="moved")
+    if "focus_node" not in extra:
+        row["actual_focus_accessibility_focused"] = True
+    row.update(extra)
+    return row
 
 
 def test_same_resource_different_bounds():

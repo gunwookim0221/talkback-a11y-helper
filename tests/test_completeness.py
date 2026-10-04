@@ -113,7 +113,7 @@ def test_unknown_pre_persist_focus_is_not_actual_talkback_visit():
     r = row(); r["actual_focus_accessibility_focused"] = None
     metrics.observe_focus(r)
     result = run([node()], focus_observations=list(metrics.focus_observations.values()))
-    assert len(metrics.visited) == 1
+    assert len(metrics.visited) == 0
     assert result["summary"]["completeness_actual_visited"] == 0
 
 

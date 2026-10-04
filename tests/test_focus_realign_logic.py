@@ -661,6 +661,7 @@ def test_record_recent_representative_signature_records_successful_move():
     object_signature = collection_flow._build_row_object_signature(row)
     logical_signature = collection_flow._row_logical_signature(row)
 
+    row["actual_focus_accessibility_focused"] = True
     collection_flow._record_recent_representative_signature(state, row)
 
     assert object_signature in state.recent_representative_signatures

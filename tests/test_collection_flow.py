@@ -2380,10 +2380,10 @@ def test_family_care_onboarding_does_not_click_generic_korean_later_without_evid
 def test_collect_tab_rows_allows_bounded_cta_descend_grace_for_card_container(monkeypatch, legacy_stop_policy):
     client = DummyClient(
         [
-            _anchor_row(),
-            _card_container_row(1),
-            _card_container_row(2),
-            _card_container_row(3),
+            dict(_anchor_row(), actual_focus_accessibility_focused=True),
+            dict(_card_container_row(1), actual_focus_accessibility_focused=True),
+            dict(_card_container_row(2), actual_focus_accessibility_focused=True),
+            dict(_card_container_row(3), actual_focus_accessibility_focused=True),
         ]
     )
     stop_sequence = iter(
@@ -2450,6 +2450,10 @@ def test_collect_tab_rows_allows_bounded_cta_descend_grace_for_card_container(mo
     monkeypatch.setattr(collection_flow, "should_stop", lambda **k: next(stop_sequence))
     monkeypatch.setattr(collection_flow, "save_excel", lambda *a, **k: None)
     monkeypatch.setattr(collection_flow, "is_overlay_candidate", lambda *a, **k: (False, "not_in_global_candidates"))
+
+    # Isolate the legacy CTA grace policy from the independently tested
+    # Phase 0G unchanged-focus presentation/reconciliation policy.
+    monkeypatch.setattr(collection_flow, "_apply_focus_reconciliation", lambda **kwargs: None)
 
     rows = collection_flow.collect_tab_rows(client, "SERIAL", _base_tab_cfg(max_steps=3), [], "o.xlsx", "out")
 
@@ -16617,6 +16621,7 @@ def test_row_quality_records_successful_representative_signature():
     object_signature = collection_flow._build_row_object_signature(row)
     logical_signature = collection_flow._row_logical_signature(row)
 
+    row["actual_focus_accessibility_focused"] = True
     collection_flow._record_recent_representative_signature(state, row)
 
     assert object_signature in state.recent_representative_signatures

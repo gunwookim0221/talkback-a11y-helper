@@ -97,6 +97,8 @@ def test_ambiguous_combined_mapping_does_not_choose_a_candidate():
     current = row("", "Same", "0,0,100,100", selected=candidate("id.a", "A", "0,200,100,300"))
     result = reconcile(current, inventory=[first, second])
     assert result["mapping_confidence"] == "AMBIGUOUS"
+    assert result["physical_visit_confirmed"] is False
+    assert result["visit_record_status"] == "NOT_RECORDED_AMBIGUOUS"
     assert result["mapped_candidate_instance_id"] == ""
     assert result["candidate_in_expected_population"] is False
     assert result["selected_candidate_consumed"] is False

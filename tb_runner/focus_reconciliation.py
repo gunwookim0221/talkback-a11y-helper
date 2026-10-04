@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from tb_runner.traversal_reliability import focus_instance, instance_id, normalized, normalized_bounds
+from tb_runner.traversal_reliability import observed_focus_instance, instance_id, normalized, normalized_bounds
 
 
 _SEMANTIC_KEYS = (
@@ -64,7 +64,7 @@ def _actual_item(row: dict[str, Any], scenario_id: str) -> dict[str, Any] | None
     # credit that earlier row to the ledger.
     observation_row = dict(row)
     observation_row.pop("physical_visited", None)
-    observed = focus_instance(observation_row)
+    observed = observed_focus_instance(observation_row)
     if observed is None:
         return None
     node = row.get("actual_focus_node")
@@ -234,7 +234,7 @@ def reconcile_focus(
                 for key in ("class_name", "role", "container_id", "stable_node_path")
                 if normalized(actual.get(key)) and normalized(before.get(key)))
     )
-    if current_proof == "AMBIGUOUS" or previous_proof == "AMBIGUOUS":
+    if current_proof == "AMBIGUOUS" or previous_proof == "AMBIGUOUS" or confidence == "AMBIGUOUS":
         focus_transition_status = "AMBIGUOUS"
     elif current_proof != "STRICT" or previous_proof != "STRICT":
         focus_transition_status = "UNAVAILABLE"
