@@ -468,6 +468,23 @@ def _observed_scenario_ids(lines: list[str]) -> set[str]:
     }
 
 
+def _terminal_scenario_ids(lines: list[str]) -> set[str]:
+    """Return scenarios with an explicit terminal record in the available log tail."""
+    terminal_markers = (
+        "[PERF][scenario_summary]",
+        "[PERF][scenario_contract_summary]",
+        "[TRAVERSAL_SUMMARY]",
+        "[MAIN] skip disabled scenario_id=",
+    )
+    return {
+        scenario_id
+        for line in lines
+        if any(marker in line for marker in terminal_markers)
+        for scenario_id in [_extract_scenario_id(line)]
+        if scenario_id
+    }
+
+
 def _is_scenario_observation_line(line: str) -> bool:
     if line.startswith("[CONFIG]") or "source='runtime'" in line or "base_enabled=" in line:
         return False
@@ -477,6 +494,9 @@ def _is_scenario_observation_line(line: str) -> bool:
         or "[SCENARIO][entry_contract]" in line
         or "[SCENARIO][pre_nav]" in line
         or "[PERF][scenario_summary]" in line
+        or "[PERF][scenario_contract_summary]" in line
+        or "[TRAVERSAL_SUMMARY]" in line
+        or "[MAIN] skip disabled scenario_id=" in line
         or "scenario_result" in line
     )
 
@@ -585,6 +605,7 @@ class BatchRunManager:
                     "started_at": None,
                     "finished_at": None,
                     "observed_scenario_ids": [],
+                    "terminal_scenario_ids": [],
                 })
             
             self._current_device_idx = 0
@@ -632,7 +653,13 @@ class BatchRunManager:
 
         device_statuses = [self._device_status_with_live_summary(device) for device in self._devices]
         if current_device:
-            current_live = self._live_status_for_device(current_device)
+            current_status = device_statuses[self._current_device_idx]
+            current_live = {
+                "runner_log_path": current_status.get("runner_log_path"),
+                "current": _dict(current_status.get("current")),
+                "progress": _dict(current_status.get("progress")),
+                "logs": _dict(current_status.get("logs")),
+            }
         elif device_statuses:
             current_live = {
                 "runner_log_path": device_statuses[-1].get("runner_log_path"),
@@ -747,8 +774,15 @@ class BatchRunManager:
         log_path = _device_runner_log_path(device)
         log_text = _read_log_tail(log_path)
         parsed = _parse_live_log(log_text, scenario_ids=self._scenario_ids)
-        observed_ids = self._accumulate_observed_scenario_ids(device, _observed_scenario_ids(log_text.splitlines()))
+        lines = log_text.splitlines()
+        observed_ids = self._accumulate_observed_scenario_ids(device, _observed_scenario_ids(lines))
+        terminal_ids = self._accumulate_terminal_scenario_ids(device, _terminal_scenario_ids(lines))
+        selected_scenarios = len(self._scenario_ids or [])
+        parsed["progress"]["selected_scenarios"] = selected_scenarios
+        parsed["progress"]["total_scenarios"] = selected_scenarios
         parsed["progress"]["observed_scenarios"] = len(observed_ids)
+        parsed["progress"]["terminal_scenarios"] = len(terminal_ids)
+        parsed["progress"]["completed_scenarios"] = len(terminal_ids)
         return {
             **parsed,
             "runner_log_path": _relative_path(log_path) if log_path else None,
@@ -788,6 +822,19 @@ class BatchRunManager:
         ordered = [scenario_id for scenario_id in selected_ids if scenario_id in combined]
         ordered.extend(sorted(scenario_id for scenario_id in combined if scenario_id not in set(ordered)))
         device["observed_scenario_ids"] = ordered
+        return ordered
+
+    def _accumulate_terminal_scenario_ids(self, device: dict, tail_ids: set[str]) -> list[str]:
+        selected_ids = [str(item) for item in (self._scenario_ids or []) if item]
+        selected_set = set(selected_ids)
+        existing = device.get("terminal_scenario_ids")
+        combined = {str(item) for item in existing} if isinstance(existing, list) else set()
+        if selected_set:
+            combined.update(scenario_id for scenario_id in tail_ids if scenario_id in selected_set)
+            ordered = [scenario_id for scenario_id in selected_ids if scenario_id in combined]
+        else:
+            ordered = []
+        device["terminal_scenario_ids"] = ordered
         return ordered
 
     def _mark_all_scenarios_observed(self, device: dict) -> None:

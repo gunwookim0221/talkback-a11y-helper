@@ -61,6 +61,36 @@ def _configure_finished_manager(tmp_path, monkeypatch, *, batch_id, scenario_ids
     return manager
 
 
+def _configure_running_manager(tmp_path, monkeypatch, *, batch_id, scenario_ids, log_text=""):
+    monkeypatch.setattr(batch_runner, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(batch_runner, "RUN_LOG_DIR", tmp_path / "qa_frontend_runs")
+    out_dir = tmp_path / "qa_frontend_runs" / batch_id / "device_Model_SERIAL"
+    out_dir.mkdir(parents=True)
+    (out_dir / "runner.log").write_text(log_text, encoding="utf-8")
+
+    manager = batch_runner.BatchRunManager()
+    manager._batch_id = batch_id
+    manager._state = "running"
+    manager._mode = "full"
+    manager._created_at = "2026-08-25T02:03:04+00:00"
+    manager._scenario_ids = scenario_ids
+    manager._current_device_idx = 0
+    manager._devices = [
+        {
+            "serial": "SERIAL",
+            "model": "Model",
+            "state": "running",
+            "output_dir": f"qa_frontend_runs/{batch_id}/device_Model_SERIAL",
+            "return_code": None,
+            "started_at": "2026-08-25T02:03:05+00:00",
+            "finished_at": None,
+            "observed_scenario_ids": [],
+            "terminal_scenario_ids": [],
+        }
+    ]
+    return manager
+
+
 def test_parse_live_log_extracts_current_progress_and_preflight():
     log_text = "\n".join(
         [
@@ -277,6 +307,135 @@ def test_running_batch_keeps_bounded_live_terminal_progress(tmp_path, monkeypatc
     assert status["progress"]["selected_scenarios"] == 32
     assert status["progress"]["terminal_scenarios"] == 7
     assert status["progress"]["completed_scenarios"] == 7
+
+
+def test_running_terminal_progress_accumulates_across_rotated_log_tails(tmp_path, monkeypatch):
+    scenario_ids = ["s1", "s2", "s3"]
+    manager = _configure_running_manager(
+        tmp_path,
+        monkeypatch,
+        batch_id="batch_tail_rotation",
+        scenario_ids=scenario_ids,
+        log_text="[PERF][scenario_summary] scenario=s1 total_steps=1\n",
+    )
+    log_path = tmp_path / manager._devices[0]["output_dir"] / "runner.log"
+
+    first_status = manager.get_status()
+    assert first_status["progress"]["terminal_scenarios"] == 1
+    assert first_status["devices"][0]["progress"]["terminal_scenarios"] == 1
+
+    # The prior terminal record has rotated out; s2 is terminal and s3 is only active.
+    log_path.write_text(
+        "\n".join(
+            [
+                "[PERF][scenario_contract_summary] scenario=s2 termination_status=INCOMPLETE_SAFETY_LIMIT",
+                "[STEP] START scenario='s3' step=0 target='Home' action='next'",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    second_status = manager.get_status()
+    progress = second_status["progress"]
+    device_progress = second_status["devices"][0]["progress"]
+    assert progress["terminal_scenarios"] == 2
+    assert progress["completed_scenarios"] == 2
+    assert progress["observed_scenarios"] == 3
+    assert second_status["current"]["current_scenario_id"] == "s3"
+    assert progress["terminal_scenarios"] == device_progress["terminal_scenarios"]
+    assert progress["completed_scenarios"] == device_progress["completed_scenarios"]
+
+    log_path.write_text(
+        "[TRAVERSAL_SUMMARY] scenario=s3 termination=COMPLETED\n",
+        encoding="utf-8",
+    )
+    third_status = manager.get_status()
+    assert third_status["progress"]["terminal_scenarios"] == 3
+    assert third_status["progress"]["completed_scenarios"] == 3
+    assert third_status["devices"][0]["progress"]["terminal_scenarios"] == 3
+
+
+def test_running_terminal_progress_deduplicates_retries_and_record_types(tmp_path, monkeypatch):
+    manager = _configure_running_manager(
+        tmp_path,
+        monkeypatch,
+        batch_id="batch_duplicate_terminal",
+        scenario_ids=["s1", "s2"],
+        log_text="\n".join(
+            [
+                "[PERF][scenario_summary] scenario=s1 total_steps=1",
+                "[PERF][scenario_summary] scenario=s1 total_steps=1 retry=1",
+                "[TRAVERSAL_SUMMARY] scenario=s1 termination=COMPLETED",
+            ]
+        ),
+    )
+
+    status = manager.get_status()
+    assert status["progress"]["terminal_scenarios"] == 1
+    assert status["progress"]["completed_scenarios"] == 1
+    assert manager._devices[0]["terminal_scenario_ids"] == ["s1"]
+
+
+def test_running_terminal_progress_counts_mixed_outcomes_as_terminal(tmp_path, monkeypatch):
+    scenario_ids = ["passed", "warning", "failed", "skipped"]
+    log_text = "\n".join(
+        [
+            "[PERF][scenario_summary] scenario=passed total_steps=1",
+            "[TRAVERSAL_SUMMARY] scenario=warning termination=COMPLETED_WITH_WARNING",
+            "[PERF][scenario_contract_summary] scenario=failed termination_status=INCOMPLETE_ERROR",
+            "[MAIN] skip disabled scenario_id='skipped' tab='(?i).*settings.*'",
+        ]
+    )
+    manager = _configure_running_manager(
+        tmp_path,
+        monkeypatch,
+        batch_id="batch_mixed_live_terminal",
+        scenario_ids=scenario_ids,
+        log_text=log_text,
+    )
+
+    progress = manager.get_status()["progress"]
+    assert progress["selected_scenarios"] == 4
+    assert progress["terminal_scenarios"] == 4
+    assert progress["completed_scenarios"] == 4
+
+
+def test_new_batch_resets_cumulative_terminal_progress(tmp_path, monkeypatch):
+    monkeypatch.setattr(batch_runner, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(batch_runner, "RUN_LOG_DIR", tmp_path / "qa_frontend_runs")
+    monkeypatch.setattr(
+        batch_runner.threading,
+        "Thread",
+        lambda *args, **kwargs: SimpleNamespace(start=lambda: None),
+    )
+    manager = batch_runner.BatchRunManager()
+
+    first = manager.start_batch(
+        [{"serial": "SERIAL", "model": "Model"}],
+        "full",
+        scenario_ids=["old_scenario"],
+    )
+    first_out_dir = tmp_path / first["devices"][0]["output_dir"]
+    first_out_dir.mkdir(parents=True, exist_ok=True)
+    (first_out_dir / "runner.log").write_text(
+        "[PERF][scenario_summary] scenario=old_scenario total_steps=1\n",
+        encoding="utf-8",
+    )
+    assert manager.get_status()["progress"]["terminal_scenarios"] == 1
+
+    manager._state = "finished"
+    manager._devices[0]["state"] = "passed"
+    manager._current_device_idx = len(manager._devices)
+    time.sleep(1.05)
+
+    second = manager.start_batch(
+        [{"serial": "SERIAL", "model": "Model"}],
+        "full",
+        scenario_ids=["new_scenario_a", "new_scenario_b"],
+    )
+    assert second["progress"]["selected_scenarios"] == 2
+    assert second["progress"]["terminal_scenarios"] == 0
+    assert second["devices"][0]["progress"]["terminal_scenarios"] == 0
+    assert manager._devices[0]["terminal_scenario_ids"] == []
 
 
 def test_finished_batch_reconciles_terminal_progress_from_persisted_summary(tmp_path, monkeypatch):
