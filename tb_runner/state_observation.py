@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
+from copy import deepcopy
+from collections import Counter
 from typing import Any, Mapping
 import unicodedata
 
@@ -18,9 +20,13 @@ from tb_runner.state_fingerprint import (
     SCHEMA_VERSION as FINGERPRINT_SCHEMA, NORMALIZATION_VERSION, StateFingerprint,
     _bounds, _boolean, _label, _semantic_node, build_state_fingerprint, normalize_dynamic_text,
 )
+from tb_runner.semantic_substate import (
+    LEGACY_SIDECAR_VERSION, SUBSTATE_SIDECAR_VERSION,
+    extract_semantic_substates, legacy_substates, normalize_substate_records,
+)
 
 OBSERVATION_SCHEMA = "state-observation-v1"
-SECONDARY_VERSION = "observed-discriminators-v1"
+SECONDARY_VERSION = SUBSTATE_SIDECAR_VERSION
 COVERAGES = frozenset({"OBSERVED_PARTIAL", "OBSERVED_FULL", "UNOBSERVED"})
 _STATUS = {
     "locked": "locked", "door locked": "locked", "잠김": "locked", "잠금": "locked", "문 잠김": "locked",
@@ -81,6 +87,13 @@ class StateObservation:
     def secondary(self) -> dict[str, Any]:
         return json.loads(self._secondary_json)
 
+    @property
+    def semantic_substates(self) -> list[dict[str, Any]]:
+        sidecar = self.secondary
+        if sidecar.get("version") == LEGACY_SIDECAR_VERSION:
+            return legacy_substates(sidecar, self.fingerprint.to_dict()["core"])
+        return deepcopy(sidecar.get("semantic_substates", []))
+
     def to_dict(self) -> dict[str, Any]:
         return dict(observation_id=self.observation_id, **json.loads(self._document_json))
 
@@ -96,13 +109,23 @@ class StateObservation:
             raise ValueError("observation checksum mismatch")
         coverage = document.get("coverage")
         secondary = document.get("secondary")
-        if coverage not in COVERAGES or not isinstance(secondary, dict) or secondary.get("version") != SECONDARY_VERSION:
+        if (coverage not in COVERAGES or not isinstance(secondary, dict)
+                or secondary.get("version") not in {LEGACY_SIDECAR_VERSION, SECONDARY_VERSION}):
             raise ValueError("invalid secondary observation contract")
         for key in ("nodes", "markers", "overlay_nodes"):
             nodes = secondary.get(key)
             if not isinstance(nodes, list) or any(not isinstance(n, dict) or not isinstance(n.get("semantic"), dict)
                                                  or not isinstance(n.get("label"), str) for n in nodes):
                 raise ValueError("invalid secondary nodes: " + key)
+        if secondary["version"] == SECONDARY_VERSION:
+            records = normalize_substate_records(secondary.get("semantic_substates"))
+            if records != secondary["semantic_substates"]:
+                raise ValueError("semantic substate ordering or structure mismatch")
+            available = Counter(canonical_json(n["semantic"]) for n in secondary["nodes"])
+            for record in records:
+                required = Counter(canonical_json(n) for n in record.get("evidence", {}).get("root_projection_nodes", []))
+                if any(count > available[key] for key, count in required.items()):
+                    raise ValueError("semantic substate root evidence is not present in the observation")
         fp = fingerprint_from_dict(document.get("fingerprint", {}))
         return cls(value["observation_id"], fp, coverage, canonical_json(secondary), canonical_json(document))
 
@@ -113,12 +136,17 @@ def build_state_observation(raw: Mapping[str, Any]) -> StateObservation:
     nodes = [n for n in flat_nodes(raw.get("nodes", []))
              if _boolean(n, ("isVisibleToUser", "visibleToUser", "visible")) is not False]
     overlay = raw.get("overlay") or {}
-    secondary = dict(version=SECONDARY_VERSION,
-        nodes=sorted((_secondary_node(n, display) for n in nodes), key=canonical_json),
+    secondary_nodes = sorted((_secondary_node(n, display) for n in nodes), key=canonical_json)
+    substates = extract_semantic_substates(raw, nodes, display)
+    secondary_version = SECONDARY_VERSION if substates else LEGACY_SIDECAR_VERSION
+    secondary = dict(version=secondary_version,
+        nodes=secondary_nodes,
         markers=sorted((_secondary_node(n, None) for n in flat_nodes(raw.get("core_nodes", []))), key=canonical_json),
         overlay_nodes=sorted((_secondary_node(n, display) for n in flat_nodes(overlay.get("nodes", []))), key=canonical_json),
         environment_partition=raw.get("environment_partition"),
         locale=raw.get("locale"), source=raw.get("source", "unspecified"))
+    if substates:
+        secondary["semantic_substates"] = substates
     coverage = raw.get("observation_coverage", "OBSERVED_PARTIAL")
     if coverage not in COVERAGES:
         raise ValueError("invalid observation coverage")

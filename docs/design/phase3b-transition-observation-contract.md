@@ -34,9 +34,10 @@ MAIN_PUSH=SUCCESS
 HEAD_ORIGIN_MAIN_MATCH=YES
 ```
 
-Audited 7 files만 단일 commit에 포함했다. Feature branch push 후 main pull
+Audited 5 files만 단일 commit에 포함했다. Feature branch push 후 main pull
 `--ff-only`, merge `--ff-only`, main push를 수행했다. 새 Phase 3B branch의 시작점은
-main/origin/main과 동일하다. Phase 3B 파일은 stage/commit/push/merge하지 않았다.
+main/origin/main과 동일하다. 이 보고서의 원래 검증 종료 시점에는 Phase 3B 파일이
+untracked였고, 아래 별도 publication 절차는 아직 실행되지 않은 상태였다.
 [Publication gate](../../output/phase3b_transition_20261005/publication_gate.json).
 
 ## 3. Goals / Non-goals
@@ -383,11 +384,19 @@ feature/phase3b-transition-observation
 ?? tools/state_transition_diagnostic.py
 ```
 
-`git diff --stat` 및 `git diff --name-only`는 empty다. Phase 3B 5개 파일은 모두 **untracked**이므로
-tracked diff에 표시되지 않는다. Staged 파일은 0개다.
-`git ls-files --others --exclude-standard`는 Phase 3B 5개와 기존 out/ 615개, 총 620개다.
-전체 명령 원문은 [final_git_state.txt](../../output/phase3b_transition_20261005/final_git_state.txt)에 기록한다.
-[Scope audit](../../output/phase3b_transition_20261005/scope_audit.json)는 runtime/config/Helper 및
-원본 out/ hashes, source bytes, allowed files, HEAD/main/origin/main 동일성을 확인한다.
+이후 사용자가 Part A publication을 명시적으로 허용하여 위 5개 파일만 commit했다:
 
-**Phase 3B commit/push/merge 없음. 사용자 review용 현재 worktree를 유지한다.**
+```ini
+PHASE3B_COMMIT=f89836a36ed12b2749f7f8203ead0d8dcebd4a5d
+PHASE3B_BRANCH_PUSH=SUCCESS
+PHASE3B_MAIN_MERGE=SUCCESS_FAST_FORWARD
+MAIN_PUSH=SUCCESS
+HEAD_ORIGIN_MAIN_MATCH=YES
+```
+
+`out/`은 commit 대상에서 제외했다. 최신 `main`을 fast-forward한 뒤
+`feature/phase3c-transition-stability-closure`를 만들었다.
+위 final assessment 당시의 untracked git snapshot은
+[final_git_state.txt](../../output/phase3b_transition_20261005/final_git_state.txt)에 남겨 둔다.
+[Scope audit](../../output/phase3b_transition_20261005/scope_audit.json)는 Phase 3B publication 전
+runtime/config/Helper, out/ hashes 및 당시 allowed file scope를 기록한다.

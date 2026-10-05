@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 import json
 import re
@@ -10,10 +11,17 @@ from typing import Any, Mapping
 
 from tb_runner.canonical_json import canonical_json, canonical_sha256
 from tb_runner.state_observation import StateObservation, observation_problems
+from tb_runner.semantic_substate import compare_substates, logical_semantic_nodes
 
 EQUALITY_SCHEMA = "state-equality-v1"
 IDENTITY_SCHEMA = "logical-state-identity-v1"
 SCROLL_EVIDENCE_SCHEMA = "state-scroll-continuity-v1"
+LEGACY_MATCHING_POLICY = "observed-secondary-v1"
+MATCHING_POLICY = "passive-update-timestamp-v1"
+MATCHING_POLICIES = frozenset({LEGACY_MATCHING_POLICY, MATCHING_POLICY})
+LEGACY_ROOT_POLICY = "full-observed-tree-v1"
+SEMANTIC_ROOT_POLICY = "camera-card-semantic-substate-v1"
+SEMANTIC_ROOT_POLICIES = frozenset({LEGACY_ROOT_POLICY, SEMANTIC_ROOT_POLICY})
 
 
 class EqualityVerdict(str, Enum):
@@ -42,6 +50,7 @@ class StateEqualityResult:
     confidence: str
     _diagnostic_json: str = field(repr=False)
     schema_version: str = EQUALITY_SCHEMA
+    _substate_comparison_json: str | None = field(default=None, repr=False)
 
     @property
     def logical_state_equal(self) -> bool | None:
@@ -52,12 +61,19 @@ class StateEqualityResult:
         return None if self.base_verdict == EqualityVerdict.AMBIGUOUS else self.base_verdict == EqualityVerdict.SAME
 
     def to_dict(self) -> dict[str, Any]:
-        return dict(schema_version=self.schema_version, verdict=self.verdict.value,
+        result = dict(schema_version=self.schema_version, verdict=self.verdict.value,
                     base_verdict=self.base_verdict.value, logical_state_equal=self.logical_state_equal,
                     base_state_equal=self.base_state_equal, viewport_equal=self.viewport_equal,
                     overlay_equal=self.overlay_equal, reasons=list(self.reasons),
                     matching_components=list(self.matching_components), differing_components=list(self.differing_components),
                     confidence=self.confidence, diagnostic=json.loads(self._diagnostic_json))
+        if self._substate_comparison_json is not None:
+            substate = json.loads(self._substate_comparison_json)
+            result.update(root_verdict=self.verdict.value,
+                semantic_substate_relation=substate["relation"],
+                semantic_substate_equal=substate["equal"],
+                semantic_substate_changes=substate["changes"])
+        return result
 
     def to_json(self) -> str:
         return canonical_json(self.to_dict())
@@ -121,16 +137,53 @@ def scope_index_key(observation: StateObservation) -> str:
         "package_name", "activity_name", "navigation_context", "selected_tab")})
 
 
-def _matching_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Normalize one observed typed age field on both live and saved evidence.
+def _update_timestamp_label(node: Mapping[str, Any]) -> str:
+    """Project a typed, passive update-time label without masking UI state.
+
+    Require a resource-anchored neutral TextView and a complete, valid timestamp.
+    Preserve the metadata kind, structural instance, flags and saved evidence.
+    Dates on controls, expiry/countdown text and mixed state labels stay intact.
+    """
+    label, semantic = node["label"], node["semantic"]
+    flags = semantic.get("flags", {})
+    if (not semantic.get("resource_id") or semantic.get("class_name") != "android.widget.TextView"
+            or node.get("semantic_value") is not None or semantic.get("semantic_state") is not None
+            or semantic.get("state_description") is not None or flags.get("enabled") is None
+            or any(flags.get(k) is not False for k in ("clickable", "focusable", "checked", "selected", "scrollable"))):
+        return label
+    match = re.fullmatch(r"(last updated|last update|updated at|마지막 업데이트|최근 업데이트)\s*:\s*"
+        r"(?:(?P<year>\d{4})-(?P<iso_month>\d{2})-(?P<iso_day>\d{2})|(?P<month>\d{1,2})/(?P<day>\d{1,2}))\s+"
+        r"(?P<hour>\d{1,2}):(?P<minute>\d{2})(?:\s*(?P<meridiem>am|pm))?", label)
+    if not match:
+        return label
+    fields = match.groupdict()
+    hour = int(fields["hour"])
+    if fields["meridiem"]:
+        if not 1 <= hour <= 12:
+            return label
+        hour = hour % 12 + (12 if fields["meridiem"] == "pm" else 0)
+    try:
+        datetime(int(fields["year"] or 2000), int(fields["iso_month"] or fields["month"]),
+                 int(fields["iso_day"] or fields["day"]), hour, int(fields["minute"]))
+    except ValueError:
+        return label
+    return match.group(1) + ": <update_timestamp>"
+
+
+def _matching_nodes(nodes: list[dict[str, Any]], matching_policy: str = MATCHING_POLICY) -> list[dict[str, Any]]:
+    """Project reviewed typed metadata on both live and saved evidence.
 
     Life map_area says 'recent location check: 59 minutes ago', then '1 hour
     ago'. Keep device name, state words and every other label discriminator.
-    Comparison-time normalization preserves old sidecars and fingerprint bytes.
+    Neutral update-time TextViews use a generic kind/value rule, independent of
+    screen, resource name or device type. Comparison-time normalization keeps
+    old sidecars and fingerprint bytes intact.
     """
+    if not isinstance(matching_policy, str) or matching_policy not in MATCHING_POLICIES:
+        raise ValueError("unsupported secondary matching policy")
     result = []
     for node in nodes:
-        label = node["label"]
+        label = _update_timestamp_label(node) if matching_policy == MATCHING_POLICY else node["label"]
         if str(node["semantic"].get("resource_id") or "").endswith("/map_area"):
             label = re.sub(r"(최근 위치 확인\s*:\s*)(?:지금|방금|(?:\d+\s*(?:일|시간|분|초)\s*)+전)(?=\s*(?:,|$))", r"\1<location_age>", label)
             label = re.sub(r"(last location (?:update|check|seen)\s*:\s*)(?:now|just now|(?:\d+\s*(?:days?|hours?|minutes?|seconds?)\s*)+ago)(?=\s*(?:,|$))", r"\1<location_age>", label)
@@ -190,16 +243,26 @@ def _aligned_state_changes(left_nodes: list, right_nodes: list) -> tuple[bool, b
 
 
 def evaluate_state_equality(left: StateObservation, right: StateObservation,
-                            continuity: VerifiedScrollEvidence | None = None) -> StateEqualityResult:
+                            continuity: VerifiedScrollEvidence | None = None, *,
+                            matching_policy: str = MATCHING_POLICY,
+                            semantic_root_policy: str = SEMANTIC_ROOT_POLICY) -> StateEqualityResult:
     """SAME is scoped to observed components, never whole-app completeness."""
     if not isinstance(left, StateObservation) or not isinstance(right, StateObservation):
         raise TypeError("equality requires StateObservation secondary evidence, not a bare hash")
+    if semantic_root_policy not in SEMANTIC_ROOT_POLICIES:
+        raise ValueError("unsupported semantic root matching policy")
     a, b = left.fingerprint.to_dict(), right.fingerprint.to_dict()
     sa, sb = left.secondary, right.secondary
-    sa["nodes"], sb["nodes"] = _matching_nodes(sa["nodes"]), _matching_nodes(sb["nodes"])
+    sa["nodes"], sb["nodes"] = _matching_nodes(sa["nodes"], matching_policy), _matching_nodes(sb["nodes"], matching_policy)
     matches, differences, reasons = [], [], []
     viewport_equal = a["viewport"] == b["viewport"]
     overlay_equal = a["overlay"] == b["overlay"] and sa["overlay_nodes"] == sb["overlay_nodes"]
+    semantic_substates_a, semantic_substates_b = left.semantic_substates, right.semantic_substates
+    substates = compare_substates(semantic_substates_a, semantic_substates_b)
+    root_nodes_a = (logical_semantic_nodes(sa["nodes"], semantic_substates_a)
+                    if semantic_root_policy == SEMANTIC_ROOT_POLICY else sa["nodes"])
+    root_nodes_b = (logical_semantic_nodes(sb["nodes"], semantic_substates_b)
+                    if semantic_root_policy == SEMANTIC_ROOT_POLICY else sb["nodes"])
     problems = sorted(set(observation_problems(left) + observation_problems(right)))
     hard_changed = []
     for field in ("package_name", "activity_name", "navigation_context", "selected_tab"):
@@ -221,7 +284,9 @@ def evaluate_state_equality(left: StateObservation, right: StateObservation,
         problems.append("COVERAGE_MISMATCH")
     (matches if viewport_equal else differences).append("viewport")
     (matches if overlay_equal else differences).append("overlay")
-    (matches if sa["nodes"] == sb["nodes"] else differences).append("secondary_semantics")
+    (matches if root_nodes_a == root_nodes_b else differences).append("logical_root_semantics")
+    if semantic_substates_a or semantic_substates_b:
+        differences.append("semantic_substates") if not substates["equal"] else matches.append("semantic_substates")
     if hard_changed:
         base = EqualityVerdict.DIFFERENT
         reasons.append("HARD_SCOPE_CHANGED")
@@ -233,7 +298,7 @@ def evaluate_state_equality(left: StateObservation, right: StateObservation,
         differences.append("persistent_markers")
         reasons.append("OBSERVED_PERSISTENT_MARKERS_CHANGED")
     else:
-        changed, unknown = _aligned_state_changes(sa["nodes"], sb["nodes"])
+        changed, unknown = _aligned_state_changes(root_nodes_a, root_nodes_b)
         if changed:
             base = EqualityVerdict.DIFFERENT
             reasons.append("MEANINGFUL_SEMANTIC_STATE_CHANGED")
@@ -243,7 +308,7 @@ def evaluate_state_equality(left: StateObservation, right: StateObservation,
         elif sa["markers"] != sb["markers"]:
             base = EqualityVerdict.AMBIGUOUS
             reasons.append("PERSISTENT_LABEL_COLLISION_OR_LOCALE_CHANGE")
-        elif sa["nodes"] == sb["nodes"]:
+        elif root_nodes_a == root_nodes_b:
             base = EqualityVerdict.SAME
             reasons.append("OBSERVED_SEMANTIC_MULTISET_MATCH")
         elif continuity is not None and continuity.links(left, right):
@@ -270,7 +335,14 @@ def evaluate_state_equality(left: StateObservation, right: StateObservation,
                       same_coarse_core=left.fingerprint.core_signature == right.fingerprint.core_signature,
                       coverage=[left.coverage, right.coverage],
                       continuity_used="LINKED_VERIFIED_SCROLL_CONTINUITY" in reasons)
+    if semantic_substates_a or semantic_substates_b:
+        diagnostic["semantic_root_policy"] = semantic_root_policy
+        diagnostic["semantic_substate_relation"] = substates["relation"]
+        diagnostic["semantic_substate_hashes"] = [substates["left_hash"], substates["right_hash"]]
+    if matching_policy != LEGACY_MATCHING_POLICY:
+        diagnostic["secondary_matching_policy"] = matching_policy
+    substate_json = canonical_json(substates) if semantic_substates_a or semantic_substates_b else None
     return StateEqualityResult(verdict, base, viewport_equal, overlay_equal, tuple(sorted(set(reasons))),
                                tuple(sorted(set(matches))), tuple(sorted(set(differences))),
                                "AMBIGUOUS" if verdict == EqualityVerdict.AMBIGUOUS else "BOUNDED_OBSERVED",
-                               canonical_json(diagnostic))
+                               canonical_json(diagnostic), _substate_comparison_json=substate_json)

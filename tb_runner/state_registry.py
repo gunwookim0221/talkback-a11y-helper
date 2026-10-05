@@ -17,9 +17,11 @@ from typing import Any, Mapping
 from tb_runner.canonical_json import canonical_json, canonical_json_bytes, canonical_sha256
 from tb_runner.state_equality import (
     EQUALITY_SCHEMA, EqualityVerdict, StateIdentity, VerifiedScrollEvidence,
+    LEGACY_MATCHING_POLICY, MATCHING_POLICY, MATCHING_POLICIES,
+    LEGACY_ROOT_POLICY, SEMANTIC_ROOT_POLICY, SEMANTIC_ROOT_POLICIES,
     _matching_nodes, evaluate_state_equality, scope_index_key,
 )
-from tb_runner.state_observation import OBSERVATION_SCHEMA, StateObservation, observation_problems
+from tb_runner.state_observation import OBSERVATION_SCHEMA, SECONDARY_VERSION, StateObservation, observation_problems
 
 REGISTRY_SCHEMA = "state-registry-v1"
 _PAYLOAD_FIELDS = frozenset({"schema_version", "equality_schema", "observation_schema", "namespace",
@@ -60,17 +62,24 @@ def _validate_secondary(observation: StateObservation) -> None:
 
 
 class StateRegistry:
-    def __init__(self, namespace: str = "phase2-diagnostic"):
+    def __init__(self, namespace: str = "phase2-diagnostic", *, matching_policy: str = MATCHING_POLICY,
+                 semantic_root_policy: str = SEMANTIC_ROOT_POLICY):
         if not isinstance(namespace, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", namespace):
             raise ValueError("invalid registry namespace")
         self.namespace = namespace
+        if not isinstance(matching_policy, str) or matching_policy not in MATCHING_POLICIES:
+            raise ValueError("unsupported secondary matching policy")
+        self.matching_policy = matching_policy
+        if semantic_root_policy not in SEMANTIC_ROOT_POLICIES:
+            raise ValueError("unsupported semantic root policy")
+        self.semantic_root_policy = semantic_root_policy
         self._next_state = 1
         self._states: dict[str, dict[str, Any]] = {}
         self._observations: dict[str, StateObservation] = {}
         self._continuities: dict[str, VerifiedScrollEvidence] = {}
         self._events: list[dict[str, Any]] = []
         self._extra_fields: dict[str, Any] = {}
-        self._behavior_keys: dict[str, str] = {}
+        self._behavior_keys: dict[tuple[str, str], str] = {}
 
     @property
     def state_count(self) -> int:
@@ -88,19 +97,27 @@ class StateRegistry:
     def states(self) -> list[dict[str, Any]]:
         return deepcopy([self._states[k] for k in sorted(self._states)])
 
-    def _behavior_key(self, observation: StateObservation) -> str:
-        key = self._behavior_keys.get(observation.observation_id)
+    def _behavior_key(self, observation: StateObservation, matching_policy: str) -> str:
+        key = self._behavior_keys.get((observation.observation_id, matching_policy))
         if key is not None:
             return key
         fp, secondary = observation.fingerprint.to_dict(), observation.secondary
         return canonical_sha256(dict(core=fp["core"], viewport=fp["viewport"], overlay=fp["overlay"],
-            coverage=observation.coverage, nodes=_matching_nodes(secondary["nodes"]), markers=secondary["markers"],
+            coverage=observation.coverage, nodes=_matching_nodes(secondary["nodes"], matching_policy), markers=secondary["markers"],
             overlay_nodes=secondary["overlay_nodes"], environment_partition=secondary.get("environment_partition")))
 
     def observe(self, observation: StateObservation,
-                continuity: VerifiedScrollEvidence | None = None) -> StateResolution:
+                continuity: VerifiedScrollEvidence | None = None, *,
+                matching_policy: str | None = None,
+                semantic_root_policy: str | None = None) -> StateResolution:
         if not isinstance(observation, StateObservation):
             raise TypeError("registry requires StateObservation")
+        policy = self.matching_policy if matching_policy is None else matching_policy
+        if not isinstance(policy, str) or policy not in MATCHING_POLICIES:
+            raise ValueError("unsupported secondary matching policy")
+        root_policy = self.semantic_root_policy if semantic_root_policy is None else semantic_root_policy
+        if root_policy not in SEMANTIC_ROOT_POLICIES:
+            raise ValueError("unsupported semantic root policy")
         # Validate immutable serialized truth, not a caller-forged dataclass.
         observation = StateObservation.from_dict(observation.to_dict())
         _validate_secondary(observation)
@@ -127,7 +144,8 @@ class StateRegistry:
                 proof = continuity if continuity and continuity.links(existing, observation) else None
                 if proof is None:
                     proof = next((p for p in self._continuities.values() if p.links(existing, observation)), None)
-                results.append(evaluate_state_equality(existing, observation, proof).to_dict())
+                results.append(evaluate_state_equality(existing, observation, proof,
+                    matching_policy=policy, semantic_root_policy=root_policy).to_dict())
             verdicts = {r["verdict"] for r in results}
             if "SAME" in verdicts and "DIFFERENT" not in verdicts:
                 verdict = "SAME"
@@ -154,7 +172,7 @@ class StateRegistry:
         # Mutate only after validation/evaluation finishes. Unknown observations
         # are retained without inventing a state or unsafe merge.
         self._observations[oid] = observation
-        self._behavior_keys[oid] = self._behavior_key(observation)
+        self._behavior_keys[(oid, policy)] = self._behavior_key(observation, policy)
         if proof_key is not None:
             self._continuities[proof_key] = continuity
         seen = dict(sequence=len(self._events)+1, timestamp=observation.fingerprint.to_dict()["transient"].get("timestamp"))
@@ -178,8 +196,15 @@ class StateRegistry:
                 metadata = observation.fingerprint.to_dict()["transient"]
                 state["scenario_context_provenance"].append(dict(observation_id=oid,
                     scenario_id=metadata.get("scenario_id"), step=metadata.get("step"), source=metadata.get("source")))
-            if self._behavior_keys[oid] not in {self._behavior_keys[r] for r in state["representative_observation_ids"]}:
+            if self._behavior_keys[(oid, policy)] not in {self._behavior_key(self._observations[r], policy)
+                                                        for r in state["representative_observation_ids"]}:
                 state["representative_observation_ids"].append(oid)
+            substates = observation.semantic_substates
+            if observation.secondary.get("version") == SECONDARY_VERSION and substates:
+                rows = state.setdefault("semantic_substate_observations", [])
+                if all(row.get("observation_id") != oid for row in rows):
+                    rows.append(dict(observation_id=oid, semantic_substate_hash=canonical_sha256(substates),
+                        values=[{k: item[k] for k in ("category", "key", "value", "confidence")} for item in substates]))
             vp = observation.fingerprint.viewport_signature
             entry = state["viewport_observations"].setdefault(vp, dict(viewport_signature=vp,
                 first_seen=seen, last_seen=seen, observation_count=0, observation_ids=[]))
@@ -187,8 +212,13 @@ class StateRegistry:
             entry["last_seen"] = seen
             if oid not in entry["observation_ids"]:
                 entry["observation_ids"].append(oid)
-        self._events.append(dict(sequence=len(self._events)+1, observation_id=oid,
-                                 continuity_id=proof_key, result=result.to_dict()))
+        event = dict(sequence=len(self._events)+1, observation_id=oid,
+                     continuity_id=proof_key, result=result.to_dict())
+        if policy != LEGACY_MATCHING_POLICY:
+            event["secondary_matching_policy"] = policy
+        if root_policy != LEGACY_ROOT_POLICY:
+            event["semantic_root_policy"] = root_policy
+        self._events.append(event)
         return result
 
     def _payload(self) -> dict[str, Any]:
@@ -207,7 +237,7 @@ class StateRegistry:
         return canonical_json(self.to_dict())
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> "StateRegistry":
+    def from_dict(cls, value: Mapping[str, Any], *, matching_policy: str = MATCHING_POLICY) -> "StateRegistry":
         if not isinstance(value, Mapping):
             raise ValueError("registry must be a mapping")
         payload = {k: v for k, v in value.items() if k != "content_sha256"}
@@ -236,7 +266,7 @@ class StateRegistry:
             if document["evidence_id"] in proofs:
                 raise ValueError("duplicate continuity evidence")
             proofs[document["evidence_id"]] = proof
-        rebuilt = cls(payload["namespace"])
+        rebuilt = cls(payload["namespace"], matching_policy=matching_policy)
         for index, event in enumerate(payload["events"], 1):
             if not isinstance(event, dict) or type(event.get("sequence")) is not int or event["sequence"] != index:
                 raise ValueError("invalid event sequence")
@@ -245,7 +275,11 @@ class StateRegistry:
                 proof = proofs[event["continuity_id"]] if event.get("continuity_id") is not None else None
             except KeyError as exc:
                 raise ValueError("orphan event reference") from exc
-            result = rebuilt.observe(obs, proof)
+            # Untagged historical events must reproduce their original verdict.
+            # New observations use the current policy; saved bytes are untouched.
+            policy = event.get("secondary_matching_policy", LEGACY_MATCHING_POLICY)
+            root_policy = event.get("semantic_root_policy", LEGACY_ROOT_POLICY)
+            result = rebuilt.observe(obs, proof, matching_policy=policy, semantic_root_policy=root_policy)
             if result.to_dict() != event.get("result"):
                 raise ValueError("saved resolution does not replay")
         known_expected = {k: payload[k] for k in _PAYLOAD_FIELDS}
@@ -271,7 +305,7 @@ class StateRegistry:
                 temporary.unlink()
 
     @classmethod
-    def load(cls, path: str | Path) -> "StateRegistry":
+    def load(cls, path: str | Path, *, matching_policy: str = MATCHING_POLICY) -> "StateRegistry":
         def unique_keys(pairs):
             result = {}
             for key, value in pairs:
@@ -283,4 +317,4 @@ class StateRegistry:
             value = json.loads(Path(path).read_text(encoding="utf-8"), object_pairs_hook=unique_keys)
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             raise ValueError("registry cannot be loaded") from exc
-        return cls.from_dict(value)
+        return cls.from_dict(value, matching_policy=matching_policy)

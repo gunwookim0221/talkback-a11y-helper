@@ -297,6 +297,12 @@ def _collect(raw: Mapping[str, Any], observation: StateObservation, resolution: 
         strict_current_focus=dict(confirmed=focus_id is not None,instance_id=focus_id,physical_visit_credited=False),
         excluded=sorted(excluded,key=canonical_json), candidate_id_collision_count=collisions,
         safety_contract="HINT_ONLY_NO_AUTO_ACTIVATION",action_executed=False,visit_credit=0)
+    semantic_substates = observation.semantic_substates
+    if semantic_substates:
+        # Candidate identity is bound to the logical root. The exact current
+        # candidate set and camera semantic evidence remain in this snapshot.
+        document["semantic_substates"] = semantic_substates
+        document["semantic_substate_hash"] = canonical_sha256(semantic_substates)
     return DiscoverySnapshot(sid,set_hash,candidates,canonical_json(document))
 
 

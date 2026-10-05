@@ -219,7 +219,9 @@ class TransitionObserver:
                     proof_error = str(exc)
             snapshot = build_discovery_snapshot(after_raw, self.registry, continuity=proof)
             result_id = snapshot.state_id
-            equality = evaluate_state_equality(prepared.source_observation, result, proof).to_dict()
+            equality = evaluate_state_equality(prepared.source_observation, result, proof,
+                                              matching_policy=self.registry.matching_policy,
+                                              semantic_root_policy=self.registry.semantic_root_policy).to_dict()
             focus = _focus(before, after_raw)
             relation = equality["verdict"]
             mismatch = bool(source_id and result_id and relation != "AMBIGUOUS" and
@@ -259,6 +261,17 @@ class TransitionObserver:
                         focus_before=focus["before_instance_id"], focus_after=focus["after_instance_id"],
                         viewport_changed=None if equality is None or equality["viewport_equal"] is None else not equality["viewport_equal"],
                         equality_relation=equality["verdict"] if equality else None)
+        source_substates = prepared.source_observation.semantic_substates
+        result_substates = result.semantic_substates if result else []
+        if source_substates or result_substates:
+            substate_relation = equality.get("semantic_substate_relation", "UNKNOWN") if equality else "UNKNOWN"
+            attribution = ("UNCHANGED_ACROSS_CAPTURE_INTERVAL" if substate_relation == "SAME" else
+                "UNATTRIBUTED_BETWEEN_CAPTURE_BOUNDARIES" if substate_relation == "DIFFERENT" else
+                "UNKNOWN_OR_UNOBSERVED")
+            semantic.update(source_semantic_substates=source_substates,
+                resulting_semantic_substates=result_substates,
+                semantic_substate_relation=substate_relation,
+                substate_change_attribution=attribution)
         # Unresolved observations need a discriminator, but not timestamps or
         # transient observation IDs. No ID is fabricated for their logical state.
         for side, sid, obs in (("source", source_id, prepared.source_observation), ("result", result_id, result)):

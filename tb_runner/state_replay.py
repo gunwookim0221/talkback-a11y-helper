@@ -28,6 +28,7 @@ def _fingerprint_only(value: Mapping[str, Any]) -> StateObservation:
         return [dict(semantic=n, label=n.get("text_fallback") or "", semantic_value=n.get("semantic_state")) for n in items]
     secondary = dict(version=SECONDARY_VERSION, nodes=nodes(data["viewport"]["semantic_nodes"]),
         markers=nodes(data["core"]["screen_markers"]), overlay_nodes=nodes(data["overlay"]["semantic_nodes"]),
+        semantic_substates=[],
         environment_partition=None, locale=None, source="fingerprint_only_secondary_unavailable")
     doc = dict(schema_version=OBSERVATION_SCHEMA, fingerprint=data, coverage="UNOBSERVED", secondary=secondary)
     return StateObservation.from_dict(dict(doc, observation_id=canonical_sha256(doc)))
@@ -80,6 +81,10 @@ def replay_dataset(manifest: Mapping[str, Any], registry: StateRegistry | None =
         raise ValueError("pairs must be a list")
     pair_rows, failures = [], []
     equality_stable, ambiguous_pairs = 0, 0
+    namespace=manifest.get("namespace",name)
+    primary=registry if registry is not None else StateRegistry(namespace)
+    if primary.namespace != namespace:
+        raise ValueError("registry namespace mismatch")
     for pair in pairs:
         try:
             a,b=observations[pair["left"]],observations[pair["right"]]
@@ -88,10 +93,11 @@ def replay_dataset(manifest: Mapping[str, Any], registry: StateRegistry | None =
         if pair.get("expected") not in {"SAME","DIFFERENT","AMBIGUOUS"}:
             raise ValueError("unreviewed equality expectation")
         proof=next((p for p in proofs if p.links(a,b)),None) if pair.get("use_continuity") is True else None
-        result=evaluate_state_equality(a,b,proof)
+        result=evaluate_state_equality(a,b,proof,matching_policy=primary.matching_policy)
         restored_a,restored_b=StateObservation.from_dict(a.to_dict()),StateObservation.from_dict(b.to_dict())
         restored_proof=VerifiedScrollEvidence.from_dict(proof.to_dict(),by_id) if proof else None
-        stable_result=result.to_json()==evaluate_state_equality(restored_a,restored_b,restored_proof).to_json()
+        stable_result=result.to_json()==evaluate_state_equality(restored_a,restored_b,restored_proof,
+            matching_policy=primary.matching_policy).to_json()
         equality_stable+=stable_result
         ambiguous_pairs+=result.verdict.value=="AMBIGUOUS"
         passed=result.verdict.value==pair["expected"] and stable_result
@@ -101,10 +107,6 @@ def replay_dataset(manifest: Mapping[str, Any], registry: StateRegistry | None =
             passed=passed and result.viewport_equal is pair["viewport_equal"]
         pair_rows.append(dict(name=pair.get("name"),expected=pair["expected"],passed=passed,result=result.to_dict()))
         if not passed: failures.append("equality:"+str(pair.get("name")))
-    namespace=manifest.get("namespace",name)
-    primary=registry if registry is not None else StateRegistry(namespace)
-    if primary.namespace != namespace:
-        raise ValueError("registry namespace mismatch")
 
     def run(target):
         seen_ids={o["observation_id"] for o in target.to_dict()["observations"]}
@@ -119,7 +121,7 @@ def replay_dataset(manifest: Mapping[str, Any], registry: StateRegistry | None =
         return results
 
     primary_rows=run(primary)
-    restarted=StateRegistry.from_dict(primary.to_dict())
+    restarted=StateRegistry.from_dict(primary.to_dict(),matching_policy=primary.matching_policy)
     persistence_stable=restarted.to_json()==primary.to_json()
     restarted_rows=run(restarted)
     registry_stable=0
