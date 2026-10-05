@@ -62,6 +62,7 @@ class ContentTerminal:
     target_attempted_ids: set = field(default_factory=set)
     target_attempt_statuses: dict = field(default_factory=dict)
     target_attempt_contract_active: bool = False
+    planner_candidate_ids: set | None = None
     lifecycle: CandidateLifecycle = field(default_factory=CandidateLifecycle)
 
     def observe(self, observation, step, focus_observations=(), semantic_ids=(), scroll=None, pending=False,
@@ -161,6 +162,8 @@ class ContentTerminal:
                 self.target_attempted_ids.add(attempt_id)
                 self.target_attempt_statuses[attempt_id] = str(target_attempt.get("status", "") or "ERROR")
         unattempted_unseen = unseen - self.target_attempted_ids
+        if self.planner_candidate_ids is not None:
+            unattempted_unseen &= self.planner_candidate_ids
         self.latest = dict(scenario_id=self.scenario_id, content_terminal_contract="phase0eb-observed-instance-v1",
             visible_candidates=len(visible), visited_candidates=len(set(self.records) & self.visited),
             logical_reconciliation_contract="phase0ga-unique-translation-alias-v1",
@@ -188,6 +191,7 @@ class ContentTerminal:
             target_attempt_count=len(self.target_attempted_ids),
             target_commit_success_count=sum(status == "TARGET_MATCHED" for status in self.target_attempt_statuses.values()),
             target_mismatch_count=sum(status in {"FOCUS_MOVED_TO_OTHER_NODE", "FOCUS_UNCHANGED"} for status in self.target_attempt_statuses.values()),
+            planner_candidate_count=(len(self.planner_candidate_ids) if self.planner_candidate_ids is not None else None),
             unattempted_active_unseen=len(unattempted_unseen),
             target_attempt_contract_active=self.target_attempt_contract_active,
             no_progress_steps=self.no_progress_steps, no_focus_progress_steps=self.no_focus_progress_steps,
@@ -233,10 +237,13 @@ class ContentTerminal:
             return "content_scroll_unverified" if (e["viewport_stable"] and not e["unseen_candidates"]) or self.no_focus_progress_steps >= 4 else ""
         if self.scroll_opportunity():
             return ""
-        # Give every active unseen instance one target-specific attempt before
-        # a focus plateau can terminate the viewport. The scenario step cap and
-        # one-attempt-per-instance ledger keep this bounded.
-        if e.get("target_attempt_contract_active") and e.get("unattempted_active_unseen", 0) > 0:
+        # Give every active unseen instance in the current valid planner pool
+        # one target-specific attempt before a focus plateau can terminate the
+        # viewport. The scenario step cap and one-attempt ledger keep this bounded.
+        if (
+            (e.get("planner_candidate_count") is not None or e.get("target_attempt_contract_active"))
+            and e.get("unattempted_active_unseen", 0) > 0
+        ):
             return ""
         if (e.get("vertical_can_scroll_forward") is True
                 and e.get("scroll_viewport_signature") in self.scroll_attempted_viewports
@@ -260,7 +267,7 @@ class ContentTerminal:
                   "stable_scroll_attempts", "new_instances", "last_progress_step", "no_progress_steps",
                   "focus_sequence_progress",
                   "target_attempt_count", "target_commit_success_count", "target_mismatch_count",
-                  "unattempted_active_unseen",
+                  "planner_candidate_count", "unattempted_active_unseen",
                   "target_attempt_contract_active",
                   "pending_transition", "scope_verified", "observation_valid", "strict_viewport_signature",
                   "semantic_viewport_signature")

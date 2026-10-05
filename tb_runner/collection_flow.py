@@ -14594,7 +14594,7 @@ def _collect_step_candidate_priority_groups(
     scenario_id: str = "",
     consumed_cluster_signatures: set[str] | None = None,
     consumed_cluster_logical_signatures: set[str] | None = None,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[str]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     consumed_cluster_signatures = set(consumed_cluster_signatures or set())
     consumed_cluster_logical_signatures = set(consumed_cluster_logical_signatures or set())
     flat_visible_nodes = [
@@ -14619,6 +14619,7 @@ def _collect_step_candidate_priority_groups(
             "rejected_bottom_strip_candidates": [],
             "chrome_excluded_candidates": [],
             "cluster_pre_filter_skipped": [],
+            "cluster_pre_filter_skipped_candidates": [],
         }
     viewport_left = min(bounds[0] for bounds in bounds_candidates)
     viewport_top = min(bounds[1] for bounds in bounds_candidates)
@@ -14637,6 +14638,7 @@ def _collect_step_candidate_priority_groups(
     chrome_excluded_candidates: list[str] = []
     section_header_candidates: list[str] = []
     cluster_pre_filter_skipped: list[str] = []
+    cluster_pre_filter_skipped_candidates: list[dict[str, Any]] = []
     container_promoted_candidates: list[str] = []
     top_priority_container_candidates: list[str] = []
 
@@ -14841,12 +14843,6 @@ def _collect_step_candidate_priority_groups(
         candidate_cluster_logical_signature = _candidate_cluster_logical_signature(dict(
             cluster_rid=cluster_rid or resource_id, cluster_label=cluster_label or label,
             cluster_bounds=cluster_root.get("boundsInScreen", "") or cluster_root.get("bounds", "")))
-        if (
-            cluster_signature in consumed_cluster_signatures
-            or candidate_cluster_logical_signature in consumed_cluster_logical_signatures
-        ):
-            cluster_pre_filter_skipped.append(cluster_label or label)
-            continue
         candidate = {
             "node": node,
             "label": label,
@@ -14874,6 +14870,13 @@ def _collect_step_candidate_priority_groups(
             _apply_semantic_card_metadata(candidate, _build_semantic_card_model(semantic_root))
         else:
             _apply_semantic_card_metadata(candidate, {})
+        if (
+            cluster_signature in consumed_cluster_signatures
+            or candidate_cluster_logical_signature in consumed_cluster_logical_signatures
+        ):
+            cluster_pre_filter_skipped.append(cluster_label or label)
+            cluster_pre_filter_skipped_candidates.append(candidate)
+            continue
         if bool(candidate.get("section_header_like", False)):
             section_header_candidates.append(label)
         content_candidates.append(candidate)
@@ -14983,6 +14986,7 @@ def _collect_step_candidate_priority_groups(
             "clustered_candidates": [_cluster_display_name(candidate) for candidate in content_candidates],
             "cluster_representatives": cluster_representatives_meta,
             "cluster_pre_filter_skipped": cluster_pre_filter_skipped,
+            "cluster_pre_filter_skipped_candidates": cluster_pre_filter_skipped_candidates,
             "container_promoted_candidates": container_promoted_candidates,
             "top_priority_container_candidates": top_priority_container_candidates,
         }
@@ -15006,6 +15010,7 @@ def _collect_step_candidate_priority_groups(
         "clustered_candidates": [_cluster_display_name(candidate) for candidate in sorted_content],
         "cluster_representatives": cluster_representatives_meta,
         "cluster_pre_filter_skipped": cluster_pre_filter_skipped,
+        "cluster_pre_filter_skipped_candidates": cluster_pre_filter_skipped_candidates,
         "container_promoted_candidates": container_promoted_candidates,
         "top_priority_container_candidates": top_priority_container_candidates,
     }
@@ -17838,6 +17843,8 @@ def _apply_content_terminal_phase(client, dev, state, row, phase_ctx, step_idx, 
         log(f"[CONTENT_TERMINAL_EVAL] scenario='{tracker.scenario_id}' step={step_idx} "
             f"visible={evaluation['visible_candidates']} visited={evaluation['visited_candidates']} "
             f"semantic={evaluation['semantically_covered_candidates']} unseen={evaluation['unseen_candidates']} "
+            f"target_attempts={evaluation['target_attempt_count']} planner_candidates={evaluation['planner_candidate_count']} "
+            f"unattempted_active_unseen={evaluation['unattempted_active_unseen']} "
             f"can_scroll_forward={evaluation['can_scroll_forward']} scroll_exhausted={evaluation['scroll_exhausted']} "
             f"viewport_stable={evaluation['viewport_stable']} new_instances={evaluation['new_instances']} "
             f"focus_sequence_progress={str(evaluation['focus_sequence_progress']).lower()} "

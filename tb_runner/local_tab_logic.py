@@ -7,10 +7,12 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from talkback_lib import A11yAdbClient
+from tb_runner.completeness import candidate as _content_terminal_candidate
 from tb_runner.focus_reconciliation import has_strict_post_move_focus
 from tb_runner.label_matcher import EMPTY_STATE_LABEL_ALIASES, canonicalize_label
 from tb_runner.logging_utils import log
 from tb_runner.perf_stats import ScenarioPerfStats
+from tb_runner.traversal_reliability import instance_id as _content_terminal_instance_id
 from tb_runner.utils import parse_bounds_str
 
 LOCAL_TAB_ACTIVE_TTL_STEPS = 3
@@ -2774,6 +2776,136 @@ def _is_row_persistent_bottom_strip_candidate(row: dict[str, Any]) -> bool:
     )
     return bool(center_y >= 900 and compact and label_word_count <= 3 and (button_like or len(label.strip()) <= 24))
 
+
+def _content_candidate_instance_id(candidate: dict[str, Any], scenario_id: str) -> str:
+    node = candidate.get("node", {}) if isinstance(candidate.get("node", {}), dict) else {}
+    rid = str(
+        candidate.get("rid", "")
+        or node.get("view_id", "")
+        or node.get("viewIdResourceName", "")
+        or node.get("resourceId", "")
+        or ""
+    ).strip()
+    bounds = str(
+        candidate.get("bounds", "")
+        or node.get("bounds", "")
+        or node.get("boundsInScreen", "")
+        or ""
+    ).strip()
+    item = _content_terminal_candidate(
+        {
+            **node,
+            "view_id": rid,
+            "bounds": bounds,
+            "label": str(candidate.get("label", "") or "").strip(),
+            "class_name": str(node.get("class_name", "") or node.get("className", "") or node.get("class", "") or "").strip(),
+            "stable_node_path": str(candidate.get("stable_node_path", "") or node.get("stable_node_path", "") or node.get("path", "") or "").strip(),
+            "ancestor_id": str(candidate.get("ancestor_id", "") or node.get("ancestor_id", "") or node.get("parentPath", "") or "").strip(),
+        },
+        scenario_id,
+    )
+    return _content_terminal_instance_id(item)
+
+
+def _current_valid_content_candidates(
+    content_candidates: list[dict[str, Any]],
+    cluster_skipped_candidates: list[dict[str, Any]],
+    *,
+    scenario_id: str,
+) -> list[dict[str, Any]]:
+    expanded: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for representative in content_candidates:
+        members = representative.get("cluster_members", [])
+        ordered_members = list(members) if isinstance(members, list) else []
+        ordered_members.append(representative)
+        for candidate in ordered_members:
+            if not isinstance(candidate, dict):
+                continue
+            if (
+                bool(candidate.get("passive_status", False))
+                or bool(candidate.get("low_value_leaf", False))
+                or bool(candidate.get("section_header_like", False))
+            ):
+                continue
+            candidate_id = _content_candidate_instance_id(candidate, scenario_id)
+            if candidate_id and candidate_id not in seen_ids:
+                seen_ids.add(candidate_id)
+                expanded.append(candidate)
+    for candidate in cluster_skipped_candidates:
+        if not isinstance(candidate, dict):
+            continue
+        if (
+            bool(candidate.get("passive_status", False))
+            or bool(candidate.get("low_value_leaf", False))
+            or bool(candidate.get("section_header_like", False))
+        ):
+            continue
+        candidate_id = _content_candidate_instance_id(candidate, scenario_id)
+        if candidate_id and candidate_id not in seen_ids:
+            seen_ids.add(candidate_id)
+            expanded.append(candidate)
+    return expanded
+
+
+def _record_content_terminal_planner_inventory(
+    state: Any,
+    candidates: list[dict[str, Any]],
+    *,
+    scenario_id: str,
+) -> None:
+    tracker = getattr(state, "content_terminal", None)
+    if tracker is None:
+        return
+    tracker.planner_candidate_ids = {
+        candidate_id
+        for candidate in candidates
+        if (candidate_id := _content_candidate_instance_id(candidate, scenario_id))
+    }
+
+
+def _prioritize_unattempted_active_unseen_candidates(
+    candidates: list[dict[str, Any]],
+    *,
+    state: MainLoopState,
+    scenario_id: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Put live, unseen target instances without an execution attempt first.
+
+    The terminal ledger owns both attempt identity and actual visit state. This
+    gate only changes the order of already-discovered, otherwise-valid content
+    candidates; the existing ranking remains the stable tie-breaker.
+    """
+    tracker = getattr(state, "content_terminal", None)
+    latest = getattr(tracker, "latest", {}) if tracker is not None else {}
+    unseen_ids = set(latest.get("unseen_candidate_ids", []) or []) if isinstance(latest, dict) else set()
+    attempted_ids = set(getattr(tracker, "target_attempted_ids", set()) or set()) if tracker is not None else set()
+    visited_ids = set(getattr(tracker, "visited", set()) or set()) if tracker is not None else set()
+    semantic_ids = set(getattr(tracker, "semantic", set()) or set()) if tracker is not None else set()
+    stale_ids = set(getattr(getattr(tracker, "lifecycle", None), "aliases", {}) or {}) if tracker is not None else set()
+    unattempted_ids = unseen_ids - attempted_ids - visited_ids - semantic_ids - stale_ids
+    planner_ids = getattr(tracker, "planner_candidate_ids", None) if tracker is not None else None
+    if planner_ids is not None:
+        unattempted_ids &= set(planner_ids)
+    eligible = [
+        candidate
+        for candidate in candidates
+        if _content_candidate_instance_id(candidate, scenario_id) in unattempted_ids
+    ]
+    if not eligible:
+        return list(candidates), {
+            "active_unseen": len(unseen_ids),
+            "unattempted_active_unseen": len(unattempted_ids),
+            "eligible_unattempted": 0,
+            "prioritized": False,
+        }
+    return eligible, {
+        "active_unseen": len(unseen_ids),
+        "unattempted_active_unseen": len(unattempted_ids),
+        "eligible_unattempted": len(eligible),
+        "prioritized": True,
+    }
+
 def _maybe_reprioritize_persistent_bottom_strip_row(
     *,
     row: dict[str, Any],
@@ -2818,6 +2950,7 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         needs_detection_only = False
     dump_tree_fn = getattr(client, "dump_tree", None)
     if not callable(dump_tree_fn):
+        _record_content_terminal_planner_inventory(state, [], scenario_id=scenario_id)
         _annotate_row_lifecycle_kind(
             row=row,
             state=state,
@@ -2829,6 +2962,7 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
     try:
         nodes = dump_tree_fn(dev=dev)
     except Exception:
+        _record_content_terminal_planner_inventory(state, [], scenario_id=scenario_id)
         _annotate_row_lifecycle_kind(
             row=row,
             state=state,
@@ -2843,6 +2977,13 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         consumed_cluster_signatures=set(getattr(state, "consumed_cluster_signatures", set()) or set()),
         consumed_cluster_logical_signatures=set(getattr(state, "consumed_cluster_logical_signatures", set()) or set()),
     )
+    cluster_skipped_candidates = list(candidate_groups_meta.get("cluster_pre_filter_skipped_candidates", []) or [])
+    fairness_inventory = _current_valid_content_candidates(
+        content_candidates,
+        cluster_skipped_candidates,
+        scenario_id=scenario_id,
+    )
+    _record_content_terminal_planner_inventory(state, fairness_inventory, scenario_id=scenario_id)
     local_tab_signature = ""
     if content_candidates and bottom_strip_candidates:
         local_tab_signature = _build_local_tab_strip_signature(bottom_strip_candidates)
@@ -2923,7 +3064,7 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
     _log_local_tab_state_consistency_mismatch(state, context="reprioritize")
     if needs_detection_only:
         return row
-    if not content_candidates:
+    if not content_candidates and not cluster_skipped_candidates:
         return row
     raw_cluster_candidates = [str(value or "").strip() for value in candidate_groups_meta.get("raw_cluster_candidates", []) if str(value or "").strip()]
     clustered_candidates = [str(value or "").strip() for value in candidate_groups_meta.get("clustered_candidates", []) if str(value or "").strip()]
@@ -2954,11 +3095,28 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
     priority_containers = [str(value or "").strip() for value in candidate_groups_meta.get("top_priority_container_candidates", []) if str(value or "").strip()]
     filtered_meta = _filter_content_candidates_for_phase(content_candidates, state=state)
     filtered_candidates = list(filtered_meta["selection_candidates"])
+    fairness_pool = list(fairness_inventory)
+    fairness_candidates, fairness_meta = _prioritize_unattempted_active_unseen_candidates(
+        fairness_pool,
+        state=state,
+        scenario_id=scenario_id,
+    )
+    if fairness_meta["prioritized"]:
+        filtered_candidates = fairness_candidates
     filtered_candidates, spatial_reason, continuity_reason = _apply_spatial_priority_to_candidates(
         filtered_candidates,
         row=row,
         state=state,
     )
+    if fairness_meta["prioritized"] and filtered_candidates:
+        fairness_selected = filtered_candidates[0]
+        log(
+            f"[STEP][unattempted_candidate_fairness] active_unseen={fairness_meta['active_unseen']} "
+            f"unattempted_active_unseen={fairness_meta['unattempted_active_unseen']} "
+            f"eligible_unattempted={fairness_meta['eligible_unattempted']} "
+            f"selected='{_truncate_debug_text(str(fairness_selected.get('label', '') or fairness_selected.get('rid', '') or ''), 96)}' "
+            "attempt_history='NEVER_ATTEMPTED' reason='before_spatial_selection'"
+        )
     passive_status_candidates = [str(candidate.get("label", "") or "").strip() for candidate in filtered_meta["status_candidates"]]
     section_header_candidates = [str(candidate.get("label", "") or "").strip() for candidate in filtered_meta.get("section_header_deferred", [])]
     visited_rejected = [candidate for candidate in filtered_meta.get("visited_rejected", [])]

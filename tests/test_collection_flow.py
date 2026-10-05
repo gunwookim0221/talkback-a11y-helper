@@ -7495,6 +7495,9 @@ def test_collect_step_candidate_priority_groups_skips_consumed_cluster_logical_e
     assert [candidate["label"] for candidate in content_candidates] == ["Latest activity"]
     assert [candidate["label"] for candidate in bottom_strip_candidates] == ["Activity", "Location"]
     assert meta["cluster_pre_filter_skipped"] == ["Weather information"]
+    retained_for_fairness = meta["cluster_pre_filter_skipped_candidates"]
+    assert [candidate["label"] for candidate in retained_for_fairness] == ["Weather information"]
+    assert retained_for_fairness[0]["rid"] == "com.example:id/weather_card"
 
 
 def test_should_suppress_row_persistence_for_low_value_leaf_when_parent_consumed():

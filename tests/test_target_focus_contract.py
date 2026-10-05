@@ -106,6 +106,63 @@ def test_no_progress_waits_for_unattempted_target_then_terminates_after_attempt(
     assert terminal.decision() == "content_no_progress"
 
 
+def test_no_progress_waits_only_for_unattempted_candidates_in_current_valid_planner_pool():
+    first = node("id/a", "A", "0,0,100,100", focused=False)
+    second = node("id/b", "B", "0,120,100,220", focused=False)
+    observation = {
+        "nodes": [first, second],
+        "capability": {"can_scroll_forward": False, "vertical_can_scroll_forward": False, "contradictory": False},
+        "viewport": {"valid": True, "stable_signature": "v"},
+    }
+    terminal = ContentTerminal("home")
+    terminal.observe(
+        observation,
+        0,
+        target_attempt={
+            "resource_id": "id/a",
+            "bounds": "0,0,100,100",
+            "label": "A",
+            "class_name": "android.widget.Button",
+            "status": "FOCUS_MOVED_TO_OTHER_NODE",
+        },
+    )
+    terminal.planner_candidate_ids = set(terminal.latest["unseen_candidate_ids"])
+
+    for step in range(1, 5):
+        terminal.observe(observation, step)
+    assert terminal.latest["unattempted_active_unseen"] == 1
+    assert terminal.decision() == ""
+    assert terminal.visited == set()
+
+    terminal.planner_candidate_ids = set()
+    terminal.observe(observation, 5)
+    assert terminal.latest["unattempted_active_unseen"] == 0
+    assert terminal.latest["active_unseen"] == 2
+    assert terminal.decision() == "content_no_progress"
+
+
+def test_valid_unattempted_planner_targets_delay_no_progress_before_first_target_attempt():
+    candidates = [
+        node("id/a", "A", "0,0,100,100", focused=False),
+        node("id/b", "B", "0,120,100,220", focused=False),
+    ]
+    observation = {
+        "nodes": candidates,
+        "capability": {"can_scroll_forward": False, "vertical_can_scroll_forward": False, "contradictory": False},
+        "viewport": {"valid": True, "stable_signature": "v"},
+    }
+    terminal = ContentTerminal("home")
+    terminal.observe(observation, 0)
+    terminal.planner_candidate_ids = set(terminal.latest["unseen_candidate_ids"])
+
+    for step in range(1, 5):
+        terminal.observe(observation, step)
+
+    assert terminal.latest["target_attempt_contract_active"] is False
+    assert terminal.latest["unattempted_active_unseen"] == 2
+    assert terminal.decision() == ""
+
+
 def test_verified_anchor_is_credited_exactly_once():
     metrics = TraversalMetrics()
     anchor = {
