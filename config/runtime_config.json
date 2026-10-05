@@ -119,7 +119,7 @@
     "home_main": {
       "group": "main_tabs",      
       "enabled": false,
-      "max_steps": 10,
+      "max_steps": 30,
       "stop_policy": {
         "stop_on_global_nav_entry": true
       }
@@ -133,7 +133,7 @@
       "group": "main_tabs",
       "anchor_ref": "home_tab_anchor",
       "enabled": false,
-      "max_steps": 10,
+      "max_steps": 30,
       "scenario_type": "content",
       "stop_policy": {
         "stop_on_global_nav_entry": true
@@ -148,7 +148,7 @@
     "routines_main": {
       "group": "main_tabs",
       "enabled": false,
-      "max_steps": 10
+      "max_steps": 30
     },
     "menu_main": {
       "group": "main_tabs",

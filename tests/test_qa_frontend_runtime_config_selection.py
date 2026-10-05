@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from qa_frontend.backend.runtime_config_selection import write_selected_runtime_config
 from tb_runner.runtime_config import RUNTIME_CONFIG_PATH_ENV, load_runtime_bundle
+from tb_runner.scenario_config import TAB_CONFIGS
 
 
 def test_write_selected_runtime_config_enables_only_selected_and_preserves_values(tmp_path):
@@ -96,6 +98,52 @@ def test_runtime_config_env_path_is_used_by_runner_loader(tmp_path, monkeypatch)
     home_cfg = bundle["tab_configs"][0]
     assert home_cfg["enabled"] is True
     assert home_cfg["max_steps"] == 12
+
+
+def test_full_runtime_config_uses_expanded_root_budgets_and_preserves_other_scenarios(tmp_path):
+    repo_root = Path(__file__).resolve().parents[1]
+    source_path = repo_root / "config" / "runtime_config.json"
+    source_text = source_path.read_text(encoding="utf-8")
+    source_config = json.loads(source_text)
+    source_scenarios = source_config["scenarios"]
+    scenario_ids = list(source_scenarios)
+    output_path = tmp_path / "full" / "runtime_config.json"
+
+    result = write_selected_runtime_config(
+        source_path=source_path,
+        output_path=output_path,
+        scenario_ids=scenario_ids,
+        mode="full",
+    )
+    bundle = load_runtime_bundle(TAB_CONFIGS, config_path=output_path)
+    effective_steps = {
+        cfg["scenario_id"]: cfg["max_steps"]
+        for cfg in bundle["tab_configs"]
+        if cfg.get("scenario_id") in source_scenarios
+    }
+
+    expected_steps = {
+        scenario_id: scenario_cfg["max_steps"]
+        for scenario_id, scenario_cfg in source_scenarios.items()
+    }
+    expected_steps.update(
+        {
+            "home_main": 30,
+            "devices_main": 30,
+            "routines_main": 30,
+        }
+    )
+    assert effective_steps == expected_steps
+    assert effective_steps["global_nav_main"] == 10
+    assert effective_steps["life_main"] == 50
+    assert effective_steps["menu_main"] == 50
+    assert result["max_steps_policy"] == "source_preserved"
+    assert source_path.read_text(encoding="utf-8") == source_text
+
+    plugin_ids = [scenario_id for scenario_id in scenario_ids if scenario_id.endswith("_plugin")]
+    assert {scenario_id: effective_steps[scenario_id] for scenario_id in plugin_ids} == {
+        scenario_id: source_scenarios[scenario_id]["max_steps"] for scenario_id in plugin_ids
+    }
 
 
 def test_full_shadow_request_enables_only_run_local_v10_flags(tmp_path):
