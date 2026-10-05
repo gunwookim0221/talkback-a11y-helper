@@ -3367,13 +3367,7 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         force_reason = "anchor_mismatch"
         if strip_focus_context or current_row_is_low_value_leaf or current_row_recent_revisit:
             force_reason = "strip_or_stale_focus_context"
-        authoritative_focus_move = has_strict_post_move_focus(row, move_result)
-        if authoritative_focus_move:
-            log(
-                f"[STEP][focus_realign_skip] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
-                "reason='strict_post_move_focus_authoritative'"
-            )
-        elif selected_signature in failed_realign_signatures:
+        if selected_signature in failed_realign_signatures:
             log(
                 f"[STEP][focus_realign_skip] target='{_truncate_debug_text(selected_label or selected_rid, 96)}' "
                 "reason='recent_realign_failed'"
@@ -3438,6 +3432,17 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
             normalized_label = normalize_fn(selected_label) if selected_label else ""
         else:
             normalized_label = re.sub(r"\s+", " ", str(selected_label or "").strip()).lower()
+        # Reconciliation must see the post-commit accessibility focus, not the
+        # earlier SMART_NEXT sibling snapshot.
+        row["actual_focus_node"] = dict(realigned_focus_node)
+        row["actual_focus_accessibility_focused"] = realigned_focus_node.get("accessibilityFocused")
+        row["actual_focus_input_focused"] = realigned_focus_node.get("focused")
+        row["actual_focus_resource_id"] = selected_rid
+        row["actual_focus_bounds"] = selected_bounds
+        row["actual_focus_visible"] = selected_label
+        row["actual_focus_speech"] = selected_label
+        row["actual_focus_class_name"] = selected_class
+        row["actual_focus_payload_source"] = "target_focus_commit_verified"
     content_summary = "|".join(str(item.get("label", "") or "").strip() for item in content_candidates[:5])
     bottom_summary = "|".join(str(item.get("label", "") or "").strip() for item in bottom_strip_candidates[:3])
     chrome_summary = "|".join(chrome_candidates[:4])

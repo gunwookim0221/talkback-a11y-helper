@@ -575,6 +575,106 @@ class A11yHelperService : AccessibilityService() {
         return resultJson
     }
 
+    internal fun performTargetFocusCommit(
+        descriptor: TargetFocusMatcher.Descriptor,
+        reqId: String = "none"
+    ): JSONObject {
+        val root = rootInActiveWindow
+        if (root == null) return emitTargetFocusResult(
+            reqId, descriptor, "ERROR", false, false, null, null, "root_unavailable"
+        )
+        val nodes = mutableListOf<AccessibilityNodeInfo>()
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            for (index in 0 until node.childCount) node.getChild(index)?.let(queue::add)
+            if (node.isVisibleToUser) nodes += node
+        }
+        val candidates = nodes.map { node ->
+            val bounds = Rect().also(node::getBoundsInScreen)
+            TargetFocusMatcher.Candidate(
+                bounds = bounds.toShortString(),
+                resourceId = node.viewIdResourceName.orEmpty(),
+                label = resolveNodeLabel(node),
+                className = node.className?.toString().orEmpty()
+            )
+        }
+        val resolution = TargetFocusMatcher.resolve(descriptor, candidates)
+        if (resolution.resolution != TargetFocusMatcher.Resolution.MATCHED) {
+            val status = when (resolution.resolution) {
+                TargetFocusMatcher.Resolution.NOT_FOUND -> "TARGET_NOT_FOUND"
+                TargetFocusMatcher.Resolution.AMBIGUOUS -> "AMBIGUOUS_TARGET"
+                TargetFocusMatcher.Resolution.INVALID -> "ERROR"
+                else -> "ERROR"
+            }
+            return emitTargetFocusResult(reqId, descriptor, status, false, false, null,
+                root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY), status.lowercase())
+        }
+        val target = nodes[resolution.index]
+        val before = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val actionAccepted = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+        if (actionAccepted) Thread.sleep(80L)
+        val actual = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val actualCandidate = actual?.let { node ->
+            TargetFocusMatcher.Candidate(
+                bounds = Rect().also(node::getBoundsInScreen).toShortString(),
+                resourceId = node.viewIdResourceName.orEmpty(),
+                label = resolveNodeLabel(node),
+                className = node.className?.toString().orEmpty()
+            )
+        }
+        val matched = actualCandidate != null && TargetFocusMatcher.sameIdentity(descriptor, actualCandidate)
+        val unchanged = before != null && actual != null && A11yNavigator.isSameNode(before, actual)
+        val status = when {
+            matched -> "TARGET_MATCHED"
+            !actionAccepted -> "FOCUS_ACTION_REJECTED"
+            unchanged -> "FOCUS_UNCHANGED"
+            actual != null -> "FOCUS_MOVED_TO_OTHER_NODE"
+            else -> "ERROR"
+        }
+        return emitTargetFocusResult(
+            reqId, descriptor, status, matched, actionAccepted, target, actual,
+            if (matched) "actual_accessibility_focus_matches_target" else status.lowercase()
+        )
+    }
+
+    private fun emitTargetFocusResult(
+        reqId: String,
+        descriptor: TargetFocusMatcher.Descriptor,
+        status: String,
+        success: Boolean,
+        actionAccepted: Boolean,
+        target: AccessibilityNodeInfo?,
+        actual: AccessibilityNodeInfo?,
+        reason: String
+    ): JSONObject {
+        val result = JSONObject().apply {
+            put("timestamp", System.currentTimeMillis())
+            put("reqId", reqId)
+            put("success", success)
+            put("status", status)
+            put("reason", reason)
+            put("action", "TARGET_FOCUS_COMMIT")
+            put("actionAccepted", actionAccepted)
+            put("requestedTarget", JSONObject().apply {
+                put("bounds", descriptor.bounds)
+                put("resourceId", descriptor.resourceId)
+                put("label", descriptor.label)
+                put("className", descriptor.className)
+            })
+            if (target != null) put("target", compactFocusInBoundsSnapshot(target))
+            if (actual != null) put("focused", compactFocusInBoundsSnapshot(actual))
+        }
+        recordActionFocusEvidence(reqId)
+        A11yEvidence.attach(result, reqId)
+        Log.i(TAG, "[TARGET_FOCUS_COMMIT] reqId=$reqId status=$status success=$success actionAccepted=$actionAccepted reason='$reason'")
+        Log.i(TAG, "TARGET_ACTION_RESULT $result")
+        A11yEvidence.emit("HELPER_ACK_SENT", reqId,
+            JSONObject().put("resultTag", "TARGET_ACTION_RESULT").put("success", success).put("status", status))
+        return result
+    }
+
     fun performTargetBoundsCenterTap(query: A11yTargetFinder.TargetQuery, reqId: String = "none"): JSONObject {
         Log.d(
             TAG,

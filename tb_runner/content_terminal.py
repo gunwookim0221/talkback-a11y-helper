@@ -59,10 +59,13 @@ class ContentTerminal:
     stable_scroll_signature: str = ""
     latest: dict = field(default_factory=dict)
     scroll_attempted_viewports: set = field(default_factory=set)
+    target_attempted_ids: set = field(default_factory=set)
+    target_attempt_statuses: dict = field(default_factory=dict)
+    target_attempt_contract_active: bool = False
     lifecycle: CandidateLifecycle = field(default_factory=CandidateLifecycle)
 
     def observe(self, observation, step, focus_observations=(), semantic_ids=(), scroll=None, pending=False,
-                focus_sequence_progress=False):
+                focus_sequence_progress=False, target_attempt=None):
         previous = set(self.records)
         visible, excluded = set(), {}
         structure, strict = [], []
@@ -145,6 +148,19 @@ class ContentTerminal:
         logical_covered=self.lifecycle.covered_targets(self.visited|semantic_readable)
         active=set(self.records)-set(self.lifecycle.aliases)
         unseen=active-logical_covered
+        if isinstance(target_attempt, dict):
+            self.target_attempt_contract_active = True
+            attempt_id = instance_id({
+                "scenario_id": self.scenario_id,
+                "view_id": target_attempt.get("resource_id", ""),
+                "bounds": target_attempt.get("bounds", ""),
+                "label": target_attempt.get("label", ""),
+                "class_name": target_attempt.get("class_name", ""),
+            })
+            if attempt_id:
+                self.target_attempted_ids.add(attempt_id)
+                self.target_attempt_statuses[attempt_id] = str(target_attempt.get("status", "") or "ERROR")
+        unattempted_unseen = unseen - self.target_attempted_ids
         self.latest = dict(scenario_id=self.scenario_id, content_terminal_contract="phase0eb-observed-instance-v1",
             visible_candidates=len(visible), visited_candidates=len(set(self.records) & self.visited),
             logical_reconciliation_contract="phase0ga-unique-translation-alias-v1",
@@ -169,6 +185,11 @@ class ContentTerminal:
             scroll_capability_source=cap.get("source", "unknown"), scroll_capability_contradictory=cap.get("contradictory", False),
             stable_scroll_attempts=self.stable_scroll_attempts, new_instances=len(new), last_progress_step=self.last_progress_step,
             focus_sequence_progress=focus_sequence_progress,
+            target_attempt_count=len(self.target_attempted_ids),
+            target_commit_success_count=sum(status == "TARGET_MATCHED" for status in self.target_attempt_statuses.values()),
+            target_mismatch_count=sum(status in {"FOCUS_MOVED_TO_OTHER_NODE", "FOCUS_UNCHANGED"} for status in self.target_attempt_statuses.values()),
+            unattempted_active_unseen=len(unattempted_unseen),
+            target_attempt_contract_active=self.target_attempt_contract_active,
             no_progress_steps=self.no_progress_steps, no_focus_progress_steps=self.no_focus_progress_steps,
             volatile_candidate_ids=sorted(k for k, values in self.labels.items() if len(values) >= 3),
             pending_transition=bool(pending), scope_verified=self.scope_verified,
@@ -212,6 +233,11 @@ class ContentTerminal:
             return "content_scroll_unverified" if (e["viewport_stable"] and not e["unseen_candidates"]) or self.no_focus_progress_steps >= 4 else ""
         if self.scroll_opportunity():
             return ""
+        # Give every active unseen instance one target-specific attempt before
+        # a focus plateau can terminate the viewport. The scenario step cap and
+        # one-attempt-per-instance ledger keep this bounded.
+        if e.get("target_attempt_contract_active") and e.get("unattempted_active_unseen", 0) > 0:
+            return ""
         if (e.get("vertical_can_scroll_forward") is True
                 and e.get("scroll_viewport_signature") in self.scroll_attempted_viewports
                 and e.get("viewport_stable")):
@@ -233,6 +259,9 @@ class ContentTerminal:
                   "can_scroll_forward", "scroll_capability_source", "scroll_capability_contradictory", "stable_observations",
                   "stable_scroll_attempts", "new_instances", "last_progress_step", "no_progress_steps",
                   "focus_sequence_progress",
+                  "target_attempt_count", "target_commit_success_count", "target_mismatch_count",
+                  "unattempted_active_unseen",
+                  "target_attempt_contract_active",
                   "pending_transition", "scope_verified", "observation_valid", "strict_viewport_signature",
                   "semantic_viewport_signature")
         return {**{k: e.get(k) for k in fields}, "termination_status": termination_status(reason),

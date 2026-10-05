@@ -2,11 +2,15 @@ import os
 
 from tb_runner.runtime_config import load_runtime_bundle
 from tb_runner.scenario_config import TAB_CONFIGS
-from tb_runner.utils import _safe_regex_search, configure_process_temp_dir
+from tb_runner.utils import _safe_regex_search, configure_process_temp_dir, parse_bounds_str
 
 
 def test_safe_regex_search_returns_false_for_invalid_pattern():
     assert _safe_regex_search("(?i", "SmartThings Settings") is False
+
+
+def test_parse_bounds_str_accepts_android_rect_format():
+    assert parse_bounds_str("[315,929][480,1094]") == (315, 929, 480, 1094)
 
 
 def test_menu_main_anchor_regex_has_single_leading_ignorecase_flag():

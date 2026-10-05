@@ -30,6 +30,7 @@ from talkback_lib.constants import (
     ACTION_DUMP_TREE,
     ACTION_FOCUS_IN_BOUNDS,
     ACTION_FOCUS_TARGET,
+    ACTION_TARGET_FOCUS_COMMIT,
     ACTION_GET_FOCUS,
     ACTION_NEXT,
     ACTION_PING,
@@ -2751,6 +2752,56 @@ class A11yAdbClient:
             timeout_fn=_smart_next_timeout,
             run_immediately=True,
         )
+
+    def target_focus_commit(
+        self,
+        dev: Any = None,
+        *,
+        target: dict[str, Any],
+        wait_: float = 2.0,
+    ) -> dict[str, Any]:
+        """Commit accessibility focus to one exact planner-selected instance."""
+        if not self.check_helper_status(dev=dev):
+            result = {"success": False, "status": "ERROR", "reason": "helper_unavailable"}
+            self.last_target_action_result = result
+            return result
+
+        bounds = str(target.get("bounds") or target.get("boundsInScreen") or "").strip()
+        resource_id = str(
+            target.get("resource_id") or target.get("rid")
+            or target.get("view_id") or target.get("viewIdResourceName") or ""
+        ).strip()
+        label = str(
+            target.get("label") or target.get("talkbackLabel")
+            or target.get("contentDescription") or target.get("text") or ""
+        ).strip()
+        class_name = str(target.get("class_name") or target.get("className") or target.get("class") or "").strip()
+        requested_target = {
+            "bounds": bounds,
+            "resourceId": resource_id,
+            "label": label,
+            "className": class_name,
+        }
+        self._evidence_begin_target_action(
+            "TARGET_FOCUS_COMMIT", requested_target=requested_target, phase="main_loop"
+        )
+        self.clear_logcat(dev=dev)
+        req_id = str(uuid.uuid4())[:8]
+        extras = [
+            "--es", "bounds", self._escape_adb_string(bounds),
+            "--es", "targetId", self._escape_adb_string(resource_id),
+            "--es", "targetLabel", self._escape_adb_string(label),
+            "--es", "className", self._escape_adb_string(class_name),
+            "--es", "reqId", req_id,
+        ]
+        extras.extend(self._evidence_correlation_extras())
+        self._evidence_action_sent(action=ACTION_TARGET_FOCUS_COMMIT, req_id=req_id)
+        self._broadcast(dev, ACTION_TARGET_FOCUS_COMMIT, extras)
+        result = self._read_log_result(dev, "TARGET_ACTION_RESULT", req_id, wait_seconds=max(0.25, float(wait_)))
+        result = self._normalize_target_action_payload(result if isinstance(result, dict) else {})
+        self.last_target_action_result = result
+        self._evidence_helper_ack(result, req_id=req_id, source="inline")
+        return result
 
     def scrollFind(self, dev, name, wait_=30, direction_='updown', type_='all'):
         if not self.check_helper_status(dev=dev):

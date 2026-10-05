@@ -17,6 +17,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val ACTION_DUMP_TREE = "com.iotpart.sqe.talkbackhelper.DUMP_TREE"
         private const val ACTION_FOCUS_TARGET = "com.iotpart.sqe.talkbackhelper.FOCUS_TARGET"
         private const val ACTION_FOCUS_IN_BOUNDS = "com.iotpart.sqe.talkbackhelper.FOCUS_IN_BOUNDS"
+        private const val ACTION_TARGET_FOCUS_COMMIT = "com.iotpart.sqe.talkbackhelper.TARGET_FOCUS_COMMIT"
         private const val ACTION_CLICK_TARGET = "com.iotpart.sqe.talkbackhelper.CLICK_TARGET"
         private const val ACTION_TOUCH_BOUNDS_CENTER_TARGET = "com.iotpart.sqe.talkbackhelper.TOUCH_BOUNDS_CENTER_TARGET"
         private const val ACTION_CHECK_TARGET = "com.iotpart.sqe.talkbackhelper.CHECK_TARGET"
@@ -50,6 +51,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val EXTRA_LOCALE = "locale"
         private const val EXTRA_CURRENT_LOCALE = "currentLocale"
         private const val EXTRA_BOUNDS = "bounds"
+        private const val EXTRA_TARGET_LABEL = "targetLabel"
         private const val EXTRA_PREFER_EMPTY_STATE = "preferEmptyState"
         private const val EXTRA_EXCLUDE_TOP_CHROME = "excludeTopChrome"
         private const val EXTRA_EXCLUDE_BOTTOM_NAV = "excludeBottomNav"
@@ -85,6 +87,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
             }
             ACTION_FOCUS_TARGET -> handleTargetAction(intent, AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
             ACTION_FOCUS_IN_BOUNDS -> handleFocusInBounds(intent)
+            ACTION_TARGET_FOCUS_COMMIT -> handleTargetFocusCommit(intent)
             ACTION_CLICK_TARGET -> {
                 val actionType = if (intent.getBooleanExtra(EXTRA_IS_LONG_CLICK, false)) {
                     AccessibilityNodeInfo.ACTION_LONG_CLICK
@@ -275,6 +278,32 @@ class A11yCommandReceiver : BroadcastReceiver() {
             } catch (error: Throwable) {
                 Log.e(TAG, "[RECOVERY][helper_failure] requestId=$reqId error=${error.javaClass.simpleName}", error)
                 logFailure("TARGET_ACTION_RESULT", reqId, "focus_in_bounds_exception:${error.javaClass.simpleName}")
+            } finally {
+                pendingResult.finish()
+            }
+        }
+    }
+
+    private fun handleTargetFocusCommit(intent: Intent) {
+        val reqId = parseReqId(intent)
+        val service = A11yHelperService.instance
+        if (service == null) {
+            logFailure("TARGET_ACTION_RESULT", reqId, "Accessibility Service is null or not running")
+            return
+        }
+        val descriptor = TargetFocusMatcher.Descriptor(
+            bounds = intent.getStringExtra(EXTRA_BOUNDS)?.trim().orEmpty(),
+            resourceId = intent.getStringExtra(EXTRA_TARGET_ID)?.trim().orEmpty(),
+            label = intent.getStringExtra(EXTRA_TARGET_LABEL)?.trim().orEmpty(),
+            className = intent.getStringExtra(EXTRA_CLASS_NAME)?.trim().orEmpty()
+        )
+        val pendingResult = goAsync()
+        focusInBoundsExecutor.execute {
+            try {
+                service.performTargetFocusCommit(descriptor, reqId)
+            } catch (error: Throwable) {
+                Log.e(TAG, "[TARGET_FOCUS_COMMIT] reqId=$reqId error=${error.javaClass.simpleName}", error)
+                logFailure("TARGET_ACTION_RESULT", reqId, "target_focus_exception:${error.javaClass.simpleName}")
             } finally {
                 pendingResult.finish()
             }

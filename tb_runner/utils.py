@@ -54,7 +54,13 @@ def parse_bounds_str(bounds_value: Any) -> tuple[int, int, int, int] | None:
             bounds_str = str(bounds_value).strip()
             if not bounds_str:
                 return None
-            if bounds_str.startswith("{") and bounds_str.endswith("}"):
+            android_bounds = re.fullmatch(
+                r"\[\s*(-?\d+)\s*,\s*(-?\d+)\s*\]\[\s*(-?\d+)\s*,\s*(-?\d+)\s*\]",
+                bounds_str,
+            )
+            if android_bounds:
+                parts = [int(value) for value in android_bounds.groups()]
+            elif bounds_str.startswith("{") and bounds_str.endswith("}"):
                 parsed_dict = ast.literal_eval(bounds_str)
                 if isinstance(parsed_dict, dict):
                     l = int(parsed_dict.get("l"))

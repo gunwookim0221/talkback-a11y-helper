@@ -17802,7 +17802,11 @@ def _apply_content_terminal_phase(client, dev, state, row, phase_ctx, step_idx, 
         evaluation = tracker.observe(observation, step_idx,
             focus_observations=state.reliability_metrics.focus_observations.values(),
             semantic_ids=semantic_ids, scroll=new_transition, pending=pending,
-            focus_sequence_progress=str(row.get("progress_status", "") or "").strip().upper() == "PROGRESS")
+            focus_sequence_progress=str(row.get("progress_status", "") or "").strip().upper() == "PROGRESS",
+            target_attempt=(
+                {**dict(row.get("target_focus_descriptor", {}) or {}), "status": row.get("target_focus_status", "")}
+                if bool(row.get("target_focus_attempted", False)) else None
+            ))
         if new_transition and not new_transition.get("action_success"):
             selected_reason = failed_scroll_reason(new_transition)
         else:
@@ -17819,7 +17823,11 @@ def _apply_content_terminal_phase(client, dev, state, row, phase_ctx, step_idx, 
             evaluation = tracker.observe(after, step_idx,
                 focus_observations=state.reliability_metrics.focus_observations.values(),
                 semantic_ids=semantic_ids, scroll=transition,
-                focus_sequence_progress=str(row.get("progress_status", "") or "").strip().upper() == "PROGRESS")
+                focus_sequence_progress=str(row.get("progress_status", "") or "").strip().upper() == "PROGRESS",
+                target_attempt=(
+                    {**dict(row.get("target_focus_descriptor", {}) or {}), "status": row.get("target_focus_status", "")}
+                    if bool(row.get("target_focus_attempted", False)) else None
+                ))
             selected_reason = tracker.decision() if transition["action_success"] else failed_scroll_reason(transition)
         row.update(tracker.summary(selected_reason or "safety_limit", step_idx))
         row["content_terminal_evidence"] = evaluation
@@ -19473,6 +19481,26 @@ def _collect_tab_rows_inner(
 
     anchor_row = start_result.start_row
     anchor_row = _annotate_report_row_context(anchor_row, tab_cfg)
+    anchor_node = anchor_row.get("actual_focus_node")
+    if not isinstance(anchor_node, dict):
+        anchor_node = anchor_row.get("focus_node")
+    if isinstance(anchor_node, dict) and anchor_node.get("accessibilityFocused") is True:
+        anchor_row["actual_focus_node"] = dict(anchor_node)
+        anchor_row["actual_focus_accessibility_focused"] = True
+        anchor_row["actual_focus_input_focused"] = anchor_node.get("focused")
+        anchor_row["actual_focus_resource_id"] = str(
+            anchor_node.get("viewIdResourceName", "") or anchor_node.get("resourceId", "")
+            or anchor_row.get("focus_view_id", "") or ""
+        ).strip()
+        anchor_row["actual_focus_bounds"] = str(
+            anchor_node.get("boundsInScreen", "") or anchor_node.get("bounds", "")
+            or anchor_row.get("focus_bounds", "") or ""
+        ).strip()
+        anchor_row["actual_focus_visible"] = str(
+            anchor_node.get("talkbackLabel", "") or anchor_node.get("contentDescription", "")
+            or anchor_node.get("text", "") or anchor_row.get("visible_label", "") or ""
+        ).strip()
+        anchor_row["actual_focus_payload_source"] = "verified_pre_loop_anchor"
     anchor_row["physical_visited"] = bool(focus_instance(anchor_row))
     _register_focusable_inventory_from_row(
         client,
