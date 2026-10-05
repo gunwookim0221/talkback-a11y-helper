@@ -119,7 +119,7 @@
     "home_main": {
       "group": "main_tabs",      
       "enabled": false,
-      "max_steps": 30,
+      "max_steps": 100,
       "stop_policy": {
         "stop_on_global_nav_entry": true
       }
@@ -127,13 +127,13 @@
     "home_safe_plugin": {
       "group": "plugin_screen",
       "enabled": false,
-      "max_steps": 30
+      "max_steps": 100
     },
     "devices_main": {
       "group": "main_tabs",
       "anchor_ref": "home_tab_anchor",
       "enabled": false,
-      "max_steps": 30,
+      "max_steps": 100,
       "scenario_type": "content",
       "stop_policy": {
         "stop_on_global_nav_entry": true
@@ -143,134 +143,134 @@
     "life_main": {
       "group": "main_tabs",
       "enabled": false,
-      "max_steps": 50
+      "max_steps": 100
     },
     "routines_main": {
       "group": "main_tabs",
       "enabled": false,
-      "max_steps": 30
+      "max_steps": 100
     },
     "menu_main": {
       "group": "main_tabs",
       "enabled": false,
-      "max_steps": 50
+      "max_steps": 100
     },
     "settings_entry_example": {
       "group": "plugin_screen",
       "pre_navigation_ref": "enter_settings",
       "anchor_ref": "settings_button_anchor",
       "enabled": false,
-      "max_steps": 50
+      "max_steps": 100
     },
     "device_smoke_sensor_plugin": {
       "group": "plugin_screen",
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 100
     },
     "device_water_leak_sensor_plugin": {
       "group": "plugin_screen",
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 100
     },
     "device_motion_sensor_plugin": {
       "group": "plugin_screen",
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 100
     },
     "device_door_lock_plugin": {
       "group": "plugin_screen",
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 100
     },
     "device_air_purifier_plugin": {
       "group": "plugin_screen",
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 100
     },
     "device_tv_plugin": {
       "group": "plugin_screen",
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 100
     },
     "device_washer_plugin": {
       "group": "plugin_screen",
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 100
     },
     "device_humidity_sensor_plugin": {
       "group": "plugin_screen",
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 100
     },
     "device_temperature_humidity_sensor_plugin": {
       "group": "plugin_screen",
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 100
     },
     "device_camera_plugin": {
       "group": "plugin_screen",
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 100
     },
     "device_home_camera_plugin": {
       "group": "plugin_screen",
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 100
     },
     "device_audio_plugin": {
       "group": "plugin_screen",
       "enabled": false,
-      "max_steps": 40
+      "max_steps": 100
     },
     "life_food_plugin": {
       "group": "plugin_screen",
       "enabled": false,
-      "max_steps": 50
+      "max_steps": 100
     },    
 
     "life_air_care_plugin": {
       "enabled": false,
-      "max_steps": 50
+      "max_steps": 100
     },
     "life_home_care_plugin": {
       "enabled": false,
-      "max_steps": 50
+      "max_steps": 100
     },
     "life_energy_plugin": {
       "enabled": false,
-      "max_steps": 50
+      "max_steps": 100
     },
     "life_pet_care_plugin": {
       "enabled": false,
-      "max_steps": 50
+      "max_steps": 100
     },
     "life_family_care_plugin": {
       "enabled": true,
-      "max_steps": 50
+      "max_steps": 100
     },
     "life_plant_care_plugin": {
       "enabled": false,
-      "max_steps": 50
+      "max_steps": 100
     },
     "life_clothing_care_plugin": {
       "enabled": false,
-      "max_steps": 50
+      "max_steps": 100
     },
     "life_find_plugin": {
       "enabled": false,
-      "max_steps": 50
+      "max_steps": 100
     },
     "life_video_plugin": {
       "enabled": false,
-      "max_steps": 50
+      "max_steps": 100
     },
     "life_home_monitor_plugin": {
       "enabled": false,
-      "max_steps": 50
+      "max_steps": 100
     },
     "life_music_sync_plugin": {
       "enabled": false,
-      "max_steps": 10
+      "max_steps": 100
     }
   }
 }

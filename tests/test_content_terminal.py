@@ -128,9 +128,9 @@ def test_unsupported_scroll_is_unverified_while_runtime_failure_is_error(result,
 
 def test_cap_before_closure_remains_safety_limit():
     t = stable(ContentTerminal("test"), steps=2)
-    s = t.summary("safety_limit", 2)
+    s = t.summary("safety_limit", 100)
     assert s["termination_status"] == "INCOMPLETE_SAFETY_LIMIT"
-    assert s["remaining_unseen_count"] == 1 and s["termination_step"] == 2
+    assert s["remaining_unseen_count"] == 1 and s["termination_step"] == 100
 
 
 def test_pending_transition_prevents_completion():
