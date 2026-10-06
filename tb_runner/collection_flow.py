@@ -22,6 +22,11 @@ from tb_runner.core_preflight import ensure_smartthings_foreground
 from tb_runner.diagnostics import classify_command_ack, classify_step_result, detect_step_mismatch, normalize_move_result, should_stop
 from tb_runner.diagnostics import is_global_nav_row
 from tb_runner import scroll_reliability
+from talkback_lib.window_lifecycle import (
+    capture_window_lifecycle,
+    configure_window_lifecycle,
+    set_window_lifecycle_step,
+)
 from tb_runner.traversal_reliability import (
     TraversalMetrics, focus_instance, identity_collisions, instance_id, normalized_bounds, termination_status,
 )
@@ -11889,10 +11894,22 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict, *, output_base
         recover_reason = "not_required"
         recover_ok = handling != "back_after_read"
         if handling == "back_after_read":
-            back_ok = _send_back(client, dev)
+            capture_window_lifecycle(
+                client, dev, "before", "SPECIAL_STATE_BACK", step=0
+            )
+            try:
+                back_ok = _send_back(client, dev)
+            except Exception:
+                capture_window_lifecycle(
+                    client, dev, "exception", "SPECIAL_STATE_BACK", step=0
+                )
+                raise
             if not back_ok:
                 back_status = "back_failed"
                 recover_reason = "back_failed"
+                capture_window_lifecycle(
+                    client, dev, "after", "SPECIAL_STATE_BACK", step=0
+                )
             else:
                 time.sleep(min(main_step_wait_seconds, 0.6))
                 after_back_focus = client.get_focus(
@@ -11900,6 +11917,14 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict, *, output_base
                     wait_seconds=min(main_step_wait_seconds, 0.8),
                     allow_fallback_dump=False,
                     mode="fast",
+                )
+                capture_window_lifecycle(
+                    client,
+                    dev,
+                    "after",
+                    "SPECIAL_STATE_BACK",
+                    step=0,
+                    focus_node=after_back_focus,
                 )
                 after_back_blob = _node_label_blob(after_back_focus if isinstance(after_back_focus, dict) else {}).lower()
                 cta_tokens = [
@@ -17494,6 +17519,7 @@ def _apply_step_collection_phase_impl(
     mono_time_fn: Callable[[], float],
 ) -> dict[str, Any]:
     phase_start_mono = mono_time_fn()
+    set_window_lifecycle_step(client, step_idx)
     forced_target = _local_tab_state_display(
         rid=str(getattr(state, "forced_local_tab_target_rid", "") or ""),
         label=str(getattr(state, "forced_local_tab_target_action_label", "") or getattr(state, "forced_local_tab_target_label", "") or ""),
@@ -17501,30 +17527,45 @@ def _apply_step_collection_phase_impl(
     _ = (scenario_id, log_fn)
     row = None
     if forced_target:
-        row = _activate_forced_local_tab_target(
-            client=client,
-            dev=dev,
-            state=state,
-            step_idx=step_idx,
-            wait_seconds=phase_ctx.main_step_wait_seconds,
-            announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
-            announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
-            announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
-        )
+        capture_window_lifecycle(client, dev, "before", "LOCAL_TAB_ENTRY")
+        try:
+            row = _activate_forced_local_tab_target(
+                client=client,
+                dev=dev,
+                state=state,
+                step_idx=step_idx,
+                wait_seconds=phase_ctx.main_step_wait_seconds,
+                announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
+                announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
+                announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
+            )
+        except Exception:
+            capture_window_lifecycle(client, dev, "exception", "LOCAL_TAB_ENTRY")
+            raise
+        finally:
+            capture_window_lifecycle(
+                client, dev, "after", "LOCAL_TAB_ENTRY", focus_node=row
+            )
         if row is not None:
             row["forced_local_tab_navigation"] = True
             row["forced_local_tab_target"] = forced_target
     if row is None:
-        row = client.collect_focus_step(
-            dev=dev,
-            step_index=step_idx,
-            move=True,
-            direction="next",
-            wait_seconds=phase_ctx.main_step_wait_seconds,
-            announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
-            announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
-            announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
-        )
+        capture_window_lifecycle(client, dev, "before", "SMART_NEXT")
+        try:
+            row = client.collect_focus_step(
+                dev=dev,
+                step_index=step_idx,
+                move=True,
+                direction="next",
+                wait_seconds=phase_ctx.main_step_wait_seconds,
+                announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
+                announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
+                announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
+            )
+        except Exception:
+            capture_window_lifecycle(client, dev, "exception", "SMART_NEXT")
+            raise
+        capture_window_lifecycle(client, dev, "after", "SMART_NEXT", focus_node=row)
     step_elapsed = mono_time_fn() - phase_start_mono
 
     row["tab_name"] = tab_cfg["tab_name"]
@@ -19324,7 +19365,21 @@ def _run_start_pipeline(
         recent_semantic_fingerprint_history=deque(maxlen=_RECENT_DUPLICATE_WINDOW),
     )
 
-    opened = open_scenario(client, dev, tab_cfg, output_base_dir=output_base_dir)
+    recorder = configure_window_lifecycle(
+        client, dev, scenario_id, output_base_dir
+    )
+    if recorder is not None:
+        capture_window_lifecycle(
+            client, dev, "scenario_start", "SCENARIO_START", step=0
+        )
+        capture_window_lifecycle(client, dev, "before", "ENTRY", step=0)
+    try:
+        opened = open_scenario(client, dev, tab_cfg, output_base_dir=output_base_dir)
+    except Exception:
+        capture_window_lifecycle(client, dev, "exception", "ENTRY", step=0)
+        raise
+    finally:
+        capture_window_lifecycle(client, dev, "after", "ENTRY", step=0)
     open_summary = getattr(client, "last_start_open_summary", {})
     crash_guard_result = getattr(client, "last_crash_guard_result", {})
     if isinstance(open_summary, dict):
@@ -19375,7 +19430,26 @@ def _run_start_pipeline(
         result.anchor_matched = bool(stabilize_trace.get("matched"))
         result.anchor_stable = bool(stabilize_trace.get("ok"))
 
-    post_open_focus = client.get_focus(dev=dev, wait_seconds=min(main_step_wait_seconds, 1.0), allow_fallback_dump=False, mode="fast")
+    try:
+        post_open_focus = client.get_focus(
+            dev=dev,
+            wait_seconds=min(main_step_wait_seconds, 1.0),
+            allow_fallback_dump=False,
+            mode="fast",
+        )
+    except Exception:
+        capture_window_lifecycle(
+            client, dev, "exception", "POST_OPEN_FOCUS", step=0
+        )
+        raise
+    capture_window_lifecycle(
+        client,
+        dev,
+        "after_focus_observation",
+        "POST_OPEN_FOCUS",
+        step=0,
+        focus_node=post_open_focus,
+    )
     post_open_trace = getattr(client, "last_get_focus_trace", {}) if isinstance(getattr(client, "last_get_focus_trace", {}), dict) else {}
     post_view_id = str(post_open_focus.get("viewIdResourceName", "") or post_open_focus.get("resourceId", "") or "").strip() if isinstance(post_open_focus, dict) else ""
     extract_visible_label = getattr(client, "extract_visible_label_from_focus", None)

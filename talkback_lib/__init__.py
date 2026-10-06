@@ -65,6 +65,7 @@ from talkback_lib.step_row_builder import (
     populate_get_focus_trace_fields,
 )
 from talkback_lib.step_collection_service import StepCollectionService
+from talkback_lib.window_lifecycle import capture_window_lifecycle
 from talkback_lib.utils import (
     json_safe_value,
     normalize_bounds,
@@ -2127,6 +2128,41 @@ class A11yAdbClient:
         container_path: str | None = None,
         container_bounds: str | None = None,
     ) -> bool:
+        action = f"SCROLL_{str(direction or '').strip().upper()[:24]}"
+        capture_window_lifecycle(self, dev, "before", action)
+        try:
+            return self._scroll_impl(
+                dev,
+                direction,
+                step_=step_,
+                time_=time_,
+                bounds_=bounds_,
+                accessibility_fallback=accessibility_fallback,
+                device_list_normalization=device_list_normalization,
+                container_path=container_path,
+                container_bounds=container_bounds,
+            )
+        except Exception:
+            capture_window_lifecycle(self, dev, "exception", action)
+            raise
+        finally:
+            capture_window_lifecycle(
+                self, dev, "after", action, focus_node=getattr(self, "last_scroll_result", {})
+            )
+
+    def _scroll_impl(
+        self,
+        dev,
+        direction,
+        step_=50,
+        time_=1000,
+        bounds_=None,
+        *,
+        accessibility_fallback: bool = False,
+        device_list_normalization: bool = False,
+        container_path: str | None = None,
+        container_bounds: str | None = None,
+    ) -> bool:
         self.last_scroll_result = {}
         if not self.check_helper_status(dev=dev):
             return False
@@ -2778,6 +2814,28 @@ class A11yAdbClient:
         )
 
     def target_focus_commit(
+        self,
+        dev: Any = None,
+        *,
+        target: dict[str, Any],
+        wait_: float = 2.0,
+    ) -> dict[str, Any]:
+        capture_window_lifecycle(self, dev, "before", "TARGET_FOCUS_COMMIT")
+        try:
+            return self._target_focus_commit_impl(dev=dev, target=target, wait_=wait_)
+        except Exception:
+            capture_window_lifecycle(self, dev, "exception", "TARGET_FOCUS_COMMIT")
+            raise
+        finally:
+            capture_window_lifecycle(
+                self,
+                dev,
+                "after",
+                "TARGET_FOCUS_COMMIT",
+                focus_node=getattr(self, "last_target_action_result", {}),
+            )
+
+    def _target_focus_commit_impl(
         self,
         dev: Any = None,
         *,
