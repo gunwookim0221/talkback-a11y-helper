@@ -15588,6 +15588,49 @@ def _run_phase_ordering_main_loop(monkeypatch, *, row, stop=False, reason=""):
     return events, phase_ctx
 
 
+def test_main_loop_invalidates_step_when_talkback_restarts_during_navigation(monkeypatch):
+    state = _phase_ordering_state()
+    client = DummyClient([_main_row(1)])
+    client._window_lifecycle_recorder = SimpleNamespace(restart_event=None)
+    phase_ctx = SimpleNamespace(
+        tab_cfg=_base_tab_cfg(max_steps=2),
+        rows=[],
+        all_rows=[],
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        checkpoint_every=100,
+        main_step_wait_seconds=0,
+        main_announcement_wait_seconds=0,
+        main_announcement_idle_wait_seconds=0,
+        main_announcement_max_extra_wait_seconds=0,
+        state=state,
+    )
+    logs = []
+
+    def action_detects_restart(**kwargs):
+        client._window_lifecycle_recorder.restart_event = {
+            "timestamp": "2026-10-07T00:00:00.000+00:00",
+            "phase": "after",
+            "action_type": "SMART_NEXT",
+            "previous_talkback_pid": "123",
+            "talkback_pid": "456",
+        }
+        return _main_row(kwargs["step_idx"])
+
+    monkeypatch.setattr(collection_flow, "_apply_step_collection_phase", action_detects_restart)
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(str(message)))
+
+    collection_flow._main_loop_phase(client, "SERIAL", phase_ctx)
+
+    assert phase_ctx.rows == []
+    assert phase_ctx.all_rows == []
+    assert state.stop_triggered is True
+    assert state.stop_reason == "talkback_restarted"
+    assert state.stop_step == 1
+    assert any("[TALKBACK_RESTART_ABORT]" in message for message in logs)
+
+
 def test_stop_then_cta_grace_allows_continue_then_stops_after_exhaust():
     state = _phase_ordering_state()
     row = _card_container_with_cta_children_row(1)

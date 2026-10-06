@@ -6,6 +6,7 @@ from talkback_lib.window_lifecycle import (
     MAX_EVENTS,
     WindowLifecycleRecorder,
     configure_window_lifecycle,
+    get_talkback_restart_event,
     parse_window_lifecycle_output,
 )
 
@@ -66,32 +67,65 @@ def test_window_lifecycle_recorder_marks_pid_return_after_enabled_gap(tmp_path):
             return self.outputs.pop(0)
 
     recorder = WindowLifecycleRecorder(FakeClient(), "serial", "life_main", tmp_path)
+    recorder.client._window_lifecycle_recorder = recorder
     first = recorder.capture("before", "SMART_NEXT", step=1)
     gap = recorder.capture("during", "SMART_NEXT", step=1)
     returned = recorder.capture("after", "SMART_NEXT", step=1)
 
     assert first["talkback_restart_detected"] is False
+    assert first["previous_talkback_pid"] is None
     assert gap["talkback_process_event"] == "enabled_but_pid_missing"
     assert returned["talkback_restart_detected"] is True
     assert returned["talkback_process_event"] == "returned_after_enabled_gap"
+    assert returned["previous_talkback_pid"] == "123"
+    assert get_talkback_restart_event(recorder.client) == {
+        "timestamp": returned["timestamp"],
+        "scenario_id": "life_main",
+        "step": 1,
+        "phase": "after",
+        "action_type": "SMART_NEXT",
+        "previous_talkback_pid": "123",
+        "talkback_pid": "456",
+        "talkback_process_event": "returned_after_enabled_gap",
+        "window_count": 2,
+        "talkback_window_count": 1,
+        "safety_probe_only": False,
+    }
     artifact = [json.loads(line) for line in (tmp_path / "talkback_window_lifecycle.jsonl").read_text(encoding="utf-8").splitlines()]
     assert [item["talkback_pid"] for item in artifact] == ["123", None, "456"]
 
 
-def test_window_lifecycle_event_limit_stops_additional_device_reads():
+def test_window_lifecycle_event_limit_keeps_lightweight_talkback_restart_probe():
     class FakeClient:
         calls = 0
 
-        def _run(self, _args, **_kwargs):
+        def _run(self, args, **_kwargs):
             self.calls += 1
-            return _snapshot("123")
+            command = args[1]
+            assert "dumpsys window" not in command
+            return "\n".join(
+                [
+                    "__TB_ACTIVITY__",
+                    "__TB_ACCESSIBILITY__",
+                    "Enabled services: {com.samsung.android.accessibility.talkback/com.samsung.android.marvin.talkback.TalkBackService}",
+                    "__TB_PID__",
+                    "456",
+                ]
+            )
 
     client = FakeClient()
     recorder = WindowLifecycleRecorder(client, "serial", "life_main", None)
+    client._window_lifecycle_recorder = recorder
+    recorder.previous_pid = "123"
     recorder.event_count = MAX_EVENTS
 
     assert recorder.capture("before", "SMART_NEXT") is None
-    assert client.calls == 0
+    assert client.calls == 1
+    event = get_talkback_restart_event(client)
+    assert event is not None
+    assert event["previous_talkback_pid"] == "123"
+    assert event["talkback_pid"] == "456"
+    assert event["safety_probe_only"] is True
 
 
 def test_window_lifecycle_tracks_pid_changes_across_scenarios(tmp_path):

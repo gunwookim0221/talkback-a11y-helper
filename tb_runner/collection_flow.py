@@ -25,6 +25,7 @@ from tb_runner import scroll_reliability
 from talkback_lib.window_lifecycle import (
     capture_window_lifecycle,
     configure_window_lifecycle,
+    get_talkback_restart_event,
     set_window_lifecycle_step,
 )
 from tb_runner.traversal_reliability import (
@@ -182,6 +183,57 @@ def _legacy_row_progressed(row: dict[str, Any]) -> bool:
         "scrolled",
         "edge_realign_then_moved",
     }
+
+
+def _abort_main_loop_for_talkback_restart(
+    *,
+    client: Any,
+    state: "MainLoopState",
+    scenario_id: str,
+    step_idx: int,
+) -> bool:
+    event = get_talkback_restart_event(client)
+    if not event:
+        return False
+    state.stop_triggered = True
+    state.stop_reason = "talkback_restarted"
+    state.stop_step = int(step_idx)
+    log(
+        f"[TALKBACK_RESTART_ABORT] scenario='{scenario_id}' step={step_idx} "
+        f"previous_pid='{event.get('previous_talkback_pid') or ''}' "
+        f"new_pid='{event.get('talkback_pid') or ''}' "
+        f"detected_at='{event.get('timestamp') or ''}' "
+        f"phase='{event.get('phase') or ''}' action='{event.get('action_type') or ''}' "
+        "continuity='invalidated' result='INCOMPLETE_ERROR'"
+    )
+    return True
+
+
+def _mark_start_pipeline_talkback_restart(
+    *,
+    client: Any,
+    result: "StartPipelineResult",
+    scenario_id: str,
+    phase: str,
+) -> bool:
+    event = get_talkback_restart_event(client)
+    if not event:
+        return False
+    result.failure_reason = "talkback_restarted"
+    result.entry_contract_detail = (
+        f"TalkBack PID changed from {event.get('previous_talkback_pid') or 'unknown'} "
+        f"to {event.get('talkback_pid') or 'unknown'} during {event.get('phase') or phase}"
+    )
+    result.needs_open_failed_row = True
+    result.should_enter_main_loop = False
+    log(
+        f"[TALKBACK_RESTART_ABORT] scenario='{scenario_id}' phase='{phase}' "
+        f"previous_pid='{event.get('previous_talkback_pid') or ''}' "
+        f"new_pid='{event.get('talkback_pid') or ''}' "
+        f"detected_at='{event.get('timestamp') or ''}' "
+        "continuity='invalidated' result='INCOMPLETE_ERROR'"
+    )
+    return True
 
 
 def _resolve_traversal_evidence_decision(
@@ -18027,6 +18079,13 @@ def _main_loop_phase(
         state.reliability_metrics = TraversalMetrics()
     state.local_tab_revisit_guard_state = LocalTabRevisitGuardState()
     for step_idx in range(start_step_index, tab_cfg["max_steps"] + 1):
+        if _abort_main_loop_for_talkback_restart(
+            client=client,
+            state=state,
+            scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+            step_idx=step_idx,
+        ):
+            break
         state.reliability_metrics.begin_step(step_idx)
         revisit_guard_state = _local_tab_revisit_guard_state(state)
         revisit_guard_state.current_representative_signatures = set()
@@ -18043,6 +18102,13 @@ def _main_loop_phase(
                 tab_cfg=tab_cfg,
                 scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
             )
+        if _abort_main_loop_for_talkback_restart(
+            client=client,
+            state=state,
+            scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+            step_idx=step_idx,
+        ):
+            break
         profiler = active_profiler()
         if profiler is not None:
             profiler.record("focus_in_bounds", float(row.get("move_elapsed_sec", 0.0) or 0.0) * 1000.0)
@@ -18682,6 +18748,14 @@ def _main_loop_phase(
                          or (row.get("cta_focus_align_requested") and not row.get("cta_focus_align_success"))),
         )
 
+        if _abort_main_loop_for_talkback_restart(
+            client=client,
+            state=state,
+            scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+            step_idx=step_idx,
+        ):
+            break
+
         _annotate_food_onboarding_complete(
             client,
             dev,
@@ -18805,6 +18879,13 @@ def _main_loop_phase(
             main_step_index_by_fingerprint=state.main_step_index_by_fingerprint,
             expanded_overlay_entries=state.expanded_overlay_entries,
         )
+        if _abort_main_loop_for_talkback_restart(
+            client=client,
+            state=state,
+            scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+            step_idx=step_idx,
+        ):
+            break
         if overlay_result.post_realign_pending_steps_delta > 0:
             state.post_realign_pending_steps = max(
                 state.post_realign_pending_steps,
@@ -19373,13 +19454,31 @@ def _run_start_pipeline(
             client, dev, "scenario_start", "SCENARIO_START", step=0
         )
         capture_window_lifecycle(client, dev, "before", "ENTRY", step=0)
+        if _mark_start_pipeline_talkback_restart(
+            client=client,
+            result=result,
+            scenario_id=scenario_id,
+            phase="scenario_start",
+        ):
+            return result
+    entry_exception: Exception | None = None
+    opened = False
     try:
         opened = open_scenario(client, dev, tab_cfg, output_base_dir=output_base_dir)
-    except Exception:
+    except Exception as exc:
         capture_window_lifecycle(client, dev, "exception", "ENTRY", step=0)
-        raise
+        entry_exception = exc
     finally:
         capture_window_lifecycle(client, dev, "after", "ENTRY", step=0)
+    if _mark_start_pipeline_talkback_restart(
+        client=client,
+        result=result,
+        scenario_id=scenario_id,
+        phase="entry",
+    ):
+        return result
+    if entry_exception is not None:
+        raise entry_exception
     open_summary = getattr(client, "last_start_open_summary", {})
     crash_guard_result = getattr(client, "last_crash_guard_result", {})
     if isinstance(open_summary, dict):
@@ -19450,6 +19549,13 @@ def _run_start_pipeline(
         step=0,
         focus_node=post_open_focus,
     )
+    if _mark_start_pipeline_talkback_restart(
+        client=client,
+        result=result,
+        scenario_id=scenario_id,
+        phase="post_open_focus",
+    ):
+        return result
     post_open_trace = getattr(client, "last_get_focus_trace", {}) if isinstance(getattr(client, "last_get_focus_trace", {}), dict) else {}
     post_view_id = str(post_open_focus.get("viewIdResourceName", "") or post_open_focus.get("resourceId", "") or "").strip() if isinstance(post_open_focus, dict) else ""
     extract_visible_label = getattr(client, "extract_visible_label_from_focus", None)
@@ -19488,11 +19594,19 @@ def _run_start_pipeline(
             focused_view_id=post_view_id,
             wait_seconds=main_step_wait_seconds,
         )
+        if _mark_start_pipeline_talkback_restart(
+            client=client,
+            result=result,
+            scenario_id=scenario_id,
+            phase="global_nav_start_focus",
+        ):
+            return result
         if not start_gate_ok:
             result.failure_reason = "global_nav_start_gate_failed"
             result.needs_open_failed_row = True
             return result
 
+    capture_window_lifecycle(client, dev, "before", "ANCHOR_FOCUS", step=0)
     anchor_row = _collect_start_anchor_row(
         client,
         dev,
@@ -19504,6 +19618,21 @@ def _run_start_pipeline(
         main_announcement_idle_wait_seconds=main_announcement_idle_wait_seconds,
         main_announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
     )
+    capture_window_lifecycle(
+        client,
+        dev,
+        "after",
+        "ANCHOR_FOCUS",
+        step=0,
+        focus_node=anchor_row,
+    )
+    if _mark_start_pipeline_talkback_restart(
+        client=client,
+        result=result,
+        scenario_id=scenario_id,
+        phase="anchor_focus",
+    ):
+        return result
     anchor_fingerprint, anchor_repeat_count = _annotate_row_quality(
         anchor_row,
         last_fingerprint="",
@@ -19600,12 +19729,30 @@ def _collect_tab_rows_inner(
         main_announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
     )
     if start_result.needs_open_failed_row:
-        terminal_status = "OPTIONAL_NOT_AVAILABLE" if start_result.entry_contract_reason == _ENTRY_REASON_OPTIONAL_NOT_AVAILABLE else "TAB_OPEN_FAILED"
+        if start_result.failure_reason == "talkback_restarted":
+            terminal_status = "INCOMPLETE_ERROR"
+        elif start_result.entry_contract_reason == _ENTRY_REASON_OPTIONAL_NOT_AVAILABLE:
+            terminal_status = "OPTIONAL_NOT_AVAILABLE"
+        else:
+            terminal_status = "TAB_OPEN_FAILED"
         failed_row = _build_terminal_row(
             tab_cfg,
             stop_reason=start_result.failure_reason or "tab_or_anchor_failed",
             status=terminal_status,
         )
+        if start_result.failure_reason == "talkback_restarted":
+            failed_row["entry_contract_detail"] = start_result.entry_contract_detail
+            setattr(
+                client,
+                "last_main_traversal_summary",
+                {
+                    "scenario_id": scenario_id,
+                    "scenario_type": str(tab_cfg.get("scenario_type", "") or ""),
+                    "main_steps_completed": 0,
+                    "stop_reason": "talkback_restarted",
+                    "traversal_finished": False,
+                },
+            )
         if terminal_status == "OPTIONAL_NOT_AVAILABLE":
             failed_row["entry_contract_reason"] = _ENTRY_REASON_OPTIONAL_NOT_AVAILABLE
             failed_row["entry_contract_detail"] = start_result.entry_contract_detail or start_result.failure_reason
@@ -19627,7 +19774,13 @@ def _collect_tab_rows_inner(
                 # Preserve the start pipeline's existing anchor-state fact in the
                 # shadow ledger.  This does not change the legacy terminal row.
                 anchor_failure = (not bool(start_result.anchor_stable)) or "anchor" in failure.lower()
-                terminal_reason = "ANCHOR_ABORT" if anchor_failure else "SCENARIO_OPEN_FAILED"
+                terminal_reason = (
+                    "SCENARIO_INTERRUPTED"
+                    if failure == "talkback_restarted"
+                    else "ANCHOR_ABORT"
+                    if anchor_failure
+                    else "SCENARIO_OPEN_FAILED"
+                )
                 evidence_runtime.emit(
                     "SCENARIO_TERMINAL",
                     producer="runner",

@@ -165,12 +165,88 @@ class WindowLifecycleRecorder:
         self.event_count = 0
         self.previous_pid: str | None = None
         self.saw_enabled_process_gap = False
+        self.restart_event: dict[str, Any] | None = None
         self.current_focus_package: str | None = None
         self.focus_package_age_events = 0
         self.limit_reported = False
 
     def set_step(self, step: int | None) -> None:
         self.step = int(step) if step is not None else None
+
+    def _track_talkback_process(self, payload: dict[str, Any]) -> None:
+        current_pid = payload.get("talkback_pid")
+        previous_pid = str(self.previous_pid) if self.previous_pid else None
+        restart_detected = False
+        process_event = "running" if current_pid else "missing_or_unavailable"
+        if current_pid:
+            if self.saw_enabled_process_gap:
+                restart_detected = True
+                process_event = "returned_after_enabled_gap"
+            elif self.previous_pid and current_pid != self.previous_pid:
+                restart_detected = True
+                process_event = "pid_changed"
+            self.previous_pid = str(current_pid)
+            self.saw_enabled_process_gap = False
+        elif payload.get("talkback_enabled") is True and self.previous_pid:
+            self.saw_enabled_process_gap = True
+            process_event = "enabled_but_pid_missing"
+        payload.update(
+            {
+                "talkback_restart_detected": restart_detected,
+                "talkback_process_event": process_event,
+                "previous_talkback_pid": previous_pid,
+            }
+        )
+        if restart_detected and self.restart_event is None:
+            self.restart_event = {
+                "timestamp": payload["timestamp"],
+                "scenario_id": self.scenario_id,
+                "step": payload["step"],
+                "phase": payload["phase"],
+                "action_type": payload["action_type"],
+                "previous_talkback_pid": previous_pid,
+                "talkback_pid": str(current_pid) if current_pid else None,
+                "talkback_process_event": process_event,
+                "window_count": payload.get("window_count"),
+                "talkback_window_count": payload.get("talkback_window_count"),
+                "safety_probe_only": bool(payload.get("safety_probe_only", False)),
+            }
+            print(
+                "[TALKBACK_RESTART_DETECTED] "
+                + json.dumps(self.restart_event, ensure_ascii=False, separators=(",", ":"))
+            )
+
+    def _probe_talkback_process_at_limit(
+        self,
+        phase: str,
+        action_type: str,
+        step: int | None,
+    ) -> None:
+        run = getattr(self.client, "_run", None)
+        if not callable(run):
+            return
+        command = (
+            f"echo {_ACTIVITY_MARKER}; "
+            f"echo {_ACCESSIBILITY_MARKER}; "
+            "dumpsys accessibility | grep -F 'Enabled services:'; "
+            f"echo {_PID_MARKER}; pidof {TALKBACK_PACKAGE}"
+        )
+        try:
+            output = run(["shell", command], dev=self.dev, timeout=5.0)
+        except Exception:
+            return
+        payload = parse_window_lifecycle_output(output or "")
+        payload.update(
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+                "scenario_id": self.scenario_id,
+                "step": self.step if step is None else int(step),
+                "phase": str(phase or "")[:48],
+                "action_type": str(action_type or "")[:48],
+                "safety_probe_only": True,
+            }
+        )
+        self._track_talkback_process(payload)
 
     def capture(
         self,
@@ -182,8 +258,12 @@ class WindowLifecycleRecorder:
     ) -> dict[str, Any] | None:
         if self.event_count >= MAX_EVENTS:
             if not self.limit_reported:
-                print(f"[TALKBACK_WINDOW] capture_limit_reached max_events={MAX_EVENTS}")
+                print(
+                    f"[TALKBACK_WINDOW] capture_limit_reached max_events={MAX_EVENTS} "
+                    "full_snapshot_disabled=true talkback_process_probe=enabled"
+                )
                 self.limit_reported = True
+            self._probe_talkback_process_at_limit(phase, action_type, step)
             return None
         run = getattr(self.client, "_run", None)
         if not callable(run):
@@ -219,21 +299,6 @@ class WindowLifecycleRecorder:
             else:
                 payload["accessibility_focus_package_observed_in_sample"] = False
         payload["accessibility_focus_package_age_events"] = self.focus_package_age_events
-        current_pid = payload.get("talkback_pid")
-        restart_detected = False
-        process_event = "running" if current_pid else "missing_or_unavailable"
-        if current_pid:
-            if self.saw_enabled_process_gap:
-                restart_detected = True
-                process_event = "returned_after_enabled_gap"
-            elif self.previous_pid and current_pid != self.previous_pid:
-                restart_detected = True
-                process_event = "pid_changed"
-            self.previous_pid = str(current_pid)
-            self.saw_enabled_process_gap = False
-        elif payload.get("talkback_enabled") is True and self.previous_pid:
-            self.saw_enabled_process_gap = True
-            process_event = "enabled_but_pid_missing"
         payload.update(
             {
                 "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
@@ -241,10 +306,9 @@ class WindowLifecycleRecorder:
                 "step": self.step if step is None else int(step),
                 "phase": str(phase or "")[:48],
                 "action_type": str(action_type or "")[:48],
-                "talkback_restart_detected": restart_detected,
-                "talkback_process_event": process_event,
             }
         )
+        self._track_talkback_process(payload)
         if command_error:
             payload["snapshot_error"] = command_error
         if self.event_count < MAX_EVENTS:
@@ -289,6 +353,13 @@ def configure_window_lifecycle(
         if enabled:
             raise
     return recorder
+
+
+def get_talkback_restart_event(client: Any) -> dict[str, Any] | None:
+    """Return the first unexpected TalkBack restart observed for this scenario."""
+    recorder = getattr(client, "_window_lifecycle_recorder", None)
+    event = getattr(recorder, "restart_event", None)
+    return dict(event) if isinstance(event, dict) else None
 
 
 def set_window_lifecycle_step(client: Any, step: int | None) -> None:
