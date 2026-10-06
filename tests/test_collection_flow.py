@@ -10567,6 +10567,26 @@ def test_post_open_verify_matches_korean_plugin_scoped_aliases():
     )
 
 
+def test_food_korean_entry_verifies_evidence_backed_action_without_accepting_card_copy():
+    tab_cfg = _scenario_config("life_food_plugin")
+
+    assert "쇼핑리스트로 보내기" in tab_cfg["verify_tokens"]
+    assert collection_flow._matches_post_open_verify(
+        tab_cfg,
+        "",
+        "상위 메뉴로 이동",
+        "상위 메뉴로 이동",
+        extra_candidates=["쇼핑리스트로 보내기"],
+    )
+    assert not collection_flow._matches_post_open_verify(
+        tab_cfg,
+        "",
+        "상위 메뉴로 이동",
+        "상위 메뉴로 이동",
+        extra_candidates=["찹스테이크 마이셰프"],
+    )
+
+
 def test_post_open_negative_verify_matches_korean_aliases():
     assert collection_flow._has_post_open_negative_verify_token(
         {"negative_verify_tokens": ["add device"]},
@@ -10876,6 +10896,102 @@ def test_open_scenario_card_entry_handles_pet_care_onboarding_special_state(monk
     assert client.back_calls == 0
 
 
+def test_air_care_post_back_uses_fresh_life_list_check_when_analyzer_misses_app(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {"ok": True, "selected": True, "reason": "selected_and_verified", "matched": True},
+    )
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(collection_flow, "_is_special_state_route_allowed", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        collection_flow,
+        "_classify_special_post_open_state",
+        lambda *_args, **_kwargs: (
+            True,
+            "setup_needed_or_empty_state",
+            {
+                "signals": ["long_intro", "cta"],
+                "special_hits": ["location setup"],
+                "cta_hits": ["location"],
+                "verify_hit": True,
+                "long_intro_like": True,
+                "low_content_diversity": True,
+                "cta_pair": False,
+                "top_chrome_intro_cta": True,
+                "intro_focus_like": True,
+                "handling": "back_after_read",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        collection_flow,
+        "_collect_special_state_grace_evidence",
+        lambda *_args, **_kwargs: {
+            "evidence": "strong_onboarding_token",
+            "strong_onboarding": True,
+            "home_like": False,
+            "focus_label": "Set geolocation",
+            "focus_visible": "Set geolocation to monitor outdoor air quality",
+            "top_visible": [],
+            "body_texts": [],
+            "home_like_hits": [],
+            "onboarding_hits": ["set geolocation"],
+            "onboarding_match_token": "set geolocation",
+            "onboarding_match_source": "visible_text",
+            "onboarding_match_text": "Set geolocation to monitor outdoor air quality",
+        },
+    )
+    analyzer_calls = []
+    monkeypatch.setattr(
+        collection_flow,
+        "_analyze_current_state",
+        lambda *_args, **_kwargs: analyzer_calls.append(True)
+        or {"package_signature_present": False, "app_bar_hits": 0},
+    )
+    list_check_calls = []
+
+    def verify_fresh_life_list(_client, _dev, *, phase):
+        list_check_calls.append(phase)
+        return True, "fresh_selected_life_tab_and_plugin_list"
+
+    monkeypatch.setattr(collection_flow, "_verify_fresh_life_list_state", verify_fresh_life_list)
+    client = DummyClient([_anchor_row(), _anchor_row()])
+    client.focus_sequence = [
+        {"viewIdResourceName": "com.example:id/title", "text": "Outdoor air quality"},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/menu_services", "text": "Life"},
+    ]
+    client.last_post_click_transition_same_screen = False
+    client.last_post_click_transition_signal = "air_care_verify"
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_air_care_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["outdoor air quality"],
+        "special_state_tokens": ["set geolocation to monitor outdoor air quality"],
+        "special_state_cta_tokens": ["set geolocation"],
+        "special_state_handling": "back_after_read",
+    }
+    monkeypatch.setattr(
+        collection_flow,
+        "_collect_post_open_visible_text",
+        lambda *_args, **_kwargs: "Set geolocation to monitor outdoor air quality Dismiss",
+    )
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    summary = getattr(client, "last_start_open_summary", {})
+    assert summary.get("entry_contract_reason") == "special_state_handled"
+    assert summary.get("special_state_detected") is True
+    assert list_check_calls.count("special_state_post_back") == 1
+    assert analyzer_calls == []
+    assert client.back_calls == 1
+
+
 def test_open_scenario_card_entry_keeps_normal_traversal_after_special_state_grace(monkeypatch):
     monkeypatch.setattr(collection_flow, "_verify_fresh_life_list_state", lambda *_args, **_kwargs: (True, "ready"))
     monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *_args, **_kwargs: True)
@@ -11165,6 +11281,127 @@ def test_special_state_korean_onboarding_evidence_still_routes_special_state():
     assert kind == "setup_needed_or_empty_state"
     assert "권한" in meta["onboarding_body_hits"]
     assert "설정하기" in meta["cta_hits"]
+
+
+def test_special_state_cta_requires_exact_actionable_korean_setup_label():
+    nodes = [
+        {"text": "권한을 연결해 주세요", "className": "android.widget.TextView"},
+        {"text": "설정하기", "className": "android.widget.Button", "clickable": True},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_air_care_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["air care"],
+        "special_state_tokens": ["권한"],
+        "special_state_cta_tokens": ["설정하기"],
+        "special_state_handling": "back_after_read",
+    }
+
+    detected, kind, meta = collection_flow._classify_special_post_open_state(
+        tab_cfg,
+        post_view_id="com.example:id/onboarding",
+        post_label="Air Care",
+        post_speech="Air Care 권한을 연결해 주세요 설정하기",
+        visible_verify_text="Air Care 권한을 연결해 주세요 설정하기",
+        matches_verify=True,
+        post_nodes=nodes,
+    )
+
+    assert detected is True
+    assert kind == "setup_needed_or_empty_state"
+    assert meta["cta_hits"] == ["설정하기"]
+
+
+def test_special_state_location_setup_action_is_detected_with_setup_context():
+    nodes = [
+        {"text": "실외 공기질을 확인하려면 위치 설정이 필요합니다", "className": "android.widget.TextView"},
+        {"text": "위치 설정", "className": "android.widget.Button", "clickable": True},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_air_care_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["air quality"],
+        "special_state_tokens": ["위치 설정"],
+        "special_state_cta_tokens": ["위치 설정"],
+        "special_state_handling": "back_after_read",
+    }
+
+    detected, kind, meta = collection_flow._classify_special_post_open_state(
+        tab_cfg,
+        post_view_id="com.example:id/location_setup",
+        post_label="위치 설정",
+        post_speech="실외 공기질을 확인하려면 위치 설정이 필요합니다 위치 설정",
+        visible_verify_text="실외 공기질을 확인하려면 위치 설정이 필요합니다 위치 설정",
+        matches_verify=True,
+        post_nodes=nodes,
+    )
+
+    assert detected is True
+    assert kind == "setup_needed_or_empty_state"
+    assert meta["cta_hits"] == ["위치 설정"]
+
+
+def test_air_care_description_setting_text_is_not_a_special_state_cta():
+    description = "방마다 딱 맞는 온습도 설정하기"
+    nodes = [
+        {"text": "실외 공기질 보통", "className": "android.widget.TextView"},
+        {"text": description, "className": "android.widget.TextView"},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_air_care_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["air quality"],
+        "special_state_cta_tokens": ["설정하기"],
+        "special_state_handling": "back_after_read",
+    }
+
+    detected, kind, meta = collection_flow._classify_special_post_open_state(
+        tab_cfg,
+        post_view_id="com.example:id/air_care",
+        post_label="Air Care",
+        post_speech=f"Air Care 실외 공기질 보통 {description}",
+        visible_verify_text=f"Air Care 실외 공기질 보통 {description}",
+        matches_verify=True,
+        post_nodes=nodes,
+    )
+
+    assert detected is False
+    assert kind == ""
+    assert "설정하기" not in meta["cta_hits"]
+
+
+def test_non_actionable_text_containing_setup_label_does_not_create_cta_pair():
+    nodes = [
+        {"text": "권한을 연결해 주세요. 자세한 내용을 확인한 뒤 설정하기를 진행해 주세요.", "className": "android.widget.TextView"},
+        {"text": "설정하기", "className": "android.widget.TextView"},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_air_care_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["air care"],
+        "special_state_tokens": ["권한"],
+        "special_state_cta_tokens": ["설정하기"],
+        "special_state_handling": "back_after_read",
+    }
+
+    detected, kind, meta = collection_flow._classify_special_post_open_state(
+        tab_cfg,
+        post_view_id="com.example:id/onboarding",
+        post_label="Air Care",
+        post_speech="Air Care 권한을 연결해 주세요 설정하기",
+        visible_verify_text="Air Care 권한을 연결해 주세요 설정하기",
+        matches_verify=True,
+        post_nodes=nodes,
+    )
+
+    assert detected is False
+    assert kind == ""
+    assert "설정하기" not in meta["cta_hits"]
+    assert meta["cta_pair"] is False
 
 
 def test_special_state_cta_with_two_content_cards_uses_ready_override():

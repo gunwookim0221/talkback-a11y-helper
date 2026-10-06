@@ -43,7 +43,7 @@ def test_life_food_plugin_uses_xml_card_entry_spec():
     assert food_cfg["entry_type"] == "card"
     assert food_cfg["pre_navigation"][0]["action"] == "xml_scroll_search_tap"
     assert food_cfg["entry_match"]["allow_description_match"] is True
-    assert food_cfg["verify_tokens"] == ["smartthings cooking", "ingredients"]
+    assert food_cfg["verify_tokens"] == ["smartthings cooking", "ingredients", "쇼핑리스트로 보내기"]
     assert "(?i)(smart\\s*things\\s*cooking|\\bcooking\\b|\\bmeal\\b|\\brecipe\\b|barcode\\s*scan|kitchen\\s*appliance)" in food_cfg[
         "entry_match"
     ]["description_patterns"]

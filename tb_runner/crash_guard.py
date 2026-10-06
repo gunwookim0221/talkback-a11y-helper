@@ -41,18 +41,46 @@ def inspect_foreground_package_exit(
     helper_alive_not_oneconnect = _helper_dump_alive_but_not_oneconnect(row)
     process_running = _oneconnect_process_running(client=client, dev=dev)
     environment_interruption = None
+    transient_systemui: dict[str, Any] | None = None
     if current_package == SYSTEM_UI_PACKAGE:
         environment_interruption = _inspect_system_ui_environment(client=client, dev=dev)
+        if environment_interruption is None and process_running is True:
+            target_ui_alive = _row_has_target_accessibility_evidence(row, packages)
+            confirmed_package = current_package
+            if not target_ui_alive:
+                # A single SystemUI focus sample is common during overlays and
+                # transitions. One bounded confirmation catches a foreground
+                # that has already returned without introducing a wait loop.
+                confirmed_package = _current_package(client=client, dev=dev) or current_package
+                if confirmed_package != current_package:
+                    packages["current_package"] = confirmed_package
+                    package_sources["current_package"] = "dumpsys_window_recheck"
+                    current_package = confirmed_package
+                    non_oneconnect_current = current_package != EXPECTED_PACKAGE
+            if target_ui_alive or confirmed_package == EXPECTED_PACKAGE:
+                transient_systemui = {
+                    "classification": "TRANSIENT_SYSTEMUI_OVERLAY",
+                    "target_process_running": True,
+                    "target_accessibility_ui_present": target_ui_alive,
+                    "foreground_recheck_package": confirmed_package,
+                    "crash_counted": False,
+                }
     signals = {
         "launcher_hit": launcher_hit,
         "non_oneconnect_current": non_oneconnect_current,
         "launcher_focus": launcher_focus,
         "launcher_resource": launcher_resource,
         "helper_alive_not_oneconnect": helper_alive_not_oneconnect,
+        "target_accessibility_ui_alive": _row_has_target_accessibility_evidence(row, packages),
+        "foreground_recheck_package": (
+            transient_systemui.get("foreground_recheck_package")
+            if transient_systemui
+            else None
+        ),
     }
 
     detection: dict[str, Any] | None = None
-    if environment_interruption is None and (
+    if environment_interruption is None and transient_systemui is None and (
         launcher_hit or non_oneconnect_current or launcher_focus or launcher_resource or helper_alive_not_oneconnect
     ):
         crash_type = "APP_TERMINATED" if process_running is False else "POSSIBLE_CRASH"
@@ -72,8 +100,51 @@ def inspect_foreground_package_exit(
         "process_running": process_running,
         "signals": signals,
         "environment_interruption": environment_interruption,
+        "transient_systemui": transient_systemui,
         "detection": detection,
     }
+
+
+def _row_has_target_accessibility_evidence(
+    row: dict[str, Any], packages: dict[str, str | None]
+) -> bool:
+    """Whether the captured accessibility state still belongs to OneConnect UI."""
+    if any(
+        _is_target_ui_package(packages.get(key))
+        for key in ("focused_package", "resource_package", "smart_nav_package")
+    ):
+        return True
+
+    for key in (
+        "accessibility_window_package",
+        "window_package",
+        "accessibility_window_packages",
+        "window_packages",
+        "accessibility_windows",
+        "windows",
+        "dump_tree_nodes",
+    ):
+        value = row.get(key)
+        values = value if isinstance(value, list) else [value]
+        for item in values:
+            if isinstance(item, dict):
+                stack = [item]
+                while stack:
+                    node = stack.pop()
+                    package = _node_package(node)
+                    if _is_target_ui_package(package):
+                        return True
+                    children = node.get("children")
+                    if isinstance(children, list):
+                        stack.extend(children)
+            elif _is_target_ui_package(item):
+                return True
+    return False
+
+
+def _is_target_ui_package(value: Any) -> bool:
+    package = str(value or "").strip().lower()
+    return package == EXPECTED_PACKAGE or package.startswith("com.samsung.android.plugin.")
 
 
 def detect_foreground_package_exit(

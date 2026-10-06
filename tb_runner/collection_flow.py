@@ -4717,6 +4717,80 @@ def _filter_special_state_cta_hits(
     return filtered
 
 
+def _normalize_special_state_cta_label(value: Any) -> str:
+    normalized = re.sub(r"\s+", " ", str(value or "").strip()).casefold()
+    return normalized.strip(" \t\r\n.,!?;:…")
+
+
+def _special_state_cta_node_is_actionable(node: dict[str, Any]) -> bool:
+    def is_true(value: Any) -> bool:
+        return value is True or str(value or "").strip().casefold() in {"1", "true", "yes"}
+
+    if any(is_true(node.get(key)) for key in ("clickable", "effectiveClickable", "actionable")):
+        return True
+    class_name = str(node.get("className", "") or node.get("class", "") or "").strip().casefold()
+    class_role = class_name.rsplit(".", 1)[-1].rsplit("$", 1)[-1]
+    if class_role.endswith("button") or class_role in {"checkbox", "radiobutton", "switch", "chip"}:
+        return True
+    resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip().casefold()
+    resource_name = re.split(r"[/.:]", resource_id)[-1]
+    return bool(re.search(r"(?:^|[_-])(?:button|cta|action|submit)\d*$", resource_name))
+
+
+def _special_state_cta_node_labels(node: dict[str, Any]) -> list[str]:
+    keys = (
+        "text",
+        "contentDescription",
+        "stateDescription",
+        "talkbackLabel",
+        "mergedLabel",
+        "label",
+        "actionableDescendantContentDescription",
+        "actionableDescendantText",
+        "actionableDescendantLabel",
+    )
+    return [_normalize_special_state_cta_label(node.get(key)) for key in keys if str(node.get(key, "") or "").strip()]
+
+
+def _special_state_cta_node_matches(
+    node: dict[str, Any],
+    ancestor_nodes: list[dict[str, Any]],
+    tokens: list[str] | tuple[str, ...],
+) -> bool:
+    normalized_tokens = {_normalize_special_state_cta_label(token) for token in tokens if _normalize_special_state_cta_label(token)}
+    if not normalized_tokens.intersection(_special_state_cta_node_labels(node)):
+        return False
+    return any(_special_state_cta_node_is_actionable(candidate) for candidate in [node, *ancestor_nodes])
+
+
+def _collect_actionable_special_state_cta_hits(
+    tokens: list[str] | tuple[str, ...],
+    flat_nodes: list[tuple[dict[str, Any], dict[str, Any] | None]],
+) -> list[str]:
+    parent_by_id = {id(node): parent for node, parent in flat_nodes}
+    hits: list[str] = []
+    seen_tokens: set[str] = set()
+    for token in tokens:
+        normalized_token = _normalize_special_state_cta_label(token)
+        if not normalized_token or normalized_token in seen_tokens:
+            continue
+        for node, _ in flat_nodes:
+            if not _node_is_visible(node):
+                continue
+            ancestors: list[dict[str, Any]] = []
+            parent = parent_by_id.get(id(node))
+            for _ in range(4):
+                if not isinstance(parent, dict):
+                    break
+                ancestors.append(parent)
+                parent = parent_by_id.get(id(parent))
+            if _special_state_cta_node_matches(node, ancestors, [normalized_token]):
+                hits.append(normalized_token)
+                seen_tokens.add(normalized_token)
+                break
+    return hits
+
+
 def _format_special_state_debug_values(values: list[str] | tuple[str, ...] | None, *, max_items: int = 5, max_len: int = 72) -> str:
     if not isinstance(values, (list, tuple)):
         return "none"
@@ -4780,11 +4854,10 @@ def _collect_ready_content_cluster_signals(
             seen.add(normalized)
             signals.append(normalized)
 
-    def is_cta_like_text(text: str) -> bool:
-        lowered = str(text or "").strip().lower()
-        if not lowered:
-            return False
-        return any(_text_matches_token_strict(lowered, token) for token in cta_like_tokens)
+    normalized_cta_tokens = {_normalize_special_state_cta_label(token) for token in cta_like_tokens}
+
+    def is_cta_like_node(node: dict[str, Any]) -> bool:
+        return bool(normalized_cta_tokens.intersection(_special_state_cta_node_labels(node)))
 
     content_text_patterns = (
         r"\bpm\s*(?:10|2\.?5)\b",
@@ -4806,11 +4879,11 @@ def _collect_ready_content_cluster_signals(
         structural_blob = " ".join([view_id, class_name, text_blob]).strip()
         if _safe_regex_search(r"\b(chart|graph)\b", structural_blob):
             add_signal("chart_or_graph")
-        if _safe_regex_search(r"\b(card|list|item|section|content)\b", structural_blob) and text_blob and not is_cta_like_text(text_blob):
+        if _safe_regex_search(r"\b(card|list|item|section|content)\b", structural_blob) and text_blob and not is_cta_like_node(node):
             add_signal(f"content_structure:{text_blob[:32]}")
         if (
             text_blob
-            and not is_cta_like_text(text_blob)
+            and not is_cta_like_node(node)
             and not _safe_regex_search(r"(?i)\b(more options|navigate up|back|menu)\b", text_blob)
             and ("textview" in class_name or "text" in view_id or "title" in view_id or "body" in view_id)
         ):
@@ -5033,14 +5106,14 @@ def _classify_special_post_open_state(
     onboarding_body_hits = _collect_token_hits(list(_ONBOARDING_BODY_EVIDENCE_TOKENS), source_texts)
     has_onboarding_body_evidence = bool(onboarding_body_hits)
     special_hits = _collect_strict_token_hits(special_tokens, source_texts)
+    generic_cta_tokens = (*ONBOARDING_CTA_ALIASES, "connect", "try")
     cta_hits = _filter_special_state_cta_hits(
-        _collect_strict_token_hits(cta_tokens, source_texts),
+        _collect_actionable_special_state_cta_hits(cta_tokens, flat_nodes),
         scenario_id=scenario_id,
         has_onboarding_body_evidence=has_onboarding_body_evidence,
     )
-    generic_cta_tokens = (*ONBOARDING_CTA_ALIASES, "connect", "try")
     generic_cta_hits = _filter_special_state_cta_hits(
-        _collect_strict_token_hits(generic_cta_tokens, source_texts),
+        _collect_actionable_special_state_cta_hits(generic_cta_tokens, flat_nodes),
         scenario_id=scenario_id,
         has_onboarding_body_evidence=has_onboarding_body_evidence,
     )
@@ -5075,6 +5148,7 @@ def _classify_special_post_open_state(
     meaningful_texts: list[str] = []
     short_cta_nodes = 0
     chrome_hits = 0
+    parent_by_id = {id(node): parent for node, parent in flat_nodes}
     for node, _ in flat_nodes:
         if not _node_is_visible(node):
             continue
@@ -5086,8 +5160,20 @@ def _classify_special_post_open_state(
             continue
         lowered = text_blob.lower()
         meaningful_texts.append(lowered)
-        token_len = len(lowered.split())
-        if token_len <= 4 and any(_text_matches_token_strict(lowered, token) for token in active_generic_cta_tokens):
+        node_labels = _special_state_cta_node_labels(node)
+        ancestors: list[dict[str, Any]] = []
+        parent = parent_by_id.get(id(node))
+        for _ in range(4):
+            if not isinstance(parent, dict):
+                break
+            ancestors.append(parent)
+            parent = parent_by_id.get(id(parent))
+        if any(
+            len(label.split()) <= 4
+            and label in active_generic_cta_tokens
+            and _special_state_cta_node_matches(node, ancestors, [label])
+            for label in node_labels
+        ):
             short_cta_nodes += 1
     unique_text_count = len(set(meaningful_texts))
     low_content_diversity = bool(unique_text_count and unique_text_count <= 5)
@@ -10494,6 +10580,17 @@ def _run_crash_guard_check(
                 "crash_counted=false"
             )
             log("[CRASH_GUARD] result='environment_interruption'")
+        elif isinstance(inspection.get("transient_systemui"), dict):
+            transient = inspection["transient_systemui"]
+            log(
+                "[CRASH_GUARD] transient_systemui_overlay "
+                f"classification='{transient.get('classification')}' "
+                f"target_process_running={str(bool(transient.get('target_process_running'))).lower()} "
+                f"target_accessibility_ui_present={str(bool(transient.get('target_accessibility_ui_present'))).lower()} "
+                f"foreground_recheck_package='{transient.get('foreground_recheck_package') or 'none'}' "
+                "crash_counted=false"
+            )
+            log("[CRASH_GUARD] result='transient_systemui_overlay'")
         else:
             log("[CRASH_GUARD] result='ok'")
         if not _crash_guard_latch_matches(client, scenario_id=scenario_id, attempt=attempt):
@@ -11828,20 +11925,31 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict, *, output_base
                     else:
                         tab_cfg["_recover_invocation_reason"] = previous_recover_invocation_reason
                 if recover_ok:
-                    post_recover_state = _analyze_current_state(client, dev)
-                    inside = _is_inside_smartthings(post_recover_state)
-                    log(
-                        "[SPECIAL_STATE][post_recover_check] "
-                        f"inside_smartthings={str(inside).lower()} "
-                        f"package={str(post_recover_state.get('package_signature_present', False)).lower()} "
-                        f"app_bar_hits={int(post_recover_state.get('app_bar_hits', 0) or 0)}"
-                    )
+                    if scenario_id == _LIFE_AIR_CARE_SCENARIO_ID:
+                        inside, recover_reason = _verify_fresh_life_list_state(
+                            client,
+                            dev,
+                            phase="special_state_post_back",
+                        )
+                        log(
+                            "[SPECIAL_STATE][post_recover_check] "
+                            f"life_list_ready={str(inside).lower()} "
+                            f"reason='{recover_reason}'"
+                        )
+                    else:
+                        post_recover_state = _analyze_current_state(client, dev)
+                        inside = _is_inside_smartthings(post_recover_state)
+                        recover_reason = "life_plugin_list_recovered" if inside else "app_exited_after_back"
+                        log(
+                            "[SPECIAL_STATE][post_recover_check] "
+                            f"inside_smartthings={str(inside).lower()} "
+                            f"package={str(post_recover_state.get('package_signature_present', False)).lower()} "
+                            f"app_bar_hits={int(post_recover_state.get('app_bar_hits', 0) or 0)}"
+                        )
                     if not inside:
                         log("[SPECIAL_STATE][post_recover_check] detected_app_exit -> abort_recover")
-                        recover_reason = "app_exited_after_back"
                         recover_ok = False
                         break
-                    recover_reason = "life_plugin_list_recovered"
                     break
                 recover_reason = "recover_to_start_state_failed"
                 if recover_attempt < 2:

@@ -195,7 +195,7 @@ TAB_CONFIGS = [
                 "generic_weak_tokens": [],
             },
         },
-        "verify_tokens": ["smartthings cooking", "ingredients"],
+        "verify_tokens": ["smartthings cooking", "ingredients", "쇼핑리스트로 보내기"],
         "anchor_name": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
         "anchor_type": "a",
         "anchor": {
