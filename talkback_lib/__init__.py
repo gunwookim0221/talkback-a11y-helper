@@ -846,12 +846,28 @@ class A11yAdbClient:
         start = time.monotonic()
         interval = max(0.05, poll_interval_sec)
         logged_parse_errors: set[str] = set()
+        chunk_transport_state: dict[str, Any] = {"state": "absent"}
         self._safe_trace_print(
             f"[SMART_NEXT_TRACE] read_log_result_start prefix={prefix} req_id={req_id} wait_seconds={wait_seconds}"
         )
         while time.monotonic() - start < wait_seconds:
             logs = self._logcat_reader.dump_filtered(dev=dev)
-            payloads = self._extract_all_payloads(logs, prefix)
+            chunk_transport_state = self._logcat_reader.reassemble_chunked_payload(
+                logs, prefix, req_id
+            )
+            if chunk_transport_state.get("state") == "error":
+                return {
+                    "success": False,
+                    "status": "transport_error",
+                    "reason": str(chunk_transport_state.get("reason") or "invalid_chunks"),
+                    "reqId": req_id,
+                }
+            if chunk_transport_state.get("state") == "incomplete":
+                payloads = []
+            elif chunk_transport_state.get("state") == "complete":
+                payloads = [str(chunk_transport_state["payload"])]
+            else:
+                payloads = self._extract_all_payloads(logs, prefix)
             for payload in reversed(payloads):
                 try:
                     parsed = self._parse_json_payload(payload, prefix)
@@ -893,6 +909,14 @@ class A11yAdbClient:
             if remaining <= 0:
                 break
             time.sleep(min(interval, remaining))
+        if chunk_transport_state.get("state") == "incomplete":
+            return {
+                "success": False,
+                "status": "transport_error",
+                "reason": "incomplete_chunked_payload",
+                "missingChunks": list(chunk_transport_state.get("missing") or []),
+                "reqId": req_id,
+            }
         miss = {"success": False, "reason": f"{prefix} 로그를 찾지 못했습니다.", "reqId": req_id}
         self._safe_trace_print(
             f"[SMART_NEXT_TRACE] read_log_result_miss prefix={prefix} req_id={req_id} parsed={miss}"

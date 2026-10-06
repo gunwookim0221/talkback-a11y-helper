@@ -78,3 +78,20 @@ def test_legacy_quality_issues_remain_unclassified_and_are_not_promoted_to_qa() 
     assert normalized[0]["classification_source"] == "legacy_summary_raw_signal"
     assert normalized[0]["raw_final_result"] == "FAIL"
     assert "QA_REVIEW" not in normalized[0].values()
+
+
+def test_identical_diagnostics_are_counted_once_but_distinct_steps_remain() -> None:
+    duplicate = {
+        "scenario_id": "life_clothing_care_plugin",
+        "step": "4",
+        "mismatch_type": "REPRESENTATIVE_CONTEXT",
+        "failure_reason": "traversal_only",
+        "final_result": "WARN",
+        "visible_label": "Clothing Care",
+    }
+    result = classify_quality_signals(
+        [duplicate, {**duplicate, "crop_thumbnail": "preview.png"}, {**duplicate, "step": "5"}]
+    )
+
+    assert result.contract["automation_diagnostic_count"] == 2
+    assert [item["step"] for item in result.automation_diagnostics] == ["4", "5"]

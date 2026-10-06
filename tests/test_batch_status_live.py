@@ -189,6 +189,31 @@ def test_batch_status_includes_stable_live_dashboard_fields(tmp_path, monkeypatc
     assert status["devices"][0]["runner_log_path"].endswith("runner.log")
 
 
+def test_start_batch_captures_repository_provenance_for_full_run(tmp_path, monkeypatch):
+    class IdleThread:
+        def __init__(self, **_kwargs):
+            pass
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(batch_runner, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(batch_runner, "RUN_LOG_DIR", tmp_path / "qa_frontend_runs")
+    monkeypatch.setattr(batch_runner.threading, "Thread", IdleThread)
+
+    manager = batch_runner.BatchRunManager()
+    status = manager.start_batch([], mode="full", scenario_ids=["life_main"])
+
+    batch_dir = tmp_path / "qa_frontend_runs" / status["batch_id"]
+    provenance_path = batch_dir / "repository_provenance.json"
+    batch_summary = json.loads((batch_dir / "batch_summary.json").read_text(encoding="utf-8"))
+    provenance_artifact = json.loads(provenance_path.read_text(encoding="utf-8"))
+
+    assert provenance_artifact["schema_version"] == "repository-provenance-v1"
+    assert provenance_artifact["repository_root"] == str(tmp_path.resolve())
+    assert batch_summary["repository_provenance"] == provenance_artifact
+
+
 def test_batch_status_accumulates_observed_scenarios_across_log_tails(tmp_path, monkeypatch):
     monkeypatch.setattr(batch_runner, "ROOT_DIR", tmp_path)
     monkeypatch.setattr(batch_runner, "RUN_LOG_DIR", tmp_path / "qa_frontend_runs")

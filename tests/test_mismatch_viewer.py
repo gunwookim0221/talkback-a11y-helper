@@ -124,6 +124,104 @@ def test_mismatch_projection_reuses_qa_review_contract_and_keeps_crop_paths_dist
     assert response["automation_diagnostics"][0]["crop_path"].endswith("/crops/clothing-step-3.png")
 
 
+def test_representative_context_is_counted_even_when_preview_filter_excludes_it(tmp_path):
+    output_path = tmp_path / "representative-context.xlsx"
+    _write_result_workbook(
+        output_path,
+        [[
+            "life_clothing_care_plugin",
+            "Clothing Care",
+            7,
+            "Clothing Care",
+            "Clothing Care",
+            "REPRESENTATIVE_CONTEXT",
+            "WARN",
+            "traversal_only",
+            "HIGH",
+            "main",
+            "review context",
+            "",
+            1,
+            7,
+            7,
+            "7",
+            False,
+        ]],
+    )
+
+    response = get_mismatch_summary_from_xlsx(output_path)
+
+    assert response["signals"] == []
+    assert len(response["quality_signals"]) == 1
+    assert response["automation_diagnostics"][0]["mismatch_type"] == "REPRESENTATIVE_CONTEXT"
+    assert response["quality_issues_contract"]["automation_diagnostic_count"] == 1
+
+
+def test_canonical_diagnostic_count_is_independent_of_preview_cap_and_deduplicated(tmp_path):
+    output_path = tmp_path / "many-diagnostics.xlsx"
+    rows = []
+    for step in range(1, 26):
+        rows.append([
+            f"life_scenario_{step}",
+            "Life",
+            step,
+            "",
+            "",
+            "TEXT_MISMATCH",
+            "WARN",
+            "terminal_not_handled",
+            "HIGH",
+            "main",
+            "",
+            "",
+            1,
+            step,
+            step,
+            str(step),
+            False,
+        ])
+    rows.append(list(rows[0]))
+    _write_result_workbook(output_path, rows)
+
+    response = get_mismatch_summary_from_xlsx(output_path)
+
+    assert len(response["signals"]) == 20
+    assert len(response["quality_signals"]) == 25
+    assert response["quality_issues_contract"]["automation_diagnostic_count"] == 25
+
+
+def test_zero_automation_diagnostics_stays_zero(tmp_path):
+    output_path = tmp_path / "zero-diagnostics.xlsx"
+    _write_result_workbook(
+        output_path,
+        [[
+            "home_main",
+            "Home",
+            1,
+            "Home",
+            "Home",
+            "EXACT_MATCH",
+            "PASS",
+            "",
+            "HIGH",
+            "main",
+            "",
+            "",
+            1,
+            1,
+            1,
+            "1",
+            False,
+        ]],
+    )
+
+    response = get_mismatch_summary_from_xlsx(output_path)
+
+    assert response["quality_signals"] == []
+    assert response["automation_diagnostics"] == []
+    assert response["quality_issues_contract"]["automation_diagnostic_count"] == 0
+
+
 def test_coverage_probe_summary_prefers_aggregate_artifacts(tmp_path):
     output_path = tmp_path / "result.xlsx"
     _write_probe_workbook(output_path)

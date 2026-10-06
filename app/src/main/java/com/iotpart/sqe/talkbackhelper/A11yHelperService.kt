@@ -340,7 +340,7 @@ class A11yHelperService : AccessibilityService() {
             "[DEBUG][TARGET_ACTION][broadcast_result] reqId=$reqId success=${outcome.success} reason='$safeReason' attemptedResourceId='$safeResourceId' attemptedClassName='$safeClassName'"
         )
         A11yEvidence.attach(resultJson, reqId)
-        Log.i(TAG, "TARGET_ACTION_RESULT $resultJson")
+        logTargetActionResult(reqId, resultJson)
         A11yEvidence.emit(
             "HELPER_ACK_SENT",
             reqId,
@@ -395,7 +395,7 @@ class A11yHelperService : AccessibilityService() {
                 put("action", "FOCUS_IN_BOUNDS")
                 put("bounds", boundsString)
             }
-            Log.i(TAG, "TARGET_ACTION_RESULT $resultJson")
+            logTargetActionResult(reqId, resultJson)
             return resultJson
         }
 
@@ -563,7 +563,7 @@ class A11yHelperService : AccessibilityService() {
                     "serializedLength=${resultJson.toString().length}"
             )
         }
-        Log.i(TAG, "TARGET_ACTION_RESULT $resultJson")
+        logTargetActionResult(reqId, resultJson)
         A11yEvidence.emit(
             "HELPER_ACK_SENT",
             reqId,
@@ -669,10 +669,16 @@ class A11yHelperService : AccessibilityService() {
         recordActionFocusEvidence(reqId)
         A11yEvidence.attach(result, reqId)
         Log.i(TAG, "[TARGET_FOCUS_COMMIT] reqId=$reqId status=$status success=$success actionAccepted=$actionAccepted reason='$reason'")
-        Log.i(TAG, "TARGET_ACTION_RESULT $result")
+        logTargetActionResult(reqId, result)
         A11yEvidence.emit("HELPER_ACK_SENT", reqId,
             JSONObject().put("resultTag", "TARGET_ACTION_RESULT").put("success", success).put("status", status))
         return result
+    }
+
+    private fun logTargetActionResult(reqId: String, result: JSONObject) {
+        A11yResultTransport.encode("TARGET_ACTION_RESULT", reqId, result.toString()).forEach { record ->
+            Log.i(TAG, record)
+        }
     }
 
     fun performTargetBoundsCenterTap(query: A11yTargetFinder.TargetQuery, reqId: String = "none"): JSONObject {
@@ -742,7 +748,7 @@ class A11yHelperService : AccessibilityService() {
                 put("target", FocusSnapshot.fromNode(actionOutcome.target).toJson())
             }
         }
-        Log.i(TAG, "TARGET_ACTION_RESULT $resultJson")
+        logTargetActionResult(reqId, resultJson)
         return resultJson
     }
 
@@ -1281,7 +1287,7 @@ class A11yHelperService : AccessibilityService() {
             }
         }
 
-        Log.i(TAG, "TARGET_ACTION_RESULT $resultJson")
+        logTargetActionResult(reqId, resultJson)
         if (outcome.success && clickedNode != null) {
             A11yStateStore.update(FocusSnapshot.fromNode(clickedNode))
         }

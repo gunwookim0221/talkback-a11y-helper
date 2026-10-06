@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from .paths import OUTPUT_DIR
 from .coverage_health import build_coverage_health_report
-from .quality_issues import classify_quality_signals
+from .quality_issues import classify_quality_signals, deduplicate_quality_signals
 from .recent_runs import safe_recent_run_log_path
 from .run_summary import read_summary_file, summary_path_for_log
 
@@ -108,6 +108,7 @@ def get_mismatch_summary_from_xlsx(
         
         scenario_stats = {}
         all_previews = []
+        canonical_signals = []
 
         for row in range(2, sheet.max_row + 1):
             scenario = str(sheet.cell(row, scenario_col).value or "").strip() if scenario_col else ""
@@ -267,8 +268,7 @@ def get_mismatch_summary_from_xlsx(
             if exact_visible_speech_match:
                 add_to_preview = False
 
-            if add_to_preview:
-                all_previews.append({
+            signal = {
                     "scenario_id": scenario,
                     "plugin_name": plugin_name,
                     "step": step,
@@ -292,7 +292,11 @@ def get_mismatch_summary_from_xlsx(
                     "scenario_shadow_verdict": scenario_shadow_verdict,
                     "category": category,
                     "top_category": top_category
-                })
+                }
+            if top_category in {"FAIL", "ISSUE", "REVIEW"}:
+                canonical_signals.append(signal)
+            if add_to_preview:
+                all_previews.append(signal)
 
         workbook.close()
 
@@ -308,7 +312,10 @@ def get_mismatch_summary_from_xlsx(
         # Keep the single-run endpoint on the same authoritative QA Review
         # projection used by batch summaries. This is presentation data only;
         # the existing review classification contract remains the source of truth.
-        classified_quality = classify_quality_signals(previews)
+        # Diagnostic counts use the complete reviewable workbook population.
+        # The UI preview remains filtered and capped independently.
+        canonical_signals = deduplicate_quality_signals(canonical_signals)
+        classified_quality = classify_quality_signals(canonical_signals)
         compare_dir = xlsx_path.with_suffix("")
 
         def _with_crop_path(signal: dict[str, object]) -> dict[str, object]:
@@ -418,6 +425,7 @@ def get_mismatch_summary_from_xlsx(
             },
             "scenario_summary": scenario_summary,
             "signals": previews,
+            "quality_signals": canonical_signals,
             "quality_issues": quality_issues,
             "automation_diagnostics": automation_diagnostics,
             "quality_issues_contract": classified_quality.contract,

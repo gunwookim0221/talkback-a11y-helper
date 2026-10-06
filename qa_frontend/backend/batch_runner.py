@@ -42,6 +42,7 @@ from .shadow_pipeline import run_shadow_validation_pipeline
 from .shadow_reporting import load_shadow_validation_summary
 from .quality_issues import classify_quality_signals, normalize_legacy_quality_issues
 from .coverage_health import build_coverage_health_report
+from .repository_provenance import capture_repository_provenance
 
 logger = logging.getLogger(__name__)
 
@@ -543,6 +544,7 @@ class BatchRunManager:
         self._current_execution: RunExecution | None = None
         self._shadow_validation_requested = False
         self._feature_flags = resolve_identity_feature_flags()
+        self._repository_provenance: dict[str, object] | None = None
 
     def _sanitize_name(self, name: str) -> str:
         return re.sub(r'[^0-9a-zA-Z_-]+', '_', name)
@@ -589,6 +591,20 @@ class BatchRunManager:
             
             batch_dir = RUN_LOG_DIR / self._batch_id
             batch_dir.mkdir(parents=True, exist_ok=True)
+            self._repository_provenance, provenance_path = capture_repository_provenance(
+                ROOT_DIR, batch_dir
+            )
+            logger.info(
+                "[QA_FRONTEND][repository_provenance] "
+                "batch_id=%s artifact='%s' branch='%s' head='%s' origin_main='%s' dirty='%s' path_count=%s",
+                self._batch_id,
+                provenance_path,
+                self._repository_provenance.get("branch"),
+                self._repository_provenance.get("head"),
+                self._repository_provenance.get("origin_main"),
+                self._repository_provenance.get("dirty"),
+                self._repository_provenance.get("path_count", 0),
+            )
             
             self._devices = []
             for d in devices:
@@ -896,6 +912,7 @@ class BatchRunManager:
             "enable_coverage_probe": self._enable_coverage_probe,
             "shadow_validation": self._shadow_validation_requested,
             "feature_flags": dict(self._feature_flags),
+            "repository_provenance": self._repository_provenance,
             "devices": devices
         }
         try:
@@ -987,7 +1004,9 @@ class BatchRunManager:
                         data["coverage_probe_summary"] = coverage_probe_summary
                         data["coverage_probe"] = coverage_probe_summary
                         
-                        classified_quality = classify_quality_signals(mismatch_res.get("signals", []))
+                        classified_quality = classify_quality_signals(
+                            mismatch_res.get("quality_signals", mismatch_res.get("signals", []))
+                        )
                         quality_issues = []
                         for sig in classified_quality.quality_issues:
                             crop_thumb = sig.get("crop_thumbnail")
