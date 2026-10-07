@@ -65,7 +65,7 @@ from talkback_lib.step_row_builder import (
     populate_get_focus_trace_fields,
 )
 from talkback_lib.step_collection_service import StepCollectionService
-from talkback_lib.window_lifecycle import capture_window_lifecycle
+from talkback_lib.window_lifecycle import capture_window_lifecycle, get_talkback_restart_event
 from talkback_lib.utils import (
     json_safe_value,
     normalize_bounds,
@@ -2130,6 +2130,9 @@ class A11yAdbClient:
     ) -> bool:
         action = f"SCROLL_{str(direction or '').strip().upper()[:24]}"
         capture_window_lifecycle(self, dev, "before", action)
+        if get_talkback_restart_event(self):
+            self.last_scroll_result = {"success": False, "status": "TALKBACK_RESTARTED", "reason": "talkback_restarted"}
+            return False
         try:
             return self._scroll_impl(
                 dev,
@@ -2821,6 +2824,9 @@ class A11yAdbClient:
         wait_: float = 2.0,
     ) -> dict[str, Any]:
         capture_window_lifecycle(self, dev, "before", "TARGET_FOCUS_COMMIT")
+        if get_talkback_restart_event(self):
+            self.last_target_action_result = {"success": False, "status": "TALKBACK_RESTARTED", "reason": "talkback_restarted"}
+            return dict(self.last_target_action_result)
         try:
             return self._target_focus_commit_impl(dev=dev, target=target, wait_=wait_)
         except Exception:

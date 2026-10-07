@@ -12826,13 +12826,11 @@ def _capture_audit_v4_xml(
     step_idx: int,
     phase_name: str,
     local_tab_label: str = "",
+    snapshot_nodes: Any = None,
 ) -> None:
     if not output_base_dir or not scenario_id:
         return
     try:
-        run_fn = getattr(client, "_run", None)
-        if not callable(run_fn):
-            return
         xml_dir = Path(output_base_dir) / scenario_id / "xml_dumps"
         xml_dir.mkdir(parents=True, exist_ok=True)
         count = len(list(xml_dir.glob("*.xml")))
@@ -12840,12 +12838,9 @@ def _capture_audit_v4_xml(
         safe_label = re.sub(r"[^a-zA-Z0-9_-]+", "_", local_tab_label or "").strip("_")
         label_suffix = f"_{safe_label[:40]}" if safe_label else ""
         filename = f"{count:03d}_step_{step_idx:03d}_{safe_phase}{label_suffix}.xml"
-        remote_xml = f"/sdcard/window_dump_v4_{count}.xml"
-        try:
-            run_fn(["shell", "uiautomator", "dump", remote_xml], dev=dev)
-            run_fn(["pull", remote_xml, str(xml_dir / filename)], dev=dev)
-        finally:
-            run_fn(["shell", "rm", "-f", remote_xml], dev=dev)
+        from tb_runner.audit_snapshot import write_helper_snapshot_xml
+        write_helper_snapshot_xml(snapshot_nodes, xml_dir / filename)
+        log(f"[AUDIT_XML] source='a11y_helper' path='{xml_dir / filename}'")
     except Exception as e:
         log(f"[WARNING] V4 XML Capture failed: {e}")
 
@@ -12881,6 +12876,15 @@ def _capture_audit_v4_xml_for_row(
         or row.get("current_local_tab_active_label", "")
         or ""
     )
+    snapshot_nodes = row.get("dump_tree_nodes")
+    scroll_transition = row.get("scroll_transition")
+    if isinstance(scroll_transition, dict):
+        path = scroll_transition.get("after_scroll_dump_path")
+        if path:
+            try:
+                snapshot_nodes = json.loads(Path(path).read_text(encoding="utf-8"))["nodes"]
+            except (OSError, ValueError, KeyError):
+                snapshot_nodes = None  # Never relabel stale pre-scroll data as an after snapshot.
     _capture_audit_v4_xml(
         client,
         dev,
@@ -12889,6 +12893,7 @@ def _capture_audit_v4_xml_for_row(
         step_idx,
         phase_name,
         local_tab_label,
+        snapshot_nodes,
     )
 
 def _build_persisted_row_semantics(row: dict[str, Any]) -> dict[str, Any]:
@@ -17583,6 +17588,8 @@ def _apply_step_collection_phase_impl(
     row = None
     if forced_target:
         capture_window_lifecycle(client, dev, "before", "LOCAL_TAB_ENTRY")
+        if get_talkback_restart_event(client):
+            return {"scenario_id": scenario_id, "step_index": step_idx, "stop_reason": "talkback_restarted"}
         try:
             row = _activate_forced_local_tab_target(
                 client=client,
@@ -17606,6 +17613,8 @@ def _apply_step_collection_phase_impl(
             row["forced_local_tab_target"] = forced_target
     if row is None:
         capture_window_lifecycle(client, dev, "before", "SMART_NEXT")
+        if get_talkback_restart_event(client):
+            return {"scenario_id": scenario_id, "step_index": step_idx, "stop_reason": "talkback_restarted"}
         try:
             row = client.collect_focus_step(
                 dev=dev,

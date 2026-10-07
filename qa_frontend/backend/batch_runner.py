@@ -924,6 +924,9 @@ class BatchRunManager:
     def _write_device_summary(self, device_info, dev_output_dir):
         try:
             out_dir = Path(dev_output_dir)
+            if device_info.get("state") in {"passed", "failed", "stopped"}:
+                from tb_runner.target_attempt_ledger import reconcile_saved_target_ledgers
+                reconcile_saved_target_ledgers(out_dir)
             log_path = None
             xlsx_path = None
             runner_log_path = None

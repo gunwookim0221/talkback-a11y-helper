@@ -94,3 +94,45 @@ def get_target_attempt_ledger(client: Any) -> TargetAttemptLedger:
         ledger = TargetAttemptLedger()
         client._target_attempt_ledger = ledger
     return ledger
+
+
+def reconcile_saved_target_ledgers(run_root: str | Path) -> list[dict[str, Any]]:
+    """Reconcile durable attempts after the subprocess has exited or been stopped.
+
+    Read only persisted raw rows; never infer missing visit credit from a log.
+    An absent workbook is an explicit omission, not a lost attempt.
+    """
+    import openpyxl
+
+    results = []
+    for path in Path(run_root).glob("*.target_attempt_ledger.json"):
+        document = json.loads(path.read_text(encoding="utf-8"))
+        entries = document["entries"]
+        by_id = {entry["attempt_id"]: entry for entry in entries}
+        if len(by_id) != len(entries):
+            raise ValueError("Duplicate target attempt identity in saved ledger")
+        workbook_path = path.with_name(path.name.removesuffix(".target_attempt_ledger.json") + ".xlsx")
+        rows = []
+        source = "WORKBOOK_UNAVAILABLE"
+        if workbook_path.is_file():
+            workbook = openpyxl.load_workbook(workbook_path, read_only=True, data_only=True)
+            try:
+                sheet = workbook["raw"]
+                iterator = sheet.iter_rows(values_only=True)
+                header = next(iterator)
+                rows = [dict(zip(header, row)) for row in iterator]
+                unknown = {str(row.get("target_focus_attempt_id")) for row in rows if row.get("target_focus_attempt_id")} - set(by_id)
+                if unknown:
+                    raise ValueError("Workbook contains an unknown target attempt identity")
+                source = "PERSISTED_RAW_WORKBOOK"
+            finally:
+                workbook.close()
+        ledger = TargetAttemptLedger(workbook_path)
+        ledger.entries = by_id
+        result = ledger.reconcile(rows)
+        result["reconciliation_source"] = source
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(path)
+        results.append(result)
+    return results

@@ -46,3 +46,33 @@ def test_restart_overrides_matched_status():
     attempt = ledger.begin("life_main", 1, {})
     entry = ledger.finish(attempt, status="TARGET_MATCHED", restart={"talkback_pid": "456"})
     assert entry["state"] == "INTERRUPTED_TALKBACK_RESTART"
+
+
+def test_stopped_subprocess_reconciles_persisted_workbook_only(tmp_path):
+    import openpyxl
+    from tb_runner.target_attempt_ledger import reconcile_saved_target_ledgers
+    ledger = TargetAttemptLedger(tmp_path / "run.xlsx")
+    linked = ledger.begin("s1", 1, {})
+    omitted = ledger.begin("s1", 2, {})
+    ledger.finish(linked, status="TARGET_MATCHED")
+    workbook = openpyxl.Workbook()
+    workbook.active.title = "raw"
+    workbook.active.append(["target_focus_attempt_id"])
+    workbook.active.append([linked])
+    workbook.save(tmp_path / "run.xlsx")
+    result = reconcile_saved_target_ledgers(tmp_path)[0]
+    assert result["ledger_count"] == 2
+    assert result["workbook_target_rows"] == result["workbook_omitted_attempt_count"] == 1
+    assert result["entries"][0]["workbook_rows"] == [2]
+    assert result["entries"][1]["attempt_id"] == omitted
+    assert result["entries"][1]["state"] == "NO_RESULT"
+    assert result["reconciliation_source"] == "PERSISTED_RAW_WORKBOOK"
+
+
+def test_stopped_subprocess_missing_workbook_is_explicit(tmp_path):
+    from tb_runner.target_attempt_ledger import reconcile_saved_target_ledgers
+    ledger = TargetAttemptLedger(tmp_path / "run.xlsx")
+    ledger.begin("s1", 1, {})
+    result = reconcile_saved_target_ledgers(tmp_path)[0]
+    assert result["reconciliation_source"] == "WORKBOOK_UNAVAILABLE"
+    assert result["workbook_omitted_attempt_count"] == 1

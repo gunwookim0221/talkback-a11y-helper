@@ -245,13 +245,12 @@ def verified_scroll(client,dev,scenario_id,step_idx,before=None,output_base_dir=
             path.write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding="utf-8")
             result[phase+"_dump_path"]=str(path)
         result["after_dump_path"]=result["after_scroll_dump_path"]
-        if callable(getattr(client,"_run",None)):
-            try:
-                client._run(["shell","uiautomator","dump","/sdcard/phase0b_after_scroll.xml"],dev=dev)
-                xml=client._run(["shell","cat","/sdcard/phase0b_after_scroll.xml"],dev=dev)
-                (folder/f"{stem}_after_scroll.xml").write_text(xml,encoding="utf-8")
-            except Exception as exc:
-                result["after_xml_error"]=type(exc).__name__
+        try:
+            from tb_runner.audit_snapshot import write_helper_snapshot_xml
+            write_helper_snapshot_xml(after["nodes"], folder/f"{stem}_after_scroll.xml")
+            result["after_xml_source"] = "a11y_helper"
+        except Exception as exc:
+            result["after_xml_error"]=type(exc).__name__
     records=getattr(client,"_scroll_transitions",None)
     if records is None:
         records=[]; client._scroll_transitions=records
