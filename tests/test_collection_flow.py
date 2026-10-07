@@ -15592,6 +15592,10 @@ def test_main_loop_invalidates_step_when_talkback_restarts_during_navigation(mon
     state = _phase_ordering_state()
     client = DummyClient([_main_row(1)])
     client._window_lifecycle_recorder = SimpleNamespace(restart_event=None)
+    from tb_runner.target_attempt_ledger import TargetAttemptLedger
+    client._target_attempt_ledger = TargetAttemptLedger()
+    attempt = client._target_attempt_ledger.begin("s1", 1, {})
+    client._target_attempt_ledger.finish(attempt, status="TARGET_MATCHED")
     phase_ctx = SimpleNamespace(
         tab_cfg=_base_tab_cfg(max_steps=2),
         rows=[],
@@ -15629,6 +15633,7 @@ def test_main_loop_invalidates_step_when_talkback_restarts_during_navigation(mon
     assert state.stop_reason == "talkback_restarted"
     assert state.stop_step == 1
     assert any("[TALKBACK_RESTART_ABORT]" in message for message in logs)
+    assert client._target_attempt_ledger.entries[attempt]["state"] == "INTERRUPTED_TALKBACK_RESTART"
 
 
 def test_stop_then_cta_grace_allows_continue_then_stops_after_exhaust():

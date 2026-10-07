@@ -198,6 +198,9 @@ def _abort_main_loop_for_talkback_restart(
     state.stop_triggered = True
     state.stop_reason = "talkback_restarted"
     state.stop_step = int(step_idx)
+    ledger = getattr(client, "_target_attempt_ledger", None)
+    if ledger is not None:
+        ledger.interrupt_step(scenario_id, int(step_idx), event)
     log(
         f"[TALKBACK_RESTART_ABORT] scenario='{scenario_id}' step={step_idx} "
         f"previous_pid='{event.get('previous_talkback_pid') or ''}' "

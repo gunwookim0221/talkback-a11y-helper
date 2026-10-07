@@ -5,6 +5,28 @@ from types import SimpleNamespace
 from qa_frontend.backend import batch_runner
 
 
+def test_device_summary_does_not_reingest_generated_review_workbook(tmp_path, monkeypatch):
+    from qa_frontend.backend import mismatch_viewer
+    manager = _configure_finished_manager(tmp_path, monkeypatch, batch_id="batch_source", scenario_ids=["s1"],
+                                          state="finished", device_state="passed", log_text="")
+    root = tmp_path / manager._devices[0]["output_dir"]
+    manager._enable_coverage_probe = False
+    manager._evidence_ledger = manager._identity_shadow_v2 = manager._traversal_identity_v2 = True
+    manager._traversal_profiler = False
+    source = root / "talkback_compare_source.xlsx"
+    source.write_bytes(b"source")
+    (root / "talkback_compare_source.review.generated.xlsx").write_bytes(b"review")
+    seen = []
+    def read(path):
+        seen.append(path.name)
+        return {"summary": {}, "quality_signals": [{"scenario_id": "s1", "step": "1", "failure_reason": "move_failed", "final_result": "WARN"}]}
+    monkeypatch.setattr(mismatch_viewer, "get_mismatch_summary_from_xlsx", read)
+    manager._write_device_summary(manager._devices[0], str(root))
+    summary = json.loads((root / "summary.json").read_text(encoding="utf-8"))
+    assert seen and all(name == source.name for name in seen)
+    assert summary["quality_issues_contract"]["automation_diagnostic_count"] == 1
+
+
 def _terminal_summary(scenario_ids, statuses):
     scenarios = [
         {"id": scenario_id, "status": status}

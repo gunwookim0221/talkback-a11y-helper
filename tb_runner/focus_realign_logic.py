@@ -5,6 +5,8 @@ from typing import Any, Callable
 
 from tb_runner.container_group_logic import _normalize_logical_text
 from tb_runner.utils import parse_bounds_str
+from tb_runner.target_attempt_ledger import get_target_attempt_ledger
+from talkback_lib.window_lifecycle import get_talkback_restart_event
 
 
 def _node_label_blob(node: dict[str, Any]) -> str:
@@ -238,8 +240,11 @@ def _maybe_realign_focus_to_representative_impl(
             f"[STEP][focus_force_realign] target='{truncate_fn(selected_label or selected_rid, 96)}' "
             f"method='target_descriptor' reason='{force_reason}'"
         )
+    ledger = get_target_attempt_ledger(client)
+    attempt_id = ledger.begin(scenario_id, step_idx, target_descriptor)
+    row["target_focus_attempt_id"] = attempt_id
     log_fn(
-        f"[TARGET_FOCUS][attempt] scenario='{scenario_id}' step={step_idx} "
+        f"[TARGET_FOCUS][attempt] attempt_id='{attempt_id}' scenario='{scenario_id}' step={step_idx} "
         f"target='{truncate_fn(selected_label or selected_rid, 96)}' rid='{truncate_fn(selected_rid, 96)}' "
         f"bounds='{selected_bounds}' class='{truncate_fn(selected_class, 96)}'"
     )
@@ -252,7 +257,12 @@ def _maybe_realign_focus_to_representative_impl(
     row["target_focus_status"] = helper_status
     row["target_focus_descriptor"] = target_descriptor
     row["target_focus_fallback_used"] = False
-    focus_node = get_focus_fn(dev=dev, wait_seconds=0.35, allow_fallback_dump=False, mode="fast")
+    try:
+        focus_node = get_focus_fn(dev=dev, wait_seconds=0.35, allow_fallback_dump=False, mode="fast")
+    except Exception:
+        ledger.finish(attempt_id, status="UNAVAILABLE", result=command_result,
+                      restart=get_talkback_restart_event(client))
+        raise
     verified = _target_focus_matches(
         focus_node=focus_node,
         target_rid=selected_rid,
@@ -263,6 +273,9 @@ def _maybe_realign_focus_to_representative_impl(
     # Actual accessibility focus evidence is authoritative over command ACK.
     if verified and isinstance(focus_node, dict) and focus_node.get("accessibilityFocused") is True:
         row["target_focus_status"] = "TARGET_MATCHED"
+        entry = ledger.finish(attempt_id, status="TARGET_MATCHED", result=command_result,
+                              restart=get_talkback_restart_event(client))
+        log_fn(f"[TARGET_FOCUS][ledger_result] attempt_id='{attempt_id}' state='{entry['state']}' req_id='{entry.get('req_id') or ''}'")
         resolved_focus = extract_label_fn(focus_node) or label_blob_fn(focus_node) or selected_label or selected_rid
         log_fn(
             f"[TARGET_FOCUS][verified] target='{truncate_fn(selected_label or selected_rid, 96)}' "
@@ -271,6 +284,10 @@ def _maybe_realign_focus_to_representative_impl(
         if scenario_perf is not None:
             scenario_perf.realign_success_count += 1
         return True, "TARGET_MATCHED", focus_node
+    status = "NO_RESULT" if "로그를 찾지 못했습니다" in str(command_result.get("reason") or "") else helper_status
+    entry = ledger.finish(attempt_id, status=status, result=command_result,
+                          restart=get_talkback_restart_event(client))
+    log_fn(f"[TARGET_FOCUS][ledger_result] attempt_id='{attempt_id}' state='{entry['state']}' req_id='{entry.get('req_id') or ''}'")
     log_fn(
         f"[TARGET_FOCUS][failed] target='{truncate_fn(selected_label or selected_rid, 96)}' "
         f"status='{helper_status}' actual='{truncate_fn(extract_label_fn(focus_node) if isinstance(focus_node, dict) else '', 96)}'"

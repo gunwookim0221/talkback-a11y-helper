@@ -10,7 +10,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.worksheet.datavalidation import DataValidation
 
 from .models import RunMetadata, SourceRow
-from .source import deterministic_pass_sample, read_pass_rows, read_review_rows
+from .source import deterministic_pass_sample, diagnostic_population_digest, read_pass_rows, read_review_rows
 
 QA_REVIEW_COLUMNS = [
     "Review ID", "Scenario", "Focus Target", "Approximate Position", "Review Description",
@@ -71,7 +71,8 @@ def _write_summary(sheet: openpyxl.worksheet.worksheet.Worksheet, metadata: RunM
         ("TalkBack", metadata.talkback), ("App version", metadata.app), ("Locale", metadata.locale),
         ("Total raw rows", sum(counts.values())), ("PASS count", counts["PASS"]), ("WARN count", counts["WARN"]),
         ("FAIL count", counts["FAIL"]), ("QA Review Count", review_count),
-        ("Automation Diagnostic Count", len(diagnostics)), ("Scenario Count", len(scenario_counts)),
+        ("Automation Diagnostic Count", len(diagnostics)),
+        ("Scenario Count", len(scenario_counts)),
         ("QA 예상 검토 시간", f"약 {ceil(review_count * 1.5)}분"), ("Unknown Target count", unknown_count),
         ("Screenshot 없는 항목 count", screenshot_missing),
         ("Resource-derived Target count", resource_target_count),
@@ -88,6 +89,7 @@ def _write_summary(sheet: openpyxl.worksheet.worksheet.Worksheet, metadata: RunM
         ("미검토", '=COUNTIF(\'Review Checklist\'!$I:$I,"미검토")'),
         ("Review completion %", '=IF(B13=0,1,(B25+B26+B27+B28+B29)/B13)'),
         ("Overall Human Review Status", '=IF(B13=0,"COMPLETED_NO_ISSUE",IF(B30=B13,"NOT_STARTED",IF(B30>0,"IN_PROGRESS",IF(B29>0,"RETEST_REQUIRED",IF(B26>0,"COMPLETED_WITH_ISSUES","COMPLETED_NO_ISSUE")))))'),
+        ("Automation Diagnostic Population SHA256", diagnostic_population_digest(diagnostics)),
     ]
     for item in values:
         sheet.append(list(item))

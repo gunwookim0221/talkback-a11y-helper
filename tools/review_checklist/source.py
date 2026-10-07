@@ -1,5 +1,6 @@
 import hashlib
 import json
+from dataclasses import MISSING, asdict, fields
 from pathlib import Path
 from typing import Final
 
@@ -22,6 +23,11 @@ _ISSUE_TYPES: Final = {
     "EMPTY_SPEECH": "TalkBack 발화 없음",
     "NEW_ACCESSIBILITY_FAILURE": "신규 접근성 failure",
 }
+
+
+def diagnostic_population_digest(rows: list[SourceRow]) -> str:
+    population = [asdict(row) for row in rows if row.review_area == "AUTOMATION"]
+    return hashlib.sha256(json.dumps(population, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def _text(value: object) -> str:
@@ -278,6 +284,43 @@ def read_review_rows(source: Path) -> tuple[RunMetadata, list[SourceRow], list[d
                 warnings[key] = {"scenario": scenario, "warning_type": failure, "step": step, "terminal": _value(result, raw_row, "stop_reason", "final_result"), "count": "0"}
             warnings[key]["count"] = str(int(warnings[key]["count"]) + 1)
     workbook.close()
+    # The finished run summary owns the classified diagnostic population. It
+    # includes WARN/SHADOW and UNKNOWN signals, not only workbook FAIL rows.
+    summary = _load_json(run_root / "summary.json")
+    if "automation_diagnostics" in summary:
+        diagnostics = summary["automation_diagnostics"]
+        if not isinstance(diagnostics, list) or not all(isinstance(item, dict) for item in diagnostics):
+            raise ValueError("invalid canonical automation diagnostic population")
+        declared_count = summary.get("quality_issues_contract", {}).get("automation_diagnostic_count")
+        if declared_count is not None and declared_count != len(diagnostics):
+            raise ValueError("summary diagnostic population/count mismatch")
+        failures = [row for row in failures if row.review_area == "QA"]
+        for diagnostic in diagnostics:
+            scenario = _text(diagnostic.get("scenario_id"))
+            step = _text(diagnostic.get("step"))
+            raw_row = raw.get((scenario, step), {})
+            values = {field.name: "" for field in fields(SourceRow) if field.default is MISSING}
+            source_row = next((index for index, item in enumerate(result_rows, start=2)
+                               if _text(item.get("scenario_id")) == scenario and _text(item.get("step")) == step), 0)
+            values.update(
+                result_row=source_row, scenario_id=scenario, scenario_name=scenario,
+                step=step, screen=_text(diagnostic.get("context_type")),
+                automatic_result=_text(diagnostic.get("raw_final_result") or diagnostic.get("final_result")),
+                issue_type=_text(diagnostic.get("validator_status")),
+                mismatch_type=_text(diagnostic.get("mismatch_type")),
+                mismatch_reason=_text(diagnostic.get("failure_reason") or diagnostic.get("mismatch_type")),
+                classification_reason=_text(diagnostic.get("classification_reason")),
+                visible_text=_text(diagnostic.get("visible_label")),
+                speech=_text(diagnostic.get("merged_announcement")),
+                resource_id=_value(diagnostic, raw_row, "focus_view_id", "resource_id"),
+                bounds=_value(diagnostic, raw_row, "focus_bounds"),
+                traversal_state=_value(diagnostic, raw_row, "move_result", "row_source"),
+                recovery_state=_value(diagnostic, raw_row, "overlay_recovery_status", "recovery_status"),
+                terminal_state=_value(diagnostic, raw_row, "stop_reason", "failure_reason", "final_result"),
+                review_area="AUTOMATION", source_run_id=metadata.run_id,
+                evidence=f"{source.stem}.evidence.jsonl" if (run_root / f"{source.stem}.evidence.jsonl").is_file() else "Not available",
+            )
+            failures.append(SourceRow(**values))
     fail_scenarios = {row.scenario_id for row in failures}
     for warning in warnings.values():
         warning["actual_fail"] = "YES" if warning["scenario"] in fail_scenarios else "NO"
