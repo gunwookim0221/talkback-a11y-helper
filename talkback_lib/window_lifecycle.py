@@ -151,6 +151,7 @@ def parse_window_lifecycle_output(
         else "unavailable",
         "talkback_enabled": enabled if "Enabled services:" in accessibility_output else None,
         "talkback_pid": pid_match.group(1) if pid_match else None,
+        "talkback_pid_available": bool(pid_match),
         "command_output_truncated": len(str(raw_output or "")) > MAX_COMMAND_OUTPUT_CHARS,
     }
 
@@ -163,7 +164,7 @@ class WindowLifecycleRecorder:
         self.step: int | None = None
         self.output_path = Path(output_dir) / "talkback_window_lifecycle.jsonl" if output_dir else None
         self.event_count = 0
-        self.previous_pid: str | None = None
+        self.previous_pid: str | None = getattr(client, "_preflight_talkback_pid", None)
         self.saw_enabled_process_gap = False
         self.restart_event: dict[str, Any] | None = None
         self.current_focus_package: str | None = None
@@ -179,7 +180,7 @@ class WindowLifecycleRecorder:
         restart_detected = False
         process_event = "running" if current_pid else "missing_or_unavailable"
         if current_pid:
-            if self.saw_enabled_process_gap:
+            if self.saw_enabled_process_gap and self.previous_pid and str(current_pid) != self.previous_pid:
                 restart_detected = True
                 process_event = "returned_after_enabled_gap"
             elif self.previous_pid and current_pid != self.previous_pid:
@@ -233,8 +234,11 @@ class WindowLifecycleRecorder:
         )
         try:
             output = run(["shell", command], dev=self.dev, timeout=5.0)
-        except Exception:
-            return
+        except Exception as exc:
+            output = ""
+            command_error = f"{type(exc).__name__}:{exc}"[:160]
+        else:
+            command_error = None
         payload = parse_window_lifecycle_output(output or "")
         payload.update(
             {
@@ -247,6 +251,18 @@ class WindowLifecycleRecorder:
             }
         )
         self._track_talkback_process(payload)
+        if command_error:
+            payload["snapshot_error"] = command_error
+        self._write_artifact(payload)
+
+    def _write_artifact(self, payload: dict[str, Any]) -> None:
+        if self.output_path is not None:
+            try:
+                self.output_path.parent.mkdir(parents=True, exist_ok=True)
+                with self.output_path.open("a", encoding="utf-8") as stream:
+                    stream.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
+            except OSError as exc:
+                print(f"[TALKBACK_WINDOW] artifact_write_failed error='{type(exc).__name__}'")
 
     def capture(
         self,
@@ -314,13 +330,7 @@ class WindowLifecycleRecorder:
         if self.event_count < MAX_EVENTS:
             serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
             print(f"[TALKBACK_WINDOW] {serialized}")
-            if self.output_path is not None:
-                try:
-                    self.output_path.parent.mkdir(parents=True, exist_ok=True)
-                    with self.output_path.open("a", encoding="utf-8") as stream:
-                        stream.write(serialized + "\n")
-                except OSError as exc:
-                    print(f"[TALKBACK_WINDOW] artifact_write_failed error='{type(exc).__name__}'")
+            self._write_artifact(payload)
             self.event_count += 1
         return payload
 

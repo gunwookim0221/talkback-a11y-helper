@@ -1,4 +1,5 @@
 import threading
+from dataclasses import replace
 import subprocess
 import json
 import logging
@@ -932,7 +933,7 @@ class BatchRunManager:
                     runner_log_path = str(runner_log_file.relative_to(ROOT_DIR)) if runner_log_file.is_relative_to(ROOT_DIR) else str(runner_log_file)
                 for f in out_dir.iterdir():
                     if f.is_file():
-                        if f.name.endswith(".xlsx"):
+                        if f.name.endswith(".xlsx") and ".review." not in f.name and ".qa-" not in f.name:
                             xlsx_path = str(f.relative_to(ROOT_DIR)) if f.is_relative_to(ROOT_DIR) else str(f)
                         elif f.name.endswith(".log") and ".normal" in f.name:
                             log_path = str(f.relative_to(ROOT_DIR)) if f.is_relative_to(ROOT_DIR) else str(f)
@@ -1546,6 +1547,7 @@ class BatchRunManager:
                     log_file.write(f"{line}\n")
                 if not preflight.get("ok"):
                     raise Exception(f"Preflight blocked: {preflight.get('reason')}")
+                spec = replace(spec, preflight_talkback_pid=preflight.get("talkback_pid"))
 
                 if self._is_stop_requested():
                     log_file.write("\n[BATCH] stop_requested before execution\n")

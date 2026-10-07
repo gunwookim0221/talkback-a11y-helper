@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import os
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -8,6 +9,7 @@ from typing import Callable
 
 from talkback_lib import A11yAdbClient
 from talkback_lib.constants import DEFAULT_ADB_PATH
+from talkback_lib.window_lifecycle import TALKBACK_PACKAGE
 from tb_runner.accessibility_preflight import (
     HELPER_SERVICE_COMPONENT,
     AccessibilityPreflightResult,
@@ -299,6 +301,15 @@ def run_preflight(
     log_fn(f"[PREFLIGHT] device_connected {device_connected['status']}")
     if device_connected["status"] == "FAIL":
         return _early_failure("device_connected_failed", device_connected, _not_run(), _not_run(), _not_run())
+
+    # Seed before any app transition. Frontend preflight may have captured an
+    # even earlier PID; never overwrite it with a process that already restarted.
+    preflight_pid = os.environ.get("TB_TALKBACK_PREFLIGHT_PID", "").strip()
+    if not preflight_pid.isdigit():
+        pid_ok, pid_output = adb_runner(adb_path, serial, "shell", "pidof", TALKBACK_PACKAGE, timeout=5.0)
+        preflight_pid = pid_output.strip() if pid_ok and pid_output.strip().isdigit() else ""
+    client._preflight_talkback_pid = preflight_pid or None
+    log_fn(f"[PREFLIGHT][talkback_pid] pid='{preflight_pid}' available={str(bool(preflight_pid)).lower()}")
 
     log_fn("[PREFLIGHT] wake_screen start")
     screen_awake = wake_screen(serial=serial, adb_path=adb_path, adb_runner=adb_runner, sleep_fn=sleep_fn)

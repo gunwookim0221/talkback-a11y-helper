@@ -181,3 +181,55 @@ def test_window_lifecycle_configuration_is_opt_in(monkeypatch):
 
     assert configure_window_lifecycle(client, "serial", "life_main", None) is None
     assert getattr(client, "_window_lifecycle_recorder") is None
+
+
+def test_first_runtime_sample_compares_preflight_pid(tmp_path):
+    for runtime_pid, expected_restart in (("18593", False), ("29833", True)):
+        class Client:
+            _preflight_talkback_pid = "18593"
+
+            def _run(self, _args, **_kwargs):
+                return _snapshot(runtime_pid)
+
+        client = Client()
+        recorder = configure_window_lifecycle(client, "serial", "home_main", tmp_path, enabled=True)
+        sample = recorder.capture("scenario_start", "SCENARIO_START", step=0)
+        assert sample["previous_talkback_pid"] == "18593"
+        assert sample["talkback_restart_detected"] is expected_restart
+        assert bool(get_talkback_restart_event(client)) is expected_restart
+
+
+def test_unavailable_pid_then_same_pid_does_not_fabricate_restart(tmp_path):
+    class Client:
+        _preflight_talkback_pid = "18593"
+
+        def __init__(self):
+            self.outputs = [_snapshot(""), _snapshot("18593")]
+
+        def _run(self, _args, **_kwargs):
+            return self.outputs.pop(0)
+
+    recorder = WindowLifecycleRecorder(Client(), "serial", "home_main", tmp_path)
+    missing = recorder.capture("before", "ENTRY")
+    returned = recorder.capture("after", "ENTRY")
+    assert missing["talkback_pid_available"] is False
+    assert missing["talkback_process_event"] == "enabled_but_pid_missing"
+    assert returned["talkback_restart_detected"] is False
+    assert recorder.restart_event is None
+
+
+def test_capped_unavailable_pid_probe_is_explicit_in_artifact(tmp_path):
+    class Client:
+        _preflight_talkback_pid = "18593"
+
+        def _run(self, _args, **_kwargs):
+            raise TimeoutError("probe unavailable")
+
+    recorder = WindowLifecycleRecorder(Client(), "serial", "home_main", tmp_path)
+    recorder.event_count = MAX_EVENTS
+    recorder.capture("after", "SMART_NEXT")
+    sample = json.loads(recorder.output_path.read_text(encoding="utf-8"))
+    assert sample["talkback_pid_available"] is False
+    assert sample["safety_probe_only"] is True
+    assert sample["snapshot_error"].startswith("TimeoutError:")
+    assert recorder.restart_event is None

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
+from talkback_lib.window_lifecycle import TALKBACK_PACKAGE
 
 ONECONNECT_PACKAGE = "com.samsung.android.oneconnect"
 FATAL_EXCEPTION_TOKEN = "FATAL EXCEPTION"
@@ -103,8 +104,9 @@ class CrashEventStore:
 
 
 class OneConnectCrashDetector:
-    def __init__(self, store: CrashEventStore) -> None:
+    def __init__(self, store: CrashEventStore, *, process: str = ONECONNECT_PACKAGE) -> None:
         self.store = store
+        self.process = process
         self._current_block: list[str] = []
         self._in_fatal_block = False
 
@@ -146,14 +148,14 @@ class OneConnectCrashDetector:
 
     def _event_from_block(self, block: list[str]) -> CrashEvent | None:
         text = "".join(block)
-        if FATAL_EXCEPTION_TOKEN not in text or PROCESS_TOKEN not in text:
+        if FATAL_EXCEPTION_TOKEN not in text or f"Process: {self.process}," not in text:
             return None
         exception = _extract_exception(block)
         top_frame = _extract_top_frame(block)
         return CrashEvent(
             crash_event_id=self.store.next_event_id(),
-            crash_type="CONFIRMED_CRASH",
-            process=ONECONNECT_PACKAGE,
+            crash_type="CONFIRMED_CRASH" if self.process == ONECONNECT_PACKAGE else "TALKBACK_CRASH",
+            process=self.process,
             exception=exception,
             top_frame=top_frame,
             timestamp=_extract_timestamp(block) or datetime.now(timezone.utc).isoformat(),
@@ -197,6 +199,14 @@ class LogcatCapture:
             helper_dump_factory=helper_dump_factory,
         )
         self.detector = OneConnectCrashDetector(self.store)
+        # Keep TalkBack crashes out of the application's crash/recovery population.
+        self.talkback_detector = OneConnectCrashDetector(
+            CrashEventStore(output_dir / "talkback_monitor", serial=serial,
+                            runner_log_path=runner_log_path, run_factory=run_factory,
+                            helper_dump_factory=helper_dump_factory),
+            process=TALKBACK_PACKAGE,
+        )
+        self._run_factory = run_factory
         self._popen_factory = popen_factory
         self._process: subprocess.Popen[str] | None = None
         self._thread: threading.Thread | None = None
@@ -216,6 +226,7 @@ class LogcatCapture:
         )
         self._thread = threading.Thread(target=self._read_loop, daemon=True)
         self._thread.start()
+        self._capture_talkback_exit_info("start")
 
     def stop(self, *, timeout: float = 3.0) -> list[CrashEvent]:
         process = self._process
@@ -229,7 +240,21 @@ class LogcatCapture:
         if self._thread:
             self._thread.join(timeout=timeout)
         self._record_events(self.detector.finish())
+        self._record_events(self.talkback_detector.finish())
+        self._capture_talkback_exit_info("end")
         return list(self.events)
+
+    def _capture_talkback_exit_info(self, phase: str) -> None:
+        path = self.output_dir / f"talkback_exit_info_{phase}.txt"
+        try:
+            result = self._run_factory(
+                _adb_command(self.serial, ["shell", "dumpsys", "activity", "exit-info", TALKBACK_PACKAGE]),
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                encoding="utf-8", errors="replace", timeout=8.0, check=False,
+            )
+            path.write_text(str(result.stdout or ""), encoding="utf-8")
+        except Exception as exc:
+            path.write_text(f"UNAVAILABLE: {type(exc).__name__}: {exc}", encoding="utf-8")
 
     def _read_loop(self) -> None:
         try:
@@ -239,7 +264,9 @@ class LogcatCapture:
                     return
                 for line in stdout:
                     log_file.write(line)
+                    log_file.flush()
                     self._record_events(self.detector.feed_line(line))
+                    self._record_events(self.talkback_detector.feed_line(line))
         except Exception:
             return
 

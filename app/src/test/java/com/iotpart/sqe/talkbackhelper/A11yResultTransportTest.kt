@@ -7,6 +7,27 @@ import java.util.Base64
 
 class A11yResultTransportTest {
     @Test
+    fun allResultTypesShareBoundaryAndDigestContract() {
+        for (prefix in listOf("TARGET_ACTION_RESULT", "SMART_NAV_RESULT", "EVIDENCE_EVENTS_RESULT")) {
+            for (size in listOf(1000, 3999, 4096, 4101, 8192, 16384)) {
+                val serialized = "{\"reqId\":\"req\",\"data\":\"" + "가".repeat(size / 3) + "\"}"
+                val records = A11yResultTransport.encode(prefix, "req", serialized)
+                assertEquals(records, A11yResultTransport.encode(prefix, "req", serialized))
+                assertTrue(records.all { it.toByteArray(Charsets.UTF_8).size < 2700 })
+                if (records.first().contains("_CHUNK ")) {
+                    val decoded = records.map { Base64.getDecoder().decode(it.substringAfter(" payload=")) }
+                        .reduce { left, right -> left + right }
+                    assertEquals(serialized, decoded.toString(Charsets.UTF_8))
+                    val digest = java.security.MessageDigest.getInstance("SHA-256").digest(decoded)
+                        .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+                    records.forEachIndexed { index, record ->
+                        assertTrue(record.contains("index=$index count=${records.size} sha256=$digest "))
+                    }
+                } else assertEquals("$prefix $serialized", records.single())
+            }
+        }
+    }
+    @Test
     fun smallResultKeepsLegacyLogFormat() {
         val serialized = "{\"reqId\":\"req-1\",\"success\":true}"
         val records = A11yResultTransport.encode("TARGET_ACTION_RESULT", "req-1", serialized)

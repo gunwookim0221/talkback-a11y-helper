@@ -1161,7 +1161,7 @@ class A11yHelperService : AccessibilityService() {
                 put("flags", org.json.JSONArray(flags))
             }
 
-            Log.i(TAG, "SMART_NAV_RESULT $resultJson")
+            // The receiver emits the final result after attaching evidence.
             Log.i(
                 TAG,
                 "[SMART_NEXT][trace_enter] stage='after_final_response' status='$normalizedStatus' detail='$detail'"

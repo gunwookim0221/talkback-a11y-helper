@@ -247,7 +247,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         val reqId = parseReqId(intent)
         val result = A11yEvidence.snapshotAndClear(reqId)
         Log.i(TAG, "[EVIDENCE][helper_response] requestId=$reqId EVIDENCE_EVENTS_snapshot=${result.optJSONArray("evidenceEvents")?.length() ?: 0}")
-        Log.i(TAG, "EVIDENCE_EVENTS_RESULT $result")
+        A11yResultTransport.encode("EVIDENCE_EVENTS_RESULT", reqId, result.toString()).forEach { Log.i(TAG, it) }
     }
 
     private fun handleFocusInBounds(intent: Intent) {
@@ -383,11 +383,9 @@ class A11yCommandReceiver : BroadcastReceiver() {
                     org.json.JSONObject().put("status", status).put("detail", detail)
                 )
                 A11yEvidence.attach(result, reqId)
-                // The runner reads command results from logcat.  The service logs the
-                // pre-attachment result, so log the final, evidence-enriched payload here.
-                if (A11yEvidence.hasCorrelation(reqId)) {
-                    Log.i(TAG, "SMART_NAV_RESULT $result")
-                }
+                // Emit exactly one final payload per reqId, after evidence attachment.
+                // A pre-attachment result can race the collector or duplicate chunks.
+                A11yResultTransport.encode("SMART_NAV_RESULT", reqId, result.toString()).forEach { Log.i(TAG, it) }
                 val reply = Intent("SMART_NAV_RESULT").apply {
                     setPackage(context.packageName)
                     putExtra("json", result.toString())
@@ -548,7 +546,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
                 if (!status.isNullOrBlank()) put("status", status)
             }
             .toString()
-        Log.w(TAG, "$resultTag $payload")
+        A11yResultTransport.encode(resultTag, reqId, payload).forEach { Log.w(TAG, it) }
     }
 
     private fun logDumpTreeFailure(reqId: String, reason: String) {

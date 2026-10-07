@@ -46,6 +46,28 @@ def _smartthings_xml() -> str:
     return f'<hierarchy><node package="{core_preflight.SMARTTHINGS_PACKAGE}" /></hierarchy>'
 
 
+def test_core_preflight_preserves_earlier_frontend_pid(monkeypatch):
+    from talkback_lib.window_lifecycle import configure_window_lifecycle
+    from tb_runner.collection_flow import _mark_start_pipeline_talkback_restart
+    from types import SimpleNamespace
+    monkeypatch.setenv("TB_TALKBACK_PREFLIGHT_PID", "18593")
+    client = _Client()
+    settings = AccessibilitySettings("helper", "1")
+    monkeypatch.setattr(core_preflight, "ensure_accessibility_service_enabled",
+                        lambda **kwargs: AccessibilityPreflightResult(True, "ok", settings, settings, False, True))
+    result = core_preflight.run_preflight(client=client, serial="SERIAL", log_fn=lambda message: None,
+                                         adb_runner=_successful_adb, sleep_fn=lambda seconds: None)
+    assert result.ok
+    assert client._preflight_talkback_pid == "18593"
+    client._run = lambda *a, **kw: "__TB_ACTIVITY__\n__TB_ACCESSIBILITY__\n__TB_PID__\n29833"
+    recorder = configure_window_lifecycle(client, "SERIAL", "home_main", None, enabled=True)
+    recorder.capture("scenario_start", "SCENARIO_START", step=0)
+    start = SimpleNamespace(should_enter_main_loop=True)
+    assert _mark_start_pipeline_talkback_restart(client=client, result=start, scenario_id="home_main", phase="scenario_start")
+    assert start.failure_reason == "talkback_restarted"
+    assert start.should_enter_main_loop is False
+
+
 def test_core_preflight_uses_one_serial_for_helper_and_talkback(monkeypatch):
     client = _Client()
     settings = AccessibilitySettings("helper", "1")

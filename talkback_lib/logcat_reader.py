@@ -55,7 +55,7 @@ class LogcatReader:
             if marker_index < 0:
                 continue
             record = line[marker_index + len(marker) :].strip()
-            if f"reqId={req_id}" not in record:
+            if not re.match(rf"^reqId={re.escape(req_id)}(?:\s|$)", record):
                 continue
             match = pattern.fullmatch(record)
             if not match:

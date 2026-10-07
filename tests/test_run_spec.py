@@ -4,6 +4,12 @@ import os
 from pathlib import Path
 
 from qa_frontend.backend.runtime_setup import prepare_runtime
+
+
+def test_run_spec_passes_only_explicit_preflight_pid():
+    from tb_runner.run_spec import RunSpec
+    assert RunSpec(preflight_talkback_pid="18593").build_subprocess_env({})["TB_TALKBACK_PREFLIGHT_PID"] == "18593"
+    assert "TB_TALKBACK_PREFLIGHT_PID" not in RunSpec().build_subprocess_env({"TB_TALKBACK_PREFLIGHT_PID": "stale"})
 from tb_runner.run_selection import apply_run_selection
 from tb_runner.run_spec import RunContext, RunSpec, resolve_identity_feature_flags
 

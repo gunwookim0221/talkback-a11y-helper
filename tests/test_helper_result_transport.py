@@ -2,19 +2,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import pytest
 
 from talkback_lib import A11yAdbClient
 from talkback_lib.logcat_reader import LogcatReader
 
 
-def _chunk_records(req_id: str, payload: str, *, chunk_size: int = 1200) -> list[str]:
+def _chunk_records(req_id: str, payload: str, *, chunk_size: int = 1200, prefix: str = "TARGET_ACTION_RESULT") -> list[str]:
     encoded = payload.encode("utf-8")
     chunks = [encoded[index : index + chunk_size] for index in range(0, len(encoded), chunk_size)]
     digest = hashlib.sha256(encoded).hexdigest()
     import base64
 
     return [
-        "A11Y_HELPER: TARGET_ACTION_RESULT_CHUNK "
+        f"A11Y_HELPER: {prefix}_CHUNK "
         f"reqId={req_id} index={index} count={len(chunks)} sha256={digest} "
         f"payload={base64.b64encode(chunk).decode('ascii')}"
         for index, chunk in enumerate(chunks)
@@ -131,3 +132,41 @@ def test_truncated_legacy_target_result_stays_parse_error():
     assert result["success"] is False
     assert result["status"] == "parse_error"
     assert result["reqId"] == "partial"
+
+
+@pytest.mark.parametrize("prefix", ["SMART_NAV_RESULT", "EVIDENCE_EVENTS_RESULT"])
+@pytest.mark.parametrize("size", [1000, 3999, 4096, 4101, 8192, 16384])
+def test_non_target_transport_unicode_escapes_boundaries(monkeypatch, prefix, size):
+    payload = json.dumps({"reqId": "result", "success": True, "data": '위치 설정 "완료"\n\\' + "가" * (size // 3)}, ensure_ascii=False)
+    records = _chunk_records("result", payload, prefix=prefix)
+    client = A11yAdbClient(start_monitor=False)
+    monkeypatch.setattr(client._logcat_reader, "dump_filtered", lambda dev=None: "\n".join(reversed(records)))
+    assert client._read_log_result(None, prefix, "result", wait_seconds=0.1) == json.loads(payload)
+
+
+@pytest.mark.parametrize("prefix", ["SMART_NAV_RESULT", "EVIDENCE_EVENTS_RESULT"])
+@pytest.mark.parametrize("fault,reason", [("missing", "incomplete_chunked_payload"), ("duplicate", "duplicate_chunk"), ("digest", "chunk_digest_mismatch")])
+def test_non_target_transport_rejects_incomplete_corrupt_payload(monkeypatch, prefix, fault, reason):
+    payload = json.dumps({"reqId": "result", "success": True, "data": "x" * 8000})
+    records = _chunk_records("result", payload, prefix=prefix)
+    if fault == "missing":
+        records.pop(1)
+    elif fault == "duplicate":
+        records.append(records[0])
+    else:
+        digest = hashlib.sha256(payload.encode()).hexdigest()
+        records = [record.replace(digest, "0" * 64) for record in records]
+    client = A11yAdbClient(start_monitor=False)
+    monkeypatch.setattr(client._logcat_reader, "dump_filtered", lambda dev=None: "\n".join(records))
+    result = client._read_log_result(None, prefix, "result", wait_seconds=0.07)
+    assert result["success"] is False
+    assert result["status"] == "transport_error"
+    assert result["reason"] == reason
+
+
+@pytest.mark.parametrize("prefix", ["SMART_NAV_RESULT", "EVIDENCE_EVENTS_RESULT"])
+def test_non_target_legacy_single_line(monkeypatch, prefix):
+    payload = {"reqId": "legacy", "success": True, "message": "한국어"}
+    client = A11yAdbClient(start_monitor=False)
+    monkeypatch.setattr(client._logcat_reader, "dump_filtered", lambda dev=None: f"A11Y_HELPER: {prefix} {json.dumps(payload)}")
+    assert client._read_log_result(None, prefix, "legacy", wait_seconds=0.1) == payload

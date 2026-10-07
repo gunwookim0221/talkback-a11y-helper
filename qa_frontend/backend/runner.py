@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import threading
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -268,6 +269,7 @@ class RunManager:
                     sleep_prevention_enabled = False
                     return self._status_locked()
 
+                spec = replace(spec, preflight_talkback_pid=preflight.get("talkback_pid"))
                 execution = start_execution(
                     spec=spec,
                     script_path=SCRIPT_PATH,

@@ -523,6 +523,12 @@ def _run_launch_surface_preflight(
     adb_runner: Callable[[list[str], float], dict[str, object]],
     sleep_fn: Callable[[float], None],
 ) -> dict[str, object]:
+    # Capture before launch_smartthings so a launch/entry restart remains visible
+    # to the subprocess's first lifecycle sample.
+    pid_result = adb_runner(["shell", "pidof", "com.samsung.android.accessibility.talkback"], 5.0)
+    preflight_pid = str(pid_result.get("stdout") or "").strip()
+    if not pid_result.get("ok") or not preflight_pid.isdigit():
+        preflight_pid = None
     launch_status = launch_smartthings(
         normalized_launch_mode,
         adb_runner=adb_runner,
@@ -569,6 +575,7 @@ def _run_launch_surface_preflight(
 
     return {
         "state": "passed",
+        "talkback_pid": preflight_pid,
         "ok": True,
         "reason": "ok",
         "launch_mode": normalized_launch_mode,
@@ -602,6 +609,7 @@ def format_preflight_log_lines(preflight: dict[str, object]) -> list[str]:
     internal_popup_status = _dict(preflight.get("internal_popup_status"))
     surface_status = _dict(preflight.get("popup_status")).get("surface_status") or {}
     lines = [
+        f"[QA_FRONTEND][preflight][talkback_pid] pid='{preflight.get('talkback_pid') or ''}'",
         f"[QA_FRONTEND][preflight][adb] status='{preflight.get('adb_state', 'unknown')}'",
         f"[QA_FRONTEND][preflight][helper] status='{preflight.get('helper_state', 'unknown')}'",
         f"[QA_FRONTEND][preflight][talkback] status='{preflight.get('talkback_state', 'unknown')}'",
