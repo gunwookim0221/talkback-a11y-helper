@@ -5,8 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 
 class A11yCommandReceiver : BroadcastReceiver() {
     companion object {
@@ -58,8 +56,6 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val EXTRA_REQ_ID = "reqId"
         private const val EXTRA_COMMAND = "command"
         private const val DEFAULT_REQ_ID = "none"
-        private val smartNextExecutor: ExecutorService = Executors.newSingleThreadExecutor()
-        private val focusInBoundsExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     }
 
     override fun onReceive(context: Context, intent: Intent?) {
@@ -265,22 +261,15 @@ class A11yCommandReceiver : BroadcastReceiver() {
             TAG,
             "[DEBUG][FOCUS_IN_BOUNDS][recv] reqId=$reqId bounds='$bounds' preferEmptyState=$preferEmptyState excludeTopChrome=$excludeTopChrome excludeBottomNav=$excludeBottomNav"
         )
-        val pendingResult = goAsync()
-        focusInBoundsExecutor.execute {
-            try {
+        dispatchFocusCommand(service, "FOCUS_IN_BOUNDS", reqId) {
                 service.performFocusInBounds(
                     boundsString = bounds,
                     preferEmptyState = preferEmptyState,
                     excludeTopChrome = excludeTopChrome,
                     excludeBottomNav = excludeBottomNav,
-                    reqId = reqId
+                    reqId = reqId,
+                    emitResult = false
                 )
-            } catch (error: Throwable) {
-                Log.e(TAG, "[RECOVERY][helper_failure] requestId=$reqId error=${error.javaClass.simpleName}", error)
-                logFailure("TARGET_ACTION_RESULT", reqId, "focus_in_bounds_exception:${error.javaClass.simpleName}")
-            } finally {
-                pendingResult.finish()
-            }
         }
     }
 
@@ -297,17 +286,21 @@ class A11yCommandReceiver : BroadcastReceiver() {
             label = intent.getStringExtra(EXTRA_TARGET_LABEL)?.trim().orEmpty(),
             className = intent.getStringExtra(EXTRA_CLASS_NAME)?.trim().orEmpty()
         )
-        val pendingResult = goAsync()
-        focusInBoundsExecutor.execute {
-            try {
-                service.performTargetFocusCommit(descriptor, reqId)
-            } catch (error: Throwable) {
-                Log.e(TAG, "[TARGET_FOCUS_COMMIT] reqId=$reqId error=${error.javaClass.simpleName}", error)
-                logFailure("TARGET_ACTION_RESULT", reqId, "target_focus_exception:${error.javaClass.simpleName}")
-            } finally {
-                pendingResult.finish()
-            }
+        dispatchFocusCommand(service, "TARGET_FOCUS_COMMIT", reqId) {
+            service.performTargetFocusCommit(descriptor, reqId, emitResult = false)
         }
+    }
+
+    private fun dispatchFocusCommand(service: A11yHelperService, command: String, reqId: String,
+                                     work: () -> org.json.JSONObject) {
+        val accepted = service.focusCommandDispatcher.submit(reqId, work, onResult = { result ->
+            A11yResultTransport.encode("TARGET_ACTION_RESULT", reqId, result.toString()).forEach { Log.i(TAG, it) }
+            Log.i(TAG, "[COMMAND_TRANSPORT] command=$command req_id=$reqId stage=result_emitted")
+        }, onFailure = { error ->
+            Log.e(TAG, "[COMMAND_TRANSPORT] command=$command req_id=$reqId stage=work_failed", error)
+            logFailure("TARGET_ACTION_RESULT", reqId, "${command.lowercase()}_exception:${error.javaClass.simpleName}")
+        })
+        Log.i(TAG, "[COMMAND_TRANSPORT] command=$command req_id=$reqId stage=receiver_ack accepted=$accepted pending_broadcast=false")
     }
 
 
@@ -361,16 +354,11 @@ class A11yCommandReceiver : BroadcastReceiver() {
             logFailure("SMART_NAV_RESULT", reqId, "Accessibility Service is null or not running")
             return
         }
-        val pendingResult = goAsync()
-        smartNextExecutor.execute {
+        // The accessibility service is already bound and owns this work.
+        // Keeping goAsync pending until navigation ends makes am broadcast wait
+        // and caused the observed 30s ADB timeouts / ~60s broadcast ANR kills.
+        val accepted = service.smartNextDispatcher.submit(reqId, onResult = { result ->
             try {
-                logSmartNextDiag(reqId, "receiver_executor_start", "thread=${Thread.currentThread().name}")
-                Log.i(
-                    TAG,
-                    "[SMART_NEXT][trace_enter] stage='receiver_executor_start' req_id='$reqId'"
-                )
-                Log.i(TAG, "[SMART_NEXT] async execution start reqId=$reqId receiverVersion=$VERSION")
-                val result = service.moveFocusSmart(reqId)
                 val status = result.optString("status", "unknown")
                 val detail = result.optString("detail", "unknown")
                 Log.i(
@@ -390,13 +378,17 @@ class A11yCommandReceiver : BroadcastReceiver() {
                     setPackage(context.packageName)
                     putExtra("json", result.toString())
                 }
-                context.sendBroadcast(reply)
+                runCatching { context.sendBroadcast(reply) }
+                    .onFailure { Log.w(TAG, "[SMART_NEXT] optional reply broadcast failed reqId=$reqId", it) }
                 Log.i(
                     TAG,
                     "[SMART_NEXT][trace_enter] stage='after_final_response' status='$status' detail='$detail'"
                 )
                 logSmartNextDiag(reqId, "receiver_broadcast_sent", "status=$status detail=$detail")
             } catch (t: Throwable) {
+                Log.e(TAG, "[SMART_NEXT] result emission failed reqId=$reqId", t)
+            }
+        }, onFailure = { t ->
                 Log.e(TAG, "[SMART_NEXT] async execution failed reqId=$reqId", t)
                 logSmartNextDiag(
                     reqId,
@@ -413,10 +405,8 @@ class A11yCommandReceiver : BroadcastReceiver() {
                     reqId,
                     org.json.JSONObject().put("status", "failed").put("detail", "async_exception")
                 )
-            } finally {
-                pendingResult.finish()
-            }
-        }
+        })
+        logSmartNextDiag(reqId, "receiver_ack", "accepted=$accepted pending_broadcast=false")
     }
 
     private fun handleClickFocused(intent: Intent) {

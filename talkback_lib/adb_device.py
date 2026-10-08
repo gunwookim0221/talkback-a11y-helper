@@ -10,6 +10,18 @@ from typing import Any
 from talkback_lib.constants import DEFAULT_TIMEOUT_SECONDS
 
 
+class AdbCommandFailure(RuntimeError):
+    """Delivery failure for commands that require an explicit transport verdict."""
+
+    def __init__(self, reason: str, command: list[str], timeout: float, *, stdout: str = "", stderr: str = ""):
+        super().__init__(reason)
+        self.reason = reason
+        self.command = command
+        self.timeout = timeout
+        self.stdout = stdout
+        self.stderr = stderr
+
+
 class AdbDevice:
     def __init__(self, adb_path: str, resolve_serial) -> None:
         self.adb_path = adb_path
@@ -24,7 +36,7 @@ class AdbDevice:
             return 5.0
         return DEFAULT_TIMEOUT_SECONDS
 
-    def _run_adb_command(self, args: list[str], dev: Any = None, timeout: float | None = DEFAULT_TIMEOUT_SECONDS) -> str:
+    def _run_adb_command(self, args: list[str], dev: Any = None, timeout: float | None = DEFAULT_TIMEOUT_SECONDS, *, raise_on_failure: bool = False) -> str:
         serial = self._resolve_serial(dev)
         cmd = [self.adb_path]
         if serial:
@@ -43,22 +55,32 @@ class AdbDevice:
             )
         except KeyboardInterrupt:
             raise
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
             print(
                 f"[ERROR][adb] timeout after {effective_timeout:.1f}s: {' '.join(cmd)}"
             )
+            if raise_on_failure:
+                def decode(value):
+                    return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value or "")
+                raise AdbCommandFailure("adb_command_timeout", cmd, effective_timeout, stdout=decode(exc.stdout), stderr=decode(exc.stderr)) from exc
             return ""
         except FileNotFoundError as exc:
             print(f"[ERROR][adb] executable_not_found path='{self.adb_path}' error='{exc}'")
+            if raise_on_failure:
+                raise AdbCommandFailure("adb_executable_not_found", cmd, effective_timeout, stderr=str(exc)) from exc
             return ""
         except OSError as exc:
             print(f"[ERROR][adb] execution_failed cmd='{' '.join(cmd)}' error='{exc}'")
+            if raise_on_failure:
+                raise AdbCommandFailure("adb_execution_failed", cmd, effective_timeout, stderr=str(exc)) from exc
             return ""
         if proc.returncode != 0:
             stderr = (proc.stderr or "").strip()
             print(f"[ERROR] 명령 실행 실패(returncode={proc.returncode}): {' '.join(cmd)}")
             if stderr:
                 print(f"[ERROR] stderr: {stderr}")
+            if raise_on_failure:
+                raise AdbCommandFailure("adb_command_failed", cmd, effective_timeout, stdout=proc.stdout or "", stderr=stderr)
             return ""
         return proc.stdout.strip()
 

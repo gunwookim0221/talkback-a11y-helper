@@ -19,6 +19,8 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 
 class A11yHelperService : AccessibilityService() {
+    internal var smartNextDispatcher = SmartNextDispatcher { reqId -> moveFocusSmart(reqId) }
+    internal var focusCommandDispatcher = AccessibilityCommandDispatcher()
     companion object {
         @Volatile
         var instance: A11yHelperService? = null
@@ -65,6 +67,8 @@ class A11yHelperService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        smartNextDispatcher.close()
+        focusCommandDispatcher.close()
         super.onDestroy()
         if (instance === this) {
             instance = null
@@ -374,9 +378,11 @@ class A11yHelperService : AccessibilityService() {
         preferEmptyState: Boolean,
         excludeTopChrome: Boolean,
         excludeBottomNav: Boolean,
-        reqId: String = "none"
+        reqId: String = "none",
+        emitResult: Boolean = true
     ): JSONObject {
         val recoveryEvidence = A11yEvidence.hasCorrelation(reqId)
+        Log.i(TAG, "[COMMAND_TRANSPORT] command=FOCUS_IN_BOUNDS req_id=$reqId stage=service_work_start")
         if (recoveryEvidence) {
             Log.i(
                 TAG,
@@ -395,7 +401,7 @@ class A11yHelperService : AccessibilityService() {
                 put("action", "FOCUS_IN_BOUNDS")
                 put("bounds", boundsString)
             }
-            logTargetActionResult(reqId, resultJson)
+            if (emitResult) logTargetActionResult(reqId, resultJson)
             return resultJson
         }
 
@@ -563,7 +569,7 @@ class A11yHelperService : AccessibilityService() {
                     "serializedLength=${resultJson.toString().length}"
             )
         }
-        logTargetActionResult(reqId, resultJson)
+        if (emitResult) logTargetActionResult(reqId, resultJson)
         A11yEvidence.emit(
             "HELPER_ACK_SENT",
             reqId,
@@ -577,11 +583,13 @@ class A11yHelperService : AccessibilityService() {
 
     internal fun performTargetFocusCommit(
         descriptor: TargetFocusMatcher.Descriptor,
-        reqId: String = "none"
+        reqId: String = "none",
+        emitResult: Boolean = true
     ): JSONObject {
+        Log.i(TAG, "[COMMAND_TRANSPORT] command=TARGET_FOCUS_COMMIT req_id=$reqId stage=service_work_start")
         val root = rootInActiveWindow
         if (root == null) return emitTargetFocusResult(
-            reqId, descriptor, "ERROR", false, false, null, null, "root_unavailable"
+            reqId, descriptor, "ERROR", false, false, null, null, "root_unavailable", emitResult
         )
         val nodes = mutableListOf<AccessibilityNodeInfo>()
         val queue = ArrayDeque<AccessibilityNodeInfo>()
@@ -609,7 +617,7 @@ class A11yHelperService : AccessibilityService() {
                 else -> "ERROR"
             }
             return emitTargetFocusResult(reqId, descriptor, status, false, false, null,
-                root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY), status.lowercase())
+                root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY), status.lowercase(), emitResult)
         }
         val target = nodes[resolution.index]
         val before = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
@@ -635,7 +643,7 @@ class A11yHelperService : AccessibilityService() {
         }
         return emitTargetFocusResult(
             reqId, descriptor, status, matched, actionAccepted, target, actual,
-            if (matched) "actual_accessibility_focus_matches_target" else status.lowercase()
+            if (matched) "actual_accessibility_focus_matches_target" else status.lowercase(), emitResult
         )
     }
 
@@ -647,7 +655,8 @@ class A11yHelperService : AccessibilityService() {
         actionAccepted: Boolean,
         target: AccessibilityNodeInfo?,
         actual: AccessibilityNodeInfo?,
-        reason: String
+        reason: String,
+        emitResult: Boolean = true
     ): JSONObject {
         val result = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
@@ -669,7 +678,7 @@ class A11yHelperService : AccessibilityService() {
         recordActionFocusEvidence(reqId)
         A11yEvidence.attach(result, reqId)
         Log.i(TAG, "[TARGET_FOCUS_COMMIT] reqId=$reqId status=$status success=$success actionAccepted=$actionAccepted reason='$reason'")
-        logTargetActionResult(reqId, result)
+        if (emitResult) logTargetActionResult(reqId, result)
         A11yEvidence.emit("HELPER_ACK_SENT", reqId,
             JSONObject().put("resultTag", "TARGET_ACTION_RESULT").put("success", success).put("status", status))
         return result
@@ -1051,6 +1060,7 @@ class A11yHelperService : AccessibilityService() {
     }
 
     fun moveFocusSmart(reqId: String = "none"): JSONObject {
+        Log.i(TAG, "[SMART_NEXT_DIAG] req_id=$reqId stage=service_work_start thread=${Thread.currentThread().name}")
         A11yHistoryManager.activeSmartNextReqId = reqId
         try {
             val currentNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)

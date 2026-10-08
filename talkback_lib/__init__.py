@@ -746,6 +746,9 @@ class A11yAdbClient:
         correlation_extras = self._evidence_correlation_extras()
         if correlation_extras and "evidenceTransactionId" not in cmd:
             cmd.extend(correlation_extras)
+        if action in {ACTION_SMART_NEXT, ACTION_FOCUS_IN_BOUNDS, ACTION_TARGET_FOCUS_COMMIT}:
+            # A delivery timeout must not be mistaken for an empty successful ACK.
+            return self._adb_device._run_adb_command(cmd, dev=dev, raise_on_failure=True)
         return self._run(cmd, dev=dev)
 
     @staticmethod
@@ -836,9 +839,11 @@ class A11yAdbClient:
         poll_interval_sec: float = 0.25,
     ) -> dict[str, Any]:
         cache_window_sec = 0.4
+        bounded_focus = prefix == "TARGET_ACTION_RESULT" and self._helper_bridge.is_focus_request(req_id)
         now_mono = time.monotonic()
         if (
             prefix == "TARGET_ACTION_RESULT"
+            and not bounded_focus
             and self._last_action_req_id == req_id
             and isinstance(self._last_action_payload, dict)
             and now_mono - self._last_action_timestamp < cache_window_sec
@@ -853,6 +858,9 @@ class A11yAdbClient:
         )
         while time.monotonic() - start < wait_seconds:
             logs = self._logcat_reader.dump_filtered(dev=dev)
+            self._helper_bridge.observe_late_focus_results(logs)
+            if prefix == "SMART_NAV_RESULT":
+                self._helper_bridge.observe_late_smart_results(logs)
             chunk_transport_state = self._logcat_reader.reassemble_chunked_payload(
                 logs, prefix, req_id
             )
@@ -869,6 +877,15 @@ class A11yAdbClient:
                 payloads = [str(chunk_transport_state["payload"])]
             else:
                 payloads = self._extract_all_payloads(logs, prefix)
+            if bounded_focus and len(payloads) > 1:
+                matches = 0
+                for candidate_payload in payloads:
+                    try:
+                        matches += self._parse_json_payload(candidate_payload, prefix).get("reqId") == req_id
+                    except Exception:
+                        pass
+                if matches > 1:
+                    return {"success": False, "status": "transport_error", "reason": "duplicate_terminal_result", "reqId": req_id}
             for payload in reversed(payloads):
                 try:
                     parsed = self._parse_json_payload(payload, prefix)
@@ -897,6 +914,10 @@ class A11yAdbClient:
                         )
                     continue
                 if parsed.get("reqId") == req_id:
+                    if bounded_focus and time.monotonic() - start >= wait_seconds:
+                        return {"success": False, "status": "transport_error", "reason": "late_focus_result", "reqId": req_id, "lateResult": True}
+                    if prefix == "SMART_NAV_RESULT" and time.monotonic() - start >= wait_seconds:
+                        return {"success": False, "status": "transport_error", "reason": "late_smart_nav_result", "reqId": req_id, "lateResult": True}
                     if prefix == "TARGET_ACTION_RESULT" and bool(parsed.get("success")):
                         self._last_action_payload = parsed
                         self._last_action_req_id = req_id
@@ -919,6 +940,10 @@ class A11yAdbClient:
                 "reqId": req_id,
             }
         miss = {"success": False, "reason": f"{prefix} 로그를 찾지 못했습니다.", "reqId": req_id}
+        if prefix == "SMART_NAV_RESULT":
+            miss.update(status="transport_error", reason="smart_nav_result_wait_timeout")
+        if bounded_focus:
+            miss.update(status="transport_error", reason="focus_result_wait_timeout")
         self._safe_trace_print(
             f"[SMART_NEXT_TRACE] read_log_result_miss prefix={prefix} req_id={req_id} parsed={miss}"
         )
@@ -1016,9 +1041,12 @@ class A11yAdbClient:
         return LogcatReader.has_req_marker(log_text=log_text, prefix=prefix, req_id=req_id)
 
     def clear_logcat(self, dev: Any = None) -> str:
-        if self._evidence_is_enabled():
-            self._evidence_collect_helper_logcat_events(dev, req_id=self._evidence_active_request_id or None)
-        return self._adb_device._clear_logcat_best_effort(dev=dev, timeout=1.5)
+        with self._helper_bridge._async_lock:
+            if self._helper_bridge._async_in_flight:
+                return "" # Preserve pending correlated results from either command family.
+            if self._evidence_is_enabled():
+                self._evidence_collect_helper_logcat_events(dev, req_id=self._evidence_active_request_id or None)
+            return self._adb_device._clear_logcat_best_effort(dev=dev, timeout=1.5)
 
     def _take_snapshot(self, dev: Any, save_path: str) -> None:
         """ADB screencap을 수행해 현재 화면을 로컬 파일로 저장합니다."""
@@ -1984,8 +2012,7 @@ class A11yAdbClient:
         self.last_merged_announcement = ""
 
         def _attempt_focus() -> tuple[bool, dict[str, Any]]:
-            self.clear_logcat(dev=dev)
-            req_id = str(uuid.uuid4())[:8]
+            req_id = uuid.uuid4().hex
             extras = [
                 "--es", "bounds", self._escape_adb_string(str(bounds or "")),
                 "--ez", "preferEmptyState", "true" if prefer_empty_state else "false",
@@ -1995,8 +2022,7 @@ class A11yAdbClient:
             ]
             extras.extend(self._evidence_correlation_extras())
             self._evidence_action_sent(action="FOCUS_IN_BOUNDS", req_id=req_id)
-            self._broadcast(dev, ACTION_FOCUS_IN_BOUNDS, extras)
-            result = self._read_log_result(dev, "TARGET_ACTION_RESULT", req_id)
+            result = self._helper_bridge.request_focus_command(dev, ACTION_FOCUS_IN_BOUNDS, req_id, extras)
             if self._recovery_evidence_active():
                 raw_payload = str(result.get("rawSnippet") or "") if isinstance(result, dict) else ""
                 self._safe_trace_print(
@@ -2014,8 +2040,6 @@ class A11yAdbClient:
                             f"success='' status='' detail='' errorType={type(result.get('parseError')).__name__} "
                             f"errorMessage={str(result.get('parseError') or '')[:160]!r}"
                         )
-            if self._is_target_action_payload_missing(result, req_id):
-                return False, {}
             self.last_target_action_result = self._normalize_target_action_payload(result)
             runtime = self.evidence_runtime
             transaction = self._evidence_active_transaction
@@ -2061,33 +2085,9 @@ class A11yAdbClient:
                 raw=result,
             )
 
-        def _focus_timeout() -> dict[str, Any]:
-            result = {"success": False, "reason": "timeout"}
-            self.last_target_action_result = result
-            runtime = self.evidence_runtime
-            transaction = self._evidence_active_transaction
-            if self._evidence_is_enabled() and runtime is not None and transaction:
-                runtime.emit(
-                    "ACTION_API_RESULT",
-                    producer="runner",
-                    phase=str(transaction.get("phase") or "recovery"),
-                    transaction=transaction,
-                    payload={"success": False, "reason": "timeout", "action": "FOCUS_IN_BOUNDS"},
-                )
-                self._evidence_helper_ack(result, req_id=self._evidence_active_request_id, source="timeout")
-            return self._normalize_action_result(
-                success=False,
-                status=STATUS_FAILED,
-                detail="timeout",
-                raw=result,
-            )
-
-        return self._run_with_retry(
-            wait_seconds=wait_,
-            sleep_seconds=0.5,
-            attempt_fn=_attempt_focus,
-            timeout_fn=_focus_timeout,
-        )
+        # wait_ was a retry budget, not a service operation deadline. One command
+        # gets the independent bounded result wait; uncertain actions are not resent.
+        return _attempt_focus()[1]
 
     def click_focused(self, dev: Any = None, wait_: int = 5) -> bool:
         if not self.check_helper_status(dev=dev):
@@ -2779,7 +2779,7 @@ class A11yAdbClient:
         # self.clear_logcat(dev=dev)
 
         def _attempt_smart_next() -> tuple[bool, dict[str, Any]]:
-            req_id = str(uuid.uuid4())[:8]
+            req_id = uuid.uuid4().hex
             self._safe_trace_print(f"[SMART_NEXT_TRACE] req_id_generated req_id={req_id} source=move_focus_smart")
             self._evidence_action_sent(action=ACTION_SMART_NEXT, req_id=req_id)
             result = self._helper_bridge._request_smart_next(dev=dev, req_id=req_id)
@@ -2873,8 +2873,7 @@ class A11yAdbClient:
         self._evidence_begin_target_action(
             "TARGET_FOCUS_COMMIT", requested_target=requested_target, phase="main_loop"
         )
-        self.clear_logcat(dev=dev)
-        req_id = str(uuid.uuid4())[:8]
+        req_id = uuid.uuid4().hex
         extras = [
             "--es", "bounds", self._escape_adb_string(bounds),
             "--es", "targetId", self._escape_adb_string(resource_id),
@@ -2884,8 +2883,7 @@ class A11yAdbClient:
         ]
         extras.extend(self._evidence_correlation_extras())
         self._evidence_action_sent(action=ACTION_TARGET_FOCUS_COMMIT, req_id=req_id)
-        self._broadcast(dev, ACTION_TARGET_FOCUS_COMMIT, extras)
-        result = self._read_log_result(dev, "TARGET_ACTION_RESULT", req_id, wait_seconds=max(0.25, float(wait_)))
+        result = self._helper_bridge.request_focus_command(dev, ACTION_TARGET_FOCUS_COMMIT, req_id, extras)
         result = self._normalize_target_action_payload(result if isinstance(result, dict) else {})
         self.last_target_action_result = result
         self._evidence_helper_ack(result, req_id=req_id, source="inline")
