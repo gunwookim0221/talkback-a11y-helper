@@ -2837,6 +2837,40 @@ def _xml_entry_candidate_obstruction_reason(
     return ""
 
 
+def _xml_entry_candidate_tap_bounds(
+    candidate_bounds: tuple[int, int, int, int] | None,
+    nodes: list[dict[str, Any]],
+) -> tuple[tuple[int, int, int, int] | None, str]:
+    """Keep entry taps inside the card's visible area outside fixed chrome."""
+    if not candidate_bounds:
+        return None, "bounds_missing"
+    left, top, right, bottom = candidate_bounds
+    obstruction = ""
+    top_chrome_ids = {
+        "home_button_container", "tab_title", "add_menu_button_container",
+        "more_menu_button_container",
+    }
+    for node, _ in _iter_tree_nodes_with_parent(nodes):
+        if not _node_is_visible(node):
+            continue
+        resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").lower()
+        bounds = parse_bounds_str(node.get("boundsInScreen", ""))
+        if not bounds or min(right, bounds[2]) <= max(left, bounds[0]):
+            continue
+        if min(bottom, bounds[3]) <= max(top, bounds[1]):
+            continue
+        if any(token in resource_id for token in _XML_ENTRY_BOTTOM_OVERLAY_ID_TOKENS):
+            bottom = min(bottom, bounds[1])
+            obstruction = resource_id
+        elif resource_id.startswith("com.samsung.android.oneconnect:id/") and resource_id.rsplit("/", 1)[-1] in top_chrome_ids:
+            top = max(top, bounds[3])
+            obstruction = resource_id
+    # A thin clipped strip cannot provide a reliable touch target.
+    if right - left < 48 or bottom - top < 48:
+        return None, obstruction or "insufficient_visible_card_area"
+    return (left, top, right, bottom), ""
+
+
 def _has_global_nav_signals(state: list[dict[str, Any]]) -> tuple[bool, int]:
     if not isinstance(state, list):
         return False, 0
@@ -6380,6 +6414,8 @@ def _run_xml_scroll_search_tap(
     transition_fast_path: bool,
 ) -> tuple[bool, str]:
     scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip().lower()
+    entry_geometry_compatibility = scenario_id in {"life_air_care_plugin", "life_energy_plugin"}
+    preserve_actionable_match = scenario_id == "life_find_plugin"
     strict_phrase_cfg = STRICT_PLUGIN_ENTRY_PHRASES.get(scenario_id, {})
     strict_phrases = tuple(str(phrase).strip().lower() for phrase in strict_phrase_cfg.get("strict", ()) if str(phrase).strip())
     title_only_phrases = tuple(
@@ -6623,7 +6659,15 @@ def _run_xml_scroll_search_tap(
             promoted_reason = "text_node_bounds"
             current = node
             parent_hops = 0
-            while isinstance(parent, dict) and parent_hops < 6:
+            # An actionable match already owns its entry action. Promoting it
+            # into a focusable recycler loses Find's map_area target.
+            while (
+                isinstance(parent, dict) and parent_hops < 6
+                and not (
+                    preserve_actionable_match
+                    and (bool(promoted.get("clickable")) or bool(promoted.get("effectiveClickable")))
+                )
+            ):
                 parent_bounds = parse_bounds_str(str(parent.get("boundsInScreen", "") or "").strip())
                 parent_resource = str(parent.get("viewIdResourceName", "") or parent.get("resourceId", "") or "").strip()
                 parent_class = str(parent.get("className", "") or "").strip()
@@ -6694,19 +6738,27 @@ def _run_xml_scroll_search_tap(
         candidate_samples.sort(key=lambda item: int(item.get("score", 0)), reverse=True)
         target_candidates = [sample for sample in candidate_samples if bool(sample.get("target_match"))]
         unobstructed_target_candidates: list[dict[str, Any]] = []
+        top_obstructed = False
         for sample in target_candidates:
             sample_node = sample.get("node", {})
             sample_bounds = parse_bounds_str(str(sample_node.get("boundsInScreen", "") or "").strip())
-            obstruction_reason = _xml_entry_candidate_obstruction_reason(sample_bounds, xml_nodes)
+            if entry_geometry_compatibility:
+                tap_bounds, obstruction_reason = _xml_entry_candidate_tap_bounds(sample_bounds, xml_nodes)
+            else:
+                tap_bounds = sample_bounds
+                obstruction_reason = _xml_entry_candidate_obstruction_reason(sample_bounds, xml_nodes)
             if obstruction_reason:
+                overlay_kind = "bottom" if any(token in obstruction_reason for token in _XML_ENTRY_BOTTOM_OVERLAY_ID_TOKENS) else "top"
+                top_obstructed = top_obstructed or overlay_kind == "top"
                 log(
                     "[XMLENTRY][defer] "
-                    f"reason='target_obstructed_by_bottom_overlay' overlay='{obstruction_reason}' "
+                    f"reason='target_obstructed_by_{overlay_kind}_overlay' overlay='{obstruction_reason}' "
                     f"bounds='{str(sample_node.get('boundsInScreen', '') or '').strip()}' "
                     f"matched_phrase='{str(sample.get('matched_phrase', '') or '')[:80]}'"
                 )
-                failure_reason = "target_obstructed_by_bottom_overlay"
+                failure_reason = f"target_obstructed_by_{overlay_kind}_overlay"
                 continue
+            sample["tap_bounds"] = tap_bounds
             unobstructed_target_candidates.append(sample)
         target_candidates = unobstructed_target_candidates
         log(
@@ -6752,8 +6804,9 @@ def _run_xml_scroll_search_tap(
             if not selected_bounds:
                 failure_reason = "bounds_missing"
                 break
-            center_x = int((selected_bounds[0] + selected_bounds[2]) / 2)
-            center_y = int((selected_bounds[1] + selected_bounds[3]) / 2)
+            tap_bounds = selected["tap_bounds"]
+            center_x = int((tap_bounds[0] + tap_bounds[2]) / 2)
+            center_y = int((tap_bounds[1] + tap_bounds[3]) / 2)
             selected_resource = str(selected_node.get("viewIdResourceName", "") or selected_node.get("resourceId", "") or "").strip()
             selected_text = _node_label_blob(selected_node)
             log(
@@ -6761,6 +6814,7 @@ def _run_xml_scroll_search_tap(
                 f"bounds='{selected_node.get('boundsInScreen', '')}' text='{selected_text[:80]}' "
                 f"target_match=true match_source='{selected.get('match_source', '')}' "
                 f"matched_phrase='{str(selected.get('matched_phrase', '') or '')[:80]}'"
+                f" tap_bounds='{','.join(map(str, tap_bounds))}' tap_point='{center_x},{center_y}'"
             )
             selected_own_text = str(selected.get("own_text", "") or "").strip()
             selected_desc_texts = [str(value or "").strip() for value in selected.get("descendant_text_summary", []) if str(value or "").strip()]
@@ -6837,8 +6891,15 @@ def _run_xml_scroll_search_tap(
                         break
                     selected_node = refreshed_target
                     selected_bounds = refreshed_bounds
-                    center_x = int((selected_bounds[0] + selected_bounds[2]) / 2)
-                    center_y = int((selected_bounds[1] + selected_bounds[3]) / 2)
+                    tap_bounds, obstruction = (
+                        _xml_entry_candidate_tap_bounds(selected_bounds, xml_nodes)
+                        if entry_geometry_compatibility else (selected_bounds, "")
+                    )
+                    if tap_bounds is None:
+                        failure_reason = f"recoverable_precondition:target_obstructed:{obstruction}"
+                        break
+                    center_x = int((tap_bounds[0] + tap_bounds[2]) / 2)
+                    center_y = int((tap_bounds[1] + tap_bounds[3]) / 2)
                 log(
                     "[XMLENTRY][recoverable_precondition] "
                     "success=true outcome='RECOVERED_STABLE' "
@@ -6901,13 +6962,14 @@ def _run_xml_scroll_search_tap(
             if failure_reason in {"no_candidate_in_dump", "no_target_candidate_yet", "max_scroll_reached"}:
                 failure_reason = "target_not_found_after_scroll"
             break
-        scrolled = bool(client.scroll(dev=dev, direction="down")) if hasattr(client, "scroll") else False
+        search_direction = "up" if top_obstructed else "down"
+        scrolled = bool(client.scroll(dev=dev, direction=search_direction)) if hasattr(client, "scroll") else False
         scroll_reason = "no_strict_target_candidate" if strict_phrase_mode and not target_candidates else (
             "no_target_candidate" if not target_candidates else "search_continue"
         )
         log(
             f"[XMLENTRY][scroll] step={scroll_step}/{max_scroll_search_steps} "
-            f"performed={str(scrolled).lower()} reason='{scroll_reason}'"
+            f"performed={str(scrolled).lower()} reason='{scroll_reason}' direction='{search_direction}'"
         )
         if not scrolled:
             break

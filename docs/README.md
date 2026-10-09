@@ -28,6 +28,7 @@ index입니다. 현재 구현, 운영 계약, dated acceptance evidence, histori
   Comparator/Baseline 흐름
 - [아키텍처](architecture.md): Production authority와 diagnostic/shadow 계층 구분
 - [TalkBack service-preserving hierarchy fix (2026-10-09)](design/talkback-service-preserving-hierarchy-fix-20261009.md): hierarchy lifecycle RCA, active-path audit, Menu compatibility and pre-publish validation
+- [Korean plugin entry and monitor closure (2026-10-09)](design/talkback-korean-anchor-monitor-closure-20261009.md): Air Care/Energy/Find entry RCA, SMART_NEXT correlation, and targeted readiness evidence
 - [Runner 흐름](runner_flow.md): scenario open, traversal, recovery, persistence
 - [현재 Python client 구조](current-client-architecture.md): `A11yAdbClient`와 내부 책임 분해
 - [테스트 파이프라인](testing-pipeline.md): 수집/검증 파이프라인 요약
