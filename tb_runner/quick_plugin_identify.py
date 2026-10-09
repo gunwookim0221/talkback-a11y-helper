@@ -531,21 +531,13 @@ def _capture_stable_helper(
 
 
 def _capture_xml(client: Any, dev: str | None) -> tuple[str, str]:
-    run = getattr(client, "_run", None)
-    if not callable(run):
-        return "", "xml_dump_unavailable"
-    remote = f"/sdcard/v10_quick_identify_{uuid.uuid4().hex[:8]}.xml"
     try:
-        run(["shell", "uiautomator", "dump", remote], dev=dev)
-        xml_text = str(run(["shell", "cat", remote], dev=dev) or "")
-        return xml_text, "" if xml_text.strip() else "xml_dump_empty"
+        from talkback_lib.hierarchy_snapshot import service_hierarchy_to_xml
+
+        xml_text = service_hierarchy_to_xml(client.dump_hierarchy(dev=dev))
+        return xml_text, "" if xml_text.strip() else "service_hierarchy_empty"
     except Exception as exc:
-        return "", f"xml_dump_failed:{exc}"
-    finally:
-        try:
-            run(["shell", "rm", "-f", remote], dev=dev)
-        except Exception:
-            pass
+        return "", f"service_hierarchy_failed:{exc}"
 
 
 def _candidate_values(card: Mapping[str, Any]) -> dict[str, str]:

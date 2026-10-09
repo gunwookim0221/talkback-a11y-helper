@@ -1053,7 +1053,10 @@ TAB_CONFIGS = [
             "allow_resource_id_only": True,
         },
         "screen_context_mode": "bottom_tab",
-        "stabilization_mode": "anchor_then_context",
+        # The Menu tab no longer exposes the configured Settings label in its
+        # current root hierarchy. A verified selected Menu tab plus a ready
+        # content root is its semantic entry contract.
+        "stabilization_mode": "tab_context",
         "anchor_name": "(?i).*smartthings settings.*|.*settings.*|.*스마트싱스\\s*설정.*",
         "anchor_type": "a",
         "anchor": {

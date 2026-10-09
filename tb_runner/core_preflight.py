@@ -16,7 +16,10 @@ from tb_runner.accessibility_preflight import (
     ensure_accessibility_service_enabled,
     run_adb_text,
 )
-from tb_runner.samsung_account_popup import find_samsung_account_popup_candidate_in_xml
+from tb_runner.samsung_account_popup import (
+    find_samsung_account_popup_candidate,
+    find_samsung_account_popup_candidate_in_xml,
+)
 
 
 SMARTTHINGS_PACKAGE = "com.samsung.android.oneconnect"
@@ -24,9 +27,6 @@ EXTERNAL_POPUP_PACKAGES = {
     "com.android.vending",
     "com.google.android.finsky",
 }
-PREFLIGHT_UI_DUMP_PATH = "/sdcard/tb_runner_preflight_surface.xml"
-
-
 @dataclass(frozen=True)
 class CorePreflightResult:
     ok: bool
@@ -189,6 +189,7 @@ def ensure_smartthings_foreground(
 
 def recover_external_popup_contamination(
     *,
+    client: A11yAdbClient | None = None,
     serial: str | None,
     adb_path: str = DEFAULT_ADB_PATH,
     adb_runner: Callable[..., tuple[bool, str]] = run_adb_text,
@@ -199,7 +200,12 @@ def recover_external_popup_contamination(
     dismiss_settle_seconds: float = 1.0,
     contamination_hint: str | None = None,
 ) -> dict[str, object]:
-    before = _read_surface_packages(serial=serial, adb_path=adb_path, adb_runner=adb_runner)
+    before = _read_surface_packages(client=client, serial=serial, adb_path=adb_path, adb_runner=adb_runner)
+    if not before.get("hierarchy_ok"):
+        return _step_result(
+            "FAIL", "Service hierarchy acquisition failed during popup preflight",
+            contamination_package=None, recovery_attempted=False, recovered=False, before=before, after=before,
+        )
     contamination_package = _find_external_popup_package(before) or (
         contamination_hint if contamination_hint in EXTERNAL_POPUP_PACKAGES else None
     )
@@ -216,7 +222,7 @@ def recover_external_popup_contamination(
 
     adb_runner(adb_path, serial, "shell", "input", "keyevent", "KEYCODE_BACK", timeout=8.0)
     sleep_fn(max(0.0, settle_seconds))
-    after = _read_surface_packages(serial=serial, adb_path=adb_path, adb_runner=adb_runner)
+    after = _read_surface_packages(client=client, serial=serial, adb_path=adb_path, adb_runner=adb_runner)
     if _surface_recovered(after):
         return _popup_recovery_result(contamination_package, before, after, recovery="back")
 
@@ -233,7 +239,7 @@ def recover_external_popup_contamination(
         timeout=12.0,
     )
     sleep_fn(max(0.0, relaunch_settle_seconds))
-    after = _read_surface_packages(serial=serial, adb_path=adb_path, adb_runner=adb_runner)
+    after = _read_surface_packages(client=client, serial=serial, adb_path=adb_path, adb_runner=adb_runner)
     if _surface_recovered(after):
         return _popup_recovery_result(contamination_package, before, after, recovery="back_or_relaunch")
 
@@ -252,7 +258,7 @@ def recover_external_popup_contamination(
         timeout=12.0,
     )
     sleep_fn(max(0.0, force_stop_settle_seconds))
-    after = _read_surface_packages(serial=serial, adb_path=adb_path, adb_runner=adb_runner)
+    after = _read_surface_packages(client=client, serial=serial, adb_path=adb_path, adb_runner=adb_runner)
     if _surface_recovered(after):
         return _popup_recovery_result(
             contamination_package,
@@ -262,6 +268,7 @@ def recover_external_popup_contamination(
         )
 
     dismiss_result = _dismiss_review_sheet_not_now(
+        client=client,
         serial=serial,
         adb_path=adb_path,
         adb_runner=adb_runner,
@@ -329,8 +336,37 @@ def run_preflight(
         sleep_fn=sleep_fn,
     )
     contamination_package = str(app_foreground.get("package") or "")
+    if app_foreground["status"] == "FAIL" and not _is_external_popup_package(contamination_package):
+        log_fn(_format_step_log("app_foreground", app_foreground))
+        return _early_failure("app_foreground_failed", device_connected, screen_awake, unlock_status, app_foreground)
+
+    accessibility = ensure_accessibility_service_enabled(
+        serial=serial,
+        adb_path=adb_path,
+        component=HELPER_SERVICE_COMPONENT,
+        helper_ready_check=lambda: client.ping(dev=serial, wait_=3.0),
+        log_fn=log_fn,
+    )
+    log_fn(
+        "[PREFLIGHT][accessibility] "
+        f"component='{HELPER_SERVICE_COMPONENT}' "
+        f"before_enabled='{accessibility.before.enabled_accessibility_services}' "
+        f"before_accessibility_enabled='{accessibility.before.accessibility_enabled}' "
+        f"after_enabled='{accessibility.after.enabled_accessibility_services}' "
+        f"after_accessibility_enabled='{accessibility.after.accessibility_enabled}' "
+        f"enable_attempted={str(accessibility.enable_attempted).lower()} "
+        f"helper_ready={str(accessibility.helper_ready).lower()} "
+        f"result='{accessibility.reason}'"
+    )
+    if not accessibility.ok:
+        return CorePreflightResult(
+            False, accessibility.reason, accessibility, "unknown", "",
+            device_connected, screen_awake, unlock_status, app_foreground,
+        )
+
     if app_foreground["status"] == "FAIL" and _is_external_popup_package(contamination_package):
         popup_status = recover_external_popup_contamination(
+            client=client,
             serial=serial,
             adb_path=adb_path,
             adb_runner=adb_runner,
@@ -354,6 +390,7 @@ def run_preflight(
         return _early_failure("app_foreground_failed", device_connected, screen_awake, unlock_status, app_foreground)
 
     popup_status = recover_external_popup_contamination(
+        client=client,
         serial=serial,
         adb_path=adb_path,
         adb_runner=adb_runner,
@@ -368,6 +405,7 @@ def run_preflight(
         return _early_failure("external_popup_contamination", device_connected, screen_awake, unlock_status, app_foreground)
 
     internal_popup_status = dismiss_samsung_account_security_popup(
+        client=client,
         serial=serial,
         adb_path=adb_path,
         adb_runner=adb_runner,
@@ -375,37 +413,16 @@ def run_preflight(
     )
     app_foreground["internal_popup_check"] = internal_popup_status
     _log_samsung_account_popup(log_fn, internal_popup_status)
-
-    accessibility = ensure_accessibility_service_enabled(
-        serial=serial,
-        adb_path=adb_path,
-        component=HELPER_SERVICE_COMPONENT,
-        helper_ready_check=lambda: client.ping(dev=serial, wait_=3.0),
-        log_fn=log_fn,
-    )
-    log_fn(
-        "[PREFLIGHT][accessibility] "
-        f"component='{HELPER_SERVICE_COMPONENT}' "
-        f"before_enabled='{accessibility.before.enabled_accessibility_services}' "
-        f"before_accessibility_enabled='{accessibility.before.accessibility_enabled}' "
-        f"after_enabled='{accessibility.after.enabled_accessibility_services}' "
-        f"after_accessibility_enabled='{accessibility.after.accessibility_enabled}' "
-        f"enable_attempted={str(accessibility.enable_attempted).lower()} "
-        f"helper_ready={str(accessibility.helper_ready).lower()} "
-        f"result='{accessibility.reason}'"
-    )
-    if not accessibility.ok:
-        return CorePreflightResult(
-            False,
-            accessibility.reason,
-            accessibility,
-            "unknown",
-            "",
-            device_connected,
-            screen_awake,
-            unlock_status,
-            app_foreground,
+    if internal_popup_status.get("acquisition_error"):
+        failed_popup_check = _step_result(
+            "FAIL",
+            f"Service hierarchy acquisition failed: {internal_popup_status['acquisition_error']}",
+            recovered=False,
+            internal_popup_check=internal_popup_status,
         )
+        app_foreground["status"] = "FAIL"
+        app_foreground["message"] = str(failed_popup_check.get("message") or "Service hierarchy acquisition failed")
+        return _early_failure("service_hierarchy_acquisition_failed", device_connected, screen_awake, unlock_status, app_foreground)
 
     talkback = client.check_talkback_ready(dev=serial)
     talkback_status = talkback.get("status", "disabled")
@@ -461,41 +478,66 @@ def _read_foreground_package(
 
 def _read_surface_packages(
     *,
+    client: A11yAdbClient | None,
     serial: str | None,
     adb_path: str,
     adb_runner: Callable[..., tuple[bool, str]],
 ) -> dict[str, object]:
-    uiautomator_xml = _read_uiautomator_xml(serial=serial, adb_path=adb_path, adb_runner=adb_runner)
-    return {
-        "foreground_package": _read_foreground_package(serial=serial, adb_path=adb_path, adb_runner=adb_runner),
-        "uiautomator_package": _extract_uiautomator_package(uiautomator_xml),
-        "bottom_tab_present": _has_smartthings_bottom_tab(uiautomator_xml),
-    }
+    foreground_package = _read_foreground_package(serial=serial, adb_path=adb_path, adb_runner=adb_runner)
+    try:
+        if client is None:
+            raise RuntimeError("HIERARCHY_SNAPSHOT:SERVICE_UNAVAILABLE:helper client unavailable")
+        from talkback_lib.hierarchy_snapshot import flatten_service_hierarchy
 
-
-def _read_uiautomator_xml(
-    *,
-    serial: str | None,
-    adb_path: str,
-    adb_runner: Callable[..., tuple[bool, str]],
-) -> str:
-    ok, _output = adb_runner(adb_path, serial, "shell", "uiautomator", "dump", PREFLIGHT_UI_DUMP_PATH, timeout=8.0)
-    if not ok:
-        return ""
-    ok, output = adb_runner(adb_path, serial, "shell", "cat", PREFLIGHT_UI_DUMP_PATH, timeout=8.0)
-    return output if ok else ""
+        snapshot = client.dump_hierarchy(dev=serial)
+        nodes = flatten_service_hierarchy(snapshot)
+        windows = snapshot.get("windows", [])
+        focused = next((node for node in nodes if bool(node.get("focused"))), None)
+        packages = [str(node.get("packageName") or "").strip() for node in nodes]
+        packages = [package for package in packages if package]
+        hierarchy_package = (focused or {}).get("packageName") or (packages[0] if packages else None)
+        bottom_tab_present = _has_smartthings_bottom_tab_nodes(nodes)
+        return {
+            "foreground_package": foreground_package,
+            "hierarchy_package": str(hierarchy_package) if hierarchy_package else None,
+            "hierarchy_focused_package": str((focused or {}).get("packageName") or "") or None,
+            "bottom_tab_present": bottom_tab_present,
+            "hierarchy_ok": bool(nodes and windows),
+            "hierarchy_window_count": len(windows),
+            "hierarchy_node_count": len(nodes),
+            "hierarchy_error": None if nodes and windows else "HIERARCHY_SNAPSHOT:NO_ROOT:empty_snapshot",
+        }
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        return {
+            "foreground_package": foreground_package,
+            "hierarchy_package": None,
+            "hierarchy_focused_package": None,
+            "bottom_tab_present": False,
+            "hierarchy_ok": False,
+            "hierarchy_error": f"{type(exc).__name__}:{exc}",
+        }
 
 
 def dismiss_samsung_account_security_popup(
     *,
+    client: A11yAdbClient | None = None,
     serial: str | None,
     adb_path: str = DEFAULT_ADB_PATH,
     adb_runner: Callable[..., tuple[bool, str]] = run_adb_text,
     sleep_fn: Callable[[float], None] = time.sleep,
     settle_seconds: float = 0.7,
 ) -> dict[str, object]:
-    xml_text = _read_uiautomator_xml(serial=serial, adb_path=adb_path, adb_runner=adb_runner)
-    candidate = find_samsung_account_popup_candidate_in_xml(xml_text)
+    if client is None:
+        return {"detected": False, "dismissed": False, "verified_gone": None,
+                "acquisition_error": "HIERARCHY_SNAPSHOT:SERVICE_UNAVAILABLE:helper client unavailable"}
+    try:
+        from talkback_lib.hierarchy_snapshot import flatten_service_hierarchy
+
+        nodes = flatten_service_hierarchy(client.dump_hierarchy(dev=serial))
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        return {"detected": False, "dismissed": False, "verified_gone": None,
+                "acquisition_error": f"{type(exc).__name__}:{exc}"}
+    candidate = find_samsung_account_popup_candidate(nodes)
     if candidate is None:
         return {"detected": False, "dismissed": False, "verified_gone": None}
 
@@ -511,8 +553,11 @@ def dismiss_samsung_account_security_popup(
     )
     if tap_ok:
         sleep_fn(max(0.0, settle_seconds))
-    verify_xml = _read_uiautomator_xml(serial=serial, adb_path=adb_path, adb_runner=adb_runner)
-    verified_gone = find_samsung_account_popup_candidate_in_xml(verify_xml) is None if verify_xml else None
+    try:
+        verify_nodes = flatten_service_hierarchy(client.dump_hierarchy(dev=serial))
+        verified_gone = find_samsung_account_popup_candidate(verify_nodes) is None
+    except (OSError, RuntimeError, TypeError, ValueError):
+        verified_gone = None
     return {
         "detected": True,
         "dismissed": bool(tap_ok),
@@ -538,8 +583,18 @@ def _extract_uiautomator_package(output: str) -> str | None:
     return None
 
 
+def _has_smartthings_bottom_tab_nodes(nodes: list[dict[str, object]]) -> bool:
+    for node in nodes:
+        if str(node.get("packageName") or "").strip() != SMARTTHINGS_PACKAGE:
+            continue
+        resource_id = str(node.get("viewIdResourceName") or "").lower()
+        if "bottom" in resource_id and ("tab" in resource_id or "nav" in resource_id):
+            return True
+    return False
+
+
 def _find_external_popup_package(packages: dict[str, object]) -> str | None:
-    for key in ("foreground_package", "uiautomator_package"):
+    for key in ("foreground_package", "hierarchy_focused_package", "hierarchy_package"):
         package = packages.get(key)
         if _is_external_popup_package(package):
             return str(package)
@@ -552,6 +607,8 @@ def _is_external_popup_package(package: object) -> bool:
 
 def _surface_recovered(packages: dict[str, object]) -> bool:
     return (
+        packages.get("hierarchy_ok") is True
+        and
         packages.get("foreground_package") == SMARTTHINGS_PACKAGE
         and _find_external_popup_package(packages) is None
     )
@@ -559,14 +616,24 @@ def _surface_recovered(packages: dict[str, object]) -> bool:
 
 def _dismiss_review_sheet_not_now(
     *,
+    client: A11yAdbClient | None,
     serial: str | None,
     adb_path: str,
     adb_runner: Callable[..., tuple[bool, str]],
     sleep_fn: Callable[[float], None],
     settle_seconds: float,
 ) -> dict[str, object]:
-    xml_text = _read_uiautomator_xml(serial=serial, adb_path=adb_path, adb_runner=adb_runner)
-    candidate = _find_review_sheet_not_now_candidate(xml_text)
+    if client is None:
+        return {"recovered": False, "recovery": "service_hierarchy_unavailable",
+                "hierarchy_error": "helper client unavailable"}
+    try:
+        from talkback_lib.hierarchy_snapshot import flatten_service_hierarchy
+
+        hierarchy_nodes = flatten_service_hierarchy(client.dump_hierarchy(dev=serial))
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        return {"recovered": False, "recovery": "service_hierarchy_failed",
+                "hierarchy_error": f"{type(exc).__name__}:{exc}"}
+    candidate = _find_review_sheet_not_now_candidate_nodes(hierarchy_nodes)
     if not candidate:
         return {"recovered": False, "recovery": "force_stop_external_and_relaunch"}
 
@@ -582,7 +649,7 @@ def _dismiss_review_sheet_not_now(
     )
     if tap_ok:
         sleep_fn(max(0.0, settle_seconds))
-    after = _read_surface_packages(serial=serial, adb_path=adb_path, adb_runner=adb_runner)
+    after = _read_surface_packages(client=client, serial=serial, adb_path=adb_path, adb_runner=adb_runner)
     return {
         "recovered": (
             tap_ok
@@ -611,6 +678,38 @@ def _find_review_sheet_not_now_candidate(xml_text: str) -> dict[str, int] | None
         if "not now" not in _node_labels(node):
             continue
         center = _bounds_center(str(node.attrib.get("bounds", "") or ""))
+        if center:
+            return {"x": center[0], "y": center[1]}
+    return None
+
+
+def _find_review_sheet_not_now_candidate_nodes(nodes: list[dict[str, object]]) -> dict[str, int] | None:
+    external_nodes = [node for node in nodes if _is_external_popup_package(node.get("packageName"))]
+    has_submit = any(
+        "submit" in {
+            str(node.get("text") or "").strip().lower(),
+            str(node.get("contentDescription") or "").strip().lower(),
+        }
+        for node in external_nodes
+    )
+    if not has_submit:
+        return None
+    for node in external_nodes:
+        labels = {
+            str(node.get("text") or "").strip().lower(),
+            str(node.get("contentDescription") or "").strip().lower(),
+        }
+        if "not now" not in labels:
+            continue
+        bounds = node.get("boundsInScreen")
+        if isinstance(bounds, dict):
+            bounds = "[{l},{t}][{r},{b}]".format(
+                l=int(bounds.get("left", bounds.get("l", 0)) or 0),
+                t=int(bounds.get("top", bounds.get("t", 0)) or 0),
+                r=int(bounds.get("right", bounds.get("r", 0)) or 0),
+                b=int(bounds.get("bottom", bounds.get("b", 0)) or 0),
+            )
+        center = _bounds_center(str(bounds or ""))
         if center:
             return {"x": center[0], "y": center[1]}
     return None

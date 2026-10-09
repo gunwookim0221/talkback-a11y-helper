@@ -6,6 +6,9 @@ import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from typing import Literal
 
+from talkback_lib import A11yAdbClient
+from talkback_lib.constants import DEFAULT_ADB_PATH
+from talkback_lib.hierarchy_snapshot import flatten_service_hierarchy
 from .adb import get_adb_status, get_helper_status, run_adb
 from tb_runner.samsung_account_popup import (
     LATER_RESOURCE_ID as SAMSUNG_ACCOUNT_POPUP_LATER_RESOURCE_ID,
@@ -132,16 +135,43 @@ def get_foreground_package(adb_runner: Callable[[list[str], float], dict[str, ob
     }
 
 
-def get_uiautomator_package_status(
-    adb_runner: Callable[[list[str], float], dict[str, object]] = run_adb,
+def get_service_hierarchy_status(
+    hierarchy_reader: Callable[[], dict[str, object]] | None = None,
+    dev_serial: str | None = None,
 ) -> dict[str, object]:
-    dump_result = adb_runner(["shell", "uiautomator", "dump", "/sdcard/qa_frontend_surface.xml"], 8.0)
-    if not dump_result.get("ok"):
-        return {"status": "unknown", "ok": False, "package": None, "focused_package": None, "error": dump_result.get("error")}
-    cat_result = adb_runner(["shell", "cat", "/sdcard/qa_frontend_surface.xml"], 8.0)
-    if not cat_result.get("ok"):
-        return {"status": "unknown", "ok": False, "package": None, "focused_package": None, "error": cat_result.get("error")}
-    return parse_uiautomator_package_status(str(cat_result.get("stdout", "")))
+    try:
+        snapshot = hierarchy_reader() if hierarchy_reader else A11yAdbClient(
+            adb_path=DEFAULT_ADB_PATH, dev_serial=dev_serial, start_monitor=False
+        ).dump_hierarchy(dev=dev_serial)
+        nodes = flatten_service_hierarchy(snapshot)
+        windows = snapshot.get("windows", [])
+        focused_node = next((node for node in nodes if bool(node.get("focused"))), None)
+        packages = [str(node.get("packageName") or "").strip() for node in nodes]
+        packages = [package for package in packages if package]
+        package = (focused_node or {}).get("packageName") or (packages[0] if packages else None)
+        focused_package = str((focused_node or {}).get("packageName") or "") or None
+        if not package or not windows:
+            raise ValueError("HIERARCHY_SNAPSHOT:NO_ROOT:empty_hierarchy")
+        return {
+            "status": "ok",
+            "ok": True,
+            "package": str(package),
+            "root_package": str(packages[0]) if packages else None,
+            "focused_package": focused_package,
+            "node_count": len(nodes),
+            "window_count": len(windows),
+            "source": "accessibility_service_hierarchy",
+        }
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        return {
+            "status": "unknown",
+            "ok": False,
+            "package": None,
+            "root_package": None,
+            "focused_package": None,
+            "error": f"{type(exc).__name__}:{exc}",
+            "source": "accessibility_service_hierarchy",
+        }
 
 
 def parse_uiautomator_package_status(xml_text: str) -> dict[str, object]:
@@ -170,21 +200,26 @@ def parse_uiautomator_package_status(xml_text: str) -> dict[str, object]:
     }
 
 
-def get_launch_surface_status(adb_runner: Callable[[list[str], float], dict[str, object]] = run_adb) -> dict[str, object]:
+def get_launch_surface_status(
+    adb_runner: Callable[[list[str], float], dict[str, object]] = run_adb,
+    hierarchy_reader: Callable[[], dict[str, object]] | None = None,
+    dev_serial: str | None = None,
+) -> dict[str, object]:
     foreground_status = get_foreground_package(adb_runner)
-    uia_status = get_uiautomator_package_status(adb_runner)
-    detected_external = _detect_external_popup_package(foreground_status, uia_status)
+    hierarchy_status = get_service_hierarchy_status(hierarchy_reader, dev_serial)
+    detected_external = _detect_external_popup_package(foreground_status, hierarchy_status)
     return {
         "foreground_status": foreground_status,
-        "uiautomator_status": uia_status,
+        "hierarchy_status": hierarchy_status,
         "foreground_package": foreground_status.get("package"),
-        "uiautomator_package": uia_status.get("package"),
-        "uiautomator_focused_package": uia_status.get("focused_package"),
+        "hierarchy_package": hierarchy_status.get("package"),
+        "hierarchy_focused_package": hierarchy_status.get("focused_package"),
         "external_popup_package": detected_external,
-        "external_popup_reason": _external_popup_reason(foreground_status, uia_status, detected_external),
+        "external_popup_reason": _external_popup_reason(foreground_status, hierarchy_status, detected_external),
         "smartthings_ready": (
             foreground_status.get("package") == SMARTTHINGS_PACKAGE
-            and uia_status.get("package") == SMARTTHINGS_PACKAGE
+            and hierarchy_status.get("ok") is True
+            and hierarchy_status.get("package") == SMARTTHINGS_PACKAGE
             and detected_external is None
         ),
     }
@@ -196,11 +231,13 @@ def poll_launch_surface_status(
     sleep_fn: Callable[[float], None] = time.sleep,
     timeout_seconds: float = 4.0,
     interval_seconds: float = 0.7,
+    hierarchy_reader: Callable[[], dict[str, object]] | None = None,
+    dev_serial: str | None = None,
 ) -> dict[str, object]:
     last_status: dict[str, object] = {}
     max_polls = max(1, int(max(0.1, timeout_seconds) / max(0.1, interval_seconds)) + 1)
     for index in range(max_polls):
-        last_status = get_launch_surface_status(adb_runner)
+        last_status = get_launch_surface_status(adb_runner, hierarchy_reader, dev_serial)
         if last_status.get("smartthings_ready") or last_status.get("external_popup_package"):
             return last_status
         if index < max_polls - 1:
@@ -213,11 +250,26 @@ def stabilize_external_popup(
     initial_foreground_status: dict[str, object] | None = None,
     initial_surface_status: dict[str, object] | None = None,
     adb_runner: Callable[[list[str], float], dict[str, object]] = run_adb,
+    hierarchy_reader: Callable[[], dict[str, object]] | None = None,
+    dev_serial: str | None = None,
     sleep_fn: Callable[[float], None] = time.sleep,
     max_attempts: int = 2,
 ) -> dict[str, object]:
-    surface_status = initial_surface_status or get_launch_surface_status(adb_runner)
+    surface_status = initial_surface_status or get_launch_surface_status(adb_runner, hierarchy_reader, dev_serial)
     foreground_status = _dict(surface_status.get("foreground_status")) or initial_foreground_status or get_foreground_package(adb_runner)
+    if _dict(surface_status.get("hierarchy_status")).get("ok") is not True:
+        hierarchy_error = _dict(surface_status.get("hierarchy_status")).get("error")
+        return {
+            "state": "acquisition_failed",
+            "popup_detected": False,
+            "popup_package": None,
+            "popup_dismissed": False,
+            "popup_result": "acquisition_failed",
+            "hierarchy_error": hierarchy_error,
+            "attempts": [],
+            "foreground_status": foreground_status,
+            "surface_status": surface_status,
+        }
     detected_package = str(surface_status.get("external_popup_package") or foreground_status.get("package") or "")
     detected_reason = str(surface_status.get("external_popup_reason") or KNOWN_EXTERNAL_POPUP_PACKAGES.get(detected_package) or "")
     attempts: list[dict[str, object]] = []
@@ -239,7 +291,7 @@ def stabilize_external_popup(
     popup_dismissed = False
     for attempt_index in range(1, max(1, max_attempts) + 1):
         try:
-            candidate = find_popup_dismiss_candidate(adb_runner)
+            candidate = find_popup_dismiss_candidate(adb_runner, hierarchy_reader, dev_serial)
             if candidate:
                 tap_result = tap_candidate_center(candidate, adb_runner)
                 method = "label"
@@ -266,6 +318,19 @@ def stabilize_external_popup(
                     }
                 )
         except Exception as exc:
+            if "HIERARCHY_SNAPSHOT:" in str(exc):
+                return {
+                    "state": "acquisition_failed",
+                    "popup_detected": True,
+                    "popup_package": detected_package,
+                    "popup_dismissed": popup_dismissed,
+                    "popup_result": "acquisition_failed",
+                    "hierarchy_error": str(exc),
+                    "detected_reason": detected_reason,
+                    "attempts": attempts,
+                    "foreground_status": foreground_status,
+                    "surface_status": surface_status,
+                }
             attempts.append(
                 {
                     "attempt": attempt_index,
@@ -277,7 +342,23 @@ def stabilize_external_popup(
             )
 
         sleep_fn(0.7)
-        surface_status = poll_launch_surface_status(adb_runner=adb_runner, sleep_fn=sleep_fn, timeout_seconds=2.0)
+        surface_status = poll_launch_surface_status(
+            adb_runner=adb_runner, sleep_fn=sleep_fn, timeout_seconds=2.0,
+            hierarchy_reader=hierarchy_reader, dev_serial=dev_serial,
+        )
+        if _dict(surface_status.get("hierarchy_status")).get("ok") is not True:
+            return {
+                "state": "acquisition_failed",
+                "popup_detected": True,
+                "popup_package": detected_package,
+                "popup_dismissed": popup_dismissed,
+                "popup_result": "acquisition_failed",
+                "hierarchy_error": _dict(surface_status.get("hierarchy_status")).get("error"),
+                "detected_reason": detected_reason,
+                "attempts": attempts,
+                "foreground_status": _dict(surface_status.get("foreground_status")),
+                "surface_status": surface_status,
+            }
         foreground_status = _dict(surface_status.get("foreground_status"))
         foreground_after = str(surface_status.get("foreground_package") or foreground_status.get("package") or "")
         external_after = str(surface_status.get("external_popup_package") or "")
@@ -316,14 +397,52 @@ def stabilize_external_popup(
 
 def find_popup_dismiss_candidate(
     adb_runner: Callable[[list[str], float], dict[str, object]] = run_adb,
+    hierarchy_reader: Callable[[], dict[str, object]] | None = None,
+    dev_serial: str | None = None,
 ) -> dict[str, object] | None:
-    dump_result = adb_runner(["shell", "uiautomator", "dump", "/sdcard/qa_frontend_popup.xml"], 8.0)
-    if not dump_result.get("ok"):
+    try:
+        snapshot = hierarchy_reader() if hierarchy_reader else A11yAdbClient(
+            adb_path=DEFAULT_ADB_PATH, dev_serial=dev_serial, start_monitor=False
+        ).dump_hierarchy(dev=dev_serial)
+        nodes = flatten_service_hierarchy(snapshot)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise RuntimeError(f"HIERARCHY_SNAPSHOT:SERVICE_UNAVAILABLE:{type(exc).__name__}:{exc}") from exc
+    samsung_candidate = _find_samsung_account_popup_candidate_nodes(nodes)
+    if samsung_candidate is not None:
+        return samsung_candidate
+    candidates: dict[str, dict[str, object]] = {}
+    for node in nodes:
+        label = _node_label({
+            "text": str(node.get("text") or ""),
+            "content-desc": str(node.get("contentDescription") or ""),
+        })
+        if not label or _is_dangerous_popup_label(label):
+            continue
+        normalized = _normalize_label(label)
+        if normalized not in DISMISS_LABELS:
+            continue
+        bounds = str(node.get("boundsInScreen") or "")
+        center = _bounds_center(bounds)
+        if center:
+            candidates.setdefault(normalized, {"label": label, "bounds": bounds, "x": center[0], "y": center[1]})
+    return next((candidates[label] for label in DISMISS_LABELS if label in candidates), None)
+
+
+def _find_samsung_account_popup_candidate_nodes(nodes: list[dict[str, object]]) -> dict[str, object] | None:
+    candidate = find_samsung_account_popup_candidate(nodes)
+    if candidate is None:
         return None
-    cat_result = adb_runner(["shell", "cat", "/sdcard/qa_frontend_popup.xml"], 8.0)
-    if not cat_result.get("ok"):
-        return None
-    return find_dismiss_candidate_in_uiautomator_xml(str(cat_result.get("stdout", "")))
+    return {
+        "label": candidate.label,
+        "bounds": candidate.bounds,
+        "x": candidate.x,
+        "y": candidate.y,
+        "resource_id": candidate.resource_id,
+        "popup_kind": candidate.popup_kind,
+        "dismiss_method": candidate.method,
+        "locale": candidate.locale,
+        "title": candidate.title,
+    }
 
 
 def find_dismiss_candidate_in_uiautomator_xml(xml_text: str) -> dict[str, object] | None:
@@ -375,8 +494,14 @@ def _find_samsung_account_popup_candidate(root: ET.Element) -> dict[str, object]
 
 def dismiss_samsung_account_popup(
     adb_runner: Callable[[list[str], float], dict[str, object]] = run_adb,
+    hierarchy_reader: Callable[[], dict[str, object]] | None = None,
+    dev_serial: str | None = None,
 ) -> dict[str, object]:
-    candidate = find_popup_dismiss_candidate(adb_runner)
+    try:
+        candidate = find_popup_dismiss_candidate(adb_runner, hierarchy_reader, dev_serial)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        return {"popup_detected": False, "popup_dismissed": False, "dismiss_method": None,
+                "candidate": None, "acquisition_failed": True, "acquisition_error": f"{type(exc).__name__}:{exc}"}
     if not candidate or candidate.get("popup_kind") != "samsung_account_two_step":
         return {"popup_detected": False, "popup_dismissed": False, "dismiss_method": None, "candidate": None}
     tap_result = tap_candidate_center(candidate, adb_runner)
@@ -406,6 +531,7 @@ def run_runtime_preflight(
     adb_status_fn: Callable[[], dict[str, object]] = get_adb_status,
     helper_status_fn: Callable[[], dict[str, object]] = get_helper_status,
     adb_runner: Callable[[list[str], float], dict[str, object]] = run_adb,
+    hierarchy_reader: Callable[[], dict[str, object]] | None = None,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> dict[str, object]:
     normalized_launch_mode = normalize_launch_mode(launch_mode)
@@ -471,6 +597,7 @@ def run_runtime_preflight(
         talkback_status=talkback_status,
         talkback_state="enabled",
         adb_runner=adb_runner,
+        hierarchy_reader=hierarchy_reader,
         sleep_fn=sleep_fn,
     )
 
@@ -480,6 +607,7 @@ def run_surface_preflight(
     *,
     adb_status_fn: Callable[[], dict[str, object]] = get_adb_status,
     adb_runner: Callable[[list[str], float], dict[str, object]] = run_adb,
+    hierarchy_reader: Callable[[], dict[str, object]] | None = None,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> dict[str, object]:
     """Prepare the app surface; the core runtime owns readiness checks."""
@@ -508,6 +636,7 @@ def run_surface_preflight(
         talkback_status=None,
         talkback_state="deferred_to_core",
         adb_runner=adb_runner,
+        hierarchy_reader=hierarchy_reader,
         sleep_fn=sleep_fn,
     )
 
@@ -521,8 +650,15 @@ def _run_launch_surface_preflight(
     talkback_status: dict[str, object] | None,
     talkback_state: str,
     adb_runner: Callable[[list[str], float], dict[str, object]],
+    hierarchy_reader: Callable[[], dict[str, object]] | None,
     sleep_fn: Callable[[float], None],
 ) -> dict[str, object]:
+    device = next((item for item in _devices(adb_status) if item.get("state") == "device"), {})
+    dev_serial = str(device.get("serial") or "").strip() or None
+    if hierarchy_reader is None:
+        hierarchy_reader = lambda: A11yAdbClient(
+            adb_path=DEFAULT_ADB_PATH, dev_serial=dev_serial, start_monitor=False
+        ).dump_hierarchy(dev=dev_serial)
     # Capture before launch_smartthings so a launch/entry restart remains visible
     # to the subprocess's first lifecycle sample.
     pid_result = adb_runner(["shell", "pidof", "com.samsung.android.accessibility.talkback"], 5.0)
@@ -546,19 +682,38 @@ def _run_launch_surface_preflight(
             accessibility_settings_opened=False,
         )
 
-    surface_status = poll_launch_surface_status(adb_runner=adb_runner, sleep_fn=sleep_fn)
+    surface_status = poll_launch_surface_status(
+        adb_runner=adb_runner, sleep_fn=sleep_fn, hierarchy_reader=hierarchy_reader, dev_serial=dev_serial
+    )
+    hierarchy_status = _dict(surface_status.get("hierarchy_status"))
+    if hierarchy_status.get("ok") is not True:
+        return _blocked_result(
+            reason="service_hierarchy_acquisition_failed",
+            launch_mode=normalized_launch_mode,
+            adb_status=adb_status,
+            helper_status=helper_status,
+            talkback_status=talkback_status,
+            launch_status=launch_status,
+            foreground_status=_dict(surface_status.get("foreground_status")),
+            popup_status={"hierarchy_error": hierarchy_status.get("error")},
+            accessibility_settings_opened=False,
+        )
     foreground_status = _dict(surface_status.get("foreground_status"))
     popup_status = stabilize_external_popup(
         initial_foreground_status=foreground_status,
         initial_surface_status=surface_status,
         adb_runner=adb_runner,
+        hierarchy_reader=hierarchy_reader,
+        dev_serial=dev_serial,
         sleep_fn=sleep_fn,
     )
     surface_status = _dict(popup_status.get("surface_status")) or surface_status
     foreground_status = _dict(popup_status.get("foreground_status")) or foreground_status
-    if popup_status.get("popup_result") == "uncleared":
+    if popup_status.get("popup_result") in {"uncleared", "acquisition_failed"}:
         return _blocked_result(
-            reason="external_popup_uncleared",
+            reason="service_hierarchy_acquisition_failed"
+            if popup_status.get("popup_result") == "acquisition_failed"
+            else "external_popup_uncleared",
             launch_mode=normalized_launch_mode,
             adb_status=adb_status,
             helper_status=helper_status,
@@ -569,7 +724,19 @@ def _run_launch_surface_preflight(
             accessibility_settings_opened=False,
         )
 
-    internal_popup_status = dismiss_samsung_account_popup(adb_runner)
+    internal_popup_status = dismiss_samsung_account_popup(adb_runner, hierarchy_reader, dev_serial)
+    if internal_popup_status.get("acquisition_failed"):
+        return _blocked_result(
+            reason="service_hierarchy_acquisition_failed",
+            launch_mode=normalized_launch_mode,
+            adb_status=adb_status,
+            helper_status=helper_status,
+            talkback_status=talkback_status,
+            launch_status=launch_status,
+            foreground_status=foreground_status,
+            popup_status={"hierarchy_error": internal_popup_status.get("acquisition_error")},
+            accessibility_settings_opened=False,
+        )
     if internal_popup_status.get("popup_detected"):
         sleep_fn(0.7)
 
@@ -584,8 +751,8 @@ def _run_launch_surface_preflight(
         "talkback_state": talkback_state,
         "foreground_package": foreground_status.get("package"),
         "foreground_matches_expected": foreground_status.get("matches_expected"),
-        "uiautomator_package": surface_status.get("uiautomator_package"),
-        "uiautomator_focused_package": surface_status.get("uiautomator_focused_package"),
+        "hierarchy_package": surface_status.get("hierarchy_package"),
+        "hierarchy_focused_package": surface_status.get("hierarchy_focused_package"),
         "accessibility_settings_opened": False,
         "adb_status": adb_status,
         "helper_status": helper_status,
@@ -617,8 +784,8 @@ def format_preflight_log_lines(preflight: dict[str, object]) -> list[str]:
         f"[QA_FRONTEND][preflight][launch_app] force_stop_attempted='{str(launch_status.get('force_stop_attempted', False)).lower()}'",
         f"[QA_FRONTEND][preflight][launch_app] monkey_success='{str(launch_status.get('monkey_success', False)).lower()}'",
         f"[QA_FRONTEND][preflight][launch_app] foreground_package='{foreground_status.get('package') or ''}'",
-        f"[QA_FRONTEND][preflight][launch_app] uiautomator_package='{_dict(surface_status).get('uiautomator_package') or preflight.get('uiautomator_package') or ''}'",
-        f"[QA_FRONTEND][preflight][launch_app] uiautomator_focused_package='{_dict(surface_status).get('uiautomator_focused_package') or preflight.get('uiautomator_focused_package') or ''}'",
+        f"[QA_FRONTEND][preflight][launch_app] hierarchy_package='{_dict(surface_status).get('hierarchy_package') or preflight.get('hierarchy_package') or ''}'",
+        f"[QA_FRONTEND][preflight][launch_app] hierarchy_focused_package='{_dict(surface_status).get('hierarchy_focused_package') or preflight.get('hierarchy_focused_package') or ''}'",
         f"[QA_FRONTEND][preflight][talkback] accessibility_settings_opened='{str(preflight.get('accessibility_settings_opened', False)).lower()}'",
     ]
     if popup_status:
@@ -677,11 +844,11 @@ def _extract_foreground_package(output: str) -> str | None:
 
 def _detect_external_popup_package(
     foreground_status: dict[str, object],
-    uia_status: dict[str, object],
+    hierarchy_status: dict[str, object],
 ) -> str | None:
     for package in (
-        str(uia_status.get("focused_package") or ""),
-        str(uia_status.get("package") or ""),
+        str(hierarchy_status.get("focused_package") or ""),
+        str(hierarchy_status.get("package") or ""),
         str(foreground_status.get("package") or ""),
     ):
         if package in KNOWN_EXTERNAL_POPUP_PACKAGES:
@@ -691,15 +858,15 @@ def _detect_external_popup_package(
 
 def _external_popup_reason(
     foreground_status: dict[str, object],
-    uia_status: dict[str, object],
+    hierarchy_status: dict[str, object],
     package: str | None,
 ) -> str | None:
     if not package:
         return None
-    if uia_status.get("focused_package") == package:
-        return "post_launch_uiautomator_focus"
-    if uia_status.get("package") == package:
-        return "post_launch_uiautomator_root"
+    if hierarchy_status.get("focused_package") == package:
+        return "post_launch_service_hierarchy_focus"
+    if hierarchy_status.get("package") == package:
+        return "post_launch_service_hierarchy_root"
     if foreground_status.get("package") == package:
         return "post_launch_foreground"
     return KNOWN_EXTERNAL_POPUP_PACKAGES.get(package)

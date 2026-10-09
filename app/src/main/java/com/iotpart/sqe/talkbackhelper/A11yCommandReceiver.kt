@@ -13,6 +13,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val ACTION_GET_FOCUS = "com.iotpart.sqe.talkbackhelper.GET_FOCUS"
         private const val ACTION_FOCUS_RESULT = "com.iotpart.sqe.talkbackhelper.FOCUS_RESULT"
         private const val ACTION_DUMP_TREE = "com.iotpart.sqe.talkbackhelper.DUMP_TREE"
+        private const val ACTION_DUMP_HIERARCHY = "com.iotpart.sqe.talkbackhelper.DUMP_HIERARCHY"
         private const val ACTION_FOCUS_TARGET = "com.iotpart.sqe.talkbackhelper.FOCUS_TARGET"
         private const val ACTION_FOCUS_IN_BOUNDS = "com.iotpart.sqe.talkbackhelper.FOCUS_IN_BOUNDS"
         private const val ACTION_TARGET_FOCUS_COMMIT = "com.iotpart.sqe.talkbackhelper.TARGET_FOCUS_COMMIT"
@@ -81,6 +82,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
                 Log.i(TAG, "[DUMP_TREE_ACTION][entry] action='$ACTION_DUMP_TREE'")
                 handleDumpTree(intent)
             }
+            ACTION_DUMP_HIERARCHY -> handleDumpHierarchy(intent)
             ACTION_FOCUS_TARGET -> handleTargetAction(intent, AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
             ACTION_FOCUS_IN_BOUNDS -> handleFocusInBounds(intent)
             ACTION_TARGET_FOCUS_COMMIT -> handleTargetFocusCommit(intent)
@@ -152,6 +154,45 @@ class A11yCommandReceiver : BroadcastReceiver() {
             },
             reportFailure = { reason -> logDumpTreeFailure(reqId, reason) }
         )
+    }
+
+    private fun handleDumpHierarchy(intent: Intent) {
+        val reqId = parseReqId(intent)
+        val service = A11yHelperService.instance
+        if (service == null) {
+            logHierarchyFailure(reqId, "SERVICE_UNAVAILABLE", "Accessibility Service is not running")
+            Log.i(TAG, "DUMP_HIERARCHY_END $reqId")
+            return
+        }
+        try {
+            val payload = service.dumpHierarchy(reqId).toString()
+            if (payload.toByteArray(Charsets.UTF_8).size > 750_000) {
+                logHierarchyFailure(reqId, "PAYLOAD_TOO_LARGE", "Hierarchy snapshot exceeds the bounded transport size")
+                return
+            }
+            A11yResultTransport.encode(
+                "DUMP_HIERARCHY_RESULT",
+                reqId,
+                payload,
+                chunkBytes = A11yResultTransport.HIERARCHY_CHUNK_BYTES,
+            )
+                .forEach { Log.i(TAG, it) }
+        } catch (error: Exception) {
+            Log.e(TAG, "[DUMP_HIERARCHY] failed req_id='$reqId'", error)
+            logHierarchyFailure(reqId, "SERIALIZATION_ERROR", "${error.javaClass.simpleName}: ${error.message.orEmpty()}")
+        } finally {
+            Log.i(TAG, "DUMP_HIERARCHY_END $reqId")
+        }
+    }
+
+    private fun logHierarchyFailure(reqId: String, reason: String, message: String) {
+        val payload = org.json.JSONObject()
+            .put("reqId", reqId)
+            .put("success", false)
+            .put("reason", reason)
+            .put("message", message)
+            .toString()
+        Log.w(TAG, "DUMP_HIERARCHY_RESULT $reqId $payload")
     }
 
     private fun handleSetSystemLanguage(intent: Intent) {

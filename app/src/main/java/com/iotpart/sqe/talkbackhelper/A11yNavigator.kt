@@ -2,11 +2,14 @@ package com.iotpart.sqe.talkbackhelper
 
 import android.graphics.Rect
 import android.os.Build
+import android.accessibilityservice.AccessibilityService
 import android.view.accessibility.AccessibilityEvent
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import kotlin.jvm.JvmName
+import org.json.JSONArray
 import org.json.JSONObject
 
 typealias PreScrollAnchor = A11yHistoryManager.PreScrollAnchor
@@ -14,6 +17,8 @@ typealias VisibleHistorySignature = A11yHistoryManager.VisibleHistorySignature
 
 object A11yNavigator {
     const val NAVIGATOR_ALGORITHM_VERSION: String = "2.76.3"
+    private const val HIERARCHY_SNAPSHOT_MAX_NODES = 4096
+    private const val HIERARCHY_SNAPSHOT_MAX_DEPTH = 80
     private const val SMART_NEXT_REPEAT_DEBUG = false
     private const val APP_VERSION_NAME_FOR_LOG = "n/a(BuildConfig-unavailable)"
     private const val APP_VERSION_CODE_FOR_LOG = -1
@@ -82,6 +87,125 @@ object A11yNavigator {
             canScrollDown = hasScrollableDownCandidate(root),
             nodes = nodeInfos
         ).toJson()
+    }
+
+    /**
+     * Captures the service-visible window roots and their full semantic node trees.
+     * This reads existing AccessibilityService state only; it does not request focus,
+     * perform actions, or create a UiAutomation session.
+     */
+    fun dumpHierarchy(service: AccessibilityService, reqId: String): JSONObject {
+        val serviceWindows = service.windows.orEmpty()
+        val totalNodes = intArrayOf(0)
+        val serializedWindows = JSONArray()
+        val rootNodes = JSONArray()
+
+        if (serviceWindows.isNotEmpty()) {
+            serviceWindows.forEachIndexed { index, window ->
+                val root = window.root
+                    ?: throw IllegalStateException("WINDOW_ROOT_UNAVAILABLE:index=$index windowId=${window.id}")
+                val bounds = Rect().also(window::getBoundsInScreen)
+                val rootJson = hierarchyNodeToJson(root, totalNodes, 0)
+                rootJson.put("windowId", window.id)
+                rootNodes.put(rootJson)
+                serializedWindows.put(JSONObject().apply {
+                    put("order", index)
+                    put("id", window.id)
+                    put("type", window.type)
+                    put("layer", window.layer)
+                    put("title", window.title?.toString() ?: JSONObject.NULL)
+                    put("active", window.isActive)
+                    put("focused", window.isFocused)
+                    put("boundsInScreen", rectToJson(bounds))
+                    put("root", rootJson)
+                })
+            }
+        } else {
+            val root = service.rootInActiveWindow
+                ?: return JSONObject()
+                    .put("reqId", reqId)
+                    .put("success", false)
+                    .put("reason", "NO_ROOT")
+                    .put("message", "No service-visible window root is available")
+            val rootJson = hierarchyNodeToJson(root, totalNodes, 0)
+            rootNodes.put(rootJson)
+            serializedWindows.put(JSONObject().apply {
+                put("order", 0)
+                put("id", root.windowId)
+                put("type", JSONObject.NULL)
+                put("layer", JSONObject.NULL)
+                put("title", JSONObject.NULL)
+                put("active", true)
+                put("focused", false)
+                put("boundsInScreen", rectToJson(Rect().also(root::getBoundsInScreen)))
+                put("root", rootJson)
+            })
+        }
+
+        return JSONObject().apply {
+            put("reqId", reqId)
+            put("success", true)
+            put("schemaVersion", "service-hierarchy-v1")
+            put("source", "accessibility_service_windows")
+            put("windowCoverage", if (serviceWindows.isNotEmpty()) "all_service_visible_windows" else "active_root_fallback")
+            put("nodeCount", totalNodes[0])
+            put("windows", serializedWindows)
+            put("nodes", rootNodes)
+        }
+    }
+
+    private fun hierarchyNodeToJson(
+        node: AccessibilityNodeInfo,
+        totalNodes: IntArray,
+        depth: Int
+    ): JSONObject {
+        if (depth > HIERARCHY_SNAPSHOT_MAX_DEPTH) {
+            throw IllegalStateException("SERIALIZATION_LIMIT_EXCEEDED:depth>$HIERARCHY_SNAPSHOT_MAX_DEPTH")
+        }
+        totalNodes[0] += 1
+        if (totalNodes[0] > HIERARCHY_SNAPSHOT_MAX_NODES) {
+            throw IllegalStateException("SERIALIZATION_LIMIT_EXCEEDED:nodes>$HIERARCHY_SNAPSHOT_MAX_NODES")
+        }
+        val bounds = Rect().also(node::getBoundsInScreen)
+        val children = JSONArray()
+        for (index in 0 until node.childCount) {
+            val child = node.getChild(index)
+                ?: throw IllegalStateException("SERIALIZATION_ERROR:child_unavailable index=$index")
+            children.put(hierarchyNodeToJson(child, totalNodes, depth + 1).put("childIndex", index))
+        }
+        return JSONObject().apply {
+            put("text", node.text?.toString() ?: JSONObject.NULL)
+            put("contentDescription", node.contentDescription?.toString() ?: JSONObject.NULL)
+            put("viewIdResourceName", node.viewIdResourceName ?: JSONObject.NULL)
+            put("className", node.className?.toString() ?: JSONObject.NULL)
+            put("packageName", node.packageName?.toString() ?: JSONObject.NULL)
+            put("boundsInScreen", rectToJson(bounds))
+            put("clickable", node.isClickable)
+            put("effectiveClickable", node.isClickable)
+            put("enabled", node.isEnabled)
+            put("focusable", node.isFocusable)
+            put("focused", node.isFocused)
+            put("accessibilityFocused", node.isAccessibilityFocused)
+            put("selected", node.isSelected)
+            put("scrollable", node.isScrollable)
+            put("isScrollable", node.isScrollable)
+            put("checkable", node.isCheckable)
+            put("checked", node.isChecked)
+            put("visibleToUser", node.isVisibleToUser)
+            put("isVisibleToUser", node.isVisibleToUser)
+            put("children", children)
+        }
+    }
+
+    private fun rectToJson(rect: Rect): JSONObject = JSONObject().apply {
+        put("l", rect.left)
+        put("t", rect.top)
+        put("r", rect.right)
+        put("b", rect.bottom)
+        put("left", rect.left)
+        put("top", rect.top)
+        put("right", rect.right)
+        put("bottom", rect.bottom)
     }
 
     /**

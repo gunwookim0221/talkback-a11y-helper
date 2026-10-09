@@ -77,7 +77,7 @@ class LogcatReader:
                 chunk = base64.b64decode(encoded, validate=True)
             except (binascii.Error, ValueError):
                 return {"state": "error", "reason": "invalid_chunk_encoding"}
-            if len(chunk) > 2048:
+            if len(chunk) > 3072:
                 return {"state": "error", "reason": "chunk_exceeds_limit"}
             chunks[index] = chunk
             if sum(map(len, chunks.values())) > max_payload_bytes:

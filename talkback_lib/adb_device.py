@@ -188,5 +188,3 @@ class AdbDevice:
         self._shell(dev, ["screencap", "-p", remote_path])
         self._pull(dev, remote_path, str(save_file))
 
-    def _dump_ui(self, dev: Any, remote_path: str = "/sdcard/window_dump.xml") -> str:
-        return self._shell(dev, ["uiautomator", "dump", remote_path])

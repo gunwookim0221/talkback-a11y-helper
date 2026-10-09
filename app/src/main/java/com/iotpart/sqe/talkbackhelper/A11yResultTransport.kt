@@ -8,13 +8,22 @@ import java.util.Base64
 internal object A11yResultTransport {
     private const val LEGACY_LINE_MAX_BYTES = 2700
     private const val CHUNK_BYTES = 1500
+    // Hierarchy snapshots are comparatively large; fewer bounded writes reduce
+    // logcat loss risk while keeping each encoded record below Android's limit.
+    const val HIERARCHY_CHUNK_BYTES = 2600
 
-    fun encode(prefix: String, reqId: String, serialized: String): List<String> {
+    fun encode(
+        prefix: String,
+        reqId: String,
+        serialized: String,
+        chunkBytes: Int = CHUNK_BYTES,
+    ): List<String> {
         val bytes = serialized.toByteArray(StandardCharsets.UTF_8)
         if (bytes.size <= LEGACY_LINE_MAX_BYTES) return listOf("$prefix $serialized")
 
         val digest = sha256(bytes)
-        val chunks = bytes.asList().chunked(CHUNK_BYTES).map { part ->
+        require(chunkBytes in 1..HIERARCHY_CHUNK_BYTES) { "Invalid result chunk size: $chunkBytes" }
+        val chunks = bytes.asList().chunked(chunkBytes).map { part ->
             ByteArray(part.size) { index -> part[index] }
         }
         val count = chunks.size

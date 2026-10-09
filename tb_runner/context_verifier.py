@@ -163,40 +163,30 @@ def _expected_bottom_nav_count(scenario_cfg: dict[str, Any]) -> int:
     return len([label for label in labels if isinstance(label, str) and label.strip()]) if isinstance(labels, list) else 0
 
 
-def _read_window_xml_selected_bottom_tab(
+def _read_service_hierarchy_selected_bottom_tab(
     client: A11yAdbClient | None,
     dev: str,
     expected_tab: str | None,
 ) -> str:
     if client is None or not expected_tab:
         return ""
-    runner = getattr(client, "_run", None)
-    if not callable(runner):
+    snapshot_reader = getattr(client, "dump_hierarchy", None)
+    if not callable(snapshot_reader):
+        log("[CONTEXT][selected_tab_service_hierarchy_failed] reason='dump_hierarchy_not_supported'")
         return ""
-    remote_path = "/sdcard/tb_runner_context_verify.xml"
     try:
-        runner(["shell", "uiautomator", "dump", remote_path], dev=dev, timeout=8)
-        raw_xml = str(runner(["shell", "cat", remote_path], dev=dev, timeout=8) or "")
-        start = raw_xml.find("<?xml")
-        if start < 0:
-            start = raw_xml.find("<hierarchy")
-        end = raw_xml.find("</hierarchy>", start)
-        if start < 0 or end < 0:
-            return ""
-        root = ET.fromstring(raw_xml[start : end + len("</hierarchy>")])
-        for node in root.iter("node"):
-            if node.attrib.get("selected", "").strip().lower() != "true":
+        from talkback_lib.hierarchy_snapshot import flatten_service_hierarchy
+
+        snapshot = snapshot_reader(dev=dev)
+        for node in flatten_service_hierarchy(snapshot):
+            if not bool(node.get("selected")):
                 continue
-            label = str(node.attrib.get("content-desc", "") or node.attrib.get("text", "") or "").strip()
+            label = str(node.get("contentDescription") or node.get("text") or "").strip()
             if _matches_bottom_tab_expectation(label, expected_tab):
                 return label
-    except (ET.ParseError, OSError, RuntimeError, TypeError, ValueError):
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        log(f"[CONTEXT][selected_tab_service_hierarchy_failed] reason='{type(exc).__name__}:{exc}'")
         return ""
-    finally:
-        try:
-            runner(["shell", "rm", "-f", remote_path], dev=dev, timeout=5)
-        except Exception:
-            pass
     return ""
 
 
@@ -457,8 +447,8 @@ def verify_context(
                     "dump_source": dump_source,
                     "lazy_dump_node_count": lazy_dump_node_count,
                 }
-        xml_selected_label = _read_window_xml_selected_bottom_tab(client, dev, expected_bottom_tab)
-        if xml_selected_label:
+        hierarchy_selected_label = _read_service_hierarchy_selected_bottom_tab(client, dev, expected_bottom_tab)
+        if hierarchy_selected_label:
             return {
                 "ok": True,
                 "type": context_type,
@@ -470,10 +460,10 @@ def verify_context(
                     ]
                     if part
                 ),
-                "actual_text": xml_selected_label,
-                "actual_announcement": xml_selected_label,
-                "actual_selected_text": xml_selected_label,
-                "actual_source": "window_xml_selected_bottom_tab",
+                "actual_text": hierarchy_selected_label,
+                "actual_announcement": hierarchy_selected_label,
+                "actual_selected_text": hierarchy_selected_label,
+                "actual_source": "service_hierarchy_selected_bottom_tab",
                 "selected_candidates": [],
                 "dump_source": dump_source,
                 "lazy_dump_node_count": lazy_dump_node_count,

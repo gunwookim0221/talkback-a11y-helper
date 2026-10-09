@@ -71,7 +71,21 @@ def _ok_context_run_factory(command, **kwargs):
 
 
 def _helper_dump(serial):
-    return {"nodes": [{"text": "Home Monitor", "packageName": "com.samsung.android.oneconnect"}], "serial": serial}
+    root = {
+        "text": "Home Monitor",
+        "packageName": "com.samsung.android.oneconnect",
+        "boundsInScreen": "0,0,1080,1920",
+        "children": [],
+    }
+    return {
+        "reqId": "test",
+        "success": True,
+        "nodes": [root],
+        "windows": [{"root": root, "order": 0, "packageName": "com.samsung.android.oneconnect"}],
+        "nodeCount": 1,
+        "windowCoverage": "all_service_visible_windows",
+        "serial": serial,
+    }
 
 
 def test_talkback_fatal_is_captured_separately_from_app_crashes(tmp_path):

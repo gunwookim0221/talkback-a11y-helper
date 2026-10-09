@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
+
 from tb_runner import core_preflight
 from tb_runner.accessibility_preflight import AccessibilityPreflightResult, AccessibilitySettings
 
@@ -7,6 +9,7 @@ from tb_runner.accessibility_preflight import AccessibilityPreflightResult, Acce
 class _Client:
     def __init__(self):
         self.serials = []
+        self.hierarchy_factory = lambda: _snapshot_from_xml(_smartthings_xml())
 
     def ping(self, dev=None, wait_=3.0):
         self.serials.append(("ping", dev))
@@ -15,6 +18,10 @@ class _Client:
     def check_talkback_ready(self, dev=None):
         self.serials.append(("talkback", dev))
         return {"status": "enabled", "reason": "ok"}
+
+    def dump_hierarchy(self, dev=None):
+        self.serials.append(("hierarchy", dev))
+        return self.hierarchy_factory()
 
 
 def _smartthings_foreground() -> str:
@@ -44,6 +51,47 @@ def _samsung_account_popup_ko_xml() -> str:
 
 def _smartthings_xml() -> str:
     return f'<hierarchy><node package="{core_preflight.SMARTTHINGS_PACKAGE}" /></hierarchy>'
+
+
+def _snapshot_from_xml(xml_text: str) -> dict[str, object]:
+    document = ET.fromstring(xml_text)
+
+    def convert(element):
+        attrs = element.attrib
+        return {
+            "text": attrs.get("text", ""),
+            "contentDescription": attrs.get("content-desc", ""),
+            "viewIdResourceName": attrs.get("resource-id", ""),
+            "className": attrs.get("class", ""),
+            "packageName": attrs.get("package", ""),
+            "boundsInScreen": attrs.get("bounds", ""),
+            "clickable": attrs.get("clickable", "false") == "true",
+            "focusable": attrs.get("focusable", "false") == "true",
+            "enabled": attrs.get("enabled", "true") == "true",
+            "focused": attrs.get("focused", "false") == "true",
+            "selected": attrs.get("selected", "false") == "true",
+            "scrollable": attrs.get("scrollable", "false") == "true",
+            "visibleToUser": attrs.get("visible-to-user", "true") == "true",
+            "children": [convert(child) for child in list(element)],
+        }
+
+    roots = [convert(node) for node in document.findall("node")]
+    first = roots[0] if roots else {}
+    active_root = {
+        "text": "",
+        "contentDescription": "",
+        "viewIdResourceName": "",
+        "className": "android.widget.FrameLayout",
+        "packageName": first.get("packageName", ""),
+        "boundsInScreen": "",
+        "children": roots,
+    }
+    return {
+        "success": True,
+        "nodes": [active_root],
+        "windows": [{"root": active_root, "order": 0, "active": True, "focused": True}],
+        "nodeCount": len(roots) + 1,
+    }
 
 
 def test_core_preflight_preserves_earlier_frontend_pid(monkeypatch):
@@ -89,7 +137,9 @@ def test_core_preflight_uses_one_serial_for_helper_and_talkback(monkeypatch):
     )
 
     assert result.ok is True
-    assert client.serials == [("ping", "SERIAL"), ("talkback", "SERIAL")]
+    assert client.serials[0] == ("ping", "SERIAL")
+    assert client.serials[-1] == ("talkback", "SERIAL")
+    assert any(call == ("hierarchy", "SERIAL") for call in client.serials)
     assert result.screen_awake["status"] == "PASS"
     assert result.unlock_swipe["status"] == "PASS"
     assert result.app_foreground["status"] == "PASS"
@@ -124,12 +174,14 @@ def test_core_preflight_dismisses_internal_samsung_account_popup_after_foregroun
             return True, _smartthings_foreground()
         if args == ("shell", "dumpsys", "window", "policy"):
             return True, "mShowingLockscreen=false"
-        if args == ("shell", "cat", core_preflight.PREFLIGHT_UI_DUMP_PATH):
-            return True, _samsung_account_popup_ko_xml() if dumped_popup["active"] else _smartthings_xml()
         if args == ("shell", "input", "tap", "282", "2334"):
             dumped_popup["active"] = False
             return True, ""
         return True, ""
+
+    client.hierarchy_factory = lambda: _snapshot_from_xml(
+        _samsung_account_popup_ko_xml() if dumped_popup["active"] else _smartthings_xml()
+    )
 
     monkeypatch.setattr(
         core_preflight,
@@ -316,7 +368,8 @@ def test_core_preflight_unlock_warn_continues_to_helper(monkeypatch):
     assert result.unlock_swipe["status"] == "WARN"
     assert "secure lockscreen may still be active" in result.unlock_swipe["message"]
     assert len(result.unlock_swipe["attempts"]) == 3
-    assert client.serials == [("ping", "SERIAL"), ("talkback", "SERIAL")]
+    assert client.serials[0] == ("ping", "SERIAL")
+    assert client.serials[-1] == ("talkback", "SERIAL")
 
 
 def test_foreground_launches_smartthings_when_another_app_is_active():
@@ -407,6 +460,9 @@ def test_core_preflight_recovers_play_store_popup_after_foreground_pass(monkeypa
     settings = AccessibilitySettings("helper", "1")
     commands = []
     uia_packages = ["com.android.vending", core_preflight.SMARTTHINGS_PACKAGE]
+    client.hierarchy_factory = lambda: _snapshot_from_xml(
+        f'<hierarchy><node package="{uia_packages.pop(0) if uia_packages else core_preflight.SMARTTHINGS_PACKAGE}" /></hierarchy>'
+    )
     logs = []
 
     def adb_runner(_adb_path, _serial, *args, timeout=8.0):
@@ -417,9 +473,6 @@ def test_core_preflight_recovers_play_store_popup_after_foreground_pass(monkeypa
             return True, "mShowingLockscreen=false"
         if args == ("shell", "dumpsys", "window"):
             return True, _smartthings_foreground()
-        if args == ("shell", "cat", core_preflight.PREFLIGHT_UI_DUMP_PATH):
-            package = uia_packages.pop(0) if uia_packages else core_preflight.SMARTTHINGS_PACKAGE
-            return True, f'<hierarchy><node package="{package}" /></hierarchy>'
         return True, ""
 
     monkeypatch.setattr(
@@ -451,6 +504,9 @@ def test_core_preflight_recovers_play_store_before_app_foreground_failure(monkey
     commands = []
     recovered = False
     logs = []
+    client.hierarchy_factory = lambda: _snapshot_from_xml(
+        f'<hierarchy><node package="{core_preflight.SMARTTHINGS_PACKAGE if recovered else "com.android.vending"}" /></hierarchy>'
+    )
 
     def adb_runner(_adb_path, _serial, *args, timeout=8.0):
         nonlocal recovered
@@ -462,9 +518,6 @@ def test_core_preflight_recovers_play_store_before_app_foreground_failure(monkey
         if args == ("shell", "dumpsys", "window"):
             package = core_preflight.SMARTTHINGS_PACKAGE if recovered else "com.android.vending"
             return True, f"mCurrentFocus=Window{{abc u0 {package}/.MainActivity}}"
-        if args == ("shell", "cat", core_preflight.PREFLIGHT_UI_DUMP_PATH):
-            package = core_preflight.SMARTTHINGS_PACKAGE if recovered else "com.android.vending"
-            return True, f'<hierarchy><node package="{package}" /></hierarchy>'
         if args == ("shell", "input", "keyevent", "KEYCODE_BACK"):
             recovered = True
         return True, ""
@@ -493,17 +546,23 @@ def test_core_preflight_recovers_play_store_before_app_foreground_failure(monkey
     assert not any("app_foreground FAIL" in line for line in logs)
 
 
-def test_core_preflight_reports_popup_reason_when_early_recovery_fails():
+def test_core_preflight_reports_popup_reason_when_early_recovery_fails(monkeypatch):
     client = _Client()
+    client.hierarchy_factory = lambda: _snapshot_from_xml(
+        '<hierarchy><node package="com.android.vending" /></hierarchy>'
+    )
     logs = []
+    settings = AccessibilitySettings("helper", "1")
+    monkeypatch.setattr(
+        core_preflight, "ensure_accessibility_service_enabled",
+        lambda **kwargs: AccessibilityPreflightResult(True, "ok", settings, settings, False, True),
+    )
 
     def adb_runner(_adb_path, _serial, *args, timeout=8.0):
         if args == ("get-state",):
             return True, "device"
         if args == ("shell", "dumpsys", "window"):
             return True, "mCurrentFocus=Window{abc u0 com.android.vending/.MainActivity}"
-        if args == ("shell", "cat", core_preflight.PREFLIGHT_UI_DUMP_PATH):
-            return True, '<hierarchy><node package="com.android.vending" /></hierarchy>'
         return True, ""
 
     result = core_preflight.run_preflight(
@@ -522,16 +581,19 @@ def test_core_preflight_reports_popup_reason_when_early_recovery_fails():
 
 def test_popup_recovery_fails_when_play_store_contamination_remains():
     commands = []
+    client = _Client()
+    client.hierarchy_factory = lambda: _snapshot_from_xml(
+        '<hierarchy><node package="com.android.vending" /></hierarchy>'
+    )
 
     def adb_runner(_adb_path, _serial, *args, timeout=8.0):
         commands.append(args)
         if args == ("shell", "dumpsys", "window"):
             return True, _smartthings_foreground()
-        if args == ("shell", "cat", core_preflight.PREFLIGHT_UI_DUMP_PATH):
-            return True, '<hierarchy><node package="com.android.vending" /></hierarchy>'
         return True, ""
 
     result = core_preflight.recover_external_popup_contamination(
+        client=client,
         serial="SERIAL",
         adb_runner=adb_runner,
         sleep_fn=lambda _seconds: None,
@@ -554,6 +616,7 @@ def test_popup_recovery_force_stop_fallback_relaunches_smartthings():
     external_stopped = False
     sleeps = []
     logs = []
+    client = _Client()
 
     def adb_runner(_adb_path, _serial, *args, timeout=8.0):
         nonlocal external_stopped
@@ -561,14 +624,12 @@ def test_popup_recovery_force_stop_fallback_relaunches_smartthings():
         if args == ("shell", "dumpsys", "window"):
             package = core_preflight.SMARTTHINGS_PACKAGE if external_stopped else "com.android.vending"
             return True, f"mCurrentFocus=Window{{abc u0 {package}/.MainActivity}}"
-        if args == ("shell", "cat", core_preflight.PREFLIGHT_UI_DUMP_PATH):
-            package = core_preflight.SMARTTHINGS_PACKAGE if external_stopped else "com.android.vending"
-            return True, f'<hierarchy><node package="{package}" /></hierarchy>'
         if args == ("shell", "am", "force-stop", "com.android.vending"):
             external_stopped = True
         return True, ""
 
     result = core_preflight.recover_external_popup_contamination(
+        client=client,
         serial="SERIAL",
         adb_runner=adb_runner,
         sleep_fn=sleeps.append,
@@ -597,6 +658,7 @@ def test_popup_recovery_dismisses_review_sheet_not_now_as_last_fallback():
     commands = []
     dismissed = False
     logs = []
+    client = _Client()
 
     def adb_runner(_adb_path, _serial, *args, timeout=8.0):
         nonlocal dismissed
@@ -604,23 +666,20 @@ def test_popup_recovery_dismisses_review_sheet_not_now_as_last_fallback():
         if args == ("shell", "dumpsys", "window"):
             package = core_preflight.SMARTTHINGS_PACKAGE if dismissed else "com.android.vending"
             return True, f"mCurrentFocus=Window{{abc u0 {package}/.MainActivity}}"
-        if args == ("shell", "cat", core_preflight.PREFLIGHT_UI_DUMP_PATH):
-            if dismissed:
-                return True, (
-                    f'<hierarchy><node package="{core_preflight.SMARTTHINGS_PACKAGE}" '
-                    'resource-id="com.samsung.android.oneconnect:id/bottom_navigation_tab_home" /></hierarchy>'
-                )
-            return True, (
-                '<hierarchy>'
-                '<node package="com.android.vending" text="Submit" bounds="[600,1800][1000,1950]" />'
-                '<node package="com.android.vending" content-desc="Not now" bounds="[80,1800][480,1950]" />'
-                '</hierarchy>'
-            )
         if args == ("shell", "input", "tap", "280", "1875"):
             dismissed = True
         return True, ""
 
+    client.hierarchy_factory = lambda: _snapshot_from_xml(
+        f'<hierarchy><node package="{core_preflight.SMARTTHINGS_PACKAGE}" '
+        'resource-id="com.samsung.android.oneconnect:id/bottom_navigation_tab_home" /></hierarchy>'
+        if dismissed
+        else '<hierarchy><node package="com.android.vending" text="Submit" bounds="[600,1800][1000,1950]" />'
+             '<node package="com.android.vending" content-desc="Not now" bounds="[80,1800][480,1950]" /></hierarchy>'
+    )
+
     result = core_preflight.recover_external_popup_contamination(
+        client=client,
         serial="SERIAL",
         adb_runner=adb_runner,
         sleep_fn=lambda _seconds: None,
@@ -636,20 +695,20 @@ def test_popup_recovery_dismisses_review_sheet_not_now_as_last_fallback():
 
 def test_popup_recovery_does_not_tap_not_now_without_review_sheet_submit():
     commands = []
+    client = _Client()
 
     def adb_runner(_adb_path, _serial, *args, timeout=8.0):
         commands.append(args)
         if args == ("shell", "dumpsys", "window"):
             return True, "mCurrentFocus=Window{abc u0 com.android.vending/.MainActivity}"
-        if args == ("shell", "cat", core_preflight.PREFLIGHT_UI_DUMP_PATH):
-            return True, (
-                '<hierarchy>'
-                '<node package="com.android.vending" text="Not now" bounds="[80,1800][480,1950]" />'
-                '</hierarchy>'
-            )
         return True, ""
 
+    client.hierarchy_factory = lambda: _snapshot_from_xml(
+        '<hierarchy><node package="com.android.vending" text="Not now" bounds="[80,1800][480,1950]" /></hierarchy>'
+    )
+
     result = core_preflight.recover_external_popup_contamination(
+        client=client,
         serial="SERIAL",
         adb_runner=adb_runner,
         sleep_fn=lambda _seconds: None,
@@ -661,26 +720,26 @@ def test_popup_recovery_does_not_tap_not_now_without_review_sheet_submit():
 
 def test_review_sheet_dismiss_requires_smartthings_bottom_tab_after_tap():
     dismissed = False
+    client = _Client()
 
     def adb_runner(_adb_path, _serial, *args, timeout=8.0):
         nonlocal dismissed
         if args == ("shell", "dumpsys", "window"):
             package = core_preflight.SMARTTHINGS_PACKAGE if dismissed else "com.android.vending"
             return True, f"mCurrentFocus=Window{{abc u0 {package}/.MainActivity}}"
-        if args == ("shell", "cat", core_preflight.PREFLIGHT_UI_DUMP_PATH):
-            if dismissed:
-                return True, f'<hierarchy><node package="{core_preflight.SMARTTHINGS_PACKAGE}" /></hierarchy>'
-            return True, (
-                '<hierarchy>'
-                '<node package="com.android.vending" text="Submit" bounds="[600,1800][1000,1950]" />'
-                '<node package="com.android.vending" text="Not now" bounds="[80,1800][480,1950]" />'
-                '</hierarchy>'
-            )
         if args == ("shell", "input", "tap", "280", "1875"):
             dismissed = True
         return True, ""
 
+    client.hierarchy_factory = lambda: _snapshot_from_xml(
+        f'<hierarchy><node package="{core_preflight.SMARTTHINGS_PACKAGE}" /></hierarchy>'
+        if dismissed
+        else '<hierarchy><node package="com.android.vending" text="Submit" bounds="[600,1800][1000,1950]" />'
+             '<node package="com.android.vending" text="Not now" bounds="[80,1800][480,1950]" /></hierarchy>'
+    )
+
     result = core_preflight.recover_external_popup_contamination(
+        client=client,
         serial="SERIAL",
         adb_runner=adb_runner,
         sleep_fn=lambda _seconds: None,

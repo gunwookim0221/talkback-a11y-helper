@@ -10,7 +10,7 @@ from tb_runner.plugin_card_discovery import (
     build_discovery_response,
     build_known_plugin_index,
     discover_device_cards,
-    discover_life_cards_from_xml,
+    discover_life_cards_from_nodes,
 )
 from tb_runner.scenario_config import TAB_CONFIGS
 
@@ -46,22 +46,15 @@ def _capture_helper_nodes(client: A11yAdbClient, serial: str | None) -> tuple[li
         return [], f"helper_dump_failed:{exc}"
 
 
-def _capture_window_xml(client: A11yAdbClient, serial: str | None) -> tuple[str, str]:
-    run_fn = getattr(client, "_run", None)
-    if not callable(run_fn):
-        return "", "xml_dump_failed:client_run_not_supported"
-    remote_xml = "/sdcard/window_dump_plugin_discovery.xml"
+def _capture_service_hierarchy(client: A11yAdbClient, serial: str | None) -> tuple[list[dict[str, Any]], str]:
     try:
-        run_fn(["shell", "uiautomator", "dump", remote_xml], dev=serial)
-        xml_text = str(run_fn(["shell", "cat", remote_xml], dev=serial) or "")
-        return xml_text, "" if xml_text.strip() else "xml_dump_failed:empty_xml"
+        snapshot = client.dump_hierarchy(dev=serial)
+        nodes = snapshot.get("nodes")
+        if not isinstance(nodes, list) or not nodes:
+            return [], "service_hierarchy_failed:HIERARCHY_SNAPSHOT:NO_ROOT:empty_nodes"
+        return [node for node in nodes if isinstance(node, dict)], ""
     except Exception as exc:
-        return "", f"xml_dump_failed:{exc}"
-    finally:
-        try:
-            run_fn(["shell", "rm", "-f", remote_xml], dev=serial)
-        except Exception:
-            pass
+        return [], f"service_hierarchy_failed:{exc}"
 
 
 def _client_adb_runner(client: A11yAdbClient, serial: str | None):
@@ -85,7 +78,13 @@ def discover_plugins(request: PluginDiscoveryRequest, *, client: A11yAdbClient |
     warnings: list[str] = []
     cards: list[dict[str, Any]] = []
     known_index = build_known_plugin_index(TAB_CONFIGS)
-    popup_status = dismiss_samsung_account_popup(_client_adb_runner(client, request.serial))
+    popup_status = dismiss_samsung_account_popup(
+        _client_adb_runner(client, request.serial),
+        hierarchy_reader=lambda: client.dump_hierarchy(dev=request.serial),
+        dev_serial=request.serial,
+    )
+    if popup_status.get("acquisition_failed"):
+        warnings.append(str(popup_status.get("acquisition_error") or "service_hierarchy_failed"))
     if popup_status.get("popup_detected") and not popup_status.get("popup_dismissed"):
         warnings.append("samsung_account_popup_detected_but_not_dismissed")
 
@@ -103,18 +102,20 @@ def discover_plugins(request: PluginDiscoveryRequest, *, client: A11yAdbClient |
 
     if "life" in targets:
         if not request.include_xml:
-            warnings.append("life_discovery_requires_xml_for_phase5a_minimal")
+            warnings.append("life_discovery_requires_service_hierarchy_for_phase5a_minimal")
         else:
-            xml_text, xml_error = _capture_window_xml(client, request.serial)
-            if xml_error:
-                warnings.append(xml_error)
+            life_nodes, hierarchy_error = _capture_service_hierarchy(client, request.serial)
+            if hierarchy_error:
+                warnings.append(hierarchy_error)
             else:
-                cards.extend(discover_life_cards_from_xml(xml_text, known_index=known_index))
+                cards.extend(discover_life_cards_from_nodes(
+                    life_nodes, known_index=known_index, source="accessibility_service_hierarchy"
+                ))
 
     hard_failures = []
     if "device" in targets and helper_error:
         hard_failures.append(helper_error)
-    if "life" in targets and request.include_xml and any(warning.startswith("xml_dump_failed:") for warning in warnings):
-        hard_failures.append("xml_dump_failed")
+    if "life" in targets and request.include_xml and any(warning.startswith("service_hierarchy_failed:") for warning in warnings):
+        hard_failures.append("service_hierarchy_failed")
     ok = not hard_failures
     return build_discovery_response(cards=cards, warnings=warnings, ok=ok)

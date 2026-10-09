@@ -355,15 +355,46 @@ def _ok_enable_talkback():
 
 
 class _ReadinessClient:
-    def __init__(self, result):
+    def __init__(self, result, hierarchy=None):
         self.result = result
+        self.hierarchy = hierarchy or _snapshot_from_xml('<hierarchy><node package="com.android.systemui" class="android.widget.FrameLayout" bounds="[0,0][1080,2400]" /></hierarchy>')
+
+    def dump_hierarchy(self, dev=None):
+        return self.hierarchy
 
     def check_talkback_ready(self):
         return self.result
 
 
-def _client_factory(result):
-    return lambda **_kwargs: _ReadinessClient(result)
+def _client_factory(result, hierarchy=None):
+    return lambda **_kwargs: _ReadinessClient(result, hierarchy)
+
+
+def _snapshot_from_xml(xml_text):
+    import xml.etree.ElementTree as ET
+
+    document = ET.fromstring(xml_text)
+
+    def convert(element):
+        attributes = element.attrib
+        node = {
+            "text": attributes.get("text", ""),
+            "contentDescription": attributes.get("content-desc", ""),
+            "viewIdResourceName": attributes.get("resource-id", ""),
+            "className": attributes.get("class", ""),
+            "packageName": attributes.get("package", ""),
+            "boundsInScreen": attributes.get("bounds", ""),
+            "children": [convert(child) for child in element.findall("node")],
+        }
+        for source, target in (("clickable", "clickable"), ("enabled", "enabled"), ("visible-to-user", "visibleToUser")):
+            if source in attributes:
+                node[target] = attributes[source].lower() == "true"
+        return node
+
+    children = [convert(child) for child in document.findall("node")]
+    package = next((node.get("packageName") for node in children if node.get("packageName")), "")
+    root = {"className": "android.widget.FrameLayout", "packageName": package, "boundsInScreen": "[0,0][1080,2400]", "children": children}
+    return {"reqId": "fixture", "success": True, "nodes": [root], "windows": [{"root": root, "order": 0}], "nodeCount": len(children) + 1}
 
 
 def _samsung_account_popup_xml() -> str:
@@ -476,7 +507,7 @@ def test_fix_talkback_dismisses_samsung_account_popup_before_readiness(monkeypat
         adb_status_fn=_adb_ready,
         helper_status_fn=_helper_ready,
         enable_talkback_fn=_ok_enable_talkback,
-        client_factory=_client_factory({"status": "enabled", "reason": "ok"}),
+        client_factory=_client_factory({"status": "enabled", "reason": "ok"}, _snapshot_from_xml(_samsung_account_popup_xml())),
         sleep_fn=lambda _seconds: None,
     )
 
@@ -502,7 +533,7 @@ def test_fix_talkback_dismisses_ko_samsung_account_popup_before_readiness(monkey
         adb_status_fn=_adb_ready,
         helper_status_fn=_helper_ready,
         enable_talkback_fn=_ok_enable_talkback,
-        client_factory=_client_factory({"status": "enabled", "reason": "ok"}),
+        client_factory=_client_factory({"status": "enabled", "reason": "ok"}, _snapshot_from_xml(_samsung_account_popup_ko_xml())),
         sleep_fn=lambda _seconds: None,
     )
 
@@ -533,7 +564,7 @@ def test_fix_talkback_does_not_dismiss_generic_ko_later_popup(monkeypatch):
         adb_status_fn=_adb_ready,
         helper_status_fn=_helper_ready,
         enable_talkback_fn=_ok_enable_talkback,
-        client_factory=_client_factory({"status": "enabled", "reason": "ok"}),
+        client_factory=_client_factory({"status": "enabled", "reason": "ok"}, _snapshot_from_xml('<hierarchy><node text="나중에" resource-id="android:id/button3" bounds="[102,2280][463,2388]" /></hierarchy>')),
         sleep_fn=lambda _seconds: None,
     )
 

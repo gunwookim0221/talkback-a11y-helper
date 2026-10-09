@@ -159,7 +159,7 @@ def _room_none(label="지정된 방 없음 지정된 방 없음", *, focusable=T
     )
 
 
-def test_ensure_all_devices_location_selected_uses_window_xml_selected_fallback(monkeypatch):
+def test_ensure_all_devices_location_selected_uses_service_hierarchy_selected_fallback(monkeypatch):
     helper_all_devices = _all_devices()
     helper_all_devices.pop("selected", None)
     helper_anywhere = _node(
@@ -193,12 +193,12 @@ def test_ensure_all_devices_location_selected_uses_window_xml_selected_fallback(
     )
 
     assert ok is True
-    assert reason == "all_devices_already_selected_window_xml"
+    assert reason == "all_devices_already_selected_service_hierarchy"
     assert nodes == helper_nodes
     assert client.tap_xy_adb_calls == []
 
 
-def test_device_list_scroll_uses_window_xml_selected_fallback(monkeypatch):
+def test_device_list_scroll_uses_service_hierarchy_selected_fallback(monkeypatch):
     helper_all_devices = _all_devices()
     helper_all_devices.pop("selected", None)
     helper_anywhere = _node(

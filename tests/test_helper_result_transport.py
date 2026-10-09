@@ -123,6 +123,19 @@ def test_missing_chunk_index_is_detected_by_reassembler():
     assert result["missing"] == [len(records) - 1]
 
 
+def test_reassembly_accepts_hierarchy_transport_chunk_size():
+    req_id = "hierarchy-large-chunk"
+    payload = json.dumps({"reqId": req_id, "success": True, "data": "x" * 8000})
+    records = _chunk_records(req_id, payload, chunk_size=2600, prefix="DUMP_HIERARCHY_RESULT")
+
+    result = LogcatReader.reassemble_chunked_payload(
+        "\n".join(records), "DUMP_HIERARCHY_RESULT", req_id
+    )
+
+    assert result["state"] == "complete"
+    assert result["payload"] == payload
+
+
 def test_truncated_legacy_target_result_stays_parse_error():
     client = A11yAdbClient(start_monitor=False)
     raw = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"reqId":"partial","success":true,"status":"TARGET_MATCHED"'
@@ -132,6 +145,86 @@ def test_truncated_legacy_target_result_stays_parse_error():
     assert result["success"] is False
     assert result["status"] == "parse_error"
     assert result["reqId"] == "partial"
+
+
+def _prepare_hierarchy_client(monkeypatch, logs):
+    client = A11yAdbClient(start_monitor=False)
+    monkeypatch.setattr("talkback_lib.uuid.uuid4", lambda: "hierarchy-re")
+    monkeypatch.setattr(client, "check_helper_status", lambda dev=None: True)
+    monkeypatch.setattr(client, "clear_logcat", lambda dev=None: pytest.fail("hierarchy reads must preserve the shared logcat buffer"))
+    monkeypatch.setattr(client, "_broadcast", lambda dev, action, args: None)
+    monkeypatch.setattr(client._logcat_reader, "dump_raw_filtered", lambda dev=None: logs)
+    return client
+
+
+def test_service_hierarchy_single_line_result_is_request_correlated(monkeypatch):
+    root = {"text": "Home", "children": []}
+    payload = {
+        "reqId": "hierarchy-re",
+        "success": True,
+        "schemaVersion": "service-hierarchy-v1",
+        "nodes": [root],
+        "windows": [{"root": root, "order": 0}],
+        "nodeCount": 1,
+    }
+    logs = "\n".join([
+        f"I/A11Y_HELPER: DUMP_HIERARCHY_RESULT {json.dumps(payload)}",
+        "I/A11Y_HELPER: DUMP_HIERARCHY_END hierarchy-re",
+    ])
+    client = _prepare_hierarchy_client(monkeypatch, logs)
+
+    result = client.dump_hierarchy(wait_seconds=0.1)
+
+    assert result == payload
+    assert client.last_hierarchy_metadata["reqId"] == "hierarchy-re"
+
+
+def test_service_hierarchy_chunked_result_reassembles(monkeypatch):
+    root = {"text": "가" * 1800, "children": []}
+    payload = json.dumps({
+        "reqId": "hierarchy-re", "success": True, "nodes": [root],
+        "windows": [{"root": root, "order": 0}], "nodeCount": 1,
+    }, ensure_ascii=False)
+    logs = "\n".join([
+        *_chunk_records("hierarchy-re", payload, chunk_size=1100, prefix="DUMP_HIERARCHY_RESULT"),
+        "I/A11Y_HELPER: DUMP_HIERARCHY_END hierarchy-re",
+    ])
+    client = _prepare_hierarchy_client(monkeypatch, logs)
+
+    result = client.dump_hierarchy(wait_seconds=0.1)
+
+    assert result["reqId"] == "hierarchy-re"
+    assert result["nodes"][0]["text"] == "가" * 1800
+
+
+def test_service_hierarchy_rejects_a_result_for_another_request(monkeypatch):
+    payload = {"reqId": "different-req", "success": True, "nodes": [], "windows": []}
+    client = _prepare_hierarchy_client(monkeypatch, "\n".join([
+        f"I/A11Y_HELPER: DUMP_HIERARCHY_RESULT {json.dumps(payload)}",
+        "I/A11Y_HELPER: DUMP_HIERARCHY_END hierarchy-re",
+    ]))
+    with pytest.raises(RuntimeError, match="request_id_mismatch"):
+        client.dump_hierarchy(wait_seconds=0.1)
+
+
+def test_service_hierarchy_failure_and_duplicate_terminal_are_explicit(monkeypatch):
+    failure = json.dumps({
+        "reqId": "hierarchy-re", "success": False, "reason": "NO_ROOT", "message": "No root",
+    })
+    client = _prepare_hierarchy_client(monkeypatch, "\n".join([
+        f"W/A11Y_HELPER: DUMP_HIERARCHY_RESULT hierarchy-re {failure}",
+        "I/A11Y_HELPER: DUMP_HIERARCHY_END hierarchy-re",
+    ]))
+    with pytest.raises(RuntimeError, match="HIERARCHY_SNAPSHOT:NO_ROOT"):
+        client.dump_hierarchy(wait_seconds=0.1)
+
+    client = _prepare_hierarchy_client(monkeypatch, "\n".join([
+        f"I/A11Y_HELPER: DUMP_HIERARCHY_RESULT {json.dumps({'reqId': 'hierarchy-re', 'success': True, 'nodes': [], 'windows': []})}",
+        "I/A11Y_HELPER: DUMP_HIERARCHY_END hierarchy-re",
+        "I/A11Y_HELPER: DUMP_HIERARCHY_END hierarchy-re",
+    ]))
+    with pytest.raises(RuntimeError, match="terminal_count=2"):
+        client.dump_hierarchy(wait_seconds=0.1)
 
 
 @pytest.mark.parametrize("prefix", ["SMART_NAV_RESULT", "EVIDENCE_EVENTS_RESULT"])

@@ -3,7 +3,6 @@ from __future__ import annotations
 import glob
 import subprocess
 import time
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from talkback_lib import A11yAdbClient
@@ -53,20 +52,17 @@ def _helper_metadata(apk_path: Path | None = None) -> dict[str, object]:
     }
 
 
-def _dismiss_samsung_account_popup_once(adb_runner=None) -> dict[str, object]:
+def _dismiss_samsung_account_popup_once(adb_runner=None, *, serial: str | None = None, client=None) -> dict[str, object]:
     adb_runner = adb_runner or run_adb
-    dump_result = adb_runner(["shell", "uiautomator", "dump", "/sdcard/fix_talkback_popup.xml"], timeout=8.0)
-    if not dump_result.get("ok"):
-        return {"popup_detected": False, "popup_dismissed": False}
-    cat_result = adb_runner(["shell", "cat", "/sdcard/fix_talkback_popup.xml"], timeout=8.0)
-    if not cat_result.get("ok"):
-        return {"popup_detected": False, "popup_dismissed": False}
     try:
-        root = ET.fromstring(str(cat_result.get("stdout", "")))
-    except ET.ParseError:
-        return {"popup_detected": False, "popup_dismissed": False}
+        helper = client or A11yAdbClient(dev_serial=serial, start_monitor=False)
+        snapshot = helper.dump_hierarchy(dev=serial)
+        from talkback_lib.hierarchy_snapshot import flatten_service_hierarchy
 
-    candidate = find_samsung_account_popup_candidate(root.iter("node"))
+        candidate = find_samsung_account_popup_candidate(flatten_service_hierarchy(snapshot))
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        return {"popup_detected": False, "popup_dismissed": False,
+                "acquisition_error": f"{type(exc).__name__}:{exc}"}
     if candidate is None:
         return {"popup_detected": False, "popup_dismissed": False}
     tap_result = adb_runner(["shell", "input", "tap", str(candidate.x), str(candidate.y)], timeout=5.0)
@@ -500,7 +496,25 @@ def fix_talkback(
         }
 
     sleep_fn(1.0)
-    popup_result = _dismiss_samsung_account_popup_once(run_adb)
+    connected_device = next(
+        (device for device in adb_status.get("devices", []) if isinstance(device, dict) and device.get("state") == "device"),
+        {},
+    )
+    serial = str(connected_device.get("serial") or "") or None
+    try:
+        client = client_factory(dev_serial=serial, start_monitor=False)
+    except TypeError:
+        client = client_factory(start_monitor=False)
+    popup_result = _dismiss_samsung_account_popup_once(run_adb, serial=serial, client=client)
+    if popup_result.get("acquisition_error"):
+        return {
+            "ok": False,
+            "status": "service_hierarchy_acquisition_failed",
+            "message": "The Helper service could not verify the popup state.",
+            "hierarchy_error": popup_result["acquisition_error"],
+            "steps": [*steps, {"step": "inspect_samsung_account_popup", "ok": False,
+                               "status": "service_hierarchy_acquisition_failed"}],
+        }
     if popup_result.get("popup_detected"):
         steps.append(
             {
@@ -510,7 +524,6 @@ def fix_talkback(
             }
         )
         sleep_fn(0.5)
-    client = client_factory(start_monitor=False)
     readiness = client.check_talkback_ready()
     talkback_status = str(readiness.get("status") or "")
     talkback_reason = str(readiness.get("reason") or "")

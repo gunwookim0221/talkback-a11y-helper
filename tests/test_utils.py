@@ -15,6 +15,8 @@ def test_parse_bounds_str_accepts_android_rect_format():
 
 def test_menu_main_anchor_regex_has_single_leading_ignorecase_flag():
     menu_cfg = next(cfg for cfg in TAB_CONFIGS if cfg.get("scenario_id") == "menu_main")
+    assert menu_cfg["screen_context_mode"] == "bottom_tab"
+    assert menu_cfg["stabilization_mode"] == "tab_context"
     for regex in (
         menu_cfg["anchor_name"],
         menu_cfg["anchor"]["text_regex"],
@@ -25,6 +27,12 @@ def test_menu_main_anchor_regex_has_single_leading_ignorecase_flag():
         assert _safe_regex_search(regex, "SmartThings settings")
         assert _safe_regex_search(regex, "Settings")
         assert _safe_regex_search(regex, "스마트싱스 설정")
+
+    runtime_bundle = load_runtime_bundle(TAB_CONFIGS, config_path="config/runtime_config.json")
+    effective_menu_cfg = next(
+        cfg for cfg in runtime_bundle["tab_configs"] if cfg.get("scenario_id") == "menu_main"
+    )
+    assert effective_menu_cfg["stabilization_mode"] == "tab_context"
 
 
 def test_life_pet_care_plugin_uses_card_entry_spec():

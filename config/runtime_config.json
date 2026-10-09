@@ -153,7 +153,8 @@
     "menu_main": {
       "group": "main_tabs",
       "enabled": false,
-      "max_steps": 100
+      "max_steps": 100,
+      "stabilization_mode": "tab_context"
     },
     "settings_entry_example": {
       "group": "plugin_screen",

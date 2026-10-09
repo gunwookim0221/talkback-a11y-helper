@@ -116,22 +116,20 @@ def verify_transition(before, after, target, action_success, markers=()):
 
 def capture(client, dev, config, folder, index):
     nodes = dump_with_capabilities(client, dev)
-    raw = ""
-    if callable(getattr(client, "_run", None)):
-        client._run(["shell", "uiautomator", "dump", "/sdcard/phase0c_global_nav.xml"], dev=dev, timeout=10)
-        raw = client._run(["shell", "cat", "/sdcard/phase0c_global_nav.xml"], dev=dev, timeout=10)
-        candidates = xml_nodes(raw)
-    else:
-        candidates = nodes
+    from talkback_lib.hierarchy_snapshot import flatten_service_hierarchy
+
+    hierarchy = client.dump_hierarchy(dev=dev)
+    candidates = flatten_service_hierarchy(hierarchy)
     observation = dict(nodes=nodes, items=discover(candidates, config), viewport=viewport(nodes, config.get("scenario_id", "")),
-                       source="raw_accessibility_xml" if raw else "helper_nodes")
+                       source="accessibility_service_hierarchy", service_hierarchy=hierarchy)
     if folder:
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / f"snapshot_{index:03d}.json"
         path.write_text(json.dumps(observation, ensure_ascii=False, indent=2), encoding="utf-8")
         observation["snapshot_path"] = str(path)
-        if raw:
-            path.with_suffix(".xml").write_text(raw, encoding="utf-8")
+        path.with_suffix(".hierarchy.json").write_text(
+            json.dumps(hierarchy, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     return observation
 
 

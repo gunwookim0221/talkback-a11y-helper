@@ -1,6 +1,4 @@
 from pathlib import Path
-import shutil
-import uuid
 
 import pytest
 
@@ -8,13 +6,8 @@ from tools import runtime_report_parser as parser
 
 
 @pytest.fixture
-def tmp_path():
-    base = Path.cwd() / ".test_tmp" / f"runtime_report_parser_{uuid.uuid4().hex}"
-    base.mkdir(parents=True, exist_ok=False)
-    try:
-        yield base
-    finally:
-        shutil.rmtree(base, ignore_errors=True)
+def tmp_path(tmp_path_factory):
+    return tmp_path_factory.mktemp("runtime_report_parser")
 
 
 def _write_log(tmp_path: Path, name: str, content: str) -> Path:

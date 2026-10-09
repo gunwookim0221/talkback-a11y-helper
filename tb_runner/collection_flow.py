@@ -3032,7 +3032,7 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _augment_life_snapshot_with_xml_selected(
+def _augment_life_snapshot_with_hierarchy_selected(
     client: A11yAdbClient,
     dev: str,
     snapshot: dict[str, Any],
@@ -3051,7 +3051,7 @@ def _augment_life_snapshot_with_xml_selected(
     merged_snapshot = dict(snapshot)
     merged_snapshot["life_selected"] = True
     merged_snapshot["life_selected_text"] = str(xml_snapshot.get("life_selected_text", "") or "").strip()
-    merged_snapshot["life_selected_source"] = "window_xml_selected"
+    merged_snapshot["life_selected_source"] = "service_hierarchy_selected"
     return merged_snapshot
 
 
@@ -3595,7 +3595,7 @@ def _verify_fresh_life_list_state(
             nodes = []
             last_reason = f"dump_failed:{exc}"
         snapshot = _life_root_state_snapshot(nodes if isinstance(nodes, list) else [])
-        snapshot = _augment_life_snapshot_with_xml_selected(client, dev, snapshot)
+        snapshot = _augment_life_snapshot_with_hierarchy_selected(client, dev, snapshot)
         life_list_ready = _is_life_list_ready(snapshot)
         plugin_card_list_visible = bool(
             int(snapshot.get("visible_card_hits", 0) or 0) > 0 or bool(snapshot.get("life_root_signature_present"))
@@ -3634,7 +3634,7 @@ def _ensure_life_plugin_list_ready(client: A11yAdbClient, dev: str, tab_cfg: dic
             raw_nodes = []
         nodes = raw_nodes if isinstance(raw_nodes, list) else []
         snapshot = _life_root_state_snapshot(nodes)
-        snapshot = _augment_life_snapshot_with_xml_selected(client, dev, snapshot)
+        snapshot = _augment_life_snapshot_with_hierarchy_selected(client, dev, snapshot)
         package_signature_present = any(
             "com.samsung.android.oneconnect" in str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").lower()
             for node, _ in _iter_tree_nodes_with_parent(nodes)
@@ -5726,18 +5726,13 @@ def _capture_pre_navigation_failure_bundle(
     except Exception as exc:
         failed_files.append(f"screenshot.png:{exc}")
 
-    run_fn = getattr(client, "_run", None)
-    if callable(run_fn):
-        try:
-            remote_xml = f"/sdcard/window_dump_{capture_root_id}.xml"
-            run_fn(["shell", "uiautomator", "dump", remote_xml], dev=dev)
-            run_fn(["pull", remote_xml, str(window_dump_path)], dev=dev)
-            run_fn(["shell", "rm", "-f", remote_xml], dev=dev)
-            saved_files.append("window_dump.xml")
-        except Exception as exc:
-            failed_files.append(f"window_dump.xml:{exc}")
-    else:
-        failed_files.append("window_dump.xml:_run_not_supported")
+    try:
+        from talkback_lib.hierarchy_snapshot import service_hierarchy_to_xml
+
+        window_dump_path.write_text(service_hierarchy_to_xml(client.dump_hierarchy(dev=dev)), encoding="utf-8")
+        saved_files.append("window_dump.xml")
+    except Exception as exc:
+        failed_files.append(f"window_dump.xml:service_hierarchy_failed:{exc}")
 
     helper_dump: Any = []
     dump_tree_fn = getattr(client, "dump_tree", None)
@@ -5864,21 +5859,12 @@ def _capture_scrolltouch_step_bundle(
 
     should_capture_xml = int(stats_map.get("partial_match_count", 0) or 0) > 0
     if should_capture_xml:
-        run_fn = getattr(client, "_run", None)
-        if callable(run_fn):
-            remote_xml = f"/sdcard/window_dump_scrolltouch_step_{max(int(scroll_step), 0)}.xml"
-            try:
-                run_fn(["shell", "uiautomator", "dump", remote_xml], dev=dev)
-                run_fn(["pull", remote_xml, str(window_dump_path)], dev=dev)
-            except Exception as exc:
-                first_failure_reason = first_failure_reason or f"window_dump_failed:{exc}"
-            finally:
-                try:
-                    run_fn(["shell", "rm", "-f", remote_xml], dev=dev)
-                except Exception:
-                    pass
-        else:
-            first_failure_reason = first_failure_reason or "window_dump_failed:run_not_supported"
+        try:
+            from talkback_lib.hierarchy_snapshot import service_hierarchy_to_xml
+
+            window_dump_path.write_text(service_hierarchy_to_xml(client.dump_hierarchy(dev=dev)), encoding="utf-8")
+        except Exception as exc:
+            first_failure_reason = first_failure_reason or f"window_dump_failed:service_hierarchy:{exc}"
 
     promotion_debug_meta = {
         "version": COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION,
@@ -6369,62 +6355,16 @@ def _parse_uiautomator_bounds(bounds_raw: str) -> tuple[int, int, int, int] | No
 
 
 def _load_scrolltouch_xml_nodes(client: A11yAdbClient, dev: str) -> tuple[list[dict[str, Any]], str]:
-    run_fn = getattr(client, "_run", None)
-    if not callable(run_fn):
-        return [], "run_not_supported"
-    remote_xml = "/sdcard/window_dump_scrolltouch.xml"
     try:
-        run_fn(["shell", "uiautomator", "dump", remote_xml], dev=dev)
-        xml_text = str(run_fn(["shell", "cat", remote_xml], dev=dev) or "").strip()
+        from talkback_lib.hierarchy_snapshot import legacy_scroll_nodes
+
+        snapshot = client.dump_hierarchy(dev=dev)
+        hierarchy_children = legacy_scroll_nodes(snapshot)
     except Exception as exc:
-        return [], f"dump_failed:{exc}"
-    finally:
-        try:
-            run_fn(["shell", "rm", "-f", remote_xml], dev=dev)
-        except Exception:
-            pass
-
-    if not xml_text:
-        return [], "empty_xml"
-    try:
-        root = ET.fromstring(xml_text)
-    except Exception as exc:
-        return [], f"parse_failed:{exc}"
-
-    def _parse_element(element: ET.Element) -> dict[str, Any] | None:
-        bounds_tuple = _parse_uiautomator_bounds(str(element.attrib.get("bounds", "") or ""))
-        if not bounds_tuple:
-            return None
-        left, top, right, bottom = bounds_tuple
-        node: dict[str, Any] = {
-            "text": str(element.attrib.get("text", "") or "").strip(),
-            "contentDescription": str(element.attrib.get("content-desc", "") or "").strip(),
-            "viewIdResourceName": str(element.attrib.get("resource-id", "") or "").strip(),
-            "className": str(element.attrib.get("class", "") or "").strip(),
-            "clickable": str(element.attrib.get("clickable", "") or "").strip().lower() == "true",
-            "focusable": str(element.attrib.get("focusable", "") or "").strip().lower() == "true",
-            "effectiveClickable": str(element.attrib.get("clickable", "") or "").strip().lower() == "true",
-            "visibleToUser": str(element.attrib.get("visible-to-user", "") or "").strip().lower() != "false",
-            "selected": str(element.attrib.get("selected", "") or "").strip().lower() == "true",
-            "boundsInScreen": f"{left},{top},{right},{bottom}",
-            "children": [],
-        }
-        children: list[dict[str, Any]] = []
-        for child in list(element):
-            child_node = _parse_element(child)
-            if isinstance(child_node, dict):
-                children.append(child_node)
-        node["children"] = children
-        return node
-
-    hierarchy_children: list[dict[str, Any]] = []
-    for child in list(root):
-        parsed_child = _parse_element(child)
-        if isinstance(parsed_child, dict):
-            hierarchy_children.append(parsed_child)
+        return [], f"service_hierarchy_failed:{exc}"
 
     if not hierarchy_children:
-        return [], "no_parsed_nodes"
+        return [], "service_hierarchy_no_bounded_nodes"
     return [{"children": hierarchy_children, "visibleToUser": True, "boundsInScreen": "0,0,1,1"}], "ok"
 
 
@@ -7239,7 +7179,7 @@ def _device_location_label(state: dict[str, Any]) -> str:
     return ""
 
 
-def _detect_selected_device_location_with_xml_fallback(
+def _detect_selected_device_location_with_hierarchy_fallback(
     client: A11yAdbClient,
     dev: str,
     nodes: list[dict[str, Any]],
@@ -7258,8 +7198,8 @@ def _detect_selected_device_location_with_xml_fallback(
     if not bool(xml_state.get("selected")):
         return state
     merged_state = dict(xml_state)
-    merged_state["reason"] = "window_xml_selected"
-    merged_state["verification_source"] = "window_xml_selected"
+    merged_state["reason"] = "service_hierarchy_selected"
+    merged_state["verification_source"] = "service_hierarchy_selected"
     merged_state["xml_reason"] = xml_reason
     return merged_state
 
@@ -7629,7 +7569,7 @@ def _scroll_device_list_for_card_search(
     dump_tree_fn: Any,
     step_wait_seconds: float,
 ) -> tuple[bool, list[dict[str, Any]], str, bool]:
-    state_before = _detect_selected_device_location_with_xml_fallback(client, dev, nodes_before)
+    state_before = _detect_selected_device_location_with_hierarchy_fallback(client, dev, nodes_before)
     selected_before = _device_location_label(state_before)
     log(f"[DEVICE][scroll] selected_before='{selected_before}'")
     if not bool(state_before.get("selected")):
@@ -7710,7 +7650,7 @@ def _scroll_device_list_for_card_search(
             )
             return False, nodes_after, "device_list_collection_unverified_after_scroll", False
 
-    state_after = _detect_selected_device_location_with_xml_fallback(client, dev, nodes_after)
+    state_after = _detect_selected_device_location_with_hierarchy_fallback(client, dev, nodes_after)
     selected_after = _device_location_label(state_after)
     log(f"[DEVICE][scroll] selected_after='{selected_after}'")
     if not bool(state_after.get("selected")):
@@ -7742,7 +7682,7 @@ def _ensure_all_devices_location_selected(
     *,
     step_wait_seconds: float,
 ) -> tuple[bool, list[dict[str, Any]], str]:
-    state = _detect_selected_device_location_with_xml_fallback(client, dev, nodes)
+    state = _detect_selected_device_location_with_hierarchy_fallback(client, dev, nodes)
     selected_before = _device_location_label(state)
     log(f"[DEVICE][location] selected_before='{selected_before}' reason='{state.get('reason', '')}'")
     candidate = state.get("candidate")
@@ -7755,8 +7695,8 @@ def _ensure_all_devices_location_selected(
         )
     if bool(state.get("selected")):
         return True, nodes, (
-            "all_devices_already_selected_window_xml"
-            if state.get("verification_source") == "window_xml_selected"
+            "all_devices_already_selected_service_hierarchy"
+            if state.get("verification_source") == "service_hierarchy_selected"
             else "all_devices_already_selected"
         )
 
@@ -7783,14 +7723,14 @@ def _ensure_all_devices_location_selected(
         except Exception as exc:
             return False, nodes, f"all_devices_verify_dump_failed:{exc}"
         nodes = refreshed if isinstance(refreshed, list) else []
-        state = _detect_selected_device_location_with_xml_fallback(client, dev, nodes)
+        state = _detect_selected_device_location_with_hierarchy_fallback(client, dev, nodes)
         selected_after = _device_location_label(state)
         last_actual = selected_after
         log(f"[DEVICE][location] selected_after='{selected_after}' reason='{state.get('reason', '')}' attempt={attempt}")
         if bool(state.get("selected")):
             return True, nodes, (
-                "all_devices_already_selected_window_xml"
-                if state.get("verification_source") == "window_xml_selected"
+                "all_devices_already_selected_service_hierarchy"
+                if state.get("verification_source") == "service_hierarchy_selected"
                 else "all_devices_selected"
             )
         if attempt == 1:
@@ -7854,7 +7794,7 @@ def _run_enter_device_card_plugin(
         # Use the existing All-devices selection evidence as the context gate.
         # This bypass never substitutes for Devices context verification and
         # never turns an unverified top into VERIFIED_TOP.
-        initial_location_state = _detect_selected_device_location_with_xml_fallback(client, dev, initial_nodes)
+        initial_location_state = _detect_selected_device_location_with_hierarchy_fallback(client, dev, initial_nodes)
         if bool(initial_location_state.get("selected")):
             direct_card, direct_geometry = _find_safe_visible_device_card_for_direct_entry(
                 initial_nodes,
@@ -17962,17 +17902,23 @@ def _initialize_content_terminal(client, dev, tab_cfg, state):
     initial = getattr(client, "_initial_scroll_observations", {}).get(scenario)
     if not isinstance(initial, dict):
         return
-    from tb_runner.global_navigation import discover, expected_destinations, xml_nodes
+    from tb_runner.global_navigation import discover, expected_destinations
     scope_nodes = initial.get("nodes", [])
-    raw = ""
-    if callable(getattr(client, "_run", None)):
-        try:
-            client._run(["shell", "uiautomator", "dump", "/sdcard/phase0eb_scope.xml"], dev=dev, timeout=10)
-            raw = client._run(["shell", "cat", "/sdcard/phase0eb_scope.xml"], dev=dev, timeout=10)
-            if isinstance(raw, str) and "<hierarchy" in raw:
-                scope_nodes = xml_nodes(raw)
-        except Exception as exc:
-            log(f"[CONTENT_SCOPE] scenario='{scenario}' error='{type(exc).__name__}'")
+    try:
+        from talkback_lib.hierarchy_snapshot import flatten_service_hierarchy
+
+        hierarchy = client.dump_hierarchy(dev=dev)
+        scope_nodes = flatten_service_hierarchy(hierarchy)
+    except Exception as exc:
+        error = f"{type(exc).__name__}:{exc}"
+        log(f"[CONTENT_SCOPE] scenario='{scenario}' service_hierarchy_error='{error}'")
+        tracker = ContentTerminal(scenario, scope_verified=False)
+        tracker.latest["service_hierarchy_error"] = error
+        state.content_terminal = tracker
+        trackers = getattr(client, "_content_terminal_trackers", {})
+        trackers[scenario] = tracker
+        client._content_terminal_trackers = trackers
+        return
     destinations = discover(scope_nodes, tab_cfg)
     expected = expected_destinations(tab_cfg)
     tracker = ContentTerminal(scenario, nav_regions=[i["bounds"] for i in destinations],
@@ -17985,11 +17931,14 @@ def _initialize_content_terminal(client, dev, tab_cfg, state):
         path = folder / f"snapshot_{index:03d}.json"
         path.write_text(json.dumps(dict(scenario_id=scenario, expected_destinations=expected,
             nav_items=destinations, scope_verified=tracker.scope_verified,
-            source="raw_accessibility_xml" if isinstance(raw, str) and "<hierarchy" in raw else "helper_nodes"),
+            source="accessibility_service_hierarchy",
+            window_count=len(hierarchy.get("windows", [])),
+            node_count=len(scope_nodes)),
             ensure_ascii=False, indent=2), encoding="utf-8")
         tracker.scope_snapshot_path = str(path)
-        if isinstance(raw, str) and "<hierarchy" in raw:
-            path.with_suffix(".xml").write_text(raw, encoding="utf-8")
+        path.with_suffix(".hierarchy.json").write_text(
+            json.dumps(hierarchy, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     tracker.observe(initial, 0, focus_observations=state.reliability_metrics.focus_observations.values())
     tracker.transition_count = sum(t.get("scenario_id") == scenario for t in getattr(client, "_scroll_transitions", []))
     state.content_terminal = tracker

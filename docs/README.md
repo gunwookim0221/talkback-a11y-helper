@@ -27,6 +27,7 @@ index입니다. 현재 구현, 운영 계약, dated acceptance evidence, histori
 - [시스템 개요](system-overview.md): 현재 실행 lifecycle, evidence, review, Candidate/
   Comparator/Baseline 흐름
 - [아키텍처](architecture.md): Production authority와 diagnostic/shadow 계층 구분
+- [TalkBack service-preserving hierarchy fix (2026-10-09)](design/talkback-service-preserving-hierarchy-fix-20261009.md): hierarchy lifecycle RCA, active-path audit, Menu compatibility and pre-publish validation
 - [Runner 흐름](runner_flow.md): scenario open, traversal, recovery, persistence
 - [현재 Python client 구조](current-client-architecture.md): `A11yAdbClient`와 내부 책임 분해
 - [테스트 파이프라인](testing-pipeline.md): 수집/검증 파이프라인 요약

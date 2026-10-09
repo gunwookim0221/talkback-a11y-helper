@@ -51,4 +51,24 @@ class A11yResultTransportTest {
         }.reduce { left, right -> left + right }
         assertEquals(serialized, decoded.toString(Charsets.UTF_8))
     }
+
+    @Test
+    fun largeHierarchyResultUsesFewerBoundedChunksWithSameDigestContract() {
+        val serialized = "{\"reqId\":\"hierarchy\",\"nodes\":[\"${"가".repeat(8000)}\"]}"
+        val records = A11yResultTransport.encode(
+            "DUMP_HIERARCHY_RESULT",
+            "hierarchy",
+            serialized,
+            chunkBytes = A11yResultTransport.HIERARCHY_CHUNK_BYTES,
+        )
+
+        assertTrue(records.size > 1)
+        assertTrue(records.all { it.toByteArray(Charsets.UTF_8).size < 4000 })
+        val decodedChunks = records.map { record ->
+            Base64.getDecoder().decode(record.substringAfter(" payload="))
+        }
+        assertTrue(decodedChunks.all { it.size <= A11yResultTransport.HIERARCHY_CHUNK_BYTES })
+        assertEquals(serialized, decodedChunks.reduce { left, right -> left + right }.toString(Charsets.UTF_8))
+        assertTrue(records.all { it.contains("sha256=") })
+    }
 }

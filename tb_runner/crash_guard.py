@@ -485,17 +485,14 @@ def _capture_screenshot(*, client: Any, dev: str | None, path: Path) -> str | No
 
 
 def _capture_window_dump(*, client: Any, dev: str | None, path: Path, event_id: str) -> str | None:
-    run_fn = getattr(client, "_run", None)
-    if not callable(run_fn):
-        return "adb_run_not_supported"
-    remote = f"/sdcard/tb_{event_id}_window_dump.xml"
     try:
-        run_fn(["shell", "uiautomator", "dump", remote], dev=dev)
-        xml = run_fn(["shell", "cat", remote], dev=dev)
-        path.write_text(str(xml or ""), encoding="utf-8", errors="replace")
+        from talkback_lib.hierarchy_snapshot import service_hierarchy_to_xml
+
+        xml = service_hierarchy_to_xml(client.dump_hierarchy(dev=dev))
+        path.write_text(xml, encoding="utf-8", errors="replace")
         return None
     except Exception as exc:
-        return str(exc)
+        return f"service_hierarchy_unavailable:{exc}"
 
 
 def _capture_helper_dump(*, client: Any, dev: str | None, path: Path, row: dict[str, Any]) -> str | None:

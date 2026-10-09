@@ -28,6 +28,7 @@ from talkback_lib.constants import (
     ACTION_CLICK_TARGET,
     ACTION_COMMAND,
     ACTION_DUMP_TREE,
+    ACTION_DUMP_HIERARCHY,
     ACTION_FOCUS_IN_BOUNDS,
     ACTION_FOCUS_TARGET,
     ACTION_TARGET_FOCUS_COMMIT,
@@ -103,6 +104,7 @@ class A11yAdbClient:
         self._monitor_thread: threading.Thread | None = None
         self._last_log_marker: tuple[tuple[int, int, int, int, int, int], int] | None = None
         self.last_dump_metadata: dict[str, Any] = {}
+        self.last_hierarchy_metadata: dict[str, Any] = {}
         self.last_scroll_capabilities: list[dict[str, Any]] = []
         self.last_device_collection: dict[str, Any] = {}
         self.last_scroll_result: dict[str, Any] = {}
@@ -1210,6 +1212,94 @@ class A11yAdbClient:
             return parsed
 
         raise RuntimeError("DUMP_TREE JSON 형식이 올바르지 않습니다.")
+
+    def dump_hierarchy(
+        self,
+        dev: Any = None,
+        wait_seconds: float = 30.0,
+    ) -> dict[str, Any]:
+        """Capture the service-owned hierarchy without opening UiAutomation."""
+        self.last_hierarchy_metadata = {}
+        if not self.check_helper_status(dev=dev):
+            raise RuntimeError("HIERARCHY_SNAPSHOT:SERVICE_UNAVAILABLE")
+        req_id = str(uuid.uuid4())[:12]
+        self._broadcast(dev, ACTION_DUMP_HIERARCHY, ["--es", "reqId", req_id])
+
+        start_time = time.monotonic()
+        logs = ""
+        terminal = f"DUMP_HIERARCHY_END {req_id}"
+        while time.monotonic() - start_time < max(0.1, wait_seconds):
+            logs = self._logcat_reader.dump_raw_filtered(dev=dev)
+            if terminal in logs:
+                break
+            time.sleep(0.25)
+        else:
+            raise TimeoutError(f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:terminal marker missing req_id={req_id}")
+
+        terminal_count = sum(line.strip().endswith(terminal) for line in logs.splitlines())
+        if terminal_count != 1:
+            raise RuntimeError(
+                f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:terminal_count={terminal_count} req_id={req_id}"
+            )
+        payloads = self._logcat_reader.extract_all_payloads(logs, "DUMP_HIERARCHY_RESULT")
+        matching_payloads: list[dict[str, Any]] = []
+        unmatched_result = False
+        for candidate in payloads:
+            try:
+                parsed_candidate = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed_candidate, dict):
+                if parsed_candidate.get("reqId") == req_id:
+                    matching_payloads.append(parsed_candidate)
+                else:
+                    unmatched_result = True
+        if not matching_payloads:
+            if unmatched_result:
+                raise RuntimeError(f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:request_id_mismatch req_id={req_id}")
+            assembled = self._logcat_reader.reassemble_chunked_payload(
+                logs,
+                "DUMP_HIERARCHY_RESULT",
+                req_id,
+                max_chunks=512,
+                max_payload_bytes=1024 * 1024,
+            )
+            if assembled.get("state") != "complete":
+                raise RuntimeError(
+                    f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:{assembled.get('reason', assembled.get('state'))} "
+                    f"req_id={req_id}"
+                )
+            payload_text = str(assembled.get("payload") or "")
+        else:
+            if len(matching_payloads) != 1:
+                raise RuntimeError(f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:duplicate_terminal req_id={req_id}")
+            payload = matching_payloads[0]
+            payload_text = ""
+        if payload_text:
+            try:
+                payload = json.loads(payload_text)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:invalid_json req_id={req_id}") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:invalid_payload req_id={req_id}")
+        if payload.get("reqId") != req_id:
+            raise RuntimeError(f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:request_id_mismatch req_id={req_id}")
+        if payload.get("success") is not True:
+            reason = str(payload.get("reason") or "SERIALIZATION_ERROR")
+            raise RuntimeError(f"HIERARCHY_SNAPSHOT:{reason}:{payload.get('message', '')}")
+        nodes = payload.get("nodes")
+        windows = payload.get("windows")
+        if not isinstance(nodes, list) or not nodes or not isinstance(windows, list) or not windows:
+            raise RuntimeError(f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:empty_hierarchy req_id={req_id}")
+        self.last_hierarchy_metadata = {
+            "schemaVersion": payload.get("schemaVersion"),
+            "source": payload.get("source"),
+            "windowCoverage": payload.get("windowCoverage"),
+            "windowCount": len(windows),
+            "nodeCount": payload.get("nodeCount"),
+            "reqId": req_id,
+        }
+        return payload
 
     def dump_scroll_capabilities(
         self,

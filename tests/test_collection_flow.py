@@ -1215,6 +1215,7 @@ class DummyClient:
         self.focus_in_bounds_results = []
         self.dump_tree_calls = []
         self.dump_tree_sequence = []
+        self._last_dump_tree_nodes = []
         self.back_calls = 0
         self.last_target_action_result = {}
         self.focus_sequence = []
@@ -1291,8 +1292,18 @@ class DummyClient:
     def dump_tree(self, **kwargs):
         self.dump_tree_calls.append(kwargs)
         if self.dump_tree_sequence:
-            return self.dump_tree_sequence.pop(0)
+            self._last_dump_tree_nodes = self.dump_tree_sequence.pop(0)
+            return self._last_dump_tree_nodes
         return []
+
+    def dump_hierarchy(self, **_kwargs):
+        nodes = self._last_dump_tree_nodes
+        root = {
+            "text": "", "packageName": "com.samsung.android.oneconnect",
+            "className": "android.widget.FrameLayout", "boundsInScreen": "0,0,1080,2400",
+            "children": nodes,
+        }
+        return {"success": True, "nodes": [root], "windows": [{"root": root, "order": 0}], "nodeCount": 1}
 
     def _run(self, args, **kwargs):
         if args == ["shell", "input", "keyevent", "4"]:
@@ -14290,7 +14301,7 @@ def test_life_reset_launches_smartthings_when_app_is_outside(monkeypatch):
     assert foreground_calls[0]["serial"] == "SERIAL"
 
 
-def test_verify_fresh_life_list_state_uses_window_xml_selected_fallback(monkeypatch):
+def test_verify_fresh_life_list_state_uses_service_hierarchy_selected_fallback(monkeypatch):
     client = DummyClient([])
     client.dump_tree_sequence = [_life_reset_r2_nodes()]
     selected_xml_nodes = _life_reset_r2_nodes(selected=True)
@@ -14316,10 +14327,15 @@ def test_load_scrolltouch_xml_nodes_preserves_selected_state():
     )
 
     class XmlClient:
-        def _run(self, args, **_kwargs):
-            if args[:3] == ["shell", "cat", "/sdcard/window_dump_scrolltouch.xml"]:
-                return xml_text
-            return ""
+        def dump_hierarchy(self, **_kwargs):
+            node = {
+                "text": "Life", "contentDescription": "", "viewIdResourceName": "",
+                "className": "android.widget.LinearLayout", "packageName": "com.samsung.android.oneconnect",
+                "clickable": True, "focusable": True, "selected": True, "visibleToUser": True,
+                "boundsInScreen": "[0,900][150,1000]", "children": [],
+            }
+            root = {"text": "", "packageName": "com.samsung.android.oneconnect", "children": [node]}
+            return {"success": True, "nodes": [root], "windows": [{"root": root, "order": 0}], "nodeCount": 2}
 
     nodes, reason = collection_flow._load_scrolltouch_xml_nodes(XmlClient(), "SERIAL")
     flat_nodes = collection_flow._iter_tree_nodes_with_parent(nodes)
@@ -14515,14 +14531,6 @@ def test_capture_pre_navigation_failure_bundle_saves_expected_files(tmp_path, mo
     monkeypatch.setattr(client, "_take_snapshot", lambda _dev, save_path: Path(save_path).write_bytes(b"png"), raising=False)
     monkeypatch.setattr(client, "_resolve_serial", lambda _dev: "SERIAL123", raising=False)
 
-    def _run(args, **kwargs):
-        if args[:3] == ["pull", "/sdcard/window_dump_20260101_120000.xml", str(Path("x"))]:
-            return ""
-        if args[0] == "pull":
-            Path(args[2]).write_text("<hierarchy/>", encoding="utf-8")
-        return ""
-
-    monkeypatch.setattr(client, "_run", _run, raising=False)
     monkeypatch.setattr(collection_flow, "datetime", SimpleNamespace(
         now=lambda tz=None: __import__("datetime").datetime(2026, 1, 1, 12, 0, 0, tzinfo=tz),
     ))
@@ -14663,13 +14671,7 @@ def test_capture_pre_navigation_failure_bundle_logs_partial_failure(monkeypatch,
     monkeypatch.setattr(client, "_take_snapshot", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("snap_fail")), raising=False)
     monkeypatch.setattr(client, "_resolve_serial", lambda _dev: "SERIAL123", raising=False)
 
-    def _run(args, **kwargs):
-        _ = kwargs
-        if args[0] == "pull":
-            raise RuntimeError("pull_fail")
-        return ""
-
-    monkeypatch.setattr(client, "_run", _run, raising=False)
+    monkeypatch.setattr(client, "dump_hierarchy", lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("pull_fail")))
     monkeypatch.setattr(collection_flow, "datetime", SimpleNamespace(
         now=lambda tz=None: __import__("datetime").datetime(2026, 1, 1, 12, 0, 0, tzinfo=tz),
     ))
@@ -14690,7 +14692,7 @@ def test_capture_pre_navigation_failure_bundle_logs_partial_failure(monkeypatch,
     assert any(
         "[CAPTURE][pre_nav_failure] failed" in line
         and "saved_files='helper_dump.json,focus_payload.json,meta.json'" in line
-        and "failed_files='screenshot.png:snap_fail,window_dump.xml:pull_fail'" in line
+        and "failed_files='screenshot.png:snap_fail,window_dump.xml:service_hierarchy_failed:pull_fail'" in line
         for _, line in logs
     )
 
