@@ -93,6 +93,10 @@ class A11yHelperService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         val type = event.eventType
+        if (type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED ||
+            type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || type == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
+            SmartNextLookupTrace.structureChanged()
+        }
         if (type != AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED &&
             type != AccessibilityEvent.TYPE_VIEW_FOCUSED &&
             type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
@@ -102,7 +106,7 @@ class A11yHelperService : AccessibilityService() {
         ) {
             return
         }
-        if (A11yHistoryManager.shouldSuppressPreCommitTransientSystemUiEvent(type, event.packageName?.toString(), rootInActiveWindow)) {
+        if (A11yHistoryManager.shouldSuppressPreCommitTransientSystemUiEvent(type, event.packageName?.toString(), SmartNextPerf.acquireRoot("A11yHelperService.onAccessibilityEvent") { rootInActiveWindow })) {
             return
         }
 
@@ -111,7 +115,7 @@ class A11yHelperService : AccessibilityService() {
             Log.d(TAG, "Focus node not found for eventType=$type")
             return
         }
-        if (A11yHistoryManager.shouldIgnorePostCommitResurfacedHeader(rootInActiveWindow, node, type)) {
+        if (A11yHistoryManager.shouldIgnorePostCommitResurfacedHeader(SmartNextPerf.acquireRoot("A11yHelperService.onAccessibilityEvent") { rootInActiveWindow }, node, type)) {
             return
         }
         if (
@@ -179,13 +183,13 @@ class A11yHelperService : AccessibilityService() {
             return source
         }
 
-        rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { return it }
-        rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.let { return it }
+        SmartNextPerf.acquireRoot("A11yHelperService.resolveFocusNode") { rootInActiveWindow }?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { return it }
+        SmartNextPerf.acquireRoot("A11yHelperService.resolveFocusNode") { rootInActiveWindow }?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.let { return it }
         return source
     }
 
     private fun resolveCurrentFocusNode(): AccessibilityNodeInfo? {
-        val root = rootInActiveWindow ?: return null
+        val root = SmartNextPerf.acquireRoot("A11yHelperService.resolveCurrentFocusNode") { rootInActiveWindow } ?: return null
         return root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
             ?: root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
             ?: root
@@ -204,7 +208,7 @@ class A11yHelperService : AccessibilityService() {
     ) {
         Log.i(TAG, "[DUMP_TREE_ACTION][before_dump] req_id='$reqId'")
         Log.i("A11Y_HELPER", "[SMART_NEXT][canary] stage='before_dump_tree'")
-        val root = rootInActiveWindow
+        val root = SmartNextPerf.acquireRoot("A11yHelperService.dumpTree") { rootInActiveWindow }
         val dumpArray = A11yNavigator.dumpTreeFlat(root)
         dumpArray.put("scrollAxisContract", "axis-v1")
         if (includeScrollCapabilities) {
@@ -267,7 +271,7 @@ class A11yHelperService : AccessibilityService() {
     private fun observeLocaleRoot(): SamsungSettingsLocaleAdapter.RootObservation {
         val service = instance
             ?: return SamsungSettingsLocaleAdapter.RootObservation(serviceAvailable = false, root = null)
-        val root = runCatching { service.rootInActiveWindow }.getOrNull()
+        val root = runCatching { SmartNextPerf.acquireRoot("A11yHelperService.observeLocaleRoot") { service.rootInActiveWindow } }.getOrNull()
             ?: return SamsungSettingsLocaleAdapter.RootObservation(serviceAvailable = true, root = null)
         val snapshot = runCatching { SamsungSettingsLocaleAdapter.snapshot(root) }.getOrNull()
             ?: return SamsungSettingsLocaleAdapter.RootObservation(serviceAvailable = true, root = null)
@@ -285,7 +289,7 @@ class A11yHelperService : AccessibilityService() {
             TAG,
             "[DEBUG][TARGET_ACTION][service_start] reqId=$reqId accessibilityAction=$actionLabel target='${query.targetName}' type='${query.targetType}'"
         )
-        val outcome = A11yTargetFinder.findAndPerformAction(rootInActiveWindow, query, action, reqId)
+        val outcome = A11yTargetFinder.findAndPerformAction(SmartNextPerf.acquireRoot("A11yHelperService.performTargetAction") { rootInActiveWindow }, query, action, reqId)
         A11yEvidence.emit(
             "TARGET_RESOLVED",
             reqId,
@@ -359,7 +363,7 @@ class A11yHelperService : AccessibilityService() {
     }
 
     fun checkTarget(query: A11yTargetFinder.TargetQuery, reqId: String = "none"): JSONObject {
-        val outcome = A11yTargetFinder.findTarget(rootInActiveWindow, query)
+        val outcome = A11yTargetFinder.findTarget(SmartNextPerf.acquireRoot("A11yHelperService.checkTarget") { rootInActiveWindow }, query)
         val resultJson = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
             put("reqId", reqId)
@@ -391,7 +395,7 @@ class A11yHelperService : AccessibilityService() {
                 "[RECOVERY][helper_request] requestId=$reqId action=FOCUS_IN_BOUNDS bounds='$boundsString'"
             )
         }
-        val root = rootInActiveWindow
+        val root = SmartNextPerf.acquireRoot("A11yHelperService.performFocusInBounds") { rootInActiveWindow }
         val targetRegion = parseShortBounds(boundsString)
         if (root == null || targetRegion == null || targetRegion.isEmpty) {
             val reason = if (root == null) "Root node is null" else "Invalid bounds"
@@ -589,7 +593,7 @@ class A11yHelperService : AccessibilityService() {
         emitResult: Boolean = true
     ): JSONObject {
         Log.i(TAG, "[COMMAND_TRANSPORT] command=TARGET_FOCUS_COMMIT req_id=$reqId stage=service_work_start")
-        val root = rootInActiveWindow
+        val root = SmartNextPerf.acquireRoot("A11yHelperService.performTargetFocusCommit") { rootInActiveWindow }
         if (root == null) return emitTargetFocusResult(
             reqId, descriptor, "ERROR", false, false, null, null, "root_unavailable", emitResult
         )
@@ -598,7 +602,7 @@ class A11yHelperService : AccessibilityService() {
         queue.add(root)
         while (queue.isNotEmpty()) {
             val node = queue.removeFirst()
-            for (index in 0 until node.childCount) node.getChild(index)?.let(queue::add)
+            for (index in 0 until node.childCount) SmartNextPerf.getChild(node, index, "A11yHelperService.performTargetFocusCommit")?.let(queue::add)
             if (node.isVisibleToUser) nodes += node
         }
         val candidates = nodes.map { node ->
@@ -697,7 +701,7 @@ class A11yHelperService : AccessibilityService() {
             TAG,
             "[DEBUG][TARGET_ACTION][service_start] reqId=$reqId accessibilityAction=TOUCH_BOUNDS_CENTER target='${query.targetName}' type='${query.targetType}' serviceVersion=$VERSION"
         )
-        val targetOutcome = A11yTargetFinder.findTarget(rootInActiveWindow, query)
+        val targetOutcome = A11yTargetFinder.findTarget(SmartNextPerf.acquireRoot("A11yHelperService.performTargetBoundsCenterTap") { rootInActiveWindow }, query)
         val targetNode = targetOutcome.target
         val actionOutcome = when {
             !targetOutcome.success || targetNode == null -> TargetActionOutcome(
@@ -820,7 +824,7 @@ class A11yHelperService : AccessibilityService() {
             val node = queue.removeFirst()
             count += 1
             for (index in 0 until node.childCount) {
-                node.getChild(index)?.let(queue::add)
+                SmartNextPerf.getChild(node, index, "A11yHelperService.countAccessibleNodes")?.let(queue::add)
             }
         }
         return count
@@ -855,7 +859,7 @@ class A11yHelperService : AccessibilityService() {
         while (queue.isNotEmpty()) {
             val node = queue.removeFirst()
             for (index in 0 until node.childCount) {
-                node.getChild(index)?.let(queue::add)
+                SmartNextPerf.getChild(node, index, "A11yHelperService.collectRawContentEntryCandidates")?.let(queue::add)
             }
             if (!node.isVisibleToUser) continue
             val bounds = Rect().also { node.getBoundsInScreen(it) }
@@ -887,13 +891,13 @@ class A11yHelperService : AccessibilityService() {
     private fun hasVisibleFocusableDescendant(node: AccessibilityNodeInfo): Boolean {
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         for (index in 0 until node.childCount) {
-            node.getChild(index)?.let(queue::add)
+            SmartNextPerf.getChild(node, index, "A11yHelperService.hasVisibleFocusableDescendant")?.let(queue::add)
         }
         while (queue.isNotEmpty()) {
             val current = queue.removeFirst()
             if (current.isVisibleToUser && (current.isFocusable || current.isClickable)) return true
             for (index in 0 until current.childCount) {
-                current.getChild(index)?.let(queue::add)
+                SmartNextPerf.getChild(current, index, "A11yHelperService.hasVisibleFocusableDescendant")?.let(queue::add)
             }
         }
         return false
@@ -1065,7 +1069,11 @@ class A11yHelperService : AccessibilityService() {
         Log.i(TAG, "[SMART_NEXT_DIAG] req_id=$reqId stage=service_work_start thread=${Thread.currentThread().name}")
         A11yHistoryManager.activeSmartNextReqId = reqId
         try {
-            val currentNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            val entryRoot = SmartNextPerf.measure("root_acquisition") { SmartNextPerf.acquireRoot("A11yHelperService.moveFocusSmart") { rootInActiveWindow } }
+            SmartNextPerf.mark("T1_current_root_obtained")
+            val currentNode = SmartNextPerf.measure("entry_focus_identification") {
+                entryRoot?.let { SmartNextPerf.findFocus(it, AccessibilityNodeInfo.FOCUS_ACCESSIBILITY) }
+            }
             logSmartNextDiag(
                 reqId = reqId,
                 stage = "REAL_ENTRY",
@@ -1088,7 +1096,8 @@ class A11yHelperService : AccessibilityService() {
                     TAG,
                     "[SMART_NEXT][trace_enter] stage='service_before_performSmartNext' req_id='$reqId'"
                 )
-                val navigatorOutcome = A11yNavigator.performSmartNext(rootInActiveWindow, currentNode, reqId)
+                val navigatorRoot = SmartNextPerf.measure("root_acquisition") { SmartNextPerf.acquireRoot("A11yHelperService.moveFocusSmart") { rootInActiveWindow } }
+                val navigatorOutcome = A11yNavigator.performSmartNext(navigatorRoot, currentNode, reqId)
                 Log.i(
                     TAG,
                     "[SMART_NEXT_ACTION][after_navigator] req_id='$reqId' success=${navigatorOutcome.success} detail='${navigatorOutcome.reason}'"
@@ -1133,10 +1142,14 @@ class A11yHelperService : AccessibilityService() {
                     JSONObject().put("claim", "navigator_outcome_success").put("reason", detail)
                 )
             }
-            recordActionFocusEvidence(reqId)
+            SmartNextPerf.measure("post_state") { recordActionFocusEvidence(reqId) }
+            SmartNextPerf.mark("T9_post_action_state_collected")
             val normalizedStatus = normalizeSmartNavStatus(outcome.success, detail)
             val flags = buildSmartNavFlags(detail)
-            val resolvedFocusNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            val resolvedFocusNode = SmartNextPerf.measure("service_verification") {
+                SmartNextPerf.acquireRoot("A11yHelperService.moveFocusSmart") { rootInActiveWindow }?.let { SmartNextPerf.findFocus(it, AccessibilityNodeInfo.FOCUS_ACCESSIBILITY) }
+            }
+            SmartNextPerf.mark("T10_verification_complete")
             val resolvedFocusLabel = (
                 resolvedFocusNode?.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
                     ?: resolvedFocusNode?.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
@@ -1210,8 +1223,8 @@ class A11yHelperService : AccessibilityService() {
     }
 
     fun moveFocus(forward: Boolean, reqId: String = "none"): JSONObject {
-        val currentNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-        val targetNode = A11yNavigator.findSwipeTarget(rootInActiveWindow, currentNode, forward)
+        val currentNode = SmartNextPerf.acquireRoot("A11yHelperService.moveFocus") { rootInActiveWindow }?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val targetNode = A11yNavigator.findSwipeTarget(SmartNextPerf.acquireRoot("A11yHelperService.moveFocus") { rootInActiveWindow }, currentNode, forward)
         val success = targetNode?.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS) == true
 
         val resultJson = JSONObject().apply {
@@ -1229,8 +1242,8 @@ class A11yHelperService : AccessibilityService() {
     }
 
     fun clickFocusedNode(reqId: String = "none"): JSONObject {
-        val focusedNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-        val rootNode = rootInActiveWindow
+        val focusedNode = SmartNextPerf.acquireRoot("A11yHelperService.clickFocusedNode") { rootInActiveWindow }?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val rootNode = SmartNextPerf.acquireRoot("A11yHelperService.clickFocusedNode") { rootInActiveWindow }
         val focusedSnapshot = FocusSnapshot.fromNodeOrNull(focusedNode)
         val focusedBounds = focusedNode?.let { Rect().also { rect -> it.getBoundsInScreen(rect) } }
         Log.d(
@@ -1244,8 +1257,8 @@ class A11yHelperService : AccessibilityService() {
                 resolveRawFocusedNodeFromRoot(snapshotFocusedNode, currentRootNode, log)
             },
             childCountOf = { it.childCount },
-            childAt = { node, index -> node.getChild(index) },
-            parentOf = { it.parent },
+            childAt = { node, index -> SmartNextPerf.getChild(node, index, "A11yHelperService.clickFocusedNode.childAt") },
+            parentOf = { SmartNextPerf.getParent(it, "A11yHelperService.clickFocusedNode.parentOf") },
             isAccessibilityFocused = { it.isAccessibilityFocused },
             isFocusable = { it.isFocusable },
             isClickable = { it.isClickable },
@@ -1330,7 +1343,7 @@ class A11yHelperService : AccessibilityService() {
         while (queue.isNotEmpty()) {
             val node = queue.removeFirst()
             for (index in 0 until node.childCount) {
-                node.getChild(index)?.let(queue::add)
+                SmartNextPerf.getChild(node, index, "A11yHelperService.resolveRawFocusedNodeFromRoot")?.let(queue::add)
             }
             val nodeBounds = Rect().also { node.getBoundsInScreen(it) }
             if (nodeBounds.isEmpty) continue
@@ -3043,7 +3056,7 @@ class A11yHelperService : AccessibilityService() {
         return findFirstScrollableInTree(
             root = root,
             childCountOf = { it.childCount },
-            childAt = { node, index -> node.getChild(index) },
+            childAt = { node, index -> SmartNextPerf.getChild(node, index, "A11yHelperService.findFirstScrollableNode.childAt") },
             isScrollable = { it.isScrollable }
         )
     }
@@ -3067,13 +3080,13 @@ class A11yHelperService : AccessibilityService() {
         scrollContainerPath: String? = null,
         scrollContainerBounds: String? = null
     ): JSONObject {
-        val root = rootInActiveWindow
+        val root = SmartNextPerf.acquireRoot("A11yHelperService.performScroll") { rootInActiveWindow }
         val focusedNode = root?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         var scrollNode = if (deviceListNormalization || preferTreeSearch) null else focusedNode
 
         if (!deviceListNormalization && !preferTreeSearch) {
             while (scrollNode != null && !scrollNode.isScrollable) {
-                scrollNode = scrollNode.parent
+                scrollNode = SmartNextPerf.getParent(scrollNode, "A11yHelperService.performScroll")
             }
         }
 
@@ -3124,7 +3137,7 @@ class A11yHelperService : AccessibilityService() {
             if (parts.firstOrNull() != "0") target = null
             for (part in parts.drop(1)) {
                 val index = part.toIntOrNull()
-                target = if (index != null && index >= 0 && target != null && index < target.childCount) target.getChild(index) else null
+                target = if (index != null && index >= 0 && target != null && index < target.childCount) SmartNextPerf.getChild(target, index, "A11yHelperService.performScroll") else null
             }
             val targetBounds = Rect().also { target?.getBoundsInScreen(it) }
             val boundsText = "${targetBounds.left},${targetBounds.top},${targetBounds.right},${targetBounds.bottom}"
@@ -3137,7 +3150,7 @@ class A11yHelperService : AccessibilityService() {
             fallbackUsed = true
             scrollNode = if (preferTreeSearch && normalizeScrollDirection(direction, forward) in listOf("down", "up")) {
                 findFirstScrollableInTree(root = root, childCountOf = { it.childCount },
-                    childAt = { node, index -> node.getChild(index) },
+                    childAt = { node, index -> SmartNextPerf.getChild(node, index, "A11yHelperService.performScroll.childAt") },
                     isScrollable = { A11yNavigator.isEligibleVerticalScrollNode(it) })
             } else findFirstScrollableNode(root)
         }
@@ -3195,7 +3208,7 @@ class A11yHelperService : AccessibilityService() {
     }
 
     fun performSetText(text: String, reqId: String = "none"): JSONObject {
-        val focusedNode = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val focusedNode = SmartNextPerf.acquireRoot("A11yHelperService.performSetText") { rootInActiveWindow }?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }

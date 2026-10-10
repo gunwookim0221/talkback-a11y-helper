@@ -25,10 +25,15 @@ internal class SmartNextDispatcher(
         }
         try {
             executor.execute {
+                SmartNextPerf.begin(reqId)
+                try {
                 // Emission is a single callback; an emission exception must not
                 // trigger a second navigation result for the same request.
                 val result = runCatching { work(reqId) }
                 result.fold(onSuccess = onResult, onFailure = onFailure)
+                } finally {
+                    SmartNextPerf.end()
+                }
             }
         } catch (error: RejectedExecutionException) {
             onFailure(error)

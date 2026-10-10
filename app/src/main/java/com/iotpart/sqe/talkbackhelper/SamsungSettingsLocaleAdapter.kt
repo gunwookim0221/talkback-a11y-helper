@@ -899,7 +899,7 @@ object SamsungSettingsLocaleAdapter {
             count += 1
             val children = if (depth < MAX_SNAPSHOT_DEPTH && count < MAX_SNAPSHOT_NODES) {
                 (0 until node.childCount).mapNotNull { index ->
-                    runCatching { node.getChild(index) }.getOrNull()?.let { build(it, depth + 1) }
+                    runCatching { SmartNextPerf.getChild(node, index, "SamsungSettingsLocaleAdapter.build") }.getOrNull()?.let { build(it, depth + 1) }
                 }
             } else {
                 emptyList()

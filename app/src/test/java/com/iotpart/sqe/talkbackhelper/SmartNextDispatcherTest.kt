@@ -51,6 +51,29 @@ class SmartNextDispatcherTest {
         assertFalse(dispatcher.submit("one", onResult) { fail(it.message) })
     }
 
+    @Test fun serialRequestsKeepSubmissionOrderAndResultCorrelation() {
+        val queue = QueueExecutor()
+        val executed = mutableListOf<String>()
+        val emitted = mutableListOf<String>()
+        val dispatcher = SmartNextDispatcher(queue) { reqId ->
+            executed.add(reqId)
+            JSONObject().put("reqId", reqId).put("success", true)
+        }
+
+        assertTrue(dispatcher.submit("first", { emitted.add(it.getString("reqId")) }) { fail(it.message) })
+        assertTrue(dispatcher.submit("second", { emitted.add(it.getString("reqId")) }) { fail(it.message) })
+        assertEquals(2, queue.tasks.size)
+
+        queue.runNext()
+        assertEquals(listOf("first"), executed)
+        assertEquals(listOf("first"), emitted)
+        queue.runNext()
+        assertEquals(listOf("first", "second"), executed)
+        assertEquals(listOf("first", "second"), emitted)
+        dispatcher.close()
+        assertTrue(queue.tasks.isEmpty())
+    }
+
     @Test fun workFailureReportsExactlyOnceAndClosedServiceRejectsNewWork() {
         val queue = QueueExecutor()
         var failures = 0

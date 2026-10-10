@@ -371,7 +371,7 @@ data class FocusChildNode(
             } else {
                 val limit = minOf(node.childCount, MAX_CHILDREN_PER_NODE)
                 (0 until limit).mapNotNull { index ->
-                    node.getChild(index)?.let { child ->
+                    SmartNextPerf.getChild(node, index, "A11yModels.fromNode")?.let { child ->
                         fromNode(child, maxDepth = maxDepth, currentDepth = currentDepth + 1)
                     }
                 }

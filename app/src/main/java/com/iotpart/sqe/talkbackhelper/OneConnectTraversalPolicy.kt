@@ -136,7 +136,7 @@ object OneConnectTraversalPolicy {
             while (pending.isNotEmpty()) {
                 val current = pending.removeFirst()
                 for (i in 0 until current.childCount) {
-                    val child = current.getChild(i) ?: continue
+                    val child = SmartNextPerf.getChild(current, i, "OneConnectTraversalPolicy.extendUpdateAppAliasMembers") ?: continue
                     if (child.viewIdResourceName == UPDATE_APP_TITLE_VIEW_ID) {
                         merged.add(child)
                     }
@@ -144,13 +144,13 @@ object OneConnectTraversalPolicy {
                 }
             }
         } else if (representativeViewId == UPDATE_APP_TITLE_VIEW_ID) {
-            var parent = representativeNode.parent
+            var parent = SmartNextPerf.getParent(representativeNode, "OneConnectTraversalPolicy.extendUpdateAppAliasMembers")
             while (parent != null) {
                 if (parent.viewIdResourceName == UPDATE_APP_CARD_VIEW_ID) {
                     merged.add(parent)
                     break
                 }
-                parent = parent.parent
+                parent = SmartNextPerf.getParent(parent, "OneConnectTraversalPolicy.extendUpdateAppAliasMembers")
             }
         }
         return merged

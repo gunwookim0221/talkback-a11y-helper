@@ -121,7 +121,7 @@ object A11yNavigator {
                 })
             }
         } else {
-            val root = service.rootInActiveWindow
+            val root = SmartNextPerf.acquireRoot("A11yNavigator.dumpHierarchy") { service.rootInActiveWindow }
                 ?: return JSONObject()
                     .put("reqId", reqId)
                     .put("success", false)
@@ -169,7 +169,7 @@ object A11yNavigator {
         val bounds = Rect().also(node::getBoundsInScreen)
         val children = JSONArray()
         for (index in 0 until node.childCount) {
-            val child = node.getChild(index)
+            val child = SmartNextPerf.getChild(node, index, "A11yNavigator.hierarchyNodeToJson")
                 ?: throw IllegalStateException("SERIALIZATION_ERROR:child_unavailable index=$index")
             children.put(hierarchyNodeToJson(child, totalNodes, depth + 1).put("childIndex", index))
         }
@@ -237,7 +237,7 @@ object A11yNavigator {
 
             val children = mutableListOf<Pair<String, AccessibilityNodeInfo>>()
             for (index in 0 until node.childCount) {
-                node.getChild(index)?.let { child ->
+                SmartNextPerf.getChild(node, index, "A11yNavigator.dumpScrollCapabilities")?.let { child ->
                     children += "${pending.path}.$index" to child
                 }
             }
@@ -337,6 +337,7 @@ object A11yNavigator {
         traversalList: List<AccessibilityNodeInfo>,
         currentNode: AccessibilityNodeInfo?
     ): FocusState {
+        return SmartNextPerf.measure("current_identification") {
         val current = resolveCurrentAndNextIndex(
             traversalList = traversalList,
             currentNode = currentNode
@@ -347,12 +348,15 @@ object A11yNavigator {
             fallbackIndex = current.fallbackIndex,
             nextIndex = current.nextIndex
         )
+
+        }
     }
 
     private fun collectScrollState(
         root: AccessibilityNodeInfo,
         resolvedCurrent: AccessibilityNodeInfo?
     ): ScrollState {
+        return SmartNextPerf.measure("scroll_state") {
         val mainScrollContainer = findMainScrollContainer(root)
         val scrollableNode = findScrollableForwardAncestorCandidate(resolvedCurrent)
             ?: mainScrollContainer
@@ -361,12 +365,15 @@ object A11yNavigator {
             mainScrollContainer = mainScrollContainer,
             scrollableNode = scrollableNode
         )
+
+        }
     }
 
     private fun collectSmartNextInputs(
         root: AccessibilityNodeInfo,
         currentNode: AccessibilityNodeInfo?
     ): CollectResult {
+        return SmartNextPerf.measure("collect_inputs") {
         val focusNodes = collectNodes(root)
         val traversalList = buildTraversalList(focusNodes)
         val focusState = collectFocusState(traversalList, currentNode)
@@ -383,11 +390,14 @@ object A11yNavigator {
             focusState = focusState,
             scrollState = scrollState
         )
+
+        }
     }
 
     private fun normalizeNodes(
         focusNodes: List<FocusedNode>
     ): Pair<List<FocusedNode>, Map<Int, List<AccessibilityNodeInfo>>> {
+        return SmartNextPerf.measure("normalize_aliases") {
         if (focusNodes.isEmpty()) return focusNodes to emptyMap()
         val normalizedInputNodes = includeOverlayRowCandidates(focusNodes)
         val groups = mutableListOf<MutableList<FocusedNode>>()
@@ -440,9 +450,12 @@ object A11yNavigator {
             }
         }
         return normalizedNodes to aliasMembersByIndex
+
+        }
     }
 
     private fun includeOverlayRowCandidates(focusNodes: List<FocusedNode>): List<FocusedNode> {
+        return SmartNextPerf.measure("overlay_candidates") {
         if (focusNodes.isEmpty()) return focusNodes
         val expanded = focusNodes.toMutableList()
         focusNodes.forEach { focusedNode ->
@@ -458,12 +471,15 @@ object A11yNavigator {
             )
         }
         return expanded
+
+        }
     }
 
     private fun normalizeSmartNextInputs(
         root: AccessibilityNodeInfo,
         collectResult: CollectResult
     ): NormalizeResult {
+        return SmartNextPerf.measure("normalize_inputs") {
         val (normalizedNodes, aliasMembersByIndex) = normalizeNodes(collectResult.focusNodes)
         val traversalList = buildTraversalList(normalizedNodes)
         val screenRect = Rect().also { root.getBoundsInScreen(it) }
@@ -495,6 +511,8 @@ object A11yNavigator {
             screenHeight = screenHeight,
             effectiveBottom = effectiveBottom
         )
+
+        }
     }
 
     private fun resolveCurrentAndNextIndex(
@@ -502,6 +520,7 @@ object A11yNavigator {
         currentNode: AccessibilityNodeInfo?,
         aliasMembersByRepresentativeIndex: Map<Int, List<AccessibilityNodeInfo>> = emptyMap()
     ): CurrentPosition {
+        return SmartNextPerf.measure("resolve_current_index") {
         val rawCurrentNode = currentNode
         val resolvedCurrent = currentNode?.let(::resolveCurrentTraversalNode)
         var currentIndex = findTraversalIndexForCurrentCandidate(
@@ -640,6 +659,8 @@ object A11yNavigator {
             fallbackIndex = fallbackIndex,
             nextIndex = nextIndex
         )
+
+        }
     }
 
 
@@ -649,6 +670,7 @@ object A11yNavigator {
         currentNode: AccessibilityNodeInfo?,
         reqId: String = A11yHistoryManager.activeSmartNextReqId
     ): TargetActionOutcome {
+        return SmartNextPerf.measure("navigator_total") {
         Log.i(
             "A11Y_HELPER",
             "[VERSION] appVersionName=$APP_VERSION_NAME_FOR_LOG appVersionCode=$APP_VERSION_CODE_FOR_LOG navigatorAlgorithmVersion=$NAVIGATOR_ALGORITHM_VERSION"
@@ -698,16 +720,30 @@ object A11yNavigator {
         val turnId = A11yHistoryManager.issueNextSmartNextTurnId()
         A11yHistoryManager.activeSmartNextTurnId = turnId
         return try {
-            attemptWebViewDescend(
+            val webViewCheckStartedAtNanos = System.nanoTime()
+            val webViewOutcome = attemptWebViewDescend(
                 root = root,
                 currentNode = currentNode,
                 reqId = reqId
-            )?.let { webViewOutcome ->
-                return webViewOutcome
+            )
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT_PERF] req_id=$reqId stage=webview_descend " +
+                    "elapsed_ms=${(System.nanoTime() - webViewCheckStartedAtNanos) / 1_000_000L}"
+            )
+            webViewOutcome?.let { outcome ->
+                return outcome
             }
+            val runtimeStateStartedAtNanos = System.nanoTime()
             val runtimeState = collectSmartNextRuntimeState(root, currentNode)
-            val focusedNow = runtimeState.root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-            val inputFocusedNow = runtimeState.root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT_PERF] req_id=$reqId stage=runtime_state_collection " +
+                    "elapsed_ms=${(System.nanoTime() - runtimeStateStartedAtNanos) / 1_000_000L} " +
+                    "candidate_count=${runtimeState.normalize.traversalList.size}"
+            )
+            val focusedNow = SmartNextPerf.findFocus(runtimeState.root, AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            val inputFocusedNow = SmartNextPerf.findFocus(runtimeState.root, AccessibilityNodeInfo.FOCUS_INPUT)
             val focusResolutionSource = when {
                 focusedNow != null -> "accessibilityFocused"
                 inputFocusedNow != null -> "focused"
@@ -729,6 +765,7 @@ object A11yNavigator {
                 "[SMART_NEXT][trace_enter] stage='before_policy' current_index=${runtimeState.currentPosition.currentIndex} next_index=${runtimeState.currentPosition.nextIndex} nav_type='pending'"
             )
             val nextActionDecision = decideNextAction(runtimeState)
+            SmartNextPerf.mark("T6_candidate_ranking_complete")
             Log.i(
                 "A11Y_HELPER",
                 "[SMART_NEXT][trace_enter] stage='after_policy' current_index=${runtimeState.currentPosition.currentIndex} next_index=${nextActionDecision.initialTarget.nextIndex} nav_type=${nextActionDecision.navigationDecision.type}"
@@ -777,6 +814,8 @@ object A11yNavigator {
                 A11yHistoryManager.activeSmartNextTurnId = 0L
             }
         }
+
+        }
     }
 
     private fun attemptWebViewDescend(
@@ -784,7 +823,7 @@ object A11yNavigator {
         currentNode: AccessibilityNodeInfo?,
         reqId: String
     ): TargetActionOutcome? {
-        val activeFocusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY) ?: currentNode
+        val activeFocusedNode = SmartNextPerf.findFocus(root, AccessibilityNodeInfo.FOCUS_ACCESSIBILITY) ?: currentNode
         val isWebViewContainerFocus = activeFocusedNode?.let { node ->
             node.className?.toString() == "android.webkit.WebView" &&
                 node.isAccessibilityFocused &&
@@ -805,7 +844,7 @@ object A11yNavigator {
         while (queue.isNotEmpty()) {
             val node = queue.removeFirst()
             for (index in 0 until node.childCount) {
-                node.getChild(index)?.let { child ->
+                SmartNextPerf.getChild(node, index, "A11yNavigator.attemptWebViewDescend")?.let { child ->
                     queue.add(child)
                     if (child.isVisibleToUser && isAccessibilityFocusableNode(child) && hasReadableLabel(child) && hasValidBounds(child)) {
                         webViewCandidates.add(child)
@@ -833,10 +872,10 @@ object A11yNavigator {
         )
 
         val target = selectedCandidate ?: return null
-        val focusedBefore = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val focusedBefore = SmartNextPerf.findFocus(root, AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         focusedBefore?.let { clearFocus(it) }
-        val actionSuccess = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
-        val focusedAfter = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val actionSuccess = SmartNextPerf.performAction(target, AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+        val focusedAfter = SmartNextPerf.findFocus(root, AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         val moved = actionSuccess && focusedAfter != null && isSameNode(focusedAfter, target)
         if (!moved) {
             return null
@@ -857,6 +896,8 @@ object A11yNavigator {
         root: AccessibilityNodeInfo,
         currentNode: AccessibilityNodeInfo?
     ): SmartNextRuntimeState {
+        return SmartNextPerf.measure("runtime_state") {
+        return SnapshotRelationshipAccess.collect {
         val collectResult = collectSmartNextInputs(root, currentNode)
         val focusNodes = collectResult.focusNodes
         val traversalList = collectResult.traversalList
@@ -876,15 +917,16 @@ object A11yNavigator {
         }
 
         val normalizeResult = normalizeSmartNextInputs(root, collectResult)
-        val a11yFocusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-        val inputFocusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        SmartNextPerf.value("candidate_count", normalizeResult.traversalList.size.toLong())
+        val a11yFocusedNode = SmartNextPerf.findFocus(root, AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val inputFocusedNode = SmartNextPerf.findFocus(root, AccessibilityNodeInfo.FOCUS_INPUT)
         val resolvedCurrentCandidate = when {
             a11yFocusedNode != null -> a11yFocusedNode
             inputFocusedNode != null && findTraversalIndexForCurrentCandidate(
                 traversalList = normalizeResult.traversalList,
                 resolvedCurrent = resolveToClickableAncestor(
                     node = inputFocusedNode,
-                    parentOf = { node -> node.parent },
+                    parentOf = { node -> SmartNextPerf.getParent(node, "A11yNavigator.collectSmartNextRuntimeState.parentOf") },
                     isClickable = { node -> node.isClickable }
                 ),
                 rawCurrentNode = inputFocusedNode,
@@ -897,10 +939,11 @@ object A11yNavigator {
             currentNode = resolvedCurrentCandidate,
             aliasMembersByRepresentativeIndex = normalizeResult.aliasMembersByRepresentativeIndex
         )
+        SmartNextPerf.mark("T3_current_identification_complete")
         val visitedHistory = snapshotVisitedHistoryLabels()
         val visitedHistorySignatures = snapshotVisitedHistorySignatures()
 
-        return SmartNextRuntimeState(
+        return@collect SmartNextRuntimeState(
             root = root,
             collect = collectResult,
             normalize = normalizeResult,
@@ -909,9 +952,13 @@ object A11yNavigator {
             visitedHistorySignatures = visitedHistorySignatures,
             focusNodeByNode = focusNodeByNode
         )
+
+        }
+        }
     }
 
     private fun decideNextAction(state: SmartNextRuntimeState): NextActionDecision {
+        return SmartNextPerf.measure("policy_ranking") {
         val smartNextState = SmartNextState(
             root = state.root,
             traversalList = state.normalize.traversalList,
@@ -928,11 +975,16 @@ object A11yNavigator {
             initialTarget = initialTarget,
             navigationDecision = navigationDecision
         )
+
+        }
     }
 
     private fun executeNextAction(decision: NextActionDecision): NextActionExecution {
+        return SmartNextPerf.measure("execute_pipeline") {
         val state = decision.state
         return NextActionExecution(executeSmartNextPipeline(state, decision.initialTarget, decision.navigationDecision))
+
+        }
     }
 
     private fun verifyAndFinalizeNextAction(
@@ -940,6 +992,7 @@ object A11yNavigator {
         execution: NextActionExecution,
         reqId: String
     ): TargetActionOutcome {
+        return SmartNextPerf.measure("finalize_verification") {
         val statusLockedByFinalCommit = A11yHistoryManager.lastFinalCommitTurnId != 0L &&
             A11yHistoryManager.lastFinalCommitTurnId == A11yHistoryManager.activeSmartNextTurnId
         val finalizedOutcome = if (statusLockedByFinalCommit && !execution.outcome.success) {
@@ -1040,6 +1093,8 @@ object A11yNavigator {
             "status=${if (finalizedOutcome.success) "moved" else "failed_single_target"} detail=${finalizedOutcome.reason} resolved_view_id=$actualViewId resolved_label='$actualLabel' target_view_id=$intendedViewId target_label='$intendedLabel'"
         )
         return finalizedOutcome
+
+        }
     }
     private fun executeSmartNextPipeline(
         state: SmartNextRuntimeState,
@@ -1065,7 +1120,7 @@ object A11yNavigator {
             return handleEndOfTraversal(executionContext, executionDecision)
         }
 
-        executionContext.root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
+        SmartNextPerf.findFocus(executionContext.root, AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { focusedNode ->
             val cleared = clearFocus(focusedNode)
             val focusedBounds = Rect().also { focusedNode.getBoundsInScreen(it) }
             Log.i("A11Y_HELPER", "[EXECUTE] Cleared existing accessibility focus before next move: result=$cleared bounds=$focusedBounds")
@@ -1337,13 +1392,13 @@ object A11yNavigator {
         )
         if (!outcome.success) {
             Log.i("A11Y_HELPER", "[EXECUTE] regular single-target failed -> stop sweep targetIndex=$targetIndex reason=${outcome.reason}")
-            val focusedAfterFailure = context.root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            val focusedAfterFailure = SmartNextPerf.findFocus(context.root, AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
             Log.i(
                 "A11Y_HELPER",
                 "[EXECUTE][REGULAR_FAIL] target=${summarizeNodeForDecision(targetNode)} focusedAfterFailure=${summarizeNodeForDecision(focusedAfterFailure)} current=${summarizeNodeForDecision(context.resolvedCurrent)}"
             )
             val currentNode = context.resolvedCurrent
-                ?: context.root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+                ?: SmartNextPerf.findFocus(context.root, AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
             val candidateCount = context.traversalList.size
             val noNextCandidate = targetIndex !in context.traversalList.indices || targetIndex <= context.currentIndex
             val exhaustedSingleTarget = outcome.reason == "single_target_exhausted"
@@ -1401,7 +1456,7 @@ object A11yNavigator {
             if (currentNotificationsRow != null) {
                 val intendedNode = context.traversalList.getOrNull(targetIndex)
                 val intendedRow = findOneConnectNotificationsRowContainer(intendedNode)
-                val actualFocusedNode = context.root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+                val actualFocusedNode = SmartNextPerf.findFocus(context.root, AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
                 val actualFocusedRow = findOneConnectNotificationsRowContainer(actualFocusedNode)
                 val failedWithinSameNotificationsGroup = (intendedRow != null && isSameNode(intendedRow, currentNotificationsRow)) ||
                     (actualFocusedRow != null && isSameNode(actualFocusedRow, currentNotificationsRow))
@@ -1676,7 +1731,7 @@ object A11yNavigator {
         val currentNode = traversalList.getOrNull(currentIndex)
         val initialNextNode = traversalList.getOrNull(initialNextIndex)
         val finalNextNode = traversalList.getOrNull(nextIndex)
-        val actualFocusedNode = state.root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val actualFocusedNode = SmartNextPerf.findFocus(state.root, AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         val currentLabel = (resolvePrimaryLabel(currentNode) ?: currentNode?.let { A11yTraversalAnalyzer.recoverDescendantLabel(it) } ?: "<none>")
             .replace("\n", " ")
             .take(72)
@@ -1703,7 +1758,7 @@ object A11yNavigator {
                 "[SMART_NEXT_DEBUG][candidate] req_id='$reqId' index=$idx id='${candidate.viewIdResourceName.orEmpty()}' class='${candidate.className}' label='$label' bounds='${bounds.toShortString()}' pkg='${candidate.packageName}' clickable=${candidate.isClickable} focusable=${candidate.isFocusable} visible=${candidate.isVisibleToUser} a11y_focused=${candidate.isAccessibilityFocused} representative=$representative"
             )
             if (candidate.viewIdResourceName == ONECONNECT_ON_AIR_CARDS_RECYCLER_VIEW_ID) {
-                val parent = candidate.parent
+                val parent = SmartNextPerf.getParent(candidate, "A11yNavigator.decideInitialNextTarget")
                 Log.i(
                     "A11Y_HELPER",
                     "[SMART_NEXT_DEBUG][gridview_candidate] req_id='$reqId' index=$idx reason='present_in_traversal' current_index=$currentIndex single_target_path=true parent_id='${parent?.viewIdResourceName.orEmpty()}' current_id='${currentNode?.viewIdResourceName.orEmpty()}' bounds='${bounds.toShortString()}' in_effective_region=${bounds.top < state.normalize.effectiveBottom && bounds.bottom > state.normalize.screenTop}"
@@ -1877,6 +1932,7 @@ object A11yNavigator {
     }
 
     private fun selectAliasGroupRepresentative(group: List<FocusedNode>): FocusedNode {
+        return SmartNextPerf.measure("alias_representative") {
         selectOneConnectSettingsRowRepresentative(group)?.let { settingsRow ->
             Log.d(
                 "A11Y_HELPER",
@@ -1928,9 +1984,12 @@ object A11yNavigator {
                     }
             )
             .first()
+
+        }
     }
 
     private fun aliasRepresentativeScore(candidate: FocusedNode): Int {
+        return SmartNextPerf.measure("aliasRepresentativeScore") {
         val node = candidate.node
         var score = 0
         val className = node.className?.toString()?.lowercase().orEmpty()
@@ -1945,6 +2004,8 @@ object A11yNavigator {
         }
         if (A11yTraversalAnalyzer.countClickableOrFocusableDescendants(node, limit = 2) == 0) score += 1
         return score
+
+        }
     }
 
     private fun isOneConnectUpdateAppMemberViewId(viewId: String?): Boolean {
@@ -1955,6 +2016,7 @@ object A11yNavigator {
         group: List<FocusedNode>,
         candidate: FocusedNode
     ): Boolean {
+        return SmartNextPerf.measure("settings_alias_check") {
         val candidateRowContainer = findOneConnectSettingsRowContainer(candidate.node) ?: return false
         return group.any { member ->
             val memberRowContainer = findOneConnectSettingsRowContainer(member.node) ?: return@any false
@@ -1969,9 +2031,12 @@ object A11yNavigator {
             }
             true
         }
+
+        }
     }
 
     private fun selectOneConnectSettingsRowRepresentative(group: List<FocusedNode>): FocusedNode? {
+        return SmartNextPerf.measure("selectOneConnectSettingsRowRepresentative") {
         val rowNode = group.mapNotNull { findOneConnectSettingsRowContainer(it.node) }
             .firstOrNull()
             ?: return null
@@ -1990,6 +2055,8 @@ object A11yNavigator {
             actionableDescendantClassName = metadata.actionableDescendantClassName,
             actionableDescendantContentDescription = metadata.actionableDescendantContentDescription
         )
+
+        }
     }
 
     private fun findOneConnectSettingsRowContainer(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
@@ -2001,7 +2068,7 @@ object A11yNavigator {
                     return current
                 }
             }
-            current = current.parent ?: break
+            current = SmartNextPerf.getParent(current, "A11yNavigator.findOneConnectSettingsRowContainer") ?: break
         }
         return null
     }
@@ -2096,7 +2163,7 @@ object A11yNavigator {
                     }
                 }
             }
-            current = current.parent ?: break
+            current = SmartNextPerf.getParent(current, "A11yNavigator.findOneConnectNotificationsRowContainer") ?: break
         }
         return null
     }
@@ -2116,7 +2183,7 @@ object A11yNavigator {
             }
             if (depth == maxDepth) continue
             for (i in 0 until current.childCount) {
-                val child = current.getChild(i) ?: continue
+                val child = SmartNextPerf.getChild(current, i, "A11yNavigator.findDescendantByPredicate") ?: continue
                 pending.add(child to depth + 1)
             }
         }
@@ -2130,7 +2197,7 @@ object A11yNavigator {
         while (pending.isNotEmpty()) {
             val current = pending.removeFirst()
             for (i in 0 until current.childCount) {
-                val child = current.getChild(i) ?: continue
+                val child = SmartNextPerf.getChild(current, i, "A11yNavigator.findDescendantByViewId") ?: continue
                 if (child.viewIdResourceName == viewId) {
                     return child
                 }
@@ -2148,7 +2215,7 @@ object A11yNavigator {
         var current: AccessibilityNodeInfo? = descendant
         while (current != null) {
             if (isSameNode(current, ancestor)) return distance
-            current = current.parent
+            current = SmartNextPerf.getParent(current, "A11yNavigator.ancestorDistance")
             distance += 1
         }
         return Int.MAX_VALUE
@@ -2164,7 +2231,7 @@ object A11yNavigator {
         while (current != null) {
             firstAncestors += current
             if (isSameNode(current, boundary)) break
-            current = current.parent
+            current = SmartNextPerf.getParent(current, "A11yNavigator.findNearestClickableCommonAncestor")
         }
         var secondCurrent: AccessibilityNodeInfo? = second
         while (secondCurrent != null) {
@@ -2174,17 +2241,17 @@ object A11yNavigator {
                 return matched
             }
             if (isSameNode(secondCurrentNode, boundary)) break
-            secondCurrent = secondCurrentNode.parent
+            secondCurrent = SmartNextPerf.getParent(secondCurrentNode, "A11yNavigator.findNearestClickableCommonAncestor")
         }
         return null
     }
 
     private fun isNodeInsideAncestor(node: AccessibilityNodeInfo, ancestor: AccessibilityNodeInfo): Boolean {
         if (isSameNode(node, ancestor)) return true
-        var current = node.parent
+        var current = SmartNextPerf.getParent(node, "A11yNavigator.isNodeInsideAncestor")
         while (current != null) {
             if (isSameNode(current, ancestor)) return true
-            current = current.parent
+            current = SmartNextPerf.getParent(current, "A11yNavigator.isNodeInsideAncestor")
         }
         return false
     }
@@ -2227,7 +2294,7 @@ object A11yNavigator {
             recyclerDetected = recyclerDetected || classToken.contains("recyclerview") || viewIdToken.contains("recycler")
             overflowDetected = overflowDetected || viewIdToken.contains("overflow")
             ancestorChain += "depth=$depth(class=${ancestor.className}|viewId=${ancestor.viewIdResourceName.orEmpty()}|clickable=${ancestor.isClickable}|focusable=${ancestor.isFocusable})"
-            ancestor = ancestor.parent
+            ancestor = SmartNextPerf.getParent(ancestor, "A11yNavigator.findOverlayRepeatSalvageIndex")
             depth += 1
         }
         val popupOrDialogDetected = popupDetected || dialogDetected
@@ -2374,7 +2441,7 @@ object A11yNavigator {
         var depth = 0
         while (current != null && depth <= 5) {
             if (isMenuLikeContainerNode(current)) return current
-            current = current.parent
+            current = SmartNextPerf.getParent(current, "A11yNavigator.nearestMenuLikeContainer")
             depth += 1
         }
         return null
@@ -2401,10 +2468,14 @@ object A11yNavigator {
     }
 
     private fun isOverlayMenuLikeContext(node: AccessibilityNodeInfo?): Boolean {
+        return SmartNextPerf.measure("isOverlayMenuLikeContext") {
         return nearestMenuLikeContainer(node) != null
+
+        }
     }
 
     private fun isNonActionableTitleText(node: AccessibilityNodeInfo): Boolean {
+        return SmartNextPerf.measure("isNonActionableTitleText") {
         val className = node.className?.toString().orEmpty()
         if (!className.contains("TextView", ignoreCase = true)) return false
         val viewId = node.viewIdResourceName.orEmpty()
@@ -2413,37 +2484,45 @@ object A11yNavigator {
         val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
             AccessibilityNodeInfoCompat.wrap(node).isScreenReaderFocusable
         return !screenReaderFocusable
+
+        }
     }
 
     private fun findOverlayRowContainer(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        return SmartNextPerf.measure("findOverlayRowContainer") {
         if (!isOverlayMenuLikeContext(node) || !isNonActionableTitleText(node)) return null
         val titleBounds = Rect().also(node::getBoundsInScreen)
-        var current = node.parent
+        var current = SmartNextPerf.getParent(node, "A11yNavigator.findOverlayRowContainer")
         var depth = 0
         while (current != null && depth <= 6) {
             val currentBounds = Rect().also(current::getBoundsInScreen)
             if (currentBounds.contains(titleBounds) && isOverlayRowCandidateNode(current)) {
                 return current
             }
-            current = current.parent
+            current = SmartNextPerf.getParent(current, "A11yNavigator.findOverlayRowContainer")
             depth += 1
         }
-        val parent = node.parent ?: return null
+        val parent = SmartNextPerf.getParent(node, "A11yNavigator.findOverlayRowContainer") ?: return null
         for (i in 0 until parent.childCount) {
-            val sibling = parent.getChild(i) ?: continue
+            val sibling = SmartNextPerf.getChild(parent, i, "A11yNavigator.findOverlayRowContainer") ?: continue
             if (isSameNode(sibling, node)) continue
             if (isOverlayRowCandidateNode(sibling)) return sibling
         }
         return null
+
+        }
     }
 
     private fun isOverlayRowCandidateNode(node: AccessibilityNodeInfo): Boolean {
+        return SmartNextPerf.measure("isOverlayRowCandidateNode") {
         if (!isOverlayMenuLikeContext(node) || !node.isVisibleToUser || isNonActionableTitleText(node)) return false
         if (!hasValidBounds(node)) return false
         if (isActionableTraversalCandidate(node)) return true
         if (hasReadableLabel(node) && A11yTraversalAnalyzer.countClickableOrFocusableDescendants(node, limit = 1) > 0) return true
         val metadata = A11yTraversalAnalyzer.collectActionableDescendantMetadata(node)
         return metadata.hasClickableDescendant || metadata.hasFocusableDescendant
+
+        }
     }
 
     private fun resolveCurrentTraversalNode(node: AccessibilityNodeInfo): AccessibilityNodeInfo {
@@ -2456,7 +2535,7 @@ object A11yNavigator {
         }
         return resolveToClickableAncestor(
             node = node,
-            parentOf = { current -> current.parent },
+            parentOf = { current -> SmartNextPerf.getParent(current, "A11yNavigator.resolveCurrentTraversalNode.parentOf") },
             isClickable = { current -> current.isClickable }
         )
     }
@@ -2474,7 +2553,7 @@ object A11yNavigator {
             val promotedIndex = traversalList.indexOfFirst { node -> isSameNode(node, promoted) }
             if (promotedIndex in traversalList.indices) return promotedIndex
         }
-        val parent = candidate.parent
+        val parent = SmartNextPerf.getParent(candidate, "A11yNavigator.promoteOverlayTitleTargetIndex")
         if (parent != null) {
             val siblingIndex = traversalList.indexOfFirst { node ->
                 !isSameNode(node, candidate) &&
@@ -2616,7 +2695,7 @@ object A11yNavigator {
     }
 
     private fun clearFocus(node: AccessibilityNodeInfo): Boolean {
-        return node.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
+        return SmartNextPerf.performAction(node, AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
     }
 
     private fun performScroll(
@@ -3299,6 +3378,7 @@ object A11yNavigator {
         isScrollable: (T) -> Boolean,
         boundsOf: (T) -> Rect
     ): T? {
+        return SmartNextPerf.measure("main_scroll_container") {
         return nodes
             .asSequence()
             .filter(isScrollable)
@@ -3308,9 +3388,12 @@ object A11yNavigator {
                 val height = (bounds.bottom - bounds.top).coerceAtLeast(0)
                 width.toLong() * height.toLong()
             }
+
+        }
     }
 
     private fun findMainScrollContainer(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        return SmartNextPerf.measure("main_scroll_container") {
         if (root == null) return null
         val nodes = mutableListOf<AccessibilityNodeInfo>()
         val queue = ArrayDeque<AccessibilityNodeInfo>()
@@ -3321,7 +3404,7 @@ object A11yNavigator {
                 nodes += node
             }
             for (index in 0 until node.childCount) {
-                node.getChild(index)?.let(queue::add)
+                SmartNextPerf.getChild(node, index, "A11yNavigator.findMainScrollContainer")?.let(queue::add)
             }
         }
         return findMainScrollContainer(
@@ -3329,6 +3412,8 @@ object A11yNavigator {
             isScrollable = { isEligibleVerticalScrollNode(it) },
             boundsOf = { node -> Rect().also { node.getBoundsInScreen(it) } }
         )
+
+        }
     }
 
     internal fun isWithinTopContentArea(
@@ -3379,7 +3464,7 @@ object A11yNavigator {
         val resolvedCurrent = currentNode?.let {
             resolveToClickableAncestor(
                 node = it,
-                parentOf = { node -> node.parent },
+                parentOf = { node -> SmartNextPerf.getParent(node, "A11yNavigator.findSwipeTarget.parentOf") },
                 isClickable = { node -> node.isClickable }
             )
         }
@@ -3597,7 +3682,7 @@ object A11yNavigator {
             }
 
             for (index in 0 until node.childCount) {
-                node.getChild(index)?.let { queue.add(it) }
+                SmartNextPerf.getChild(node, index, "A11yNavigator.findScrollableForwardCandidate")?.let { queue.add(it) }
             }
         }
         return null
@@ -3606,7 +3691,7 @@ object A11yNavigator {
     internal fun findScrollableForwardAncestorCandidate(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
         return findScrollableForwardAncestorCandidate(
             node = node,
-            parentOf = { it.parent },
+            parentOf = { SmartNextPerf.getParent(it, "A11yNavigator.findScrollableForwardAncestorCandidate.parentOf") },
             isScrollable = { isEligibleVerticalScrollNode(it) },
             hasScrollForwardAction = {
                 verticalScrollAction("down", it.actionList.map { action -> action.id }) != null

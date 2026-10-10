@@ -150,6 +150,7 @@ object A11yFocusExecutor {
         verificationWindowMs: Long = 550L,
         retryDelayMs: Long = 120L
     ): FocusExecutionResult {
+        return SmartNextPerf.measure("focus_retry") {
         val targetBounds = Rect().also { target.getBoundsInScreen(it) }
         val expectedPackageName = target.packageName?.toString()
         var lastBounds: Rect? = null
@@ -160,8 +161,8 @@ object A11yFocusExecutor {
         )
 
         repeat(maxAttempts) { attempt ->
-            target.refresh()
-            val actionResult = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+            SmartNextPerf.refresh(target)
+            val actionResult = SmartNextPerf.performAction(target, AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
             Log.i("A11Y_HELPER", "[FOCUS_EXEC] Attempt ${attempt + 1}: performAction=$actionResult")
 
             val verification = pollForTargetFocusWithinWindow(
@@ -186,6 +187,8 @@ object A11yFocusExecutor {
         }
         Log.e("A11Y_HELPER", "[FOCUS_EXEC] Failed all attempts. Last actual focus: $lastBounds")
         return FocusExecutionResult(false, maxAttempts, lastBounds)
+
+        }
     }
 
     fun verifyFocusStabilizationAfterAction(
@@ -197,6 +200,7 @@ object A11yFocusExecutor {
         settleDelayMs: Long = 75L,
         settleWindowMs: Long = 450L
     ): FocusVerificationResult {
+        return SmartNextPerf.measure("stabilization") {
         val settleResult = pollForTargetFocusWithinWindow(
             root = root,
             targetBounds = targetBounds,
@@ -220,6 +224,8 @@ object A11yFocusExecutor {
             actualFocusedBounds = actualBounds,
             hardFailureSignal = hardFailureSignal
         )
+
+        }
     }
 
     internal fun shouldTreatAsSnapBackAfterVerification(
@@ -260,6 +266,7 @@ object A11yFocusExecutor {
         currentFocusIndexHint: Int = -1,
         aliasMembersByTraversalIndex: Map<Int, List<AccessibilityNodeInfo>> = emptyMap()
     ): ActionResult {
+        return SmartNextPerf.measure("focus_flow") {
         val label = target.text?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
             ?: target.contentDescription?.toString()?.trim().takeUnless { it.isNullOrEmpty() }
             ?: "<no-label>"
@@ -301,7 +308,7 @@ object A11yFocusExecutor {
             Log.i("A11Y_HELPER", "[SMART_NEXT] status_detail pre_focus_alignment_adjusted=true")
         }
 
-        val currentFocusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val currentFocusedNode = SmartNextPerf.findFocus(root, AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         val currentFocusedBounds = currentFocusedNode?.let { Rect().also(it::getBoundsInScreen) }
         val currentPackageName = currentFocusedNode?.packageName?.toString()
         val currentIsTopBar = currentFocusedNode != null &&
@@ -378,7 +385,7 @@ object A11yFocusExecutor {
             Log.w("A11Y_HELPER", "[SMART_NEXT] requestFocusFlow snap_back target=${A11yNavigator.formatBoundsForLog(targetBounds)} actual=${A11yNavigator.formatBoundsForLog(focusVerification.actualFocusedBounds)}")
         }
         if (focusVerification.hardFailureSignal) {
-            val actualFocusedAfterVerification = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            val actualFocusedAfterVerification = SmartNextPerf.findFocus(root, AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
             Log.w(
                 "A11Y_HELPER",
                 "[FOCUS_VERIFY] hard_failure_signal external_package_departure targetPackage=$expectedPackageName actual=${A11yNavigator.formatBoundsForLog(focusVerification.actualFocusedBounds)}"
@@ -426,7 +433,7 @@ object A11yFocusExecutor {
             )
         }
         if (!commitDecision.success) {
-            val actualFocusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            val actualFocusedNode = SmartNextPerf.findFocus(root, AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
             Log.w(
                 "A11Y_HELPER",
                 "[SMART_NEXT_DEBUG][reject] req_id='${A11yHistoryManager.activeSmartNextReqId}' detail='failed_focus_rejected' branch='requestFocusFlow.commit_decision_failed' target_id='${target.viewIdResourceName.orEmpty()}' target_label='${label.replace("\n", " ")}' target_bounds='${A11yNavigator.formatBoundsForLog(targetBounds)}' perform_action_success=${focusExecution.success} verify_resolved=${focusVerification.resolved} verify_snap_back=${focusVerification.snapBackDetected} verify_hard_failure=${focusVerification.hardFailureSignal} actual_focus_id='${actualFocusedNode?.viewIdResourceName.orEmpty()}' reject_reason='${commitDecision.reason}' commit_source='${commitDecision.source}' commit_status='${commitDecision.commitStatus}'"
@@ -438,6 +445,8 @@ object A11yFocusExecutor {
             reason = "focus_confirmed_final",
             aliasGroupMembers = aliasMembersByTraversalIndex[traversalIndex].orEmpty()
         )
+
+        }
     }
 
     internal fun resolveFocusRetargetDecision(
@@ -451,7 +460,9 @@ object A11yFocusExecutor {
         preActionFocusedNode: AccessibilityNodeInfo? = null,
         preActionCandidateAvailable: Boolean = true
     ): FocusRetargetDecision {
-        val actualFocusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val perfToken = SmartNextPerf.start("retarget_verify")
+        try {
+        val actualFocusedNode = SmartNextPerf.findFocus(root, AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
         val actualCandidateIndex = if (actualFocusedNode != null && traversalListSnapshot != null) {
             A11yTraversalAnalyzer.findNodeIndexByIdentity(
                 nodes = traversalListSnapshot,
@@ -609,6 +620,7 @@ object A11yFocusExecutor {
             success = success,
             reason = finalReason
         )
+        } finally { SmartNextPerf.finish(perfToken) }
     }
 
     private fun commitFinalFocusCandidate(
@@ -616,6 +628,7 @@ object A11yFocusExecutor {
         reason: String,
         aliasGroupMembers: List<AccessibilityNodeInfo> = emptyList()
     ): ActionResult {
+        return SmartNextPerf.measure("focus_commit") {
         val activeTurnId = A11yHistoryManager.activeSmartNextTurnId
         if (A11yHistoryManager.hasCommittedFinalFocusForTurn(activeTurnId)) {
             Log.i(
@@ -642,6 +655,8 @@ object A11yFocusExecutor {
             "[FOCUS_VERIFY] final_focus_commit candidate=${decision.finalLabel.replace("\n", " ")} source=${decision.source} viewId=${decision.finalTarget.viewIdResourceName}"
         )
         return ActionResult(decision.success, if (decision.success) decision.commitStatus else decision.reason, decision.finalTarget)
+
+        }
     }
 
     internal fun alignCandidateForReadableFocus(
@@ -656,6 +671,7 @@ object A11yFocusExecutor {
         intendedTrailingCandidate: AccessibilityNodeInfo? = null,
         maxPreFocusAdjustments: Int = 2
     ): PreFocusAlignmentResult {
+        return SmartNextPerf.measure("focus_alignment") {
         if (isTopBar) return PreFocusAlignmentResult()
         if (isBottomBar) {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Detected bottom navigation target -> skipping pre-focus alignment")
@@ -704,7 +720,7 @@ object A11yFocusExecutor {
             if (shouldTryContainerScroll) {
                 val scrollableNode = A11yNavigator.findScrollableForwardAncestorCandidate(target) ?: findScrollableNode(root)
                 if (scrollableNode != null) {
-                    val scrolled = scrollableNode.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                    val scrolled = SmartNextPerf.performAction(scrollableNode, AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                     Log.i("A11Y_HELPER", "[SMART_NEXT] Pre-focus readable alignment scroll result=$scrolled label=$label")
                     adjusted = adjusted || scrolled
                 }
@@ -717,7 +733,7 @@ object A11yFocusExecutor {
             adjustedAny = adjustedAny || adjusted
             if (!adjusted) break
             Thread.sleep(400)
-            target.refresh()
+            SmartNextPerf.refresh(target)
             currentBounds = Rect().also { target.getBoundsInScreen(it) }
             val trailingBounds = intendedTrailingCandidate?.let { candidate ->
                 Rect().also { candidate.getBoundsInScreen(it) }
@@ -742,6 +758,8 @@ object A11yFocusExecutor {
             Log.i("A11Y_HELPER", "[SMART_NEXT] Proceeding with best-effort focus on intended candidate")
         }
         return PreFocusAlignmentResult(adjusted = adjustedAny, bottomClipped = bottomClippedCandidate, reasonablyAligned = reasonablyAligned)
+
+        }
     }
 
     internal fun shouldUseMinimalPreFocusAdjustment(
@@ -843,7 +861,7 @@ object A11yFocusExecutor {
             val node = queue.removeFirst()
 
             for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { queue.addLast(it) }
+                SmartNextPerf.getChild(node, i, "A11yFocusExecutor.findScrollableNode")?.let { queue.addLast(it) }
             }
 
             if (node.isScrollable) {
@@ -876,7 +894,7 @@ object A11yFocusExecutor {
     }
 
     internal fun requestInputFocusBeforeAccessibilityFocus(target: AccessibilityNodeInfo, label: String): Boolean {
-        val inputFocusResult = target.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        val inputFocusResult = SmartNextPerf.performAction(target, AccessibilityNodeInfo.ACTION_FOCUS)
         Log.i("A11Y_HELPER", "[SMART_NEXT] ACTION_FOCUS priming result=$inputFocusResult label=$label")
         return inputFocusResult
     }
@@ -897,6 +915,7 @@ object A11yFocusExecutor {
         totalWindowMs: Long,
         phaseTag: String
     ): FocusPollingResult {
+        return SmartNextPerf.measure("event_poll") {
         val effectivePollInterval = pollIntervalMs.coerceIn(50L, 100L)
         val effectiveWindow = totalWindowMs.coerceIn(400L, 700L)
         val deadline = SystemClock.uptimeMillis() + effectiveWindow
@@ -909,8 +928,8 @@ object A11yFocusExecutor {
         }
 
         while (true) {
-            root.refresh()
-            val actualFocusNode = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            SmartNextPerf.refresh(root)
+            val actualFocusNode = SmartNextPerf.findFocus(root, AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
             val actualPackageName = actualFocusNode?.packageName?.toString()
             val packageAllowed = expectedPackageName == null || actualPackageName == expectedPackageName
             val systemUiPackage = actualPackageName == "com.android.systemui"
@@ -924,7 +943,7 @@ object A11yFocusExecutor {
             val verificationNode = if (packageAllowed) actualFocusNode else null
             lastBounds = verificationNode?.let { Rect().also(it::getBoundsInScreen) }
             val latestTargetBounds = intendedTarget?.let { targetNode ->
-                targetNode.refresh()
+                SmartNextPerf.refresh(targetNode)
                 Rect().also(targetNode::getBoundsInScreen)
             } ?: targetBounds
             val matched = isTargetFocusResolved(
@@ -963,9 +982,12 @@ object A11yFocusExecutor {
             systemUiObserved = systemUiObserved,
             externalPackageObserved = externalPackageObserved
         )
+
+        }
     }
 
     private fun waitWithoutMainThreadSleep(durationMs: Long, phaseTag: String): Boolean {
+        return SmartNextPerf.measure("event_wait") {
         val waitDuration = durationMs.coerceAtLeast(0L)
         if (waitDuration == 0L) return true
         val isMainThread = Looper.myLooper() == Looper.getMainLooper()
@@ -975,6 +997,8 @@ object A11yFocusExecutor {
         }
         Log.w("A11Y_HELPER", "[FOCUS_EXEC] Skip blocking wait on main thread phase=$phaseTag durationMs=$waitDuration")
         return false
+
+        }
     }
 
     private fun isWithinSnapBackTolerance(targetBounds: Rect, actualFocusedBounds: Rect, tolerancePx: Int = 10): Boolean {

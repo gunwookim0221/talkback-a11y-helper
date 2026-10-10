@@ -398,6 +398,8 @@ class A11yCommandReceiver : BroadcastReceiver() {
         // The accessibility service is already bound and owns this work.
         // Keeping goAsync pending until navigation ends makes am broadcast wait
         // and caused the observed 30s ADB timeouts / ~60s broadcast ANR kills.
+        SmartNextPerf.request(reqId, intent.getBooleanExtra("profileSmartNext", false),
+            if (intent.getBooleanExtra("profileRelationships", false)) context.filesDir else null)
         val accepted = service.smartNextDispatcher.submit(reqId, onResult = { result ->
             try {
                 val status = result.optString("status", "unknown")
@@ -411,10 +413,15 @@ class A11yCommandReceiver : BroadcastReceiver() {
                     reqId,
                     org.json.JSONObject().put("status", status).put("detail", detail)
                 )
-                A11yEvidence.attach(result, reqId)
+                SmartNextPerf.measure("evidence_attach") { A11yEvidence.attach(result, reqId) }
                 // Emit exactly one final payload per reqId, after evidence attachment.
                 // A pre-attachment result can race the collector or duplicate chunks.
-                A11yResultTransport.encode("SMART_NAV_RESULT", reqId, result.toString()).forEach { Log.i(TAG, it) }
+                val encodedResult = SmartNextPerf.measure("serialize") {
+                    A11yResultTransport.encode("SMART_NAV_RESULT", reqId, result.toString())
+                }
+                SmartNextPerf.mark("T11_result_serialized")
+                SmartNextPerf.measure("emit") { encodedResult.forEach { Log.i(TAG, it) } }
+                SmartNextPerf.mark("T12_result_emitted")
                 val reply = Intent("SMART_NAV_RESULT").apply {
                     setPackage(context.packageName)
                     putExtra("json", result.toString())
@@ -447,6 +454,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
                     org.json.JSONObject().put("status", "failed").put("detail", "async_exception")
                 )
         })
+        if (!accepted) SmartNextPerf.cancel(reqId)
         logSmartNextDiag(reqId, "receiver_ack", "accepted=$accepted pending_broadcast=false")
     }
 
