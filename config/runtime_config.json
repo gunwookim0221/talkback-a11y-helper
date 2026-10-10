@@ -131,7 +131,6 @@
     },
     "devices_main": {
       "group": "main_tabs",
-      "anchor_ref": "home_tab_anchor",
       "enabled": false,
       "max_steps": 100,
       "scenario_type": "content",

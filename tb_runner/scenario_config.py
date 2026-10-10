@@ -472,11 +472,13 @@ TAB_CONFIGS = [
         },
         "screen_context_mode": "bottom_tab",
         "stabilization_mode": "anchor_then_context",
-        "anchor_name": "(?i).*location.*qr.*code.*|.*장소\\s*qr\\s*코드.*",
-        "anchor_type": "b",
+        # This is the same body anchor verified by fallback in both locales.
+        # Keep Devices independent of Home's QR chrome configuration.
+        "anchor_name": "^com\\.samsung\\.android\\.oneconnect:id/search_icon$",
+        "anchor_type": "r",
         "anchor": {
-            "text_regex": "(?i).*location.*qr.*code.*|.*장소\\s*qr\\s*코드.*",
-            "announcement_regex": "(?i).*qr.*code.*|.*qr\\s*코드.*",
+            "resource_id_regex": "^com\\.samsung\\.android\\.oneconnect:id/search_icon$",
+            "allow_resource_id_only": True,
             "tie_breaker": "top_left",
         },
         "context_verify": {

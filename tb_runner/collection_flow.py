@@ -6634,6 +6634,20 @@ def _run_xml_scroll_search_tap(
                             match_source = "descendant_title"
                             matched_phrase = phrase
                             break
+                # The English Find map/card exposes its name as a leading
+                # description, not a title. Require its actionable resource so
+                # generic "find" prose on other cards remains ineligible.
+                if (
+                    not target_match and preserve_actionable_match
+                    and resource_id in {
+                        "com.samsung.android.oneconnect:id/map_area",
+                        "com.samsung.android.oneconnect:id/fme_view",
+                    }
+                    and (bool(node.get("clickable")) or bool(node.get("effectiveClickable")))
+                    and re.match(r"(?i)^find\s*[,.:]", node_desc)
+                ):
+                    desc_match = target_match = True
+                    match_source, matched_phrase = "resource-content-desc", "find"
                 for phrase in negative_phrases:
                     if _contains_phrase(node_text, phrase) or _contains_phrase(node_desc, phrase) or _contains_phrase(descendant_blob, phrase):
                         negative_plugin_phrase = phrase
