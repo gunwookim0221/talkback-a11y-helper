@@ -204,6 +204,98 @@ def test_systemui_without_screen_keyguard_or_shade_still_uses_existing_crash_det
     assert detection["reason"] == "app_terminated"
 
 
+def test_systemui_foreground_with_live_oneconnect_accessibility_focus_is_transient():
+    client = GuardClient(pidof="1234", current_package=crash_guard.SYSTEM_UI_PACKAGE)
+    row = _launcher_row(
+        focus_view_id="com.samsung.android.oneconnect:id/title",
+        focus_node={
+            "packageName": crash_guard.EXPECTED_PACKAGE,
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/title",
+            "text": "Family Care",
+        },
+        dump_tree_nodes=[],
+    )
+
+    inspection = crash_guard.inspect_foreground_package_exit(row=row, client=client, dev="SERIAL")
+
+    assert inspection["detection"] is None
+    assert inspection["transient_systemui"] == {
+        "classification": "TRANSIENT_SYSTEMUI_OVERLAY",
+        "target_process_running": True,
+        "target_accessibility_ui_present": True,
+        "foreground_recheck_package": crash_guard.SYSTEM_UI_PACKAGE,
+        "crash_counted": False,
+    }
+
+
+def test_systemui_foreground_with_live_target_accessibility_window_is_transient():
+    client = GuardClient(pidof="1234", current_package=crash_guard.SYSTEM_UI_PACKAGE)
+    row = _launcher_row(focus_node={}, focus_view_id="", dump_tree_nodes=[])
+    row["accessibility_windows"] = [{"packageName": crash_guard.EXPECTED_PACKAGE}]
+
+    inspection = crash_guard.inspect_foreground_package_exit(row=row, client=client, dev="SERIAL")
+
+    assert inspection["detection"] is None
+    assert inspection["transient_systemui"]["target_accessibility_ui_present"] is True
+
+
+def test_systemui_with_gone_process_and_no_target_ui_remains_app_terminated():
+    client = GuardClient(pidof="", current_package=crash_guard.SYSTEM_UI_PACKAGE)
+    row = _launcher_row(focus_node={}, focus_view_id="", dump_tree_nodes=[])
+
+    detection = crash_guard.detect_foreground_package_exit(row=row, client=client, dev="SERIAL")
+
+    assert detection is not None
+    assert detection["crash_type"] == "APP_TERMINATED"
+    assert detection["reason"] == "app_terminated"
+
+
+def test_transient_systemui_foreground_that_returns_to_target_is_reconciled_once():
+    class ReturningClient(GuardClient):
+        def __init__(self):
+            super().__init__(pidof="1234", current_package=crash_guard.SYSTEM_UI_PACKAGE)
+            self.foreground_samples = [crash_guard.SYSTEM_UI_PACKAGE, crash_guard.EXPECTED_PACKAGE]
+            self.window_reads = 0
+
+        def _run(self, args, **kwargs):
+            if args == ["shell", "dumpsys", "window"]:
+                self.window_reads += 1
+                package = self.foreground_samples.pop(0)
+                return f"mCurrentFocus=Window{{abc u0 {package}/{package}.Main}}"
+            return super()._run(args, **kwargs)
+
+    client = ReturningClient()
+    row = _launcher_row(focus_node={}, focus_view_id="", dump_tree_nodes=[])
+
+    inspection = crash_guard.inspect_foreground_package_exit(row=row, client=client, dev="SERIAL")
+
+    assert inspection["detection"] is None
+    assert inspection["transient_systemui"]["foreground_recheck_package"] == crash_guard.EXPECTED_PACKAGE
+    assert client.window_reads == 2
+
+
+def test_ambiguous_stable_systemui_state_stays_bounded_and_remains_possible_crash():
+    class StableSystemUiClient(GuardClient):
+        def __init__(self):
+            super().__init__(pidof="1234", current_package=crash_guard.SYSTEM_UI_PACKAGE)
+            self.window_reads = 0
+
+        def _run(self, args, **kwargs):
+            if args == ["shell", "dumpsys", "window"]:
+                self.window_reads += 1
+                return super()._run(args, **kwargs)
+            return super()._run(args, **kwargs)
+
+    client = StableSystemUiClient()
+    row = _launcher_row(focus_node={}, focus_view_id="", dump_tree_nodes=[])
+
+    detection = crash_guard.detect_foreground_package_exit(row=row, client=client, dev="SERIAL")
+
+    assert detection is not None
+    assert detection["crash_type"] == "POSSIBLE_CRASH"
+    assert client.window_reads == 2
+
+
 def test_main_loop_stops_on_launcher_focus_and_persists_crash_artifacts(tmp_path, monkeypatch):
     monkeypatch.setattr(collection_flow, "save_excel_with_perf", lambda *args, **kwargs: None)
     logs = []

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import threading
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -16,6 +17,7 @@ from .preflight import (
     normalize_launch_mode,
     run_surface_preflight as run_runtime_preflight,
 )
+from .repository_provenance import capture_repository_provenance
 from .run_summary import write_summary_file
 from .runtime_dashboard import build_runtime_dashboard
 from .runtime_config_selection import write_selected_runtime_config
@@ -63,6 +65,7 @@ class RunManager:
         self._run_dir: Path | None = None
         self._shadow_validation_requested = False
         self._feature_flags = resolve_identity_feature_flags()
+        self._repository_provenance: dict[str, object] | None = None
 
     def start_run(
         self,
@@ -118,6 +121,18 @@ class RunManager:
                     identity_shadow_v2=identity_shadow_v2,
                     traversal_identity_v2=traversal_identity_v2,
                     traversal_profiler=traversal_profiler,
+                )
+                self._repository_provenance, provenance_path = capture_repository_provenance(
+                    ROOT_DIR, run_dir
+                )
+                log_file.write(
+                    "[QA_FRONTEND][repository_provenance] "
+                    f"artifact='{provenance_path}' "
+                    f"branch='{self._repository_provenance.get('branch')}' "
+                    f"head='{self._repository_provenance.get('head')}' "
+                    f"origin_main='{self._repository_provenance.get('origin_main')}' "
+                    f"dirty='{str(bool(self._repository_provenance.get('dirty'))).lower()}' "
+                    f"path_count={self._repository_provenance.get('path_count', 0)}\n"
                 )
                 log_file.write(
                     "[FEATURE_FLAGS][runspec] "
@@ -254,6 +269,7 @@ class RunManager:
                     sleep_prevention_enabled = False
                     return self._status_locked()
 
+                spec = replace(spec, preflight_talkback_pid=preflight.get("talkback_pid"))
                 execution = start_execution(
                     spec=spec,
                     script_path=SCRIPT_PATH,
@@ -547,4 +563,5 @@ class RunManager:
             "popup_result": self._preflight.get("popup_result") if self._preflight else None,
             "accessibility_settings_opened": self._preflight.get("accessibility_settings_opened") if self._preflight else False,
             "preflight": self._preflight,
+            "repository_provenance": self._repository_provenance,
         }

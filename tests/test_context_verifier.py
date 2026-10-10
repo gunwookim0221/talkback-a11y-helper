@@ -195,21 +195,21 @@ def test_verify_context_selected_bottom_tab_uses_semantic_focus_after_r2_touch()
     assert result["actual_source"] == "semantic_focus_candidate"
 
 
-def test_verify_context_selected_bottom_tab_reads_r2_selected_state_from_window_xml():
-    class _WindowXmlClient:
+def test_verify_context_selected_bottom_tab_reads_r2_selected_state_from_service_hierarchy():
+    class _ServiceHierarchyClient:
         def dump_tree(self, **kwargs):
             return []
 
-        def _run(self, args, **kwargs):
-            if args[:3] == ["shell", "uiautomator", "dump"]:
-                return "UI hierchary dumped to: /sdcard/tb_runner_context_verify.xml"
-            if args[:2] == ["shell", "cat"]:
-                return (
-                    '<hierarchy><node class="android.widget.LinearLayout" '
-                    'content-desc="기기" selected="true" '
-                    'bounds="[100,900][250,1000]" /></hierarchy>'
-                )
-            return ""
+        def dump_hierarchy(self, **kwargs):
+            root = {
+                "className": "android.widget.LinearLayout",
+                "contentDescription": "기기",
+                "packageName": "com.samsung.android.oneconnect",
+                "selected": True,
+                "boundsInScreen": {"left": 100, "top": 900, "right": 250, "bottom": 1000},
+                "children": [],
+            }
+            return {"success": True, "nodes": [root], "windows": [{"root": root}], "nodeCount": 1}
 
     result = verify_context(
         _step(),
@@ -219,12 +219,12 @@ def test_verify_context_selected_bottom_tab_reads_r2_selected_state_from_window_
                 "announcement_regex": r"(?i).*(selected|선택됨).*(devices|기기).*",
             }
         },
-        client=_WindowXmlClient(),
+        client=_ServiceHierarchyClient(),
         dev="serial",
     )
 
     assert result["ok"] is True
-    assert result["actual_source"] == "window_xml_selected_bottom_tab"
+    assert result["actual_source"] == "service_hierarchy_selected_bottom_tab"
 
 
 def test_verify_context_selected_bottom_tab_accepts_english_selected_after_label():

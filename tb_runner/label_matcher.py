@@ -41,6 +41,7 @@ LABEL_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 VERIFY_TOKEN_ALIASES: dict[str, tuple[str, ...]] = {
+    "쇼핑리스트로 보내기": ("send to shopping list",),
     "outdoor air quality": ("실외 공기질", "실외 공기(미세먼지)"),
     "air quality": ("실외 공기질", "실외 공기(미세먼지)"),
     "air care": ("에어 케어", "실외 공기질", "실외 공기(미세먼지)"),

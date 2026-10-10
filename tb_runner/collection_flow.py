@@ -22,6 +22,12 @@ from tb_runner.core_preflight import ensure_smartthings_foreground
 from tb_runner.diagnostics import classify_command_ack, classify_step_result, detect_step_mismatch, normalize_move_result, should_stop
 from tb_runner.diagnostics import is_global_nav_row
 from tb_runner import scroll_reliability
+from talkback_lib.window_lifecycle import (
+    capture_window_lifecycle,
+    configure_window_lifecycle,
+    get_talkback_restart_event,
+    set_window_lifecycle_step,
+)
 from tb_runner.traversal_reliability import (
     TraversalMetrics, focus_instance, identity_collisions, instance_id, normalized_bounds, termination_status,
 )
@@ -177,6 +183,60 @@ def _legacy_row_progressed(row: dict[str, Any]) -> bool:
         "scrolled",
         "edge_realign_then_moved",
     }
+
+
+def _abort_main_loop_for_talkback_restart(
+    *,
+    client: Any,
+    state: "MainLoopState",
+    scenario_id: str,
+    step_idx: int,
+) -> bool:
+    event = get_talkback_restart_event(client)
+    if not event:
+        return False
+    state.stop_triggered = True
+    state.stop_reason = "talkback_restarted"
+    state.stop_step = int(step_idx)
+    ledger = getattr(client, "_target_attempt_ledger", None)
+    if ledger is not None:
+        ledger.interrupt_step(scenario_id, int(step_idx), event)
+    log(
+        f"[TALKBACK_RESTART_ABORT] scenario='{scenario_id}' step={step_idx} "
+        f"previous_pid='{event.get('previous_talkback_pid') or ''}' "
+        f"new_pid='{event.get('talkback_pid') or ''}' "
+        f"detected_at='{event.get('timestamp') or ''}' "
+        f"phase='{event.get('phase') or ''}' action='{event.get('action_type') or ''}' "
+        "continuity='invalidated' result='INCOMPLETE_ERROR'"
+    )
+    return True
+
+
+def _mark_start_pipeline_talkback_restart(
+    *,
+    client: Any,
+    result: "StartPipelineResult",
+    scenario_id: str,
+    phase: str,
+) -> bool:
+    event = get_talkback_restart_event(client)
+    if not event:
+        return False
+    result.failure_reason = "talkback_restarted"
+    result.entry_contract_detail = (
+        f"TalkBack PID changed from {event.get('previous_talkback_pid') or 'unknown'} "
+        f"to {event.get('talkback_pid') or 'unknown'} during {event.get('phase') or phase}"
+    )
+    result.needs_open_failed_row = True
+    result.should_enter_main_loop = False
+    log(
+        f"[TALKBACK_RESTART_ABORT] scenario='{scenario_id}' phase='{phase}' "
+        f"previous_pid='{event.get('previous_talkback_pid') or ''}' "
+        f"new_pid='{event.get('talkback_pid') or ''}' "
+        f"detected_at='{event.get('timestamp') or ''}' "
+        "continuity='invalidated' result='INCOMPLETE_ERROR'"
+    )
+    return True
 
 
 def _resolve_traversal_evidence_decision(
@@ -2777,6 +2837,40 @@ def _xml_entry_candidate_obstruction_reason(
     return ""
 
 
+def _xml_entry_candidate_tap_bounds(
+    candidate_bounds: tuple[int, int, int, int] | None,
+    nodes: list[dict[str, Any]],
+) -> tuple[tuple[int, int, int, int] | None, str]:
+    """Keep entry taps inside the card's visible area outside fixed chrome."""
+    if not candidate_bounds:
+        return None, "bounds_missing"
+    left, top, right, bottom = candidate_bounds
+    obstruction = ""
+    top_chrome_ids = {
+        "home_button_container", "tab_title", "add_menu_button_container",
+        "more_menu_button_container",
+    }
+    for node, _ in _iter_tree_nodes_with_parent(nodes):
+        if not _node_is_visible(node):
+            continue
+        resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").lower()
+        bounds = parse_bounds_str(node.get("boundsInScreen", ""))
+        if not bounds or min(right, bounds[2]) <= max(left, bounds[0]):
+            continue
+        if min(bottom, bounds[3]) <= max(top, bounds[1]):
+            continue
+        if any(token in resource_id for token in _XML_ENTRY_BOTTOM_OVERLAY_ID_TOKENS):
+            bottom = min(bottom, bounds[1])
+            obstruction = resource_id
+        elif resource_id.startswith("com.samsung.android.oneconnect:id/") and resource_id.rsplit("/", 1)[-1] in top_chrome_ids:
+            top = max(top, bounds[3])
+            obstruction = resource_id
+    # A thin clipped strip cannot provide a reliable touch target.
+    if right - left < 48 or bottom - top < 48:
+        return None, obstruction or "insufficient_visible_card_area"
+    return (left, top, right, bottom), ""
+
+
 def _has_global_nav_signals(state: list[dict[str, Any]]) -> tuple[bool, int]:
     if not isinstance(state, list):
         return False, 0
@@ -2972,7 +3066,7 @@ def _life_root_state_snapshot(nodes: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _augment_life_snapshot_with_xml_selected(
+def _augment_life_snapshot_with_hierarchy_selected(
     client: A11yAdbClient,
     dev: str,
     snapshot: dict[str, Any],
@@ -2991,7 +3085,7 @@ def _augment_life_snapshot_with_xml_selected(
     merged_snapshot = dict(snapshot)
     merged_snapshot["life_selected"] = True
     merged_snapshot["life_selected_text"] = str(xml_snapshot.get("life_selected_text", "") or "").strip()
-    merged_snapshot["life_selected_source"] = "window_xml_selected"
+    merged_snapshot["life_selected_source"] = "service_hierarchy_selected"
     return merged_snapshot
 
 
@@ -3535,7 +3629,7 @@ def _verify_fresh_life_list_state(
             nodes = []
             last_reason = f"dump_failed:{exc}"
         snapshot = _life_root_state_snapshot(nodes if isinstance(nodes, list) else [])
-        snapshot = _augment_life_snapshot_with_xml_selected(client, dev, snapshot)
+        snapshot = _augment_life_snapshot_with_hierarchy_selected(client, dev, snapshot)
         life_list_ready = _is_life_list_ready(snapshot)
         plugin_card_list_visible = bool(
             int(snapshot.get("visible_card_hits", 0) or 0) > 0 or bool(snapshot.get("life_root_signature_present"))
@@ -3574,7 +3668,7 @@ def _ensure_life_plugin_list_ready(client: A11yAdbClient, dev: str, tab_cfg: dic
             raw_nodes = []
         nodes = raw_nodes if isinstance(raw_nodes, list) else []
         snapshot = _life_root_state_snapshot(nodes)
-        snapshot = _augment_life_snapshot_with_xml_selected(client, dev, snapshot)
+        snapshot = _augment_life_snapshot_with_hierarchy_selected(client, dev, snapshot)
         package_signature_present = any(
             "com.samsung.android.oneconnect" in str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").lower()
             for node, _ in _iter_tree_nodes_with_parent(nodes)
@@ -3830,6 +3924,7 @@ def recover_to_device_start_state(
     recovery bounded: it sends Back only while the global navigation is absent,
     then uses the existing tab-selection/context verification contract.
     """
+    setattr(client, "last_device_tab_context_verified", False)
     policy = _resolve_recovery_policy(tab_cfg)
     scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip() or "unknown"
     wait_seconds = _get_wait_seconds(tab_cfg, "back_recovery_wait_seconds", MAIN_STEP_WAIT_SECONDS)
@@ -3899,6 +3994,7 @@ def recover_to_device_start_state(
                 context = tab_result.get("verify_context", {}) if isinstance(tab_result, dict) else {}
             actual = str(context.get("actual_selected_text", "") or "") if isinstance(context, dict) else ""
             if _device_recovery_context_verified(tab_result):
+                setattr(client, "last_device_tab_context_verified", True)
                 log(
                     f"[DEVICE_RESET] success=true scenario='{scenario_id}' "
                     f"reason='devices_context_verified' actual='{actual}'"
@@ -3935,11 +4031,13 @@ def recover_to_device_start_state(
 
 def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, Any]) -> bool:
     policy = _resolve_recovery_policy(tab_cfg)
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    if _is_device_plugin_scenario(scenario_id):
+        setattr(client, "last_device_tab_context_verified", False)
     if not policy.get("enabled", True):
         log("[RECOVER] skipped reason='disabled'")
         return True
 
-    scenario_id = str(tab_cfg.get("scenario_id", "") or "")
     if _is_device_plugin_scenario(scenario_id):
         reset_ok, reset_reason = recover_to_device_start_state(client, dev, tab_cfg)
         if reset_ok:
@@ -4717,6 +4815,80 @@ def _filter_special_state_cta_hits(
     return filtered
 
 
+def _normalize_special_state_cta_label(value: Any) -> str:
+    normalized = re.sub(r"\s+", " ", str(value or "").strip()).casefold()
+    return normalized.strip(" \t\r\n.,!?;:…")
+
+
+def _special_state_cta_node_is_actionable(node: dict[str, Any]) -> bool:
+    def is_true(value: Any) -> bool:
+        return value is True or str(value or "").strip().casefold() in {"1", "true", "yes"}
+
+    if any(is_true(node.get(key)) for key in ("clickable", "effectiveClickable", "actionable")):
+        return True
+    class_name = str(node.get("className", "") or node.get("class", "") or "").strip().casefold()
+    class_role = class_name.rsplit(".", 1)[-1].rsplit("$", 1)[-1]
+    if class_role.endswith("button") or class_role in {"checkbox", "radiobutton", "switch", "chip"}:
+        return True
+    resource_id = str(node.get("viewIdResourceName", "") or node.get("resourceId", "") or "").strip().casefold()
+    resource_name = re.split(r"[/.:]", resource_id)[-1]
+    return bool(re.search(r"(?:^|[_-])(?:button|cta|action|submit)\d*$", resource_name))
+
+
+def _special_state_cta_node_labels(node: dict[str, Any]) -> list[str]:
+    keys = (
+        "text",
+        "contentDescription",
+        "stateDescription",
+        "talkbackLabel",
+        "mergedLabel",
+        "label",
+        "actionableDescendantContentDescription",
+        "actionableDescendantText",
+        "actionableDescendantLabel",
+    )
+    return [_normalize_special_state_cta_label(node.get(key)) for key in keys if str(node.get(key, "") or "").strip()]
+
+
+def _special_state_cta_node_matches(
+    node: dict[str, Any],
+    ancestor_nodes: list[dict[str, Any]],
+    tokens: list[str] | tuple[str, ...],
+) -> bool:
+    normalized_tokens = {_normalize_special_state_cta_label(token) for token in tokens if _normalize_special_state_cta_label(token)}
+    if not normalized_tokens.intersection(_special_state_cta_node_labels(node)):
+        return False
+    return any(_special_state_cta_node_is_actionable(candidate) for candidate in [node, *ancestor_nodes])
+
+
+def _collect_actionable_special_state_cta_hits(
+    tokens: list[str] | tuple[str, ...],
+    flat_nodes: list[tuple[dict[str, Any], dict[str, Any] | None]],
+) -> list[str]:
+    parent_by_id = {id(node): parent for node, parent in flat_nodes}
+    hits: list[str] = []
+    seen_tokens: set[str] = set()
+    for token in tokens:
+        normalized_token = _normalize_special_state_cta_label(token)
+        if not normalized_token or normalized_token in seen_tokens:
+            continue
+        for node, _ in flat_nodes:
+            if not _node_is_visible(node):
+                continue
+            ancestors: list[dict[str, Any]] = []
+            parent = parent_by_id.get(id(node))
+            for _ in range(4):
+                if not isinstance(parent, dict):
+                    break
+                ancestors.append(parent)
+                parent = parent_by_id.get(id(parent))
+            if _special_state_cta_node_matches(node, ancestors, [normalized_token]):
+                hits.append(normalized_token)
+                seen_tokens.add(normalized_token)
+                break
+    return hits
+
+
 def _format_special_state_debug_values(values: list[str] | tuple[str, ...] | None, *, max_items: int = 5, max_len: int = 72) -> str:
     if not isinstance(values, (list, tuple)):
         return "none"
@@ -4780,11 +4952,10 @@ def _collect_ready_content_cluster_signals(
             seen.add(normalized)
             signals.append(normalized)
 
-    def is_cta_like_text(text: str) -> bool:
-        lowered = str(text or "").strip().lower()
-        if not lowered:
-            return False
-        return any(_text_matches_token_strict(lowered, token) for token in cta_like_tokens)
+    normalized_cta_tokens = {_normalize_special_state_cta_label(token) for token in cta_like_tokens}
+
+    def is_cta_like_node(node: dict[str, Any]) -> bool:
+        return bool(normalized_cta_tokens.intersection(_special_state_cta_node_labels(node)))
 
     content_text_patterns = (
         r"\bpm\s*(?:10|2\.?5)\b",
@@ -4806,11 +4977,11 @@ def _collect_ready_content_cluster_signals(
         structural_blob = " ".join([view_id, class_name, text_blob]).strip()
         if _safe_regex_search(r"\b(chart|graph)\b", structural_blob):
             add_signal("chart_or_graph")
-        if _safe_regex_search(r"\b(card|list|item|section|content)\b", structural_blob) and text_blob and not is_cta_like_text(text_blob):
+        if _safe_regex_search(r"\b(card|list|item|section|content)\b", structural_blob) and text_blob and not is_cta_like_node(node):
             add_signal(f"content_structure:{text_blob[:32]}")
         if (
             text_blob
-            and not is_cta_like_text(text_blob)
+            and not is_cta_like_node(node)
             and not _safe_regex_search(r"(?i)\b(more options|navigate up|back|menu)\b", text_blob)
             and ("textview" in class_name or "text" in view_id or "title" in view_id or "body" in view_id)
         ):
@@ -5033,14 +5204,14 @@ def _classify_special_post_open_state(
     onboarding_body_hits = _collect_token_hits(list(_ONBOARDING_BODY_EVIDENCE_TOKENS), source_texts)
     has_onboarding_body_evidence = bool(onboarding_body_hits)
     special_hits = _collect_strict_token_hits(special_tokens, source_texts)
+    generic_cta_tokens = (*ONBOARDING_CTA_ALIASES, "connect", "try")
     cta_hits = _filter_special_state_cta_hits(
-        _collect_strict_token_hits(cta_tokens, source_texts),
+        _collect_actionable_special_state_cta_hits(cta_tokens, flat_nodes),
         scenario_id=scenario_id,
         has_onboarding_body_evidence=has_onboarding_body_evidence,
     )
-    generic_cta_tokens = (*ONBOARDING_CTA_ALIASES, "connect", "try")
     generic_cta_hits = _filter_special_state_cta_hits(
-        _collect_strict_token_hits(generic_cta_tokens, source_texts),
+        _collect_actionable_special_state_cta_hits(generic_cta_tokens, flat_nodes),
         scenario_id=scenario_id,
         has_onboarding_body_evidence=has_onboarding_body_evidence,
     )
@@ -5075,6 +5246,7 @@ def _classify_special_post_open_state(
     meaningful_texts: list[str] = []
     short_cta_nodes = 0
     chrome_hits = 0
+    parent_by_id = {id(node): parent for node, parent in flat_nodes}
     for node, _ in flat_nodes:
         if not _node_is_visible(node):
             continue
@@ -5086,8 +5258,20 @@ def _classify_special_post_open_state(
             continue
         lowered = text_blob.lower()
         meaningful_texts.append(lowered)
-        token_len = len(lowered.split())
-        if token_len <= 4 and any(_text_matches_token_strict(lowered, token) for token in active_generic_cta_tokens):
+        node_labels = _special_state_cta_node_labels(node)
+        ancestors: list[dict[str, Any]] = []
+        parent = parent_by_id.get(id(node))
+        for _ in range(4):
+            if not isinstance(parent, dict):
+                break
+            ancestors.append(parent)
+            parent = parent_by_id.get(id(parent))
+        if any(
+            len(label.split()) <= 4
+            and label in active_generic_cta_tokens
+            and _special_state_cta_node_matches(node, ancestors, [label])
+            for label in node_labels
+        ):
             short_cta_nodes += 1
     unique_text_count = len(set(meaningful_texts))
     low_content_diversity = bool(unique_text_count and unique_text_count <= 5)
@@ -5580,18 +5764,13 @@ def _capture_pre_navigation_failure_bundle(
     except Exception as exc:
         failed_files.append(f"screenshot.png:{exc}")
 
-    run_fn = getattr(client, "_run", None)
-    if callable(run_fn):
-        try:
-            remote_xml = f"/sdcard/window_dump_{capture_root_id}.xml"
-            run_fn(["shell", "uiautomator", "dump", remote_xml], dev=dev)
-            run_fn(["pull", remote_xml, str(window_dump_path)], dev=dev)
-            run_fn(["shell", "rm", "-f", remote_xml], dev=dev)
-            saved_files.append("window_dump.xml")
-        except Exception as exc:
-            failed_files.append(f"window_dump.xml:{exc}")
-    else:
-        failed_files.append("window_dump.xml:_run_not_supported")
+    try:
+        from talkback_lib.hierarchy_snapshot import service_hierarchy_to_xml
+
+        window_dump_path.write_text(service_hierarchy_to_xml(client.dump_hierarchy(dev=dev)), encoding="utf-8")
+        saved_files.append("window_dump.xml")
+    except Exception as exc:
+        failed_files.append(f"window_dump.xml:service_hierarchy_failed:{exc}")
 
     helper_dump: Any = []
     dump_tree_fn = getattr(client, "dump_tree", None)
@@ -5718,21 +5897,12 @@ def _capture_scrolltouch_step_bundle(
 
     should_capture_xml = int(stats_map.get("partial_match_count", 0) or 0) > 0
     if should_capture_xml:
-        run_fn = getattr(client, "_run", None)
-        if callable(run_fn):
-            remote_xml = f"/sdcard/window_dump_scrolltouch_step_{max(int(scroll_step), 0)}.xml"
-            try:
-                run_fn(["shell", "uiautomator", "dump", remote_xml], dev=dev)
-                run_fn(["pull", remote_xml, str(window_dump_path)], dev=dev)
-            except Exception as exc:
-                first_failure_reason = first_failure_reason or f"window_dump_failed:{exc}"
-            finally:
-                try:
-                    run_fn(["shell", "rm", "-f", remote_xml], dev=dev)
-                except Exception:
-                    pass
-        else:
-            first_failure_reason = first_failure_reason or "window_dump_failed:run_not_supported"
+        try:
+            from talkback_lib.hierarchy_snapshot import service_hierarchy_to_xml
+
+            window_dump_path.write_text(service_hierarchy_to_xml(client.dump_hierarchy(dev=dev)), encoding="utf-8")
+        except Exception as exc:
+            first_failure_reason = first_failure_reason or f"window_dump_failed:service_hierarchy:{exc}"
 
     promotion_debug_meta = {
         "version": COLLECTION_FLOW_SCROLLTOUCH_OBSERVABILITY_VERSION,
@@ -6223,62 +6393,16 @@ def _parse_uiautomator_bounds(bounds_raw: str) -> tuple[int, int, int, int] | No
 
 
 def _load_scrolltouch_xml_nodes(client: A11yAdbClient, dev: str) -> tuple[list[dict[str, Any]], str]:
-    run_fn = getattr(client, "_run", None)
-    if not callable(run_fn):
-        return [], "run_not_supported"
-    remote_xml = "/sdcard/window_dump_scrolltouch.xml"
     try:
-        run_fn(["shell", "uiautomator", "dump", remote_xml], dev=dev)
-        xml_text = str(run_fn(["shell", "cat", remote_xml], dev=dev) or "").strip()
+        from talkback_lib.hierarchy_snapshot import legacy_scroll_nodes
+
+        snapshot = client.dump_hierarchy(dev=dev)
+        hierarchy_children = legacy_scroll_nodes(snapshot)
     except Exception as exc:
-        return [], f"dump_failed:{exc}"
-    finally:
-        try:
-            run_fn(["shell", "rm", "-f", remote_xml], dev=dev)
-        except Exception:
-            pass
-
-    if not xml_text:
-        return [], "empty_xml"
-    try:
-        root = ET.fromstring(xml_text)
-    except Exception as exc:
-        return [], f"parse_failed:{exc}"
-
-    def _parse_element(element: ET.Element) -> dict[str, Any] | None:
-        bounds_tuple = _parse_uiautomator_bounds(str(element.attrib.get("bounds", "") or ""))
-        if not bounds_tuple:
-            return None
-        left, top, right, bottom = bounds_tuple
-        node: dict[str, Any] = {
-            "text": str(element.attrib.get("text", "") or "").strip(),
-            "contentDescription": str(element.attrib.get("content-desc", "") or "").strip(),
-            "viewIdResourceName": str(element.attrib.get("resource-id", "") or "").strip(),
-            "className": str(element.attrib.get("class", "") or "").strip(),
-            "clickable": str(element.attrib.get("clickable", "") or "").strip().lower() == "true",
-            "focusable": str(element.attrib.get("focusable", "") or "").strip().lower() == "true",
-            "effectiveClickable": str(element.attrib.get("clickable", "") or "").strip().lower() == "true",
-            "visibleToUser": str(element.attrib.get("visible-to-user", "") or "").strip().lower() != "false",
-            "selected": str(element.attrib.get("selected", "") or "").strip().lower() == "true",
-            "boundsInScreen": f"{left},{top},{right},{bottom}",
-            "children": [],
-        }
-        children: list[dict[str, Any]] = []
-        for child in list(element):
-            child_node = _parse_element(child)
-            if isinstance(child_node, dict):
-                children.append(child_node)
-        node["children"] = children
-        return node
-
-    hierarchy_children: list[dict[str, Any]] = []
-    for child in list(root):
-        parsed_child = _parse_element(child)
-        if isinstance(parsed_child, dict):
-            hierarchy_children.append(parsed_child)
+        return [], f"service_hierarchy_failed:{exc}"
 
     if not hierarchy_children:
-        return [], "no_parsed_nodes"
+        return [], "service_hierarchy_no_bounded_nodes"
     return [{"children": hierarchy_children, "visibleToUser": True, "boundsInScreen": "0,0,1,1"}], "ok"
 
 
@@ -6294,6 +6418,8 @@ def _run_xml_scroll_search_tap(
     transition_fast_path: bool,
 ) -> tuple[bool, str]:
     scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip().lower()
+    entry_geometry_compatibility = scenario_id in {"life_air_care_plugin", "life_energy_plugin"}
+    preserve_actionable_match = scenario_id == "life_find_plugin"
     strict_phrase_cfg = STRICT_PLUGIN_ENTRY_PHRASES.get(scenario_id, {})
     strict_phrases = tuple(str(phrase).strip().lower() for phrase in strict_phrase_cfg.get("strict", ()) if str(phrase).strip())
     title_only_phrases = tuple(
@@ -6512,6 +6638,20 @@ def _run_xml_scroll_search_tap(
                             match_source = "descendant_title"
                             matched_phrase = phrase
                             break
+                # The English Find map/card exposes its name as a leading
+                # description, not a title. Require its actionable resource so
+                # generic "find" prose on other cards remains ineligible.
+                if (
+                    not target_match and preserve_actionable_match
+                    and resource_id in {
+                        "com.samsung.android.oneconnect:id/map_area",
+                        "com.samsung.android.oneconnect:id/fme_view",
+                    }
+                    and (bool(node.get("clickable")) or bool(node.get("effectiveClickable")))
+                    and re.match(r"(?i)^find\s*[,.:]", node_desc)
+                ):
+                    desc_match = target_match = True
+                    match_source, matched_phrase = "resource-content-desc", "find"
                 for phrase in negative_phrases:
                     if _contains_phrase(node_text, phrase) or _contains_phrase(node_desc, phrase) or _contains_phrase(descendant_blob, phrase):
                         negative_plugin_phrase = phrase
@@ -6537,7 +6677,15 @@ def _run_xml_scroll_search_tap(
             promoted_reason = "text_node_bounds"
             current = node
             parent_hops = 0
-            while isinstance(parent, dict) and parent_hops < 6:
+            # An actionable match already owns its entry action. Promoting it
+            # into a focusable recycler loses Find's map_area target.
+            while (
+                isinstance(parent, dict) and parent_hops < 6
+                and not (
+                    preserve_actionable_match
+                    and (bool(promoted.get("clickable")) or bool(promoted.get("effectiveClickable")))
+                )
+            ):
                 parent_bounds = parse_bounds_str(str(parent.get("boundsInScreen", "") or "").strip())
                 parent_resource = str(parent.get("viewIdResourceName", "") or parent.get("resourceId", "") or "").strip()
                 parent_class = str(parent.get("className", "") or "").strip()
@@ -6608,19 +6756,27 @@ def _run_xml_scroll_search_tap(
         candidate_samples.sort(key=lambda item: int(item.get("score", 0)), reverse=True)
         target_candidates = [sample for sample in candidate_samples if bool(sample.get("target_match"))]
         unobstructed_target_candidates: list[dict[str, Any]] = []
+        top_obstructed = False
         for sample in target_candidates:
             sample_node = sample.get("node", {})
             sample_bounds = parse_bounds_str(str(sample_node.get("boundsInScreen", "") or "").strip())
-            obstruction_reason = _xml_entry_candidate_obstruction_reason(sample_bounds, xml_nodes)
+            if entry_geometry_compatibility:
+                tap_bounds, obstruction_reason = _xml_entry_candidate_tap_bounds(sample_bounds, xml_nodes)
+            else:
+                tap_bounds = sample_bounds
+                obstruction_reason = _xml_entry_candidate_obstruction_reason(sample_bounds, xml_nodes)
             if obstruction_reason:
+                overlay_kind = "bottom" if any(token in obstruction_reason for token in _XML_ENTRY_BOTTOM_OVERLAY_ID_TOKENS) else "top"
+                top_obstructed = top_obstructed or overlay_kind == "top"
                 log(
                     "[XMLENTRY][defer] "
-                    f"reason='target_obstructed_by_bottom_overlay' overlay='{obstruction_reason}' "
+                    f"reason='target_obstructed_by_{overlay_kind}_overlay' overlay='{obstruction_reason}' "
                     f"bounds='{str(sample_node.get('boundsInScreen', '') or '').strip()}' "
                     f"matched_phrase='{str(sample.get('matched_phrase', '') or '')[:80]}'"
                 )
-                failure_reason = "target_obstructed_by_bottom_overlay"
+                failure_reason = f"target_obstructed_by_{overlay_kind}_overlay"
                 continue
+            sample["tap_bounds"] = tap_bounds
             unobstructed_target_candidates.append(sample)
         target_candidates = unobstructed_target_candidates
         log(
@@ -6666,8 +6822,9 @@ def _run_xml_scroll_search_tap(
             if not selected_bounds:
                 failure_reason = "bounds_missing"
                 break
-            center_x = int((selected_bounds[0] + selected_bounds[2]) / 2)
-            center_y = int((selected_bounds[1] + selected_bounds[3]) / 2)
+            tap_bounds = selected["tap_bounds"]
+            center_x = int((tap_bounds[0] + tap_bounds[2]) / 2)
+            center_y = int((tap_bounds[1] + tap_bounds[3]) / 2)
             selected_resource = str(selected_node.get("viewIdResourceName", "") or selected_node.get("resourceId", "") or "").strip()
             selected_text = _node_label_blob(selected_node)
             log(
@@ -6675,6 +6832,7 @@ def _run_xml_scroll_search_tap(
                 f"bounds='{selected_node.get('boundsInScreen', '')}' text='{selected_text[:80]}' "
                 f"target_match=true match_source='{selected.get('match_source', '')}' "
                 f"matched_phrase='{str(selected.get('matched_phrase', '') or '')[:80]}'"
+                f" tap_bounds='{','.join(map(str, tap_bounds))}' tap_point='{center_x},{center_y}'"
             )
             selected_own_text = str(selected.get("own_text", "") or "").strip()
             selected_desc_texts = [str(value or "").strip() for value in selected.get("descendant_text_summary", []) if str(value or "").strip()]
@@ -6751,8 +6909,15 @@ def _run_xml_scroll_search_tap(
                         break
                     selected_node = refreshed_target
                     selected_bounds = refreshed_bounds
-                    center_x = int((selected_bounds[0] + selected_bounds[2]) / 2)
-                    center_y = int((selected_bounds[1] + selected_bounds[3]) / 2)
+                    tap_bounds, obstruction = (
+                        _xml_entry_candidate_tap_bounds(selected_bounds, xml_nodes)
+                        if entry_geometry_compatibility else (selected_bounds, "")
+                    )
+                    if tap_bounds is None:
+                        failure_reason = f"recoverable_precondition:target_obstructed:{obstruction}"
+                        break
+                    center_x = int((tap_bounds[0] + tap_bounds[2]) / 2)
+                    center_y = int((tap_bounds[1] + tap_bounds[3]) / 2)
                 log(
                     "[XMLENTRY][recoverable_precondition] "
                     "success=true outcome='RECOVERED_STABLE' "
@@ -6815,13 +6980,14 @@ def _run_xml_scroll_search_tap(
             if failure_reason in {"no_candidate_in_dump", "no_target_candidate_yet", "max_scroll_reached"}:
                 failure_reason = "target_not_found_after_scroll"
             break
-        scrolled = bool(client.scroll(dev=dev, direction="down")) if hasattr(client, "scroll") else False
+        search_direction = "up" if top_obstructed else "down"
+        scrolled = bool(client.scroll(dev=dev, direction=search_direction)) if hasattr(client, "scroll") else False
         scroll_reason = "no_strict_target_candidate" if strict_phrase_mode and not target_candidates else (
             "no_target_candidate" if not target_candidates else "search_continue"
         )
         log(
             f"[XMLENTRY][scroll] step={scroll_step}/{max_scroll_search_steps} "
-            f"performed={str(scrolled).lower()} reason='{scroll_reason}'"
+            f"performed={str(scrolled).lower()} reason='{scroll_reason}' direction='{search_direction}'"
         )
         if not scrolled:
             break
@@ -7093,7 +7259,104 @@ def _device_location_label(state: dict[str, Any]) -> str:
     return ""
 
 
-def _detect_selected_device_location_with_xml_fallback(
+def _has_device_tab_root_signature(nodes: list[dict[str, Any]]) -> bool:
+    if not isinstance(nodes, list):
+        return False
+    visible_nodes = [
+        node
+        for node, _parent in _iter_tree_nodes_with_parent(nodes)
+        if isinstance(node, dict) and device_tab_logic._visible(node)
+    ]
+    search_present = any(
+        device_tab_logic._resource_id(node) == "com.samsung.android.oneconnect:id/search_icon"
+        for node in visible_nodes
+    )
+    return search_present and bool(device_tab_logic.collect_visible_device_cards(nodes))
+
+
+def _reveal_all_devices_location_chip(
+    client: A11yAdbClient,
+    dev: str,
+    nodes: list[dict[str, Any]],
+    dump_tree_fn: Any,
+    *,
+    step_wait_seconds: float,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None, str]:
+    """Reveal the left edge of the horizontal location-chip strip, boundedly."""
+    max_swipes = 3
+    current_nodes = nodes
+    strip = device_tab_logic.device_location_filter_strip(current_nodes)
+    if strip is None:
+        return current_nodes, None, "location_filter_strip_unavailable"
+    adb_device = getattr(client, "_adb_device", None)
+    swipe_fn = getattr(adb_device, "_swipe", None)
+    if not callable(swipe_fn):
+        return current_nodes, None, "location_filter_strip_swipe_unavailable"
+
+    for attempt in range(1, max_swipes + 1):
+        bounds = _parse_device_entry_bounds(strip.get("bounds", ""))
+        if not bounds:
+            return current_nodes, None, "location_filter_strip_bounds_invalid"
+        left, top, right, bottom = bounds
+        width = right - left
+        if width < 100:
+            return current_nodes, None, "location_filter_strip_too_narrow"
+        y = top + ((bottom - top) // 2)
+        inset = max(24, int(width * 0.08))
+        x_start = left + inset
+        x_end = right - inset
+        if x_end <= x_start:
+            return current_nodes, None, "location_filter_strip_swipe_bounds_invalid"
+        before_signature = str(strip.get("signature", "") or "")
+        log(
+            "[DEVICE][location][reveal] "
+            f"attempt={attempt}/{max_swipes} direction='left' "
+            f"strip='{left},{top},{right},{bottom}' "
+            f"chip_count={int(strip.get('chip_count', 0) or 0)}"
+        )
+        try:
+            swipe_fn(
+                dev=dev,
+                x1=x_start,
+                y1=y,
+                x2=x_end,
+                y2=y,
+                duration_ms=400,
+            )
+        except Exception as exc:
+            return current_nodes, None, f"location_filter_strip_swipe_failed:{type(exc).__name__}"
+        if step_wait_seconds > 0:
+            time.sleep(step_wait_seconds)
+        try:
+            refreshed = dump_tree_fn(dev=dev)
+        except Exception as exc:
+            return current_nodes, None, f"location_filter_strip_verify_dump_failed:{type(exc).__name__}"
+        current_nodes = refreshed if isinstance(refreshed, list) else []
+        candidate = device_tab_logic.find_all_devices_location_candidate(current_nodes)
+        if candidate is not None:
+            log(
+                "[DEVICE][location][reveal_result] candidate_found=true "
+                f"label='{candidate.get('label', '')}' bounds='{candidate.get('bounds', '')}'"
+            )
+            return current_nodes, candidate, "all_devices_chip_revealed"
+        next_strip = device_tab_logic.device_location_filter_strip(current_nodes)
+        if next_strip is None:
+            return current_nodes, None, "location_filter_strip_lost_after_swipe"
+        if str(next_strip.get("signature", "") or "") == before_signature:
+            log(
+                "[DEVICE][location][reveal_result] candidate_found=false "
+                "strip_changed=false stop=true"
+            )
+            return current_nodes, None, "location_filter_strip_no_visible_change"
+        strip = next_strip
+    log(
+        "[DEVICE][location][reveal_result] candidate_found=false "
+        f"strip_changed=true attempts={max_swipes}"
+    )
+    return current_nodes, None, "all_devices_chip_not_revealed_within_bound"
+
+
+def _detect_selected_device_location_with_hierarchy_fallback(
     client: A11yAdbClient,
     dev: str,
     nodes: list[dict[str, Any]],
@@ -7112,8 +7375,8 @@ def _detect_selected_device_location_with_xml_fallback(
     if not bool(xml_state.get("selected")):
         return state
     merged_state = dict(xml_state)
-    merged_state["reason"] = "window_xml_selected"
-    merged_state["verification_source"] = "window_xml_selected"
+    merged_state["reason"] = "service_hierarchy_selected"
+    merged_state["verification_source"] = "service_hierarchy_selected"
     merged_state["xml_reason"] = xml_reason
     return merged_state
 
@@ -7483,7 +7746,7 @@ def _scroll_device_list_for_card_search(
     dump_tree_fn: Any,
     step_wait_seconds: float,
 ) -> tuple[bool, list[dict[str, Any]], str, bool]:
-    state_before = _detect_selected_device_location_with_xml_fallback(client, dev, nodes_before)
+    state_before = _detect_selected_device_location_with_hierarchy_fallback(client, dev, nodes_before)
     selected_before = _device_location_label(state_before)
     log(f"[DEVICE][scroll] selected_before='{selected_before}'")
     if not bool(state_before.get("selected")):
@@ -7564,7 +7827,7 @@ def _scroll_device_list_for_card_search(
             )
             return False, nodes_after, "device_list_collection_unverified_after_scroll", False
 
-    state_after = _detect_selected_device_location_with_xml_fallback(client, dev, nodes_after)
+    state_after = _detect_selected_device_location_with_hierarchy_fallback(client, dev, nodes_after)
     selected_after = _device_location_label(state_after)
     log(f"[DEVICE][scroll] selected_after='{selected_after}'")
     if not bool(state_after.get("selected")):
@@ -7596,7 +7859,7 @@ def _ensure_all_devices_location_selected(
     *,
     step_wait_seconds: float,
 ) -> tuple[bool, list[dict[str, Any]], str]:
-    state = _detect_selected_device_location_with_xml_fallback(client, dev, nodes)
+    state = _detect_selected_device_location_with_hierarchy_fallback(client, dev, nodes)
     selected_before = _device_location_label(state)
     log(f"[DEVICE][location] selected_before='{selected_before}' reason='{state.get('reason', '')}'")
     candidate = state.get("candidate")
@@ -7609,8 +7872,8 @@ def _ensure_all_devices_location_selected(
         )
     if bool(state.get("selected")):
         return True, nodes, (
-            "all_devices_already_selected_window_xml"
-            if state.get("verification_source") == "window_xml_selected"
+            "all_devices_already_selected_service_hierarchy"
+            if state.get("verification_source") == "service_hierarchy_selected"
             else "all_devices_already_selected"
         )
 
@@ -7618,11 +7881,32 @@ def _ensure_all_devices_location_selected(
     for attempt in range(1, 3):
         candidate = device_tab_logic.find_all_devices_location_candidate(nodes)
         if not candidate:
-            log(
-                "[DEVICE][location] selection_verify_failed "
-                f"expected='모든 기기|All devices' actual='{last_actual}' reason='all_devices_candidate_not_found'"
-            )
-            return False, nodes, "all_devices_candidate_not_found"
+            device_tab_context_verified = bool(getattr(client, "last_device_tab_context_verified", False))
+            if device_tab_context_verified and _has_device_tab_root_signature(nodes):
+                nodes, candidate, reveal_reason = _reveal_all_devices_location_chip(
+                    client,
+                    dev,
+                    nodes,
+                    dump_tree_fn,
+                    step_wait_seconds=step_wait_seconds,
+                )
+                state = _detect_selected_device_location_with_hierarchy_fallback(client, dev, nodes)
+                last_actual = _device_location_label(state)
+                log(
+                    "[DEVICE][location][reveal_state] "
+                    f"selected={str(bool(state.get('selected'))).lower()} "
+                    f"actual='{last_actual}' reason='{state.get('reason', '')}' "
+                    f"reveal_reason='{reveal_reason}'"
+                )
+                if bool(state.get("selected")):
+                    return True, nodes, "all_devices_already_selected_after_bounded_strip_recovery"
+            if not candidate:
+                log(
+                    "[DEVICE][location] selection_verify_failed "
+                    f"expected='모든 기기|All devices' actual='{last_actual}' "
+                    "reason='all_devices_candidate_not_found'"
+                )
+                return False, nodes, "all_devices_candidate_not_found"
 
         log(
             f"[DEVICE][location] tap_candidate='{candidate.get('stable_label') or candidate.get('label', '')}' "
@@ -7637,14 +7921,14 @@ def _ensure_all_devices_location_selected(
         except Exception as exc:
             return False, nodes, f"all_devices_verify_dump_failed:{exc}"
         nodes = refreshed if isinstance(refreshed, list) else []
-        state = _detect_selected_device_location_with_xml_fallback(client, dev, nodes)
+        state = _detect_selected_device_location_with_hierarchy_fallback(client, dev, nodes)
         selected_after = _device_location_label(state)
         last_actual = selected_after
         log(f"[DEVICE][location] selected_after='{selected_after}' reason='{state.get('reason', '')}' attempt={attempt}")
         if bool(state.get("selected")):
             return True, nodes, (
-                "all_devices_already_selected_window_xml"
-                if state.get("verification_source") == "window_xml_selected"
+                "all_devices_already_selected_service_hierarchy"
+                if state.get("verification_source") == "service_hierarchy_selected"
                 else "all_devices_selected"
             )
         if attempt == 1:
@@ -7708,7 +7992,7 @@ def _run_enter_device_card_plugin(
         # Use the existing All-devices selection evidence as the context gate.
         # This bypass never substitutes for Devices context verification and
         # never turns an unverified top into VERIFIED_TOP.
-        initial_location_state = _detect_selected_device_location_with_xml_fallback(client, dev, initial_nodes)
+        initial_location_state = _detect_selected_device_location_with_hierarchy_fallback(client, dev, initial_nodes)
         if bool(initial_location_state.get("selected")):
             direct_card, direct_geometry = _find_safe_visible_device_card_for_direct_entry(
                 initial_nodes,
@@ -10494,6 +10778,17 @@ def _run_crash_guard_check(
                 "crash_counted=false"
             )
             log("[CRASH_GUARD] result='environment_interruption'")
+        elif isinstance(inspection.get("transient_systemui"), dict):
+            transient = inspection["transient_systemui"]
+            log(
+                "[CRASH_GUARD] transient_systemui_overlay "
+                f"classification='{transient.get('classification')}' "
+                f"target_process_running={str(bool(transient.get('target_process_running'))).lower()} "
+                f"target_accessibility_ui_present={str(bool(transient.get('target_accessibility_ui_present'))).lower()} "
+                f"foreground_recheck_package='{transient.get('foreground_recheck_package') or 'none'}' "
+                "crash_counted=false"
+            )
+            log("[CRASH_GUARD] result='transient_systemui_overlay'")
         else:
             log("[CRASH_GUARD] result='ok'")
         if not _crash_guard_latch_matches(client, scenario_id=scenario_id, attempt=attempt):
@@ -11792,10 +12087,22 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict, *, output_base
         recover_reason = "not_required"
         recover_ok = handling != "back_after_read"
         if handling == "back_after_read":
-            back_ok = _send_back(client, dev)
+            capture_window_lifecycle(
+                client, dev, "before", "SPECIAL_STATE_BACK", step=0
+            )
+            try:
+                back_ok = _send_back(client, dev)
+            except Exception:
+                capture_window_lifecycle(
+                    client, dev, "exception", "SPECIAL_STATE_BACK", step=0
+                )
+                raise
             if not back_ok:
                 back_status = "back_failed"
                 recover_reason = "back_failed"
+                capture_window_lifecycle(
+                    client, dev, "after", "SPECIAL_STATE_BACK", step=0
+                )
             else:
                 time.sleep(min(main_step_wait_seconds, 0.6))
                 after_back_focus = client.get_focus(
@@ -11803,6 +12110,14 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict, *, output_base
                     wait_seconds=min(main_step_wait_seconds, 0.8),
                     allow_fallback_dump=False,
                     mode="fast",
+                )
+                capture_window_lifecycle(
+                    client,
+                    dev,
+                    "after",
+                    "SPECIAL_STATE_BACK",
+                    step=0,
+                    focus_node=after_back_focus,
                 )
                 after_back_blob = _node_label_blob(after_back_focus if isinstance(after_back_focus, dict) else {}).lower()
                 cta_tokens = [
@@ -11828,20 +12143,31 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict, *, output_base
                     else:
                         tab_cfg["_recover_invocation_reason"] = previous_recover_invocation_reason
                 if recover_ok:
-                    post_recover_state = _analyze_current_state(client, dev)
-                    inside = _is_inside_smartthings(post_recover_state)
-                    log(
-                        "[SPECIAL_STATE][post_recover_check] "
-                        f"inside_smartthings={str(inside).lower()} "
-                        f"package={str(post_recover_state.get('package_signature_present', False)).lower()} "
-                        f"app_bar_hits={int(post_recover_state.get('app_bar_hits', 0) or 0)}"
-                    )
+                    if scenario_id == _LIFE_AIR_CARE_SCENARIO_ID:
+                        inside, recover_reason = _verify_fresh_life_list_state(
+                            client,
+                            dev,
+                            phase="special_state_post_back",
+                        )
+                        log(
+                            "[SPECIAL_STATE][post_recover_check] "
+                            f"life_list_ready={str(inside).lower()} "
+                            f"reason='{recover_reason}'"
+                        )
+                    else:
+                        post_recover_state = _analyze_current_state(client, dev)
+                        inside = _is_inside_smartthings(post_recover_state)
+                        recover_reason = "life_plugin_list_recovered" if inside else "app_exited_after_back"
+                        log(
+                            "[SPECIAL_STATE][post_recover_check] "
+                            f"inside_smartthings={str(inside).lower()} "
+                            f"package={str(post_recover_state.get('package_signature_present', False)).lower()} "
+                            f"app_bar_hits={int(post_recover_state.get('app_bar_hits', 0) or 0)}"
+                        )
                     if not inside:
                         log("[SPECIAL_STATE][post_recover_check] detected_app_exit -> abort_recover")
-                        recover_reason = "app_exited_after_back"
                         recover_ok = False
                         break
-                    recover_reason = "life_plugin_list_recovered"
                     break
                 recover_reason = "recover_to_start_state_failed"
                 if recover_attempt < 2:
@@ -12638,13 +12964,11 @@ def _capture_audit_v4_xml(
     step_idx: int,
     phase_name: str,
     local_tab_label: str = "",
+    snapshot_nodes: Any = None,
 ) -> None:
     if not output_base_dir or not scenario_id:
         return
     try:
-        run_fn = getattr(client, "_run", None)
-        if not callable(run_fn):
-            return
         xml_dir = Path(output_base_dir) / scenario_id / "xml_dumps"
         xml_dir.mkdir(parents=True, exist_ok=True)
         count = len(list(xml_dir.glob("*.xml")))
@@ -12652,12 +12976,9 @@ def _capture_audit_v4_xml(
         safe_label = re.sub(r"[^a-zA-Z0-9_-]+", "_", local_tab_label or "").strip("_")
         label_suffix = f"_{safe_label[:40]}" if safe_label else ""
         filename = f"{count:03d}_step_{step_idx:03d}_{safe_phase}{label_suffix}.xml"
-        remote_xml = f"/sdcard/window_dump_v4_{count}.xml"
-        try:
-            run_fn(["shell", "uiautomator", "dump", remote_xml], dev=dev)
-            run_fn(["pull", remote_xml, str(xml_dir / filename)], dev=dev)
-        finally:
-            run_fn(["shell", "rm", "-f", remote_xml], dev=dev)
+        from tb_runner.audit_snapshot import write_helper_snapshot_xml
+        write_helper_snapshot_xml(snapshot_nodes, xml_dir / filename)
+        log(f"[AUDIT_XML] source='a11y_helper' path='{xml_dir / filename}'")
     except Exception as e:
         log(f"[WARNING] V4 XML Capture failed: {e}")
 
@@ -12693,6 +13014,15 @@ def _capture_audit_v4_xml_for_row(
         or row.get("current_local_tab_active_label", "")
         or ""
     )
+    snapshot_nodes = row.get("dump_tree_nodes")
+    scroll_transition = row.get("scroll_transition")
+    if isinstance(scroll_transition, dict):
+        path = scroll_transition.get("after_scroll_dump_path")
+        if path:
+            try:
+                snapshot_nodes = json.loads(Path(path).read_text(encoding="utf-8"))["nodes"]
+            except (OSError, ValueError, KeyError):
+                snapshot_nodes = None  # Never relabel stale pre-scroll data as an after snapshot.
     _capture_audit_v4_xml(
         client,
         dev,
@@ -12701,6 +13031,7 @@ def _capture_audit_v4_xml_for_row(
         step_idx,
         phase_name,
         local_tab_label,
+        snapshot_nodes,
     )
 
 def _build_persisted_row_semantics(row: dict[str, Any]) -> dict[str, Any]:
@@ -14594,7 +14925,7 @@ def _collect_step_candidate_priority_groups(
     scenario_id: str = "",
     consumed_cluster_signatures: set[str] | None = None,
     consumed_cluster_logical_signatures: set[str] | None = None,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[str]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     consumed_cluster_signatures = set(consumed_cluster_signatures or set())
     consumed_cluster_logical_signatures = set(consumed_cluster_logical_signatures or set())
     flat_visible_nodes = [
@@ -14619,6 +14950,7 @@ def _collect_step_candidate_priority_groups(
             "rejected_bottom_strip_candidates": [],
             "chrome_excluded_candidates": [],
             "cluster_pre_filter_skipped": [],
+            "cluster_pre_filter_skipped_candidates": [],
         }
     viewport_left = min(bounds[0] for bounds in bounds_candidates)
     viewport_top = min(bounds[1] for bounds in bounds_candidates)
@@ -14637,6 +14969,7 @@ def _collect_step_candidate_priority_groups(
     chrome_excluded_candidates: list[str] = []
     section_header_candidates: list[str] = []
     cluster_pre_filter_skipped: list[str] = []
+    cluster_pre_filter_skipped_candidates: list[dict[str, Any]] = []
     container_promoted_candidates: list[str] = []
     top_priority_container_candidates: list[str] = []
 
@@ -14841,12 +15174,6 @@ def _collect_step_candidate_priority_groups(
         candidate_cluster_logical_signature = _candidate_cluster_logical_signature(dict(
             cluster_rid=cluster_rid or resource_id, cluster_label=cluster_label or label,
             cluster_bounds=cluster_root.get("boundsInScreen", "") or cluster_root.get("bounds", "")))
-        if (
-            cluster_signature in consumed_cluster_signatures
-            or candidate_cluster_logical_signature in consumed_cluster_logical_signatures
-        ):
-            cluster_pre_filter_skipped.append(cluster_label or label)
-            continue
         candidate = {
             "node": node,
             "label": label,
@@ -14874,6 +15201,13 @@ def _collect_step_candidate_priority_groups(
             _apply_semantic_card_metadata(candidate, _build_semantic_card_model(semantic_root))
         else:
             _apply_semantic_card_metadata(candidate, {})
+        if (
+            cluster_signature in consumed_cluster_signatures
+            or candidate_cluster_logical_signature in consumed_cluster_logical_signatures
+        ):
+            cluster_pre_filter_skipped.append(cluster_label or label)
+            cluster_pre_filter_skipped_candidates.append(candidate)
+            continue
         if bool(candidate.get("section_header_like", False)):
             section_header_candidates.append(label)
         content_candidates.append(candidate)
@@ -14983,6 +15317,7 @@ def _collect_step_candidate_priority_groups(
             "clustered_candidates": [_cluster_display_name(candidate) for candidate in content_candidates],
             "cluster_representatives": cluster_representatives_meta,
             "cluster_pre_filter_skipped": cluster_pre_filter_skipped,
+            "cluster_pre_filter_skipped_candidates": cluster_pre_filter_skipped_candidates,
             "container_promoted_candidates": container_promoted_candidates,
             "top_priority_container_candidates": top_priority_container_candidates,
         }
@@ -15006,6 +15341,7 @@ def _collect_step_candidate_priority_groups(
         "clustered_candidates": [_cluster_display_name(candidate) for candidate in sorted_content],
         "cluster_representatives": cluster_representatives_meta,
         "cluster_pre_filter_skipped": cluster_pre_filter_skipped,
+        "cluster_pre_filter_skipped_candidates": cluster_pre_filter_skipped_candidates,
         "container_promoted_candidates": container_promoted_candidates,
         "top_priority_container_candidates": top_priority_container_candidates,
     }
@@ -17381,6 +17717,7 @@ def _apply_step_collection_phase_impl(
     mono_time_fn: Callable[[], float],
 ) -> dict[str, Any]:
     phase_start_mono = mono_time_fn()
+    set_window_lifecycle_step(client, step_idx)
     forced_target = _local_tab_state_display(
         rid=str(getattr(state, "forced_local_tab_target_rid", "") or ""),
         label=str(getattr(state, "forced_local_tab_target_action_label", "") or getattr(state, "forced_local_tab_target_label", "") or ""),
@@ -17388,30 +17725,49 @@ def _apply_step_collection_phase_impl(
     _ = (scenario_id, log_fn)
     row = None
     if forced_target:
-        row = _activate_forced_local_tab_target(
-            client=client,
-            dev=dev,
-            state=state,
-            step_idx=step_idx,
-            wait_seconds=phase_ctx.main_step_wait_seconds,
-            announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
-            announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
-            announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
-        )
+        capture_window_lifecycle(client, dev, "before", "LOCAL_TAB_ENTRY")
+        if get_talkback_restart_event(client):
+            return {"scenario_id": scenario_id, "step_index": step_idx, "stop_reason": "talkback_restarted"}
+        try:
+            row = _activate_forced_local_tab_target(
+                client=client,
+                dev=dev,
+                state=state,
+                step_idx=step_idx,
+                wait_seconds=phase_ctx.main_step_wait_seconds,
+                announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
+                announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
+                announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
+            )
+        except Exception:
+            capture_window_lifecycle(client, dev, "exception", "LOCAL_TAB_ENTRY")
+            raise
+        finally:
+            capture_window_lifecycle(
+                client, dev, "after", "LOCAL_TAB_ENTRY", focus_node=row
+            )
         if row is not None:
             row["forced_local_tab_navigation"] = True
             row["forced_local_tab_target"] = forced_target
     if row is None:
-        row = client.collect_focus_step(
-            dev=dev,
-            step_index=step_idx,
-            move=True,
-            direction="next",
-            wait_seconds=phase_ctx.main_step_wait_seconds,
-            announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
-            announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
-            announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
-        )
+        capture_window_lifecycle(client, dev, "before", "SMART_NEXT")
+        if get_talkback_restart_event(client):
+            return {"scenario_id": scenario_id, "step_index": step_idx, "stop_reason": "talkback_restarted"}
+        try:
+            row = client.collect_focus_step(
+                dev=dev,
+                step_index=step_idx,
+                move=True,
+                direction="next",
+                wait_seconds=phase_ctx.main_step_wait_seconds,
+                announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
+                announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
+                announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
+            )
+        except Exception:
+            capture_window_lifecycle(client, dev, "exception", "SMART_NEXT")
+            raise
+        capture_window_lifecycle(client, dev, "after", "SMART_NEXT", focus_node=row)
     step_elapsed = mono_time_fn() - phase_start_mono
 
     row["tab_name"] = tab_cfg["tab_name"]
@@ -17744,17 +18100,23 @@ def _initialize_content_terminal(client, dev, tab_cfg, state):
     initial = getattr(client, "_initial_scroll_observations", {}).get(scenario)
     if not isinstance(initial, dict):
         return
-    from tb_runner.global_navigation import discover, expected_destinations, xml_nodes
+    from tb_runner.global_navigation import discover, expected_destinations
     scope_nodes = initial.get("nodes", [])
-    raw = ""
-    if callable(getattr(client, "_run", None)):
-        try:
-            client._run(["shell", "uiautomator", "dump", "/sdcard/phase0eb_scope.xml"], dev=dev, timeout=10)
-            raw = client._run(["shell", "cat", "/sdcard/phase0eb_scope.xml"], dev=dev, timeout=10)
-            if isinstance(raw, str) and "<hierarchy" in raw:
-                scope_nodes = xml_nodes(raw)
-        except Exception as exc:
-            log(f"[CONTENT_SCOPE] scenario='{scenario}' error='{type(exc).__name__}'")
+    try:
+        from talkback_lib.hierarchy_snapshot import flatten_service_hierarchy
+
+        hierarchy = client.dump_hierarchy(dev=dev)
+        scope_nodes = flatten_service_hierarchy(hierarchy)
+    except Exception as exc:
+        error = f"{type(exc).__name__}:{exc}"
+        log(f"[CONTENT_SCOPE] scenario='{scenario}' service_hierarchy_error='{error}'")
+        tracker = ContentTerminal(scenario, scope_verified=False)
+        tracker.latest["service_hierarchy_error"] = error
+        state.content_terminal = tracker
+        trackers = getattr(client, "_content_terminal_trackers", {})
+        trackers[scenario] = tracker
+        client._content_terminal_trackers = trackers
+        return
     destinations = discover(scope_nodes, tab_cfg)
     expected = expected_destinations(tab_cfg)
     tracker = ContentTerminal(scenario, nav_regions=[i["bounds"] for i in destinations],
@@ -17767,11 +18129,14 @@ def _initialize_content_terminal(client, dev, tab_cfg, state):
         path = folder / f"snapshot_{index:03d}.json"
         path.write_text(json.dumps(dict(scenario_id=scenario, expected_destinations=expected,
             nav_items=destinations, scope_verified=tracker.scope_verified,
-            source="raw_accessibility_xml" if isinstance(raw, str) and "<hierarchy" in raw else "helper_nodes"),
+            source="accessibility_service_hierarchy",
+            window_count=len(hierarchy.get("windows", [])),
+            node_count=len(scope_nodes)),
             ensure_ascii=False, indent=2), encoding="utf-8")
         tracker.scope_snapshot_path = str(path)
-        if isinstance(raw, str) and "<hierarchy" in raw:
-            path.with_suffix(".xml").write_text(raw, encoding="utf-8")
+        path.with_suffix(".hierarchy.json").write_text(
+            json.dumps(hierarchy, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     tracker.observe(initial, 0, focus_observations=state.reliability_metrics.focus_observations.values())
     tracker.transition_count = sum(t.get("scenario_id") == scenario for t in getattr(client, "_scroll_transitions", []))
     state.content_terminal = tracker
@@ -17802,7 +18167,11 @@ def _apply_content_terminal_phase(client, dev, state, row, phase_ctx, step_idx, 
         evaluation = tracker.observe(observation, step_idx,
             focus_observations=state.reliability_metrics.focus_observations.values(),
             semantic_ids=semantic_ids, scroll=new_transition, pending=pending,
-            focus_sequence_progress=str(row.get("progress_status", "") or "").strip().upper() == "PROGRESS")
+            focus_sequence_progress=str(row.get("progress_status", "") or "").strip().upper() == "PROGRESS",
+            target_attempt=(
+                {**dict(row.get("target_focus_descriptor", {}) or {}), "status": row.get("target_focus_status", "")}
+                if bool(row.get("target_focus_attempted", False)) else None
+            ))
         if new_transition and not new_transition.get("action_success"):
             selected_reason = failed_scroll_reason(new_transition)
         else:
@@ -17819,7 +18188,11 @@ def _apply_content_terminal_phase(client, dev, state, row, phase_ctx, step_idx, 
             evaluation = tracker.observe(after, step_idx,
                 focus_observations=state.reliability_metrics.focus_observations.values(),
                 semantic_ids=semantic_ids, scroll=transition,
-                focus_sequence_progress=str(row.get("progress_status", "") or "").strip().upper() == "PROGRESS")
+                focus_sequence_progress=str(row.get("progress_status", "") or "").strip().upper() == "PROGRESS",
+                target_attempt=(
+                    {**dict(row.get("target_focus_descriptor", {}) or {}), "status": row.get("target_focus_status", "")}
+                    if bool(row.get("target_focus_attempted", False)) else None
+                ))
             selected_reason = tracker.decision() if transition["action_success"] else failed_scroll_reason(transition)
         row.update(tracker.summary(selected_reason or "safety_limit", step_idx))
         row["content_terminal_evidence"] = evaluation
@@ -17830,6 +18203,8 @@ def _apply_content_terminal_phase(client, dev, state, row, phase_ctx, step_idx, 
         log(f"[CONTENT_TERMINAL_EVAL] scenario='{tracker.scenario_id}' step={step_idx} "
             f"visible={evaluation['visible_candidates']} visited={evaluation['visited_candidates']} "
             f"semantic={evaluation['semantically_covered_candidates']} unseen={evaluation['unseen_candidates']} "
+            f"target_attempts={evaluation['target_attempt_count']} planner_candidates={evaluation['planner_candidate_count']} "
+            f"unattempted_active_unseen={evaluation['unattempted_active_unseen']} "
             f"can_scroll_forward={evaluation['can_scroll_forward']} scroll_exhausted={evaluation['scroll_exhausted']} "
             f"viewport_stable={evaluation['viewport_stable']} new_instances={evaluation['new_instances']} "
             f"focus_sequence_progress={str(evaluation['focus_sequence_progress']).lower()} "
@@ -17863,6 +18238,13 @@ def _main_loop_phase(
         state.reliability_metrics = TraversalMetrics()
     state.local_tab_revisit_guard_state = LocalTabRevisitGuardState()
     for step_idx in range(start_step_index, tab_cfg["max_steps"] + 1):
+        if _abort_main_loop_for_talkback_restart(
+            client=client,
+            state=state,
+            scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+            step_idx=step_idx,
+        ):
+            break
         state.reliability_metrics.begin_step(step_idx)
         revisit_guard_state = _local_tab_revisit_guard_state(state)
         revisit_guard_state.current_representative_signatures = set()
@@ -17879,6 +18261,13 @@ def _main_loop_phase(
                 tab_cfg=tab_cfg,
                 scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
             )
+        if _abort_main_loop_for_talkback_restart(
+            client=client,
+            state=state,
+            scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+            step_idx=step_idx,
+        ):
+            break
         profiler = active_profiler()
         if profiler is not None:
             profiler.record("focus_in_bounds", float(row.get("move_elapsed_sec", 0.0) or 0.0) * 1000.0)
@@ -18518,6 +18907,14 @@ def _main_loop_phase(
                          or (row.get("cta_focus_align_requested") and not row.get("cta_focus_align_success"))),
         )
 
+        if _abort_main_loop_for_talkback_restart(
+            client=client,
+            state=state,
+            scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+            step_idx=step_idx,
+        ):
+            break
+
         _annotate_food_onboarding_complete(
             client,
             dev,
@@ -18641,6 +19038,13 @@ def _main_loop_phase(
             main_step_index_by_fingerprint=state.main_step_index_by_fingerprint,
             expanded_overlay_entries=state.expanded_overlay_entries,
         )
+        if _abort_main_loop_for_talkback_restart(
+            client=client,
+            state=state,
+            scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+            step_idx=step_idx,
+        ):
+            break
         if overlay_result.post_realign_pending_steps_delta > 0:
             state.post_realign_pending_steps = max(
                 state.post_realign_pending_steps,
@@ -19201,7 +19605,39 @@ def _run_start_pipeline(
         recent_semantic_fingerprint_history=deque(maxlen=_RECENT_DUPLICATE_WINDOW),
     )
 
-    opened = open_scenario(client, dev, tab_cfg, output_base_dir=output_base_dir)
+    recorder = configure_window_lifecycle(
+        client, dev, scenario_id, output_base_dir
+    )
+    if recorder is not None:
+        capture_window_lifecycle(
+            client, dev, "scenario_start", "SCENARIO_START", step=0
+        )
+        capture_window_lifecycle(client, dev, "before", "ENTRY", step=0)
+        if _mark_start_pipeline_talkback_restart(
+            client=client,
+            result=result,
+            scenario_id=scenario_id,
+            phase="scenario_start",
+        ):
+            return result
+    entry_exception: Exception | None = None
+    opened = False
+    try:
+        opened = open_scenario(client, dev, tab_cfg, output_base_dir=output_base_dir)
+    except Exception as exc:
+        capture_window_lifecycle(client, dev, "exception", "ENTRY", step=0)
+        entry_exception = exc
+    finally:
+        capture_window_lifecycle(client, dev, "after", "ENTRY", step=0)
+    if _mark_start_pipeline_talkback_restart(
+        client=client,
+        result=result,
+        scenario_id=scenario_id,
+        phase="entry",
+    ):
+        return result
+    if entry_exception is not None:
+        raise entry_exception
     open_summary = getattr(client, "last_start_open_summary", {})
     crash_guard_result = getattr(client, "last_crash_guard_result", {})
     if isinstance(open_summary, dict):
@@ -19252,7 +19688,33 @@ def _run_start_pipeline(
         result.anchor_matched = bool(stabilize_trace.get("matched"))
         result.anchor_stable = bool(stabilize_trace.get("ok"))
 
-    post_open_focus = client.get_focus(dev=dev, wait_seconds=min(main_step_wait_seconds, 1.0), allow_fallback_dump=False, mode="fast")
+    try:
+        post_open_focus = client.get_focus(
+            dev=dev,
+            wait_seconds=min(main_step_wait_seconds, 1.0),
+            allow_fallback_dump=False,
+            mode="fast",
+        )
+    except Exception:
+        capture_window_lifecycle(
+            client, dev, "exception", "POST_OPEN_FOCUS", step=0
+        )
+        raise
+    capture_window_lifecycle(
+        client,
+        dev,
+        "after_focus_observation",
+        "POST_OPEN_FOCUS",
+        step=0,
+        focus_node=post_open_focus,
+    )
+    if _mark_start_pipeline_talkback_restart(
+        client=client,
+        result=result,
+        scenario_id=scenario_id,
+        phase="post_open_focus",
+    ):
+        return result
     post_open_trace = getattr(client, "last_get_focus_trace", {}) if isinstance(getattr(client, "last_get_focus_trace", {}), dict) else {}
     post_view_id = str(post_open_focus.get("viewIdResourceName", "") or post_open_focus.get("resourceId", "") or "").strip() if isinstance(post_open_focus, dict) else ""
     extract_visible_label = getattr(client, "extract_visible_label_from_focus", None)
@@ -19291,11 +19753,19 @@ def _run_start_pipeline(
             focused_view_id=post_view_id,
             wait_seconds=main_step_wait_seconds,
         )
+        if _mark_start_pipeline_talkback_restart(
+            client=client,
+            result=result,
+            scenario_id=scenario_id,
+            phase="global_nav_start_focus",
+        ):
+            return result
         if not start_gate_ok:
             result.failure_reason = "global_nav_start_gate_failed"
             result.needs_open_failed_row = True
             return result
 
+    capture_window_lifecycle(client, dev, "before", "ANCHOR_FOCUS", step=0)
     anchor_row = _collect_start_anchor_row(
         client,
         dev,
@@ -19307,6 +19777,21 @@ def _run_start_pipeline(
         main_announcement_idle_wait_seconds=main_announcement_idle_wait_seconds,
         main_announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
     )
+    capture_window_lifecycle(
+        client,
+        dev,
+        "after",
+        "ANCHOR_FOCUS",
+        step=0,
+        focus_node=anchor_row,
+    )
+    if _mark_start_pipeline_talkback_restart(
+        client=client,
+        result=result,
+        scenario_id=scenario_id,
+        phase="anchor_focus",
+    ):
+        return result
     anchor_fingerprint, anchor_repeat_count = _annotate_row_quality(
         anchor_row,
         last_fingerprint="",
@@ -19403,12 +19888,30 @@ def _collect_tab_rows_inner(
         main_announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
     )
     if start_result.needs_open_failed_row:
-        terminal_status = "OPTIONAL_NOT_AVAILABLE" if start_result.entry_contract_reason == _ENTRY_REASON_OPTIONAL_NOT_AVAILABLE else "TAB_OPEN_FAILED"
+        if start_result.failure_reason == "talkback_restarted":
+            terminal_status = "INCOMPLETE_ERROR"
+        elif start_result.entry_contract_reason == _ENTRY_REASON_OPTIONAL_NOT_AVAILABLE:
+            terminal_status = "OPTIONAL_NOT_AVAILABLE"
+        else:
+            terminal_status = "TAB_OPEN_FAILED"
         failed_row = _build_terminal_row(
             tab_cfg,
             stop_reason=start_result.failure_reason or "tab_or_anchor_failed",
             status=terminal_status,
         )
+        if start_result.failure_reason == "talkback_restarted":
+            failed_row["entry_contract_detail"] = start_result.entry_contract_detail
+            setattr(
+                client,
+                "last_main_traversal_summary",
+                {
+                    "scenario_id": scenario_id,
+                    "scenario_type": str(tab_cfg.get("scenario_type", "") or ""),
+                    "main_steps_completed": 0,
+                    "stop_reason": "talkback_restarted",
+                    "traversal_finished": False,
+                },
+            )
         if terminal_status == "OPTIONAL_NOT_AVAILABLE":
             failed_row["entry_contract_reason"] = _ENTRY_REASON_OPTIONAL_NOT_AVAILABLE
             failed_row["entry_contract_detail"] = start_result.entry_contract_detail or start_result.failure_reason
@@ -19430,7 +19933,13 @@ def _collect_tab_rows_inner(
                 # Preserve the start pipeline's existing anchor-state fact in the
                 # shadow ledger.  This does not change the legacy terminal row.
                 anchor_failure = (not bool(start_result.anchor_stable)) or "anchor" in failure.lower()
-                terminal_reason = "ANCHOR_ABORT" if anchor_failure else "SCENARIO_OPEN_FAILED"
+                terminal_reason = (
+                    "SCENARIO_INTERRUPTED"
+                    if failure == "talkback_restarted"
+                    else "ANCHOR_ABORT"
+                    if anchor_failure
+                    else "SCENARIO_OPEN_FAILED"
+                )
                 evidence_runtime.emit(
                     "SCENARIO_TERMINAL",
                     producer="runner",
@@ -19473,6 +19982,26 @@ def _collect_tab_rows_inner(
 
     anchor_row = start_result.start_row
     anchor_row = _annotate_report_row_context(anchor_row, tab_cfg)
+    anchor_node = anchor_row.get("actual_focus_node")
+    if not isinstance(anchor_node, dict):
+        anchor_node = anchor_row.get("focus_node")
+    if isinstance(anchor_node, dict) and anchor_node.get("accessibilityFocused") is True:
+        anchor_row["actual_focus_node"] = dict(anchor_node)
+        anchor_row["actual_focus_accessibility_focused"] = True
+        anchor_row["actual_focus_input_focused"] = anchor_node.get("focused")
+        anchor_row["actual_focus_resource_id"] = str(
+            anchor_node.get("viewIdResourceName", "") or anchor_node.get("resourceId", "")
+            or anchor_row.get("focus_view_id", "") or ""
+        ).strip()
+        anchor_row["actual_focus_bounds"] = str(
+            anchor_node.get("boundsInScreen", "") or anchor_node.get("bounds", "")
+            or anchor_row.get("focus_bounds", "") or ""
+        ).strip()
+        anchor_row["actual_focus_visible"] = str(
+            anchor_node.get("talkbackLabel", "") or anchor_node.get("contentDescription", "")
+            or anchor_node.get("text", "") or anchor_row.get("visible_label", "") or ""
+        ).strip()
+        anchor_row["actual_focus_payload_source"] = "verified_pre_loop_anchor"
     anchor_row["physical_visited"] = bool(focus_instance(anchor_row))
     _register_focusable_inventory_from_row(
         client,

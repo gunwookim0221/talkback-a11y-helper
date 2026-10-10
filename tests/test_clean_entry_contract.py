@@ -30,8 +30,8 @@ def tree(selected='home', content=True):
 @pytest.fixture(autouse=True)
 def no_device_or_sleep(monkeypatch):
     monkeypatch.setattr(anchor_logic.time, 'sleep', lambda _: None)
-    monkeypatch.setattr(context_verifier, '_read_window_xml_selected_bottom_tab', lambda *a: '')
-    monkeypatch.setattr(tab_logic, '_read_window_xml_nodes', lambda *a: [])
+    monkeypatch.setattr(context_verifier, '_read_service_hierarchy_selected_bottom_tab', lambda *a: '')
+    monkeypatch.setattr(tab_logic, '_read_service_hierarchy_nodes', lambda *a: [])
 
 
 def readiness(snapshots, **kwargs):
@@ -163,20 +163,26 @@ def test_partial_nonempty_focus_cache_refreshes_full_tree():
     assert result['ok'] and result['dump_source'] == 'refreshed_incomplete_step_cache'
 
 
-def test_xml_selected_state_works_without_explicit_serial(monkeypatch):
+def test_service_hierarchy_selected_state_works_without_explicit_serial(monkeypatch):
     monkeypatch.undo()
-    xml = '<hierarchy><node selected="true" content-desc="Home" /></hierarchy>'
-    client = Mock(spec=['_run'])
-    client._run.side_effect = ['', xml, '']
-    assert context_verifier._read_window_xml_selected_bottom_tab(client, None, 'home') == 'Home'
-    assert all(call.kwargs['dev'] is None for call in client._run.call_args_list)
+    root = {"selected": True, "contentDescription": "Home", "children": []}
+    snapshot = {"success": True, "nodes": [root], "windows": [{"root": root}]}
+    client = Mock(spec=['dump_hierarchy'])
+    client.dump_hierarchy.return_value = snapshot
+    assert context_verifier._read_service_hierarchy_selected_bottom_tab(client, None, 'home') == 'Home'
+    client.dump_hierarchy.assert_called_once_with(dev=None)
 
 
-def test_tab_xml_fallback_works_without_explicit_serial(monkeypatch):
+def test_tab_service_hierarchy_fallback_works_without_explicit_serial(monkeypatch):
     monkeypatch.undo()
-    xml = '<hierarchy><node selected="true" content-desc="Home" bounds="[0,900][150,1000]" /></hierarchy>'
-    client = Mock(spec=['_run'])
-    client._run.side_effect = ['', xml, '']
-    nodes = tab_logic._read_window_xml_nodes(client, None)
+    root = {
+        "selected": True,
+        "contentDescription": "Home",
+        "boundsInScreen": {"left": 0, "top": 900, "right": 150, "bottom": 1000},
+        "children": [],
+    }
+    client = Mock(spec=['dump_hierarchy'])
+    client.dump_hierarchy.return_value = {"success": True, "nodes": [root], "windows": [{"root": root}]}
+    nodes = tab_logic._read_service_hierarchy_nodes(client, None)
     assert nodes[0]['selected'] is True
-    assert all(call.kwargs['dev'] is None for call in client._run.call_args_list)
+    client.dump_hierarchy.assert_called_once_with(dev=None)

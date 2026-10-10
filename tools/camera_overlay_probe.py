@@ -5,6 +5,8 @@ sequential observation; timing intervals and unavailable speech stay explicit.
 """
 from __future__ import annotations
 
+from talkback_lib.hierarchy_snapshot import service_hierarchy_to_xml
+
 from copy import deepcopy
 from datetime import datetime, timezone
 import json
@@ -51,33 +53,32 @@ class EventProbe:
 
     def capture(self, label):
         client, serial = self.client, self.serial
-        original = client._run
+        original = client.dump_hierarchy
         index = len(self.rows)+1
         capture_timing = {}
-        def hooked(args, dev=None, timeout=None):
-            if len(args) >= 3 and args[:3] == ["shell", "uiautomator", "dump"]:
-                start, start_time = time.perf_counter(), now()
-                result = original(args, dev=dev, timeout=timeout)
-                end, end_time = time.perf_counter(), now()
-                shot_start, shot_start_time = time.perf_counter(), now()
-                original(["shell", "screencap", "-p", "/sdcard/camera_overlay_probe.png"], dev=serial, timeout=15)
-                shot_end, shot_end_time = time.perf_counter(), now()
-                capture_timing.update(XML_CAPTURE_TIME=dict(start=start_time, end=end_time),
-                    SCREENSHOT_CAPTURE_TIME=dict(start=shot_start_time, end=shot_end_time),
-                    **timing_gap(end, shot_start, start, shot_end))
-                subprocess.run(["adb", "-s", serial, "pull", "/sdcard/camera_overlay_probe.png", str(self.output/f"{index:03d}.png")],
-                               check=True, capture_output=True, timeout=15)
-                return result
-            return original(args, dev=dev, timeout=timeout)
+        def hooked(*args, **kwargs):
+            start, start_time = time.perf_counter(), now()
+            result = original(*args, **kwargs)
+            end, end_time = time.perf_counter(), now()
+            shot_start, shot_start_time = time.perf_counter(), now()
+            client._run(["shell", "screencap", "-p", "/sdcard/camera_overlay_probe.png"], dev=serial, timeout=15)
+            shot_end, shot_end_time = time.perf_counter(), now()
+            capture_timing.update(XML_CAPTURE_TIME=dict(start=start_time, end=end_time),
+                SCREENSHOT_CAPTURE_TIME=dict(start=shot_start_time, end=shot_end_time),
+                **timing_gap(end, shot_start, start, shot_end))
+            subprocess.run(["adb", "-s", serial, "pull", "/sdcard/camera_overlay_probe.png", str(self.output/f"{index:03d}.png")],
+                           check=True, capture_output=True, timeout=15)
+            capture_timing["hierarchy_xml"] = service_hierarchy_to_xml(result)
+            return result
         t0=time.perf_counter()
-        client._run=hooked
+        client.dump_hierarchy=hooked
         try:
             raw=capture_observation(client, serial, scenario_id="camera-overlay-probe", step=index)
         finally:
-            client._run=original
-        if raw["source"] != "helper_capability+xml_semantics" or not capture_timing:
+            client.dump_hierarchy=original
+        if raw["source"] != "helper_capability+service_hierarchy_semantics" or not capture_timing:
             raise RuntimeError("Reliable XML/screenshot capture unavailable; no stale XML accepted")
-        xml=original(["shell", "cat", "/sdcard/phase2a_fingerprint.xml"], dev=serial, timeout=8)
+        xml=capture_timing.pop("hierarchy_xml")
         (self.output/f"{index:03d}.xml").write_text(xml, encoding="utf-8")
         camera=xml_camera_evidence(xml)
         observation=build_state_observation(raw)

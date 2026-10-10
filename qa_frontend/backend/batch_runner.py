@@ -1,4 +1,5 @@
 import threading
+from dataclasses import replace
 import subprocess
 import json
 import logging
@@ -42,6 +43,7 @@ from .shadow_pipeline import run_shadow_validation_pipeline
 from .shadow_reporting import load_shadow_validation_summary
 from .quality_issues import classify_quality_signals, normalize_legacy_quality_issues
 from .coverage_health import build_coverage_health_report
+from .repository_provenance import capture_repository_provenance
 
 logger = logging.getLogger(__name__)
 
@@ -250,6 +252,7 @@ def _parse_live_log(log_text: str, *, scenario_ids: list[str] | None = None) -> 
         "passed_scenarios": int(parsed.get("passed_scenarios") or 0),
         "failed_scenarios": int(parsed.get("failed_scenarios") or 0),
         "warning_scenarios": int(parsed.get("warning_scenarios") or 0),
+        "scenario_progress": list(parsed.get("scenario_progress") or []),
         "observed_runtime_events": observed_runtime_events,
         "observed_steps": observed_step_count,
         "total_steps": max(int(parsed.get("total_step_count") or 0), observed_step_count),
@@ -468,6 +471,23 @@ def _observed_scenario_ids(lines: list[str]) -> set[str]:
     }
 
 
+def _terminal_scenario_ids(lines: list[str]) -> set[str]:
+    """Return scenarios with an explicit terminal record in the available log tail."""
+    terminal_markers = (
+        "[PERF][scenario_summary]",
+        "[PERF][scenario_contract_summary]",
+        "[TRAVERSAL_SUMMARY]",
+        "[MAIN] skip disabled scenario_id=",
+    )
+    return {
+        scenario_id
+        for line in lines
+        if any(marker in line for marker in terminal_markers)
+        for scenario_id in [_extract_scenario_id(line)]
+        if scenario_id
+    }
+
+
 def _is_scenario_observation_line(line: str) -> bool:
     if line.startswith("[CONFIG]") or "source='runtime'" in line or "base_enabled=" in line:
         return False
@@ -477,6 +497,9 @@ def _is_scenario_observation_line(line: str) -> bool:
         or "[SCENARIO][entry_contract]" in line
         or "[SCENARIO][pre_nav]" in line
         or "[PERF][scenario_summary]" in line
+        or "[PERF][scenario_contract_summary]" in line
+        or "[TRAVERSAL_SUMMARY]" in line
+        or "[MAIN] skip disabled scenario_id=" in line
         or "scenario_result" in line
     )
 
@@ -523,6 +546,7 @@ class BatchRunManager:
         self._current_execution: RunExecution | None = None
         self._shadow_validation_requested = False
         self._feature_flags = resolve_identity_feature_flags()
+        self._repository_provenance: dict[str, object] | None = None
 
     def _sanitize_name(self, name: str) -> str:
         return re.sub(r'[^0-9a-zA-Z_-]+', '_', name)
@@ -569,6 +593,20 @@ class BatchRunManager:
             
             batch_dir = RUN_LOG_DIR / self._batch_id
             batch_dir.mkdir(parents=True, exist_ok=True)
+            self._repository_provenance, provenance_path = capture_repository_provenance(
+                ROOT_DIR, batch_dir
+            )
+            logger.info(
+                "[QA_FRONTEND][repository_provenance] "
+                "batch_id=%s artifact='%s' branch='%s' head='%s' origin_main='%s' dirty='%s' path_count=%s",
+                self._batch_id,
+                provenance_path,
+                self._repository_provenance.get("branch"),
+                self._repository_provenance.get("head"),
+                self._repository_provenance.get("origin_main"),
+                self._repository_provenance.get("dirty"),
+                self._repository_provenance.get("path_count", 0),
+            )
             
             self._devices = []
             for d in devices:
@@ -585,6 +623,7 @@ class BatchRunManager:
                     "started_at": None,
                     "finished_at": None,
                     "observed_scenario_ids": [],
+                    "terminal_scenario_ids": [],
                 })
             
             self._current_device_idx = 0
@@ -632,7 +671,13 @@ class BatchRunManager:
 
         device_statuses = [self._device_status_with_live_summary(device) for device in self._devices]
         if current_device:
-            current_live = self._live_status_for_device(current_device)
+            current_status = device_statuses[self._current_device_idx]
+            current_live = {
+                "runner_log_path": current_status.get("runner_log_path"),
+                "current": _dict(current_status.get("current")),
+                "progress": _dict(current_status.get("progress")),
+                "logs": _dict(current_status.get("logs")),
+            }
         elif device_statuses:
             current_live = {
                 "runner_log_path": device_statuses[-1].get("runner_log_path"),
@@ -747,8 +792,15 @@ class BatchRunManager:
         log_path = _device_runner_log_path(device)
         log_text = _read_log_tail(log_path)
         parsed = _parse_live_log(log_text, scenario_ids=self._scenario_ids)
-        observed_ids = self._accumulate_observed_scenario_ids(device, _observed_scenario_ids(log_text.splitlines()))
+        lines = log_text.splitlines()
+        observed_ids = self._accumulate_observed_scenario_ids(device, _observed_scenario_ids(lines))
+        terminal_ids = self._accumulate_terminal_scenario_ids(device, _terminal_scenario_ids(lines))
+        selected_scenarios = len(self._scenario_ids or [])
+        parsed["progress"]["selected_scenarios"] = selected_scenarios
+        parsed["progress"]["total_scenarios"] = selected_scenarios
         parsed["progress"]["observed_scenarios"] = len(observed_ids)
+        parsed["progress"]["terminal_scenarios"] = len(terminal_ids)
+        parsed["progress"]["completed_scenarios"] = len(terminal_ids)
         return {
             **parsed,
             "runner_log_path": _relative_path(log_path) if log_path else None,
@@ -788,6 +840,19 @@ class BatchRunManager:
         ordered = [scenario_id for scenario_id in selected_ids if scenario_id in combined]
         ordered.extend(sorted(scenario_id for scenario_id in combined if scenario_id not in set(ordered)))
         device["observed_scenario_ids"] = ordered
+        return ordered
+
+    def _accumulate_terminal_scenario_ids(self, device: dict, tail_ids: set[str]) -> list[str]:
+        selected_ids = [str(item) for item in (self._scenario_ids or []) if item]
+        selected_set = set(selected_ids)
+        existing = device.get("terminal_scenario_ids")
+        combined = {str(item) for item in existing} if isinstance(existing, list) else set()
+        if selected_set:
+            combined.update(scenario_id for scenario_id in tail_ids if scenario_id in selected_set)
+            ordered = [scenario_id for scenario_id in selected_ids if scenario_id in combined]
+        else:
+            ordered = []
+        device["terminal_scenario_ids"] = ordered
         return ordered
 
     def _mark_all_scenarios_observed(self, device: dict) -> None:
@@ -849,6 +914,7 @@ class BatchRunManager:
             "enable_coverage_probe": self._enable_coverage_probe,
             "shadow_validation": self._shadow_validation_requested,
             "feature_flags": dict(self._feature_flags),
+            "repository_provenance": self._repository_provenance,
             "devices": devices
         }
         try:
@@ -859,6 +925,9 @@ class BatchRunManager:
     def _write_device_summary(self, device_info, dev_output_dir):
         try:
             out_dir = Path(dev_output_dir)
+            if device_info.get("state") in {"passed", "failed", "stopped"}:
+                from tb_runner.target_attempt_ledger import reconcile_saved_target_ledgers
+                reconcile_saved_target_ledgers(out_dir)
             log_path = None
             xlsx_path = None
             runner_log_path = None
@@ -868,7 +937,7 @@ class BatchRunManager:
                     runner_log_path = str(runner_log_file.relative_to(ROOT_DIR)) if runner_log_file.is_relative_to(ROOT_DIR) else str(runner_log_file)
                 for f in out_dir.iterdir():
                     if f.is_file():
-                        if f.name.endswith(".xlsx"):
+                        if f.name.endswith(".xlsx") and ".review." not in f.name and ".qa-" not in f.name:
                             xlsx_path = str(f.relative_to(ROOT_DIR)) if f.is_relative_to(ROOT_DIR) else str(f)
                         elif f.name.endswith(".log") and ".normal" in f.name:
                             log_path = str(f.relative_to(ROOT_DIR)) if f.is_relative_to(ROOT_DIR) else str(f)
@@ -940,7 +1009,9 @@ class BatchRunManager:
                         data["coverage_probe_summary"] = coverage_probe_summary
                         data["coverage_probe"] = coverage_probe_summary
                         
-                        classified_quality = classify_quality_signals(mismatch_res.get("signals", []))
+                        classified_quality = classify_quality_signals(
+                            mismatch_res.get("quality_signals", mismatch_res.get("signals", []))
+                        )
                         quality_issues = []
                         for sig in classified_quality.quality_issues:
                             crop_thumb = sig.get("crop_thumbnail")
@@ -1480,6 +1551,7 @@ class BatchRunManager:
                     log_file.write(f"{line}\n")
                 if not preflight.get("ok"):
                     raise Exception(f"Preflight blocked: {preflight.get('reason')}")
+                spec = replace(spec, preflight_talkback_pid=preflight.get("talkback_pid"))
 
                 if self._is_stop_requested():
                     log_file.write("\n[BATCH] stop_requested before execution\n")

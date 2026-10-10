@@ -95,7 +95,7 @@ object A11ySnapshotTracker {
             }
 
             for (i in node.childCount - 1 downTo 0) {
-                node.getChild(i)?.let(stack::add)
+                SmartNextPerf.getChild(node, i, "A11ySnapshotTracker.buildNodeTextSnapshot")?.let(stack::add)
             }
         }
 
@@ -125,14 +125,14 @@ object A11ySnapshotTracker {
         var treeUpdated = false
         for (i in 1..10) {
             Thread.sleep(150)
-            val newRoot = service?.rootInActiveWindow ?: continue
+            val newRoot = SmartNextPerf.acquireRoot("A11ySnapshotTracker.pollForUpdatedRoot") { service?.rootInActiveWindow } ?: continue
             latestRoot = newRoot
             val newSnapshot = buildNodeTextSnapshot(newRoot)
 
             if (oldSnapshot != newSnapshot) {
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Tree change detected, waiting for settling...")
                 Thread.sleep(300)
-                latestRoot = service?.rootInActiveWindow ?: newRoot
+                latestRoot = SmartNextPerf.acquireRoot("A11ySnapshotTracker.pollForUpdatedRoot") { service?.rootInActiveWindow } ?: newRoot
                 Log.i("A11Y_HELPER", "[SMART_NEXT] Tree updated successfully at loop $i after settling wait")
                 treeUpdated = true
                 break
@@ -142,7 +142,7 @@ object A11ySnapshotTracker {
         if (!treeUpdated) {
             Log.w("A11Y_HELPER", "[SMART_NEXT] Tree did not change after 10 polling loops. Applying final 500ms safeguard.")
             Thread.sleep(500)
-            latestRoot = service?.rootInActiveWindow ?: latestRoot
+            latestRoot = SmartNextPerf.acquireRoot("A11ySnapshotTracker.pollForUpdatedRoot") { service?.rootInActiveWindow } ?: latestRoot
         }
 
         return latestRoot
@@ -204,7 +204,7 @@ object A11ySnapshotTracker {
                     bounds = bounds
                 )
                 for (childIndex in node.childCount - 1 downTo 0) {
-                    node.getChild(childIndex)?.let(stack::add)
+                    SmartNextPerf.getChild(node, childIndex, "A11ySnapshotTracker.collectRawVisibleNodes")?.let(stack::add)
                 }
             }
         }

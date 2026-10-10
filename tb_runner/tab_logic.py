@@ -1,6 +1,5 @@
 import re
 import time
-import xml.etree.ElementTree as ET
 from typing import Any
 
 from talkback_lib import A11yAdbClient
@@ -105,52 +104,18 @@ def normalize_tab_config(tab_cfg: dict[str, Any]) -> dict[str, Any]:
     return normalized_tab_cfg
 
 
-def _read_window_xml_nodes(client: A11yAdbClient, dev: str) -> list[dict[str, Any]]:
-    runner = getattr(client, "_run", None)
-    if not callable(runner):
+def _read_service_hierarchy_nodes(client: A11yAdbClient, dev: str) -> list[dict[str, Any]]:
+    snapshot_reader = getattr(client, "dump_hierarchy", None)
+    if not callable(snapshot_reader):
+        log("[TAB][service_hierarchy_failed] reason='dump_hierarchy_not_supported'")
         return []
-    remote_path = "/sdcard/tb_runner_tab_selection.xml"
     try:
-        runner(["shell", "uiautomator", "dump", remote_path], dev=dev, timeout=8)
-        raw_xml = str(runner(["shell", "cat", remote_path], dev=dev, timeout=8) or "")
-        start = raw_xml.find("<?xml")
-        if start < 0:
-            start = raw_xml.find("<hierarchy")
-        end = raw_xml.find("</hierarchy>", start)
-        if start < 0 or end < 0:
-            return []
-        root = ET.fromstring(raw_xml[start : end + len("</hierarchy>")])
-    except (ET.ParseError, OSError, RuntimeError, TypeError, ValueError):
-        return []
-    finally:
-        try:
-            runner(["shell", "rm", "-f", remote_path], dev=dev, timeout=5)
-        except Exception:
-            pass
+        from talkback_lib.hierarchy_snapshot import flatten_service_hierarchy
 
-    nodes: list[dict[str, Any]] = []
-    for xml_node in root.iter("node"):
-        attrs = xml_node.attrib
-        def xml_bool(name: str, default: bool = False) -> bool:
-            value = attrs.get(name)
-            if value is None:
-                return default
-            return str(value).strip().lower() == "true"
-
-        nodes.append(
-            {
-                "text": attrs.get("text", ""),
-                "contentDescription": attrs.get("content-desc", ""),
-                "className": attrs.get("class", ""),
-                "viewIdResourceName": attrs.get("resource-id", ""),
-                "boundsInScreen": attrs.get("bounds", ""),
-                "clickable": xml_bool("clickable"),
-                "focusable": xml_bool("focusable"),
-                "selected": xml_bool("selected"),
-                "visibleToUser": xml_bool("visible-to-user", default=True),
-            }
-        )
-    return nodes
+        return flatten_service_hierarchy(snapshot_reader(dev=dev))
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        log(f"[TAB][service_hierarchy_failed] reason='{type(exc).__name__}:{exc}'")
+        raise
 
 
 def _expected_bottom_nav_count(tab_cfg: dict[str, Any]) -> int:
@@ -424,10 +389,10 @@ def stabilize_tab_selection(
         )
         matches = [m for m in (match_tab_candidate(node, normalized_tab_cfg) for node in node_list) if m.get("matched")]
         if not matches:
-            xml_nodes = _read_window_xml_nodes(client, dev)
-            if xml_nodes:
+            hierarchy_nodes = _read_service_hierarchy_nodes(client, dev)
+            if hierarchy_nodes:
                 xml_node_list = annotate_bottom_nav_candidates(
-                    xml_nodes,
+                    hierarchy_nodes,
                     expected_count=_expected_bottom_nav_count(tab_cfg),
                 )
                 xml_matches = [
@@ -437,7 +402,7 @@ def stabilize_tab_selection(
                     node_list = xml_node_list
                     matches = xml_matches
                     log(
-                        f"[TAB][select] scenario='{scenario_id}' source='window_xml' "
+                        f"[TAB][select] scenario='{scenario_id}' source='service_hierarchy' "
                         f"candidate_count={len(matches)}",
                         level="DEBUG",
                     )
@@ -460,7 +425,7 @@ def stabilize_tab_selection(
                 {"dump_tree_nodes": node_list}, tab_cfg, client=client, dev=dev
             )
         already_selected = bool(current_context.get("ok")) and current_context.get("actual_source") in {
-            "selected_candidate", "window_xml_selected_bottom_tab", "focus_payload_fast_path"
+            "selected_candidate", "service_hierarchy_selected_bottom_tab", "focus_payload_fast_path"
         }
         if already_selected:
             selected = True

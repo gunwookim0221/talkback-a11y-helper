@@ -7,7 +7,7 @@ from typing import Any
 
 import openpyxl
 
-from .source import read_review_rows
+from .source import diagnostic_population_digest, read_review_rows
 from .workbook import _contains_decisions, generate_review_checklist
 
 _DIAGNOSTIC_NAME = "review_generation.json"
@@ -71,18 +71,36 @@ def auto_generate_review(run_root: Path, *, batch_id: str, run_mode: str, batch_
         del metadata
         qa_count = sum(row.review_area == "QA" for row in rows)
         diagnostic_count = sum(row.review_area == "AUTOMATION" for row in rows)
+        population_digest = diagnostic_population_digest(rows)
         output = source.with_name(f"{source.stem}.review.generated.xlsx")
         _record(run_root, _event("AUTO_REVIEW_SOURCE_VALIDATED", batch_id=batch_id, run_root=run_root, run_mode=run_mode, batch_state=batch_state, device=device, source=source, output=output, qa_count=qa_count, diagnostic_count=diagnostic_count))
         if output.is_file() and _contains_decisions(output):
+            if not _diagnostics_match(output, diagnostic_count, population_digest):
+                raise ValueError("reviewed workbook diagnostic population is stale; preserved for manual reconciliation")
             _record(run_root, _event("AUTO_REVIEW_REVIEWED_FILE_PROTECTED", batch_id=batch_id, run_root=run_root, run_mode=run_mode, batch_state=batch_state, device=device, source=source, output=output, qa_count=qa_count, diagnostic_count=diagnostic_count))
             return AutoReviewResult("AUTO_REVIEW_REVIEWED_FILE_PROTECTED", output, qa_count, diagnostic_count)
-        if output.is_file():
+        if output.is_file() and _diagnostics_match(output, diagnostic_count, population_digest):
             _record(run_root, _event("AUTO_REVIEW_ALREADY_EXISTS", batch_id=batch_id, run_root=run_root, run_mode=run_mode, batch_state=batch_state, device=device, source=source, output=output, qa_count=qa_count, diagnostic_count=diagnostic_count))
             return AutoReviewResult("AUTO_REVIEW_ALREADY_EXISTS", output, qa_count, diagnostic_count)
         _record(run_root, _event("AUTO_REVIEW_WRITE_STARTED", batch_id=batch_id, run_root=run_root, run_mode=run_mode, batch_state=batch_state, device=device, source=source, output=output, qa_count=qa_count, diagnostic_count=diagnostic_count))
-        generate_review_checklist(source, output=output)
+        generate_review_checklist(source, output=output, force_regenerate=output.is_file())
+        if not _diagnostics_match(output, diagnostic_count, population_digest):
+            raise ValueError("generated workbook diagnostic population/count mismatch")
         _record(run_root, _event("AUTO_REVIEW_WRITE_SUCCEEDED", batch_id=batch_id, run_root=run_root, run_mode=run_mode, batch_state=batch_state, device=device, source=source, output=output, qa_count=qa_count, diagnostic_count=diagnostic_count))
         return AutoReviewResult("AUTO_REVIEW_WRITE_SUCCEEDED", output, qa_count, diagnostic_count)
     except Exception as error:  # noqa: BLE001
         _record(run_root, _event("AUTO_REVIEW_FAILED", batch_id=batch_id, run_root=run_root, run_mode=run_mode, batch_state=batch_state, device=device, source=source, error=error))
         return AutoReviewResult("AUTO_REVIEW_FAILED", None, 0, 0)
+
+
+def _diagnostics_match(path: Path, count: int, population_digest: str) -> bool:
+    workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        if "Summary" not in workbook.sheetnames or "Automation Diagnostic" not in workbook.sheetnames:
+            return False
+        metrics = {row[0]: row[1] for row in workbook["Summary"].iter_rows(values_only=True) if row[0]}
+        actual = sum(any(value is not None for value in row) for row in workbook["Automation Diagnostic"].iter_rows(min_row=2, values_only=True))
+        return (metrics.get("Automation Diagnostic Count") == count == actual
+                and metrics.get("Automation Diagnostic Population SHA256") == population_digest)
+    finally:
+        workbook.close()

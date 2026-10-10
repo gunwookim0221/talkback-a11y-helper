@@ -180,13 +180,16 @@ def capture(client,dev,scenario_id,nodes=None,step_index=0,evidence="helper_capt
     meta=deepcopy(getattr(client,"last_dump_metadata",{}) or {})
     caps=deepcopy(getattr(client,"last_scroll_capabilities",[]) or [])
     c=capability(nodes,meta,caps)
-    if c["source"] == "unknown" and callable(getattr(client,"_run",None)):
+    if c["source"] == "unknown" and callable(getattr(client,"dump_hierarchy",None)):
         try:
-            client._run(["shell","uiautomator","dump","/sdcard/phase0b_capability.xml"],dev=dev)
-            xml=client._run(["shell","cat","/sdcard/phase0b_capability.xml"],dev=dev)
+            from talkback_lib.hierarchy_snapshot import service_hierarchy_to_xml
+
+            xml=service_hierarchy_to_xml(client.dump_hierarchy(dev=dev))
             c=capability(nodes,meta,caps,raw_xml=xml)
+            if c["source"] == "raw_xml_fallback":
+                c["source"] = "service_hierarchy_fallback"
         except Exception:
-            pass
+            c["acquisition_error"] = "service_hierarchy_unavailable"
     observation = dict(nodes=nodes,capability=c,viewport=viewport(nodes,scenario_id,c["container"]),
                        step_index=step_index,evidence=evidence)
     history = getattr(client, "_completeness_observations", None)
@@ -245,13 +248,12 @@ def verified_scroll(client,dev,scenario_id,step_idx,before=None,output_base_dir=
             path.write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding="utf-8")
             result[phase+"_dump_path"]=str(path)
         result["after_dump_path"]=result["after_scroll_dump_path"]
-        if callable(getattr(client,"_run",None)):
-            try:
-                client._run(["shell","uiautomator","dump","/sdcard/phase0b_after_scroll.xml"],dev=dev)
-                xml=client._run(["shell","cat","/sdcard/phase0b_after_scroll.xml"],dev=dev)
-                (folder/f"{stem}_after_scroll.xml").write_text(xml,encoding="utf-8")
-            except Exception as exc:
-                result["after_xml_error"]=type(exc).__name__
+        try:
+            from tb_runner.audit_snapshot import write_helper_snapshot_xml
+            write_helper_snapshot_xml(after["nodes"], folder/f"{stem}_after_scroll.xml")
+            result["after_xml_source"] = "a11y_helper"
+        except Exception as exc:
+            result["after_xml_error"]=type(exc).__name__
     records=getattr(client,"_scroll_transitions",None)
     if records is None:
         records=[]; client._scroll_transitions=records

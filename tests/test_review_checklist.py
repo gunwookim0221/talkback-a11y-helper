@@ -16,6 +16,41 @@ QA_HEADERS = [
 ]
 
 
+def test_review_uses_canonical_summary_diagnostics_including_warn_and_unknown(tmp_path):
+    from tools.review_checklist.auto import auto_generate_review
+    source = _write_source_run(tmp_path / "device_run")
+    summary = json.loads((source.parent / "summary.json").read_text(encoding="utf-8"))
+    summary["automation_diagnostics"] = [
+        {"scenario_id": "life_food_plugin", "step": "3", "final_result": "WARN", "classification_reason": "move_failed", "failure_reason": "move_failed", "visible_label": "가", "validator_status": "AUTOMATION_DIAGNOSTIC"},
+        {"scenario_id": "life_food_plugin", "step": "99", "final_result": "SHADOW", "classification_reason": "unclassified_signal", "validator_status": "CLASSIFICATION_UNAVAILABLE"},
+    ]
+    summary["quality_issues_contract"] = {"automation_diagnostic_count": 2}
+    (source.parent / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+    generated = auto_generate_review(source.parent, batch_id="b", run_mode="full", batch_state="finished", device={})
+    assert generated.automation_diagnostic_count == 2
+    workbook = openpyxl.load_workbook(generated.output_path, data_only=True)
+    assert workbook["Automation Diagnostic"].max_row - 1 == 2
+    assert workbook["Automation Diagnostic"].cell(2, 16).value == "가"
+    assert workbook["Automation Diagnostic"].cell(3, 2).value == "unclassified_signal"
+    metrics = {row[0]: row[1] for row in workbook["Summary"].iter_rows(values_only=True) if row[0]}
+    assert metrics["Automation Diagnostic Count"] == 2
+    workbook.close()
+    summary["automation_diagnostics"][1]["classification_reason"] = "changed_diagnostic"
+    (source.parent / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+    refreshed = auto_generate_review(source.parent, batch_id="b", run_mode="full", batch_state="finished", device={})
+    assert refreshed.event == "AUTO_REVIEW_WRITE_SUCCEEDED"
+    workbook = openpyxl.load_workbook(refreshed.output_path, data_only=True)
+    assert workbook["Automation Diagnostic"].cell(3, 2).value == "changed_diagnostic"
+    workbook.close()
+    workbook = openpyxl.load_workbook(refreshed.output_path, data_only=False)
+    summary_sheet = workbook["Summary"]
+    assert summary_sheet["A25"].value == "정상 발화"
+    assert summary_sheet["A30"].value == "미검토"
+    assert summary_sheet["B31"].value == '=IF(B13=0,1,(B25+B26+B27+B28+B29)/B13)'
+    assert summary_sheet["A33"].value == "Automation Diagnostic Population SHA256"
+    workbook.close()
+
+
 def _write_source_run(run_root: Path) -> Path:
     run_root.mkdir()
     source = run_root / "talkback_compare_20260724_124302.xlsx"

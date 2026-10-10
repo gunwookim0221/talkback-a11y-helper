@@ -942,7 +942,7 @@ def wait_for_root_entry_ready(client, dev, tab_cfg, *, max_reads=3, timeout_seco
                 [_extract_candidate_from_node(n, i) for i, n in enumerate(nodes)], exclude_top_dismiss=True
             )
             selected_confirmed = bool(context.get("ok")) and context.get("actual_source") in {
-                "selected_candidate", "window_xml_selected_bottom_tab", "focus_payload_fast_path"
+                "selected_candidate", "service_hierarchy_selected_bottom_tab", "focus_payload_fast_path"
             }
             ready = bool(nodes and nav and selected_confirmed and anchor)
         except RuntimeError as exc:

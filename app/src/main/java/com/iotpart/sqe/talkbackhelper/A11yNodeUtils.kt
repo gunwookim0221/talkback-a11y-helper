@@ -169,6 +169,7 @@ object A11yNodeUtils {
     }
 
     fun findBestScrollableContainer(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        return SmartNextPerf.measure("best_scroll_container") {
         if (root == null) return null
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
@@ -187,10 +188,12 @@ object A11yNodeUtils {
                 }
             }
             for (index in 0 until node.childCount) {
-                node.getChild(index)?.let(queue::add)
+                SmartNextPerf.getChild(node, index, "A11yNodeUtils.findBestScrollableContainer")?.let(queue::add)
             }
         }
         return bestNode
+
+        }
     }
 
 
@@ -331,7 +334,7 @@ object A11yNodeUtils {
         return isFixedSystemUI(
             node = node,
             mainScrollContainer = mainScrollContainer,
-            parentOf = { it.parent },
+            parentOf = { SmartNextPerf.getParent(it, "A11yNodeUtils.isFixedSystemUI.parentOf") },
             classNameOf = { it.className?.toString() },
             viewIdOf = { it.viewIdResourceName },
             textOf = { it.text?.toString() },

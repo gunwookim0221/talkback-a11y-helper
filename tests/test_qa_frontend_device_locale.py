@@ -243,6 +243,9 @@ def test_samsung_fallback_verifies_effective_locale_after_one_helper_action():
         def dump_tree(self, dev=None, wait_seconds=3.0):
             return []
 
+        def dump_hierarchy(self, dev=None):
+            return _snapshot_from_xml(locale_xml)
+
     def fake_adb(args, timeout=10.0):
         if args == ["shell", "getprop", "persist.sys.locale"]:
             return {"ok": True, "stdout": f"{state['effective']}\n", "stderr": ""}
@@ -299,6 +302,9 @@ def test_samsung_fallback_stops_on_confirmation_without_executing_confirmation_a
 
         def dump_tree(self, dev=None, wait_seconds=3.0):
             return [{"text": "Confirm", "clickable": True}]
+
+        def dump_hierarchy(self, dev=None):
+            return _snapshot_from_xml(locale_xml)
 
     def fake_adb(args, timeout=10.0):
         if args == ["shell", "getprop", "persist.sys.locale"]:
@@ -358,6 +364,9 @@ def test_samsung_fallback_propagates_helper_service_unavailable_without_retry():
                 "reason": "service_instance_unavailable_deadline_expired",
             }
 
+        def dump_hierarchy(self, dev=None):
+            return _snapshot_from_xml(_locale_picker_xml())
+
     def fake_adb(args, timeout=10.0):
         if args == ["shell", "getprop", "persist.sys.locale"]:
             return {"ok": True, "stdout": f"{state['effective']}\n", "stderr": ""}
@@ -394,8 +403,9 @@ def test_samsung_fallback_propagates_helper_service_unavailable_without_retry():
 
 
 def test_preflight_and_production_contract_fields_are_ready_for_both_supported_locales():
-    korean = _read_locale_picker_semantics(_xml_reader(_locale_picker_xml()), target_locale="ko-KR")
-    english = _read_locale_picker_semantics(_xml_reader(_locale_picker_xml()), target_locale="en-US")
+    fixture = _locale_picker_xml()
+    korean = _read_locale_picker_semantics(_xml_reader(fixture), target_locale="ko-KR", hierarchy_reader=lambda: _snapshot_from_xml(fixture))
+    english = _read_locale_picker_semantics(_xml_reader(fixture), target_locale="en-US", hierarchy_reader=lambda: _snapshot_from_xml(fixture))
 
     for screen in (korean, english):
         readiness = screen["readiness"]
@@ -423,7 +433,9 @@ def test_preflight_reports_the_same_named_missing_marker_predicate():
     )
 
     for case_xml, expected_reason in cases:
-        screen = _read_locale_picker_semantics(_xml_reader(case_xml), target_locale="ko-KR")
+        screen = _read_locale_picker_semantics(
+            _xml_reader(case_xml), target_locale="ko-KR", hierarchy_reader=lambda xml=case_xml: _snapshot_from_xml(xml)
+        )
 
         assert screen["visible"] is False
         assert screen["reason"] == expected_reason
@@ -436,7 +448,7 @@ def test_preflight_accepts_valid_recycler_context_when_locale_list_is_absent():
         '',
     ).replace('</node></node></node></hierarchy>', '</node></node></hierarchy>')
 
-    screen = _read_locale_picker_semantics(_xml_reader(xml), target_locale="ko-KR")
+    screen = _read_locale_picker_semantics(_xml_reader(xml), target_locale="ko-KR", hierarchy_reader=lambda: _snapshot_from_xml(xml))
 
     assert screen["visible"] is True
     assert "reason" not in screen
@@ -466,9 +478,9 @@ def test_preflight_keeps_missing_recycler_and_context_fail_closed_when_list_is_a
         'package="com.samsung.android.oneconnect" resource-id="com.android.settings:id/locale_recycler_view"',
     )
 
-    missing_recycler = _read_locale_picker_semantics(_xml_reader(no_recycler), target_locale="ko-KR")
-    missing_description = _read_locale_picker_semantics(_xml_reader(no_description), target_locale="ko-KR")
-    wrong_context = _read_locale_picker_semantics(_xml_reader(invalid_context), target_locale="ko-KR")
+    missing_recycler = _read_locale_picker_semantics(_xml_reader(no_recycler), target_locale="ko-KR", hierarchy_reader=lambda: _snapshot_from_xml(no_recycler))
+    missing_description = _read_locale_picker_semantics(_xml_reader(no_description), target_locale="ko-KR", hierarchy_reader=lambda: _snapshot_from_xml(no_description))
+    wrong_context = _read_locale_picker_semantics(_xml_reader(invalid_context), target_locale="ko-KR", hierarchy_reader=lambda: _snapshot_from_xml(invalid_context))
 
     assert missing_recycler["visible"] is False
     assert missing_recycler["reason"] == "locale_recycler_missing"
@@ -488,7 +500,7 @@ def test_preflight_uses_canonical_korean_content_description_without_native_text
         'text="한국어(대한민국)" content-desc=""',
     )
 
-    screen = _read_locale_picker_semantics(_xml_reader(native_only_xml), target_locale="ko-KR")
+    screen = _read_locale_picker_semantics(_xml_reader(native_only_xml), target_locale="ko-KR", hierarchy_reader=lambda: _snapshot_from_xml(native_only_xml))
 
     assert screen["target_match_count"] == 1
     assert screen["readiness"]["targetMatchCount"] == 1
@@ -520,6 +532,33 @@ def _xml_reader(xml_text):
         raise AssertionError(args)
 
     return fake_adb
+
+
+def _snapshot_from_xml(xml_text):
+    import xml.etree.ElementTree as ET
+
+    source = ET.fromstring(xml_text).find("node")
+    assert source is not None
+
+    def convert(element):
+        attributes = element.attrib
+        node = {
+            "text": attributes.get("text", ""),
+            "contentDescription": attributes.get("content-desc", ""),
+            "viewIdResourceName": attributes.get("resource-id", ""),
+            "className": attributes.get("class", ""),
+            "packageName": attributes.get("package", ""),
+            "boundsInScreen": attributes.get("bounds", ""),
+            "children": [convert(child) for child in element.findall("node")],
+        }
+        for name in ("clickable", "focusable", "enabled", "focused", "selected", "scrollable", "checked", "visible-to-user"):
+            if name in attributes:
+                key = "visibleToUser" if name == "visible-to-user" else name
+                node[key] = attributes[name].lower() == "true"
+        return node
+
+    root = convert(source)
+    return {"reqId": "fixture", "success": True, "nodes": [root], "windows": [{"root": root, "order": 0}], "nodeCount": 1}
 
 
 def _locale_picker_xml():

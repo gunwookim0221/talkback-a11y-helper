@@ -32,6 +32,10 @@ class Client:
         self.selected=selected;self.count=count;self.activate=activate;self.change=change;self.calls=[]
     def dump_tree(self,**kwargs):
         return nodes(self.selected,self.count)
+    def dump_hierarchy(self,**kwargs):
+        root=dict(className="android.widget.FrameLayout",boundsInScreen="0,0,1080,2400",
+                  children=nodes(self.selected,self.count))
+        return dict(success=True,nodes=[root],windows=[dict(root=root,order=0,active=True,focused=True)],nodeCount=self.count+2)
     def touch_point(self,dev,x,y):
         self.calls.append((x,y))
         if self.activate and self.change:

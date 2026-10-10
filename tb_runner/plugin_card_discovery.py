@@ -110,6 +110,15 @@ def _is_chrome_resource(resource_id: str, class_name: str) -> bool:
 
 
 def _parse_bounds(value: Any) -> tuple[int, int, int, int] | None:
+    if isinstance(value, dict):
+        try:
+            left = int(value.get("left", value.get("l", 0)) or 0)
+            top = int(value.get("top", value.get("t", 0)) or 0)
+            right = int(value.get("right", value.get("r", 0)) or 0)
+            bottom = int(value.get("bottom", value.get("b", 0)) or 0)
+        except (TypeError, ValueError):
+            return None
+        return (left, top, right, bottom) if right > left and bottom > top else None
     text = _text(value)
     if not text:
         return None

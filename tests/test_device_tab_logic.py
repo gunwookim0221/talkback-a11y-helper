@@ -582,6 +582,55 @@ def test_find_all_devices_location_candidate_supports_english_label():
     assert candidate["label"] == "All devices All devices"
 
 
+def test_device_location_filter_strip_uses_visible_actionable_horizontal_chips():
+    nodes = [
+        _node(
+            "Search",
+            "com.samsung.android.oneconnect:id/search_icon",
+            "48,286,168,436",
+            class_name="android.widget.ImageView",
+        ),
+        _node(
+            "거실 거실",
+            "",
+            "171,286,286,436",
+            class_name="android.widget.LinearLayout",
+            clickable=True,
+            focusable=True,
+        ),
+        _node(
+            "어디서나 사용 어디서나 사용",
+            "",
+            "286,286,603,436",
+            class_name="android.widget.LinearLayout",
+            clickable=True,
+            focusable=True,
+        ),
+        _node(
+            "No room assigned No room assigned",
+            "",
+            "603,286,1044,436",
+            class_name="android.widget.LinearLayout",
+            clickable=True,
+            focusable=True,
+        ),
+        _node(
+            "Expanded Anywhere Anywhere",
+            "com.samsung.android.oneconnect:id/subheader_card",
+            "30,183,1050,291",
+            class_name="android.view.ViewGroup",
+            clickable=True,
+        ),
+    ]
+
+    strip = device_tab_logic.device_location_filter_strip(nodes)
+
+    assert strip is not None
+    assert strip["bounds"] == "171,286,1044,436"
+    assert strip["chip_count"] == 3
+    assert "Search" not in strip["signature"]
+
+
 def test_find_collapsed_room_sections_marks_only_explicit_collapsed_as_actionable():
     nodes = [
         _node(

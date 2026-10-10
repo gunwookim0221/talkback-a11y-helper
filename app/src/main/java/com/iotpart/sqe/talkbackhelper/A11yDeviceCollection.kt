@@ -196,7 +196,7 @@ internal object A11yDeviceCollection {
             }
 
             for (index in 0 until node.childCount) {
-                node.getChild(index)?.let { child ->
+                SmartNextPerf.getChild(node, index, "A11yDeviceCollection.findValidated")?.let { child ->
                     queue.add(PendingNode(child, "${pending.path}.$index", pending.path))
                 }
             }
@@ -255,7 +255,7 @@ internal object A11yDeviceCollection {
         val queue = ArrayDeque<PendingCard>()
         val seen = IdentityHashMap<AccessibilityNodeInfo, Boolean>()
         for (index in 0 until owner.childCount) {
-            owner.getChild(index)?.let { child ->
+            SmartNextPerf.getChild(owner, index, "A11yDeviceCollection.collectCardDescendants")?.let { child ->
                 queue.add(PendingCard(child, "$ownerPath.$index", 1))
             }
         }
@@ -282,7 +282,7 @@ internal object A11yDeviceCollection {
                 continue
             }
             for (index in 0 until pending.node.childCount) {
-                pending.node.getChild(index)?.let { child ->
+                SmartNextPerf.getChild(pending.node, index, "A11yDeviceCollection.collectCardDescendants")?.let { child ->
                     queue.add(PendingCard(child, "${pending.path}.$index", pending.depth + 1))
                 }
             }
@@ -316,7 +316,7 @@ internal object A11yDeviceCollection {
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         val seen = IdentityHashMap<AccessibilityNodeInfo, Boolean>()
         for (index in 0 until node.childCount) {
-            node.getChild(index)?.let(queue::addLast)
+            SmartNextPerf.getChild(node, index, "A11yDeviceCollection.isActionable")?.let(queue::addLast)
         }
         var visited = 0
         while (queue.isNotEmpty() && visited < MAX_NODES) {
@@ -327,7 +327,7 @@ internal object A11yDeviceCollection {
                 return true
             }
             for (index in 0 until current.childCount) {
-                current.getChild(index)?.let(queue::addLast)
+                SmartNextPerf.getChild(current, index, "A11yDeviceCollection.isActionable")?.let(queue::addLast)
             }
         }
         return false

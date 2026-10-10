@@ -58,6 +58,9 @@ def test_plugin_discovery_service_reports_helper_and_xml_failures():
         def dump_tree(self, **_kwargs):
             raise RuntimeError("helper unavailable")
 
+        def dump_hierarchy(self, **_kwargs):
+            raise RuntimeError("adb unavailable")
+
         def _run(self, *_args, **_kwargs):
             raise RuntimeError("adb unavailable")
 
@@ -70,4 +73,4 @@ def test_plugin_discovery_service_reports_helper_and_xml_failures():
     assert result["cards"] == []
     warnings = result["diagnostics"]["warnings"]
     assert any("helper_dump_failed" in warning for warning in warnings)
-    assert any("xml_dump_failed" in warning for warning in warnings)
+    assert any("service_hierarchy_failed" in warning for warning in warnings)

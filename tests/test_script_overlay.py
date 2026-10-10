@@ -1079,15 +1079,21 @@ def test_menu_main_uses_smartthings_anchor_config():
     assert menu_cfg["anchor"]["announcement_regex"] == expected
 
 
-def test_non_menu_tabs_keep_common_qr_anchor_config():
-    target_ids = {"home_main", "devices_main", "life_main", "routines_main"}
+def test_root_tab_anchor_configs_keep_devices_independent_of_home_qr():
+    target_ids = {"home_main", "life_main", "routines_main"}
     target_cfgs = [cfg for cfg in script_test.TAB_CONFIGS if cfg.get("scenario_id") in target_ids]
 
-    assert len(target_cfgs) == 4
+    assert len(target_cfgs) == 3
     for cfg in target_cfgs:
         assert cfg["anchor_name"] == "(?i).*location.*qr.*code.*|.*장소\\s*qr\\s*코드.*"
         assert cfg["anchor"]["text_regex"] == "(?i).*location.*qr.*code.*|.*장소\\s*qr\\s*코드.*"
         assert cfg["anchor"]["announcement_regex"] == "(?i).*qr.*code.*|.*qr\\s*코드.*"
+
+    devices = next(cfg for cfg in script_test.TAB_CONFIGS if cfg.get("scenario_id") == "devices_main")
+    assert devices["anchor_type"] == "r"
+    assert devices["anchor_name"] == "^com\\.samsung\\.android\\.oneconnect:id/search_icon$"
+    assert devices["anchor"]["resource_id_regex"] == devices["anchor_name"]
+    assert "text_regex" not in devices["anchor"]
 
 
 def test_life_and_routines_block_add_on_overlay_policy():

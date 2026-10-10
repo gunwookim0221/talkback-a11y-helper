@@ -39,16 +39,45 @@ def _classified_signal(signal: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _signal_identity(signal: dict[str, Any]) -> tuple[str, ...]:
+    """Stable issue identity that ignores preview-only crop and repeat metadata."""
+    fields = (
+        "scenario_id",
+        "step",
+        "mismatch_type",
+        "failure_reason",
+        "final_result",
+        "context_type",
+        "visible_label",
+        "merged_announcement",
+        "resource_id",
+        "focus_view_id",
+    )
+    return tuple(str(signal.get(field) or "").strip() for field in fields)
+
+
+def deduplicate_quality_signals(signals: object) -> list[dict[str, Any]]:
+    if not isinstance(signals, list):
+        return []
+    seen_signals: set[tuple[str, ...]] = set()
+    deduplicated: list[dict[str, Any]] = []
+    for signal in signals:
+        if not isinstance(signal, dict):
+            continue
+        identity = _signal_identity(signal)
+        if identity in seen_signals:
+            continue
+        seen_signals.add(identity)
+        deduplicated.append(signal)
+    return deduplicated
+
+
 def classify_quality_signals(signals: object) -> QualityIssueClassification:
     quality_issues: list[dict[str, Any]] = []
     automation_diagnostics: list[dict[str, Any]] = []
     classification_unavailable_count = 0
 
-    if not isinstance(signals, list):
-        signals = []
-    for signal in signals:
-        if not isinstance(signal, dict):
-            continue
+    for signal in deduplicate_quality_signals(signals):
         classified = _classified_signal(signal)
         if classified["review_domain"] == ReviewDomain.QA_ACCESSIBILITY.value:
             quality_issues.append(classified)
@@ -95,5 +124,6 @@ __all__ = [
     "QUALITY_ISSUE_SCHEMA_VERSION",
     "QualityIssueClassification",
     "classify_quality_signals",
+    "deduplicate_quality_signals",
     "normalize_legacy_quality_issues",
 ]

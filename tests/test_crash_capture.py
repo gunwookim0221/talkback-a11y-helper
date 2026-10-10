@@ -71,7 +71,36 @@ def _ok_context_run_factory(command, **kwargs):
 
 
 def _helper_dump(serial):
-    return {"nodes": [{"text": "Home Monitor", "packageName": "com.samsung.android.oneconnect"}], "serial": serial}
+    root = {
+        "text": "Home Monitor",
+        "packageName": "com.samsung.android.oneconnect",
+        "boundsInScreen": "0,0,1080,1920",
+        "children": [],
+    }
+    return {
+        "reqId": "test",
+        "success": True,
+        "nodes": [root],
+        "windows": [{"root": root, "order": 0, "packageName": "com.samsung.android.oneconnect"}],
+        "nodeCount": 1,
+        "windowCoverage": "all_service_visible_windows",
+        "serial": serial,
+    }
+
+
+def test_talkback_fatal_is_captured_separately_from_app_crashes(tmp_path):
+    lines = [line.replace("com.samsung.android.oneconnect", "com.samsung.android.accessibility.talkback") for line in CRASH_LINES]
+    capture = LogcatCapture(serial="SERIAL", output_dir=tmp_path,
+                            popen_factory=lambda *a, **kw: _FakeLogcatProcess(lines),
+                            run_factory=_ok_context_run_factory, helper_dump_factory=_helper_dump)
+    capture.start()
+    capture.stop()
+    assert not list((tmp_path / "crashes").glob("CRASH-*"))
+    assert len(capture.events) == 1
+    assert capture.events[0].crash_type == "TALKBACK_CRASH"
+    assert (tmp_path / "talkback_monitor/crashes/CRASH-0001/crash_event.json").is_file()
+    assert (tmp_path / "talkback_exit_info_start.txt").is_file()
+    assert (tmp_path / "talkback_exit_info_end.txt").is_file()
 
 
 def test_detector_stores_confirmed_oneconnect_crash_event(tmp_path):

@@ -22,7 +22,7 @@ def test_xml_bottom_tab_bounds_are_normalized_for_activation(monkeypatch, destin
     nodes = _r2_bottom_nav_nodes()
     for i, n in enumerate(nodes):
         n["boundsInScreen"] = f"[{i*180},900][{i*180+150},1000]"
-    monkeypatch.setattr(tab_logic, "_read_window_xml_nodes", lambda *a: nodes)
+    monkeypatch.setattr(tab_logic, "_read_service_hierarchy_nodes", lambda *a: nodes)
     monkeypatch.setattr(tab_logic, "verify_context", lambda *a, **k: {"ok": True})
     monkeypatch.setattr(tab_logic.time, "sleep", lambda *a: None)
     client.touch_point.return_value = True
@@ -284,36 +284,31 @@ def test_stabilize_tab_selection_skips_legacy_touch_for_missing_bottom_nav_candi
     client.touch.assert_not_called()
 
 
-def test_read_window_xml_nodes_parses_boolean_attributes(monkeypatch):
+def test_read_service_hierarchy_nodes_preserves_semantic_fields(monkeypatch):
     client = FakeTabClient()
-    client._run = Mock(
-        side_effect=[
-            "UI hierchary dumped to: /sdcard/tb_runner_tab_selection.xml",
-            (
-                '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>'
-                '<hierarchy><node text="Menu" content-desc="Menu" class="android.view.View" '
-                'resource-id="id/menu_more" bounds="[0,0][100,100]" clickable="true" '
-                'focusable="false" selected="true" visible-to-user="false" /></hierarchy>'
-            ),
-            "",
-        ]
-    )
+    root = {
+        "text": "Menu",
+        "contentDescription": "Menu",
+        "className": "android.view.View",
+        "viewIdResourceName": "id/menu_more",
+        "boundsInScreen": {"left": 0, "top": 0, "right": 100, "bottom": 100},
+        "clickable": True,
+        "focusable": False,
+        "selected": True,
+        "visibleToUser": False,
+        "children": [],
+    }
+    client.dump_hierarchy = Mock(return_value={"success": True, "nodes": [root], "windows": [{"root": root}]})
 
-    nodes = tab_logic._read_window_xml_nodes(client, "SERIAL")
+    nodes = tab_logic._read_service_hierarchy_nodes(client, "SERIAL")
 
-    assert nodes == [
-        {
-            "text": "Menu",
-            "contentDescription": "Menu",
-            "className": "android.view.View",
-            "viewIdResourceName": "id/menu_more",
-            "boundsInScreen": "[0,0][100,100]",
-            "clickable": True,
-            "focusable": False,
-            "selected": True,
-            "visibleToUser": False,
-        }
-    ]
+    assert len(nodes) == 1
+    assert nodes[0]["text"] == nodes[0]["contentDescription"] == "Menu"
+    assert nodes[0]["viewIdResourceName"] == "id/menu_more"
+    assert nodes[0]["boundsInScreen"] == "[0,0][100,100]"
+    assert nodes[0]["clickable"] is True
+    assert nodes[0]["selected"] is True
+    assert nodes[0]["visibleToUser"] is False
 
 
 def test_stabilize_tab_selection_success_when_selected_and_context_ok(monkeypatch):

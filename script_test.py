@@ -61,6 +61,7 @@ from tb_runner.environment_collector import EnvironmentCollector, capture_and_wr
 from tb_runner.evidence_identity import identity_shadow_enabled
 from tb_runner.traversal_evidence_gate import traversal_identity_v2_enabled
 from tb_runner.traversal_profiler import traversal_profiler_enabled
+from tb_runner.target_attempt_ledger import TargetAttemptLedger
 
 
 def _force_utf8_stdio():
@@ -173,6 +174,7 @@ def main() -> int:
     )
     target_serial = context.serial
     client = A11yAdbClient(dev_serial=target_serial)
+    client._target_attempt_ledger = TargetAttemptLedger(output_path)
     environment_capture = None
     try:
         repo_root = Path(__file__).resolve().parent
@@ -475,6 +477,8 @@ def main() -> int:
 
     finally:
         run_perf.record_save_excel()
+        ledger_document = client._target_attempt_ledger.reconcile(all_rows)
+        log(f"[TARGET_FOCUS][ledger_summary] attempts={ledger_document['attempt_count']} ledger={ledger_document['ledger_count']} workbook_rows={ledger_document['workbook_target_rows']} omitted={ledger_document['workbook_omitted_attempt_count']}")
         save_excel_with_perf(save_excel, all_rows, output_path, with_images=True)
         log("[MAIN] final save complete")
         log(format_perf_summary("run_summary", run_perf.summary_dict()))

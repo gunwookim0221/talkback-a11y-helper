@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
+
+import pytest
+
 from qa_frontend.backend import preflight
 
 
@@ -57,6 +61,62 @@ def _package_xml(package: str, *, focused_package: str | None = None) -> str:
         f'<node package="{focused}" text="" focused="true" bounds="[0,0][100,100]" />'
         "</node></hierarchy>"
     )
+
+
+def _snapshot_from_xml(xml_text: str) -> dict[str, object]:
+    root = ET.fromstring(xml_text)
+
+    def convert(element):
+        attrs = element.attrib
+        return {
+            "text": attrs.get("text", ""),
+            "contentDescription": attrs.get("content-desc", ""),
+            "viewIdResourceName": attrs.get("resource-id", ""),
+            "className": attrs.get("class", ""),
+            "packageName": attrs.get("package", ""),
+            "boundsInScreen": attrs.get("bounds", ""),
+            "clickable": attrs.get("clickable", "false") == "true",
+            "focusable": attrs.get("focusable", "false") == "true",
+            "enabled": attrs.get("enabled", "true") == "true",
+            "focused": attrs.get("focused", "false") == "true",
+            "selected": attrs.get("selected", "false") == "true",
+            "scrollable": attrs.get("scrollable", "false") == "true",
+            "visibleToUser": attrs.get("visible-to-user", "true") == "true",
+            "children": [convert(child) for child in list(element)],
+        }
+
+    nodes = [convert(node) for node in root.findall("node")]
+    first = nodes[0] if nodes else {}
+    active_root = {
+        "text": "",
+        "contentDescription": "",
+        "viewIdResourceName": "",
+        "className": "android.widget.FrameLayout",
+        "packageName": first.get("packageName", ""),
+        "boundsInScreen": "",
+        "children": nodes,
+    }
+    return {
+        "success": True,
+        "nodes": [active_root],
+        "windows": [{"root": active_root, "active": True, "focused": True}],
+    }
+
+
+def _snapshot_for(package: str, *, focused_package: str | None = None) -> dict[str, object]:
+    return _snapshot_from_xml(_package_xml(package, focused_package=focused_package))
+
+
+@pytest.fixture(autouse=True)
+def fake_helper_snapshot(monkeypatch):
+    class FakeA11yClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def dump_hierarchy(self, dev=None):
+            return _snapshot_for(preflight.SMARTTHINGS_PACKAGE)
+
+    monkeypatch.setattr(preflight, "A11yAdbClient", FakeA11yClient)
 
 
 def test_warm_launch_does_not_force_stop_and_calls_monkey():
@@ -257,7 +317,9 @@ def test_samsung_account_popup_dismiss_is_noop_when_absent():
             return _ok(_popup_xml("Not now"))
         return _ok()
 
-    result = preflight.dismiss_samsung_account_popup(adb_runner)
+    result = preflight.dismiss_samsung_account_popup(
+        adb_runner, hierarchy_reader=lambda: _snapshot_from_xml(_popup_xml("Not now"))
+    )
 
     assert result["popup_detected"] is False
     assert result["popup_dismissed"] is False
@@ -277,7 +339,9 @@ def test_samsung_account_popup_dismiss_taps_later_only():
             return _ok()
         return _ok()
 
-    result = preflight.dismiss_samsung_account_popup(adb_runner)
+    result = preflight.dismiss_samsung_account_popup(
+        adb_runner, hierarchy_reader=lambda: _snapshot_from_xml(_samsung_account_popup_xml())
+    )
 
     assert result["popup_detected"] is True
     assert result["popup_dismissed"] is True
@@ -298,7 +362,9 @@ def test_samsung_account_popup_ko_dismiss_taps_later_only():
             return _ok()
         return _ok()
 
-    result = preflight.dismiss_samsung_account_popup(adb_runner)
+    result = preflight.dismiss_samsung_account_popup(
+        adb_runner, hierarchy_reader=lambda: _snapshot_from_xml(_samsung_account_popup_ko_xml())
+    )
 
     assert result["popup_detected"] is True
     assert result["popup_dismissed"] is True
@@ -308,12 +374,14 @@ def test_samsung_account_popup_ko_dismiss_taps_later_only():
 
 def test_external_popup_detection_clicks_dismiss_candidate_and_clears_to_smartthings():
     calls = []
+    dismissed = False
     foreground_outputs = [
         _window_focus("com.android.vending"),
         _window_focus(preflight.SMARTTHINGS_PACKAGE),
     ]
 
     def adb_runner(args, timeout):
+        nonlocal dismissed
         calls.append(args)
         if args == ["shell", "dumpsys", "window"]:
             return _ok(foreground_outputs.pop(0) if foreground_outputs else _window_focus(preflight.SMARTTHINGS_PACKAGE))
@@ -326,10 +394,21 @@ def test_external_popup_detection_clicks_dismiss_candidate_and_clears_to_smartth
         if args == ["shell", "cat", "/sdcard/qa_frontend_popup.xml"]:
             return _ok(_popup_xml("Not now"))
         if args[:4] == ["shell", "input", "tap", "110"]:
+            dismissed = True
             return _ok()
         return _ok()
 
-    result = preflight.stabilize_external_popup(adb_runner=adb_runner, sleep_fn=lambda _seconds: None)
+    def hierarchy_reader():
+        return _snapshot_from_xml(
+            _package_xml(preflight.SMARTTHINGS_PACKAGE)
+            if dismissed else _popup_xml("Not now").replace(
+                "<hierarchy>", '<hierarchy><node package="com.android.vending" text="Rate" />', 1
+            )
+        )
+
+    result = preflight.stabilize_external_popup(
+        adb_runner=adb_runner, hierarchy_reader=hierarchy_reader, sleep_fn=lambda _seconds: None
+    )
 
     assert result["popup_detected"] is True
     assert result["popup_package"] == "com.android.vending"
@@ -338,7 +417,7 @@ def test_external_popup_detection_clicks_dismiss_candidate_and_clears_to_smartth
     assert ["shell", "input", "tap", "110", "130"] in calls
 
 
-def test_foreground_smartthings_with_uiautomator_focus_vending_detects_popup():
+def test_foreground_smartthings_with_service_hierarchy_focus_vending_detects_popup():
     def adb_runner(args, timeout):
         if args == ["shell", "dumpsys", "window"]:
             return _ok(_window_focus(preflight.SMARTTHINGS_PACKAGE))
@@ -348,16 +427,20 @@ def test_foreground_smartthings_with_uiautomator_focus_vending_detects_popup():
             return _ok(_package_xml(preflight.SMARTTHINGS_PACKAGE, focused_package="com.android.vending"))
         return _ok()
 
-    status = preflight.poll_launch_surface_status(adb_runner=adb_runner, sleep_fn=lambda _seconds: None)
+    status = preflight.poll_launch_surface_status(
+        adb_runner=adb_runner,
+        hierarchy_reader=lambda: _snapshot_for(preflight.SMARTTHINGS_PACKAGE, focused_package="com.android.vending"),
+        sleep_fn=lambda _seconds: None,
+    )
 
     assert status["foreground_package"] == preflight.SMARTTHINGS_PACKAGE
-    assert status["uiautomator_focused_package"] == "com.android.vending"
+    assert status["hierarchy_focused_package"] == "com.android.vending"
     assert status["external_popup_package"] == "com.android.vending"
-    assert status["external_popup_reason"] == "post_launch_uiautomator_focus"
+    assert status["external_popup_reason"] == "post_launch_service_hierarchy_focus"
 
 
 def test_focus_package_polling_retries_until_surface_is_available():
-    dumps = ["", _package_xml(preflight.SMARTTHINGS_PACKAGE)]
+    snapshots = [{"success": False, "reason": "NO_ROOT"}, _snapshot_for(preflight.SMARTTHINGS_PACKAGE)]
     sleep_calls = []
 
     def adb_runner(args, timeout):
@@ -371,6 +454,7 @@ def test_focus_package_polling_retries_until_surface_is_available():
 
     status = preflight.poll_launch_surface_status(
         adb_runner=adb_runner,
+        hierarchy_reader=lambda: snapshots.pop(0) if snapshots else _snapshot_for(preflight.SMARTTHINGS_PACKAGE),
         sleep_fn=lambda seconds: sleep_calls.append(seconds),
         timeout_seconds=2.0,
         interval_seconds=0.5,
@@ -382,26 +466,29 @@ def test_focus_package_polling_retries_until_surface_is_available():
 
 def test_external_popup_falls_back_to_back_when_no_candidate():
     calls = []
+    dismissed = False
     foreground_outputs = [
         _window_focus("com.android.vending"),
         _window_focus(preflight.SMARTTHINGS_PACKAGE),
     ]
 
     def adb_runner(args, timeout):
+        nonlocal dismissed
         calls.append(args)
         if args == ["shell", "dumpsys", "window"]:
             return _ok(foreground_outputs.pop(0) if foreground_outputs else _window_focus(preflight.SMARTTHINGS_PACKAGE))
-        if args == ["shell", "uiautomator", "dump", "/sdcard/qa_frontend_surface.xml"]:
-            return _ok()
-        if args == ["shell", "cat", "/sdcard/qa_frontend_surface.xml"]:
-            return _ok(_package_xml(preflight.SMARTTHINGS_PACKAGE))
-        if args == ["shell", "uiautomator", "dump", "/sdcard/qa_frontend_popup.xml"]:
-            return _ok()
-        if args == ["shell", "cat", "/sdcard/qa_frontend_popup.xml"]:
-            return _ok(_popup_xml("Rate", "Submit"))
+        if args == ["shell", "input", "keyevent", "KEYCODE_BACK"]:
+            dismissed = True
         return _ok()
 
-    result = preflight.stabilize_external_popup(adb_runner=adb_runner, sleep_fn=lambda _seconds: None)
+    hierarchy_reader = lambda: _snapshot_from_xml(
+        _package_xml(preflight.SMARTTHINGS_PACKAGE) if dismissed
+        else '<hierarchy><node package="com.android.vending" text="Rate" />'
+             '<node package="com.android.vending" text="Submit" /></hierarchy>'
+    )
+    result = preflight.stabilize_external_popup(
+        adb_runner=adb_runner, hierarchy_reader=hierarchy_reader, sleep_fn=lambda _seconds: None
+    )
 
     assert result["popup_result"] == "cleared"
     assert ["shell", "input", "keyevent", "KEYCODE_BACK"] in calls
@@ -415,15 +502,23 @@ def test_external_popup_dismiss_exception_is_captured_without_crash():
         calls.append(args)
         if args == ["shell", "dumpsys", "window"]:
             return _ok(_window_focus("com.android.vending"))
-        if args == ["shell", "uiautomator", "dump", "/sdcard/qa_frontend_popup.xml"]:
-            raise RuntimeError("dump failed")
         return _ok()
 
-    result = preflight.stabilize_external_popup(adb_runner=adb_runner, sleep_fn=lambda _seconds: None, max_attempts=1)
+    reads = 0
+    def hierarchy_reader():
+        nonlocal reads
+        reads += 1
+        if reads == 1:
+            return _snapshot_for("com.android.vending")
+        raise RuntimeError("HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:fixture failure")
+
+    result = preflight.stabilize_external_popup(
+        adb_runner=adb_runner, hierarchy_reader=hierarchy_reader, sleep_fn=lambda _seconds: None, max_attempts=1
+    )
 
     assert result["popup_detected"] is True
-    assert result["popup_result"] == "uncleared"
-    assert result["attempts"][0]["dismiss_method"] == "exception"
+    assert result["popup_result"] == "acquisition_failed"
+    assert "HIERARCHY_SNAPSHOT:TRANSPORT_ERROR" in result["hierarchy_error"]
 
 
 def test_runtime_preflight_passes_when_popup_clears_to_smartthings():
@@ -488,7 +583,7 @@ def test_runtime_preflight_blocks_when_vending_remains_foreground():
     assert result["foreground_package"] == "com.android.vending"
 
 
-def test_runtime_preflight_blocks_when_foreground_smartthings_but_uiautomator_focus_vending_remains():
+def test_runtime_preflight_blocks_when_foreground_smartthings_but_service_focus_vending_remains():
     def adb_runner(args, timeout):
         if args[:4] == ["shell", "settings", "get", "secure"]:
             return _ok("com.google.android.marvin.talkback/.TalkBackService\n")
@@ -505,6 +600,7 @@ def test_runtime_preflight_blocks_when_foreground_smartthings_but_uiautomator_fo
         adb_status_fn=_adb_status,
         helper_status_fn=_helper_ok,
         adb_runner=adb_runner,
+        hierarchy_reader=lambda: _snapshot_for(preflight.SMARTTHINGS_PACKAGE, focused_package="com.android.vending"),
         sleep_fn=lambda _seconds: None,
     )
 

@@ -67,6 +67,7 @@ def parent_comparison(left: dict, right: dict, *, left_speech=None, right_speech
 
 def capture(client, serial, registry, output, count=30):
     from tools.state_fingerprint_diagnostic import capture_observation
+    from talkback_lib.hierarchy_snapshot import service_hierarchy_to_xml
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     registry.save(output / "registry_seed.json")
@@ -76,7 +77,7 @@ def capture(client, serial, registry, output, count=30):
         raw = capture_observation(client, serial, scenario_id="camera-alert-semantics", step=index)
         if (raw.get("selected_tab") or {}).get("name") != "home":
             raise RuntimeError("Passive collector requires Home already selected")
-        xml = client._run(["shell", "cat", "/sdcard/phase2a_fingerprint.xml"], dev=serial, timeout=8)
+        xml = service_hierarchy_to_xml(client.dump_hierarchy(dev=serial))
         (output / f"{index:03d}.xml").write_text(xml, encoding="utf-8")
         metadata = xml_camera_evidence(xml)
         observation = build_state_observation(raw)
@@ -92,15 +93,11 @@ def capture(client, serial, registry, output, count=30):
         if not screenshot.startswith(b"\x89PNG\r\n\x1a\n"):
             raise RuntimeError("Invalid screenshot")
         compressed = None
-        if index in {1, count // 2, count}:
-            client._run(["shell", "uiautomator", "dump", "--compressed", "/sdcard/camera_semantics_compressed.xml"], dev=serial, timeout=12)
-            compressed_xml = client._run(["shell", "cat", "/sdcard/camera_semantics_compressed.xml"], dev=serial, timeout=8)
-            (output / f"{index:03d}_compressed.xml").write_text(compressed_xml, encoding="utf-8")
-            compressed = xml_camera_evidence(compressed_xml)
         bundle = dict(index=index, started_at=started, screenshot_started_at=shot_started,
             completed_at=datetime.now(timezone.utc).isoformat(), raw=raw, observation=observation.to_dict(),
             snapshot=snapshot, registry_resolution=registry.to_dict()["events"][-1]["result"],
             camera=metadata, compressed_camera=compressed,
+            compressed_capture_status="UNAVAILABLE_SERVICE_API_HAS_NO_COMPRESSED_MODE",
             physical_candidate_hash=canonical_sha256(_physical_candidates(snapshot)),
             speech=None, speech_status="NOT_OBSERVED_DURING_PASSIVE_CAPTURE",
             screenshot=f"{index:03d}.png", actions_executed=0, visit_credit=0)

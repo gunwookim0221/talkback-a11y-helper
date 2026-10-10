@@ -15,6 +15,7 @@ object A11yPostScrollScanner {
         context: FindAndFocusPhaseContext,
         request: FindAndFocusRequest
     ): TargetActionOutcome {
+        return SmartNextPerf.measure("post_scroll_scan") {
         val localMainScrollContainer = A11yNodeUtils.findBestScrollableContainer(context.root)
         val postScrollContext = buildPostScrollSearchContext(context, request, localMainScrollContainer)
         val loopState = FocusLoopState()
@@ -69,6 +70,8 @@ object A11yPostScrollScanner {
             return noCandidateOutcome
         }
         return handleLoopFallback(context, request, loopState)
+
+        }
     }
 
     internal fun buildPostScrollSearchContext(
@@ -76,6 +79,7 @@ object A11yPostScrollScanner {
         request: FindAndFocusRequest,
         localMainScrollContainer: AccessibilityNodeInfo?
     ): PostScrollSearchContext {
+        return SmartNextPerf.measure("post_scroll_state") {
         val traversalList = context.traversalList
         val excludedIndex = findIndexByDescription(
             nodes = traversalList,
@@ -218,6 +222,8 @@ object A11yPostScrollScanner {
             anchorStartIndex = anchorStartIndex,
             skipGeneralScan = skipGeneralScan
         )
+
+        }
     }
 
     internal fun tryFocusCandidate(
@@ -228,6 +234,7 @@ object A11yPostScrollScanner {
         loopState: FocusLoopState,
         index: Int
     ): TargetActionOutcome? {
+        return SmartNextPerf.measure("candidate_focus_attempt") {
         val traversalList = context.traversalList
         val node = traversalList[index]
         val bounds = Rect().also { node.getBoundsInScreen(it) }
@@ -271,7 +278,7 @@ object A11yPostScrollScanner {
             isScrollAction = request.isScrollAction,
             inHistory = inVisitedHistory,
             isFixedUi = isFixedUi || isTopBar || isBottomBar,
-            isInsideMainScrollContainer = localMainScrollContainer?.let { container -> node == container || A11yNodeUtils.isDescendantOf(container, node) { it.parent } } ?: false,
+            isInsideMainScrollContainer = localMainScrollContainer?.let { container -> node == container || A11yNodeUtils.isDescendantOf(container, node) { SmartNextPerf.getParent(it, "A11yPostScrollScanner.tryFocusCandidate") } } ?: false,
             isTopArea = A11yNodeUtils.isWithinTopContentArea(bounds.top, context.screenTop, context.screenHeight)
         )
         if (shouldSkipHistory || (request.isScrollAction && inVisitedHistory)) {
@@ -330,7 +337,7 @@ object A11yPostScrollScanner {
                 return mappedOutcome
             }
             if (debugEnabled && request.singleTargetOnly) {
-                val focusedNode = context.root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+                val focusedNode = SmartNextPerf.findFocus(context.root, AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
                 val focusedBounds = focusedNode?.let { Rect().also(it::getBoundsInScreen) }
                 Log.d(
                     "A11Y_HELPER",
@@ -340,6 +347,8 @@ object A11yPostScrollScanner {
             }
         }
         return null
+
+        }
     }
 
     private fun shouldEmitOneConnectSettingsRegularDebug(node: AccessibilityNodeInfo, resolvedLabel: String): Boolean {

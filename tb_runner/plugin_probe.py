@@ -96,21 +96,13 @@ def _capture_helper_nodes(client: A11yAdbClient, serial: str | None) -> tuple[li
 
 
 def _capture_window_xml(client: A11yAdbClient, serial: str | None) -> tuple[str, str]:
-    run_fn = getattr(client, "_run", None)
-    if not callable(run_fn):
-        return "", "xml_unavailable"
-    remote_xml = "/sdcard/window_dump_plugin_probe.xml"
     try:
-        run_fn(["shell", "uiautomator", "dump", remote_xml], dev=serial)
-        xml_text = str(run_fn(["shell", "cat", remote_xml], dev=serial) or "")
-        return xml_text, "" if xml_text.strip() else "xml_unavailable"
-    except Exception:
-        return "", "xml_unavailable"
-    finally:
-        try:
-            run_fn(["shell", "rm", "-f", remote_xml], dev=serial)
-        except Exception:
-            pass
+        from talkback_lib.hierarchy_snapshot import service_hierarchy_to_xml
+
+        xml_text = service_hierarchy_to_xml(client.dump_hierarchy(dev=serial))
+        return xml_text, "" if xml_text.strip() else "service_hierarchy_empty"
+    except Exception as exc:
+        return "", f"service_hierarchy_failed:{exc}"
 
 
 def _flatten_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:

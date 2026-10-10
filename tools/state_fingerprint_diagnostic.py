@@ -18,13 +18,14 @@ from tb_runner import global_navigation, scroll_reliability
 from tb_runner.popup_handler import detect_popup_candidate
 from tb_runner.scenario_config import BOTTOM_TAB_GLOBAL_NAV
 from tb_runner.state_fingerprint import build_state_fingerprint, write_fingerprint_record
+from talkback_lib.hierarchy_snapshot import service_hierarchy_to_xml
 
 
 def capture_observation(client: Any, serial: str | None, *, scenario_id: str = "diagnostic", step: int = 0) -> dict[str, Any]:
     """Read existing Helper/XML/focus sources; no gesture, click, recovery or APK.
 
     Keep transport capability copies before later reads mutate the client cache.
-    XML complements missing selected/enabled/checked flags in flat Helper nodes.
+    Service-owned XML complements flags missing in flat Helper nodes.
     Capture sources are sequential, not claimed to be one atomic UI snapshot.
     """
     nodes = scroll_reliability.dump_with_capabilities(client, serial)
@@ -41,9 +42,7 @@ def capture_observation(client: Any, serial: str | None, *, scenario_id: str = "
     source = "helper_flat"
     xml_packages = set()
     try:
-        remote = "/sdcard/phase2a_fingerprint.xml"
-        client._run(["shell", "uiautomator", "dump", remote], dev=serial, timeout=12)
-        raw = client._run(["shell", "cat", remote], dev=serial, timeout=8)
+        raw = service_hierarchy_to_xml(client.dump_hierarchy(dev=serial))
         observed_nodes = global_navigation.xml_nodes(raw)
         root = ET.fromstring(raw[raw.find("<hierarchy"):])
         attributes = [n.attrib for n in root.iter("node")]
@@ -54,11 +53,12 @@ def capture_observation(client: Any, serial: str | None, *, scenario_id: str = "
             for field, xml_name in (("selected", "selected"), ("checked", "checked"),
                                     ("enabled", "enabled"), ("clickable", "clickable"),
                                     ("focusable", "focusable"), ("focused", "focused"),
+                                    ("accessibilityFocused", "accessibility-focused"),
                                     ("scrollable", "scrollable"), ("visibleToUser", "visible-to-user")):
                 node[field] = attrs[xml_name] == "true" if xml_name in attrs else None
-        source = "helper_capability+xml_semantics"
+        source = "helper_capability+service_hierarchy_semantics"
     except Exception as exc:
-        notes.append("xml_capture:" + type(exc).__name__)
+        notes.append("hierarchy_capture:" + type(exc).__name__)
     items = global_navigation.discover(observed_nodes, dict(global_nav=BOTTOM_TAB_GLOBAL_NAV))
     selected = global_navigation.current(items)
     display = None
@@ -105,7 +105,7 @@ def capture_observation(client: Any, serial: str | None, *, scenario_id: str = "
     return dict(nodes=observed_nodes, package_name=package, activity_name=activity,
                 navigation_context={"bottom_tab": selected["logical_name"]} if selected else None,
                 selected_tab=dict(name=selected["logical_name"], verified=True,
-                                  source="xml_selected" if source == "helper_capability+xml_semantics" else "helper_selected") if selected else None,
+                                  source="service_hierarchy_selected" if source == "helper_capability+service_hierarchy_semantics" else "helper_selected") if selected else None,
                 display_bounds=display, capability=cap, focus_node=focus, overlay=overlay,
                 viewport=scroll_reliability.viewport(nodes, scenario_id, cap.get("container")),
                 timestamp=datetime.now(timezone.utc).isoformat(), scenario_id=scenario_id, step=step,

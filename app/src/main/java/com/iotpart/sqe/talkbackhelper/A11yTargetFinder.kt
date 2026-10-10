@@ -50,7 +50,7 @@ object A11yTargetFinder {
             }
 
             for (i in node.childCount - 1 downTo 0) {
-                node.getChild(i)?.let { stack.add(it) }
+                SmartNextPerf.getChild(node, i, "A11yTargetFinder.findAndPerformAction")?.let { stack.add(it) }
             }
         }
 
@@ -129,7 +129,7 @@ object A11yTargetFinder {
             }
 
             for (i in node.childCount - 1 downTo 0) {
-                node.getChild(i)?.let { stack.add(it) }
+                SmartNextPerf.getChild(node, i, "A11yTargetFinder.findTarget")?.let { stack.add(it) }
             }
         }
 
@@ -217,14 +217,14 @@ object A11yTargetFinder {
             candidate.contentDescription.isNullOrBlank() &&
             !isCandidateInteractive
         ) {
-            candidate.getChild(0) ?: candidate
+            SmartNextPerf.getChild(candidate, 0, "A11yTargetFinder.resolveMatchedTarget") ?: candidate
         } else {
             candidate
         }
 
         val resolvedNode = A11yNavigator.resolveToClickableAncestor(
             node = effectiveTarget,
-            parentOf = { current -> current.parent },
+            parentOf = { current -> SmartNextPerf.getParent(current, "A11yTargetFinder.resolveMatchedTarget.parentOf") },
             isClickable = { current -> current.isClickable }
         )
 

@@ -5,13 +5,19 @@ from __future__ import annotations
 
 import time
 import uuid
+import threading
+from collections import OrderedDict
 from typing import Any
+
+from talkback_lib.adb_device import AdbCommandFailure
 
 from talkback_lib.constants import (
     ACTION_GET_FOCUS,
     ACTION_EVIDENCE_EVENTS,
     ACTION_PING,
     ACTION_SMART_NEXT,
+    ACTION_FOCUS_IN_BOUNDS,
+    ACTION_TARGET_FOCUS_COMMIT,
     RED_TEXT,
     RESET_TEXT,
     STATUS_FAILED,
@@ -24,9 +30,115 @@ from talkback_lib.constants import (
 class HelperBridge:
     BRIDGE_VERSION = "1.0.1"
     _PREFLIGHT_LIGHT_CMD_TIMEOUT_SEC = 5.0
+    # Failed-run results arrived in 41.946–55.903s; ten broadcasts then ANRed
+    # around 60s. Navigation completion is independent of the unchanged 30s
+    # command-delivery limit. Never retry an action whose delivery is uncertain.
+    SMART_NAV_RESULT_WAIT_SECONDS = 75.0
+    # FOCUS_IN_BOUNDS already took 30.454s. These commands scan the same
+    # accessibility trees as SMART_NEXT (observed up to ~60s); share its
+    # bounded operation budget, independently of 30s broadcast delivery.
+    FOCUS_RESULT_WAIT_SECONDS = 75.0
 
     def __init__(self, client: Any) -> None:
         self._client = client
+        self._smart_request_lock = threading.Lock()
+        self._smart_request_ids: OrderedDict[str, None] = OrderedDict()
+        self._expired_smart_requests: OrderedDict[str, bool] = OrderedDict()
+        self._async_lock = threading.RLock()
+        self._async_in_flight: set[str] = set()
+        self._focus_request_ids: OrderedDict[str, str] = OrderedDict()
+        self._expired_focus_requests: OrderedDict[str, bool] = OrderedDict()
+
+    def is_focus_request(self, req_id: str) -> bool:
+        with self._async_lock:
+            return req_id in self._focus_request_ids
+
+    def observe_late_focus_results(self, logs: str) -> None:
+        with self._async_lock:
+            retired = list(self._expired_focus_requests.items())
+        for req_id, observed in retired:
+            if observed:
+                continue
+            transport = self._client._logcat_reader.reassemble_chunked_payload(logs, "TARGET_ACTION_RESULT", req_id)
+            payloads = [transport["payload"]] if transport.get("state") == "complete" else []
+            if transport.get("state") == "absent":
+                payloads = self._client._extract_all_payloads(logs, "TARGET_ACTION_RESULT")
+            for payload in payloads:
+                try:
+                    result = self._client._parse_json_payload(payload, "TARGET_ACTION_RESULT")
+                except Exception:
+                    continue
+                if result.get("reqId") == req_id:
+                    with self._async_lock:
+                        self._expired_focus_requests[req_id] = True
+                    self._client._safe_trace_print(f"[FOCUS_TRANSPORT] late_result req_id={req_id} ignored=true reason=retired_request")
+                    break
+
+    def request_focus_command(self, dev: Any, action: str, req_id: str, extras: list[str]) -> dict[str, Any]:
+        if action not in {ACTION_FOCUS_IN_BOUNDS, ACTION_TARGET_FOCUS_COMMIT}:
+            raise ValueError("Unsupported asynchronous focus command")
+        with self._async_lock:
+            if req_id in self._focus_request_ids:
+                return {"success": False, "status": "transport_error", "reason": "duplicate_focus_request_id", "reqId": req_id}
+            self._focus_request_ids[req_id] = action
+            self._async_in_flight.add(req_id)
+            while len(self._focus_request_ids) > 1024:
+                expired = next((key for key in self._focus_request_ids if key not in self._async_in_flight), None)
+                if expired is None:
+                    break
+                del self._focus_request_ids[expired]
+        self._client._safe_trace_print(f"[FOCUS_TRANSPORT] before_broadcast action={action} req_id={req_id}")
+        started = time.monotonic()
+        try:
+            try:
+                stdout = self._client._broadcast(dev, action, extras)
+            except AdbCommandFailure as exc:
+                result = {"success": False, "status": "transport_error", "reason": exc.reason, "reqId": req_id,
+                          "deliveryElapsedSeconds": time.monotonic() - started,
+                          "command": exc.command, "commandTimeoutSeconds": exc.timeout,
+                          "commandStdout": exc.stdout, "commandStderr": exc.stderr, "resultWaitStarted": False}
+                self._client._safe_trace_print(f"[FOCUS_TRANSPORT] delivery_failed action={action} req_id={req_id} reason={exc.reason} retry=false")
+            else:
+                delivery = time.monotonic() - started
+                self._client._safe_trace_print(f"[FOCUS_TRANSPORT] delivered action={action} req_id={req_id} delivery_seconds={delivery:.3f} result_pending=true")
+                result = self._client._read_log_result(dev, "TARGET_ACTION_RESULT", req_id,
+                    wait_seconds=self.FOCUS_RESULT_WAIT_SECONDS, poll_interval_sec=0.2)
+                result.update(commandStdout=stdout, deliveryElapsedSeconds=delivery,
+                              resultWaitSeconds=self.FOCUS_RESULT_WAIT_SECONDS, resultWaitStarted=True)
+            if result.get("status") == "transport_error" or result.get("reason") == "json_parse_failed":
+                with self._async_lock:
+                    self._expired_focus_requests[req_id] = bool(result.get("lateResult"))
+                    while len(self._expired_focus_requests) > 64:
+                        self._expired_focus_requests.popitem(last=False)
+            self._client._safe_trace_print(f"[FOCUS_TRANSPORT] completed action={action} req_id={req_id} status={result.get('status', '')} reason={result.get('reason', '')} retry=false")
+            return result
+        finally:
+            with self._async_lock:
+                self._async_in_flight.discard(req_id)
+
+    def observe_late_smart_results(self, logs: str) -> None:
+        """Classify retired responses from existing polls without issuing actions."""
+        for req_id, observed in list(self._expired_smart_requests.items()):
+            if observed:
+                continue
+            transport = self._client._logcat_reader.reassemble_chunked_payload(logs, "SMART_NAV_RESULT", req_id)
+            payloads = [transport["payload"]] if transport.get("state") == "complete" else []
+            if transport.get("state") == "absent":
+                payloads = self._client._extract_all_payloads(logs, "SMART_NAV_RESULT")
+            for payload in payloads:
+                try:
+                    result = self._client._parse_json_payload(payload, "SMART_NAV_RESULT")
+                except Exception:
+                    continue
+                if result.get("reqId") == req_id:
+                    self._expired_smart_requests[req_id] = True
+                    self._client._safe_trace_print(f"[SMART_NEXT_TRANSPORT] late_result req_id={req_id} ignored=true reason=retired_request")
+                    break
+
+    def _retire_smart_request(self, req_id: str, *, late_observed: bool = False) -> None:
+        self._expired_smart_requests[req_id] = late_observed
+        while len(self._expired_smart_requests) > 64:
+            self._expired_smart_requests.popitem(last=False)
 
     @staticmethod
     def _parse_broadcast_result(result: dict[str, Any], *, success_key: str = "success") -> bool:
@@ -143,6 +255,21 @@ class HelperBridge:
         )
 
     def _request_smart_next(self, dev: Any, req_id: str) -> dict[str, Any]:
+        with self._async_lock:
+            self._async_in_flight.add(req_id)
+        try:
+            return self._request_smart_next_impl(dev, req_id)
+        finally:
+            with self._async_lock:
+                self._async_in_flight.discard(req_id)
+
+    def _request_smart_next_impl(self, dev: Any, req_id: str) -> dict[str, Any]:
+        with self._smart_request_lock:
+            if req_id in self._smart_request_ids:
+                return {"success": False, "status": "transport_error", "reason": "duplicate_smart_next_request_id", "reqId": req_id}
+            self._smart_request_ids[req_id] = None
+            while len(self._smart_request_ids) > 1024:
+                self._smart_request_ids.popitem(last=False)
         serial = self._client._resolve_serial(dev)
         cmd_parts = [self._client.adb_path]
         if serial:
@@ -173,11 +300,22 @@ class HelperBridge:
                 correlation_extras = list(get_correlation_extras() or [])
             except Exception:
                 correlation_extras = []
-        raw_stdout = self._client._broadcast(
-            dev,
-            ACTION_SMART_NEXT,
-            ["--es", "reqId", req_id, *correlation_extras],
-        )
+        delivery_start = time.monotonic()
+        try:
+            raw_stdout = self._client._broadcast(
+                dev,
+                ACTION_SMART_NEXT,
+                ["--es", "reqId", req_id, *correlation_extras],
+            )
+        except AdbCommandFailure as exc:
+            self._retire_smart_request(req_id)
+            result = {"success": False, "status": "transport_error", "reason": exc.reason, "reqId": req_id,
+                      "deliveryElapsedSeconds": time.monotonic() - delivery_start,
+                      "commandTimeoutSeconds": exc.timeout, "command": exc.command,
+                      "commandStdout": exc.stdout, "commandStderr": exc.stderr, "resultWaitStarted": False}
+            self._client._safe_trace_print(f"[SMART_NEXT_TRANSPORT] delivery_failed req_id={req_id} reason={exc.reason} retry=false")
+            return result
+        delivery_elapsed = time.monotonic() - delivery_start
         self._client._safe_trace_print(
             f"[SMART_NEXT_TRACE] adb_raw_response req_id={req_id} raw_stdout=\"{raw_stdout}\""
         )
@@ -185,12 +323,16 @@ class HelperBridge:
             dev,
             "SMART_NAV_RESULT",
             req_id,
-            wait_seconds=3.0,
+            wait_seconds=self.SMART_NAV_RESULT_WAIT_SECONDS,
             poll_interval_sec=0.2,
         )
         self._client._safe_trace_print(
             f"[SMART_NEXT_TRACE] parsed_broadcast_result req_id={req_id} raw_json={result}"
         )
+        result.update(deliveryElapsedSeconds=delivery_elapsed, resultWaitSeconds=self.SMART_NAV_RESULT_WAIT_SECONDS)
+        if not result.get("success") and result.get("status") == "transport_error":
+            self._retire_smart_request(req_id, late_observed=bool(result.get("lateResult")))
+        self._client._safe_trace_print(f"[SMART_NEXT_TRANSPORT] completed req_id={req_id} delivery_seconds={delivery_elapsed:.3f} result_wait_limit={self.SMART_NAV_RESULT_WAIT_SECONDS} status={result.get('status', '')} reason={result.get('reason', '')} retry=false")
         return result
 
     def request_evidence_events(self, dev: Any, req_id: str) -> dict[str, Any]:

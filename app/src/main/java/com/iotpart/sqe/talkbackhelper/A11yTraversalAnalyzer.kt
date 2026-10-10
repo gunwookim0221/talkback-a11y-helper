@@ -43,14 +43,24 @@ object A11yTraversalAnalyzer {
         val actionableDescendantContentDescription: String?
     )
 
+    internal data class FocusNodeCollectionStats(
+        var visibleNodeVisits: Int = 0,
+        var descendantMetadataScans: Int = 0,
+        var mergedTextScans: Int = 0
+    )
+
     internal fun buildTalkBackLikeFocusNodes(root: AccessibilityNodeInfo): List<FocusedNode> {
+        return SmartNextPerf.measure("candidate_build") {
         val focusNodes = mutableListOf<FocusedNode>()
         val emittedNodes = IdentityHashMap<AccessibilityNodeInfo, Boolean>()
+        val stats = FocusNodeCollectionStats()
+        val startedAtNanos = System.nanoTime()
         collectFocusableNodes(
             node = root,
             containerAncestor = null,
             sink = focusNodes,
-            emittedNodes = emittedNodes
+            emittedNodes = emittedNodes,
+            stats = stats
         )
 
         val dedupedNodes = focusNodes
@@ -71,20 +81,42 @@ object A11yTraversalAnalyzer {
                     }
                 )
             )
+        val requestId = A11yHistoryManager.activeSmartNextReqId
+        if (requestId != "none") {
+            val elapsedMs = (System.nanoTime() - startedAtNanos) / 1_000_000L
+            Log.i(
+                "A11Y_HELPER",
+                "[SMART_NEXT_PERF] req_id=$requestId stage=focus_node_collection elapsed_ms=$elapsedMs " +
+                    "visible_node_visits=${stats.visibleNodeVisits} focus_nodes=${filteredNodes.size} " +
+                    "descendant_metadata_scans=${stats.descendantMetadataScans} merged_text_scans=${stats.mergedTextScans}"
+            )
+        }
+        SmartNextPerf.value("focusable_count", filteredNodes.size.toLong())
+        SmartNextPerf.mark("T4_descendant_metadata_complete")
+        SmartNextPerf.mark("T5_candidate_set_built")
         return filteredNodes
+
+        }
     }
 
     internal fun collectFocusableNodes(
         node: AccessibilityNodeInfo,
         containerAncestor: AccessibilityNodeInfo?,
         sink: MutableList<FocusedNode>,
-        emittedNodes: MutableMap<AccessibilityNodeInfo, Boolean> = IdentityHashMap()
+        emittedNodes: MutableMap<AccessibilityNodeInfo, Boolean> = IdentityHashMap(),
+        stats: FocusNodeCollectionStats = FocusNodeCollectionStats()
     ) {
+        return SmartNextPerf.measure("enumeration") {
+        SmartNextPerf.enterEnumeration(node, node.isVisibleToUser)
+        try {
         if (!node.isVisibleToUser || emittedNodes.containsKey(node)) return
+        stats.visibleNodeVisits++
 
         val container = isFocusContainer(node)
-        val descendantMetadata = collectActionableDescendantMetadata(node)
         if (container) {
+            stats.descendantMetadataScans++
+            val descendantMetadata = collectActionableDescendantMetadata(node)
+            stats.mergedTextScans++
             val mergedContent = collectMergedTextFromContainer(node)
             val mergedText = mergedContent.firstOrNull()
             val mergedDescription = mergedContent.getOrNull(1)
@@ -102,6 +134,8 @@ object A11yTraversalAnalyzer {
             )
             emittedNodes[node] = true
         } else if (containerAncestor == null && hasAnyText(node)) {
+            stats.descendantMetadataScans++
+            val descendantMetadata = collectActionableDescendantMetadata(node)
             sink += FocusedNode(
                 node = node,
                 text = node.text?.toString(),
@@ -130,6 +164,8 @@ object A11yTraversalAnalyzer {
                 )
             }
             if (staticTextDecision.accepted) {
+                stats.descendantMetadataScans++
+                val descendantMetadata = collectActionableDescendantMetadata(node)
                 sink += FocusedNode(
                     node = node,
                     text = node.text?.toString(),
@@ -156,12 +192,13 @@ object A11yTraversalAnalyzer {
             viewId.contains("recycler_view", ignoreCase = true)
         val nextContainer = if (container && !isStructural) node else containerAncestor
         for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
+            val child = SmartNextPerf.getChild(node, i, "A11yTraversalAnalyzer.collectFocusableNodes") ?: continue
             collectFocusableNodes(
                 node = child,
                 containerAncestor = nextContainer,
                 sink = sink,
-                emittedNodes = emittedNodes
+                emittedNodes = emittedNodes,
+                stats = stats
             )
         }
 
@@ -170,6 +207,10 @@ object A11yTraversalAnalyzer {
             sink = sink,
             emittedNodes = emittedNodes
         )
+
+        } finally { SmartNextPerf.leaveEnumeration() }
+
+        }
     }
 
     private fun projectNestedAdjustableDescendants(
@@ -177,12 +218,13 @@ object A11yTraversalAnalyzer {
         sink: MutableList<FocusedNode>,
         emittedNodes: MutableMap<AccessibilityNodeInfo, Boolean>
     ) {
+        return SmartNextPerf.measure("adjustable_projection") {
         if (!isAdjustableProjectionScope(owner)) return
 
         val seen = IdentityHashMap<AccessibilityNodeInfo, Boolean>()
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         for (index in 0 until owner.childCount) {
-            owner.getChild(index)?.let(queue::addLast)
+            SmartNextPerf.getChild(owner, index, "A11yTraversalAnalyzer.projectNestedAdjustableDescendants")?.let(queue::addLast)
         }
 
         while (queue.isNotEmpty()) {
@@ -228,8 +270,10 @@ object A11yTraversalAnalyzer {
             // Do not let a projection from the outer card leak into another card.
             if (isFocusContainer(current)) continue
             for (index in 0 until current.childCount) {
-                current.getChild(index)?.let(queue::addLast)
+                SmartNextPerf.getChild(current, index, "A11yTraversalAnalyzer.projectNestedAdjustableDescendants")?.let(queue::addLast)
             }
+        }
+
         }
     }
 
@@ -287,6 +331,9 @@ object A11yTraversalAnalyzer {
     )
 
     internal fun collectMergedTextFromContainer(container: AccessibilityNodeInfo): List<String> {
+        return SmartNextPerf.measure("merged_text") {
+        SmartNextPerf.scan("merged_text", container)
+
         val merged = mutableListOf<String>()
         collectDescendantReadableText(
             node = container,
@@ -297,6 +344,8 @@ object A11yTraversalAnalyzer {
         if (merged.isEmpty()) return emptyList()
         val mergedText = merged.joinToString(separator = " ")
         return listOf(mergedText, mergedText)
+
+        }
     }
 
     internal fun collectDescendantReadableText(
@@ -312,7 +361,7 @@ object A11yTraversalAnalyzer {
         }
 
         for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
+            val child = SmartNextPerf.getChild(node, i, "A11yTraversalAnalyzer.collectDescendantReadableText") ?: continue
             if (!child.isVisibleToUser) continue
 
             if (isFocusContainer(child)) {
@@ -330,10 +379,13 @@ object A11yTraversalAnalyzer {
     }
 
     internal fun collectActionableDescendantMetadata(container: AccessibilityNodeInfo): ActionableDescendantMetadata {
+        return SmartNextPerf.measure("metadata_entry") {
+        SmartNextPerf.scan("metadata", container)
+
         return collectActionableDescendantMetadata(
             container = container,
             childCountOf = { it.childCount },
-            childAt = { node, index -> node.getChild(index) },
+            childAt = { node, index -> SmartNextPerf.getChild(node, index, "A11yTraversalAnalyzer.collectActionableDescendantMetadata.childAt") },
             isVisible = { it.isVisibleToUser },
             isClickable = { it.isClickable },
             isFocusable = { it.isFocusable },
@@ -344,6 +396,8 @@ object A11yTraversalAnalyzer {
             textOf = { it.text?.toString() },
             boundsOf = { Rect().also { rect -> it.getBoundsInScreen(rect) } }
         )
+
+        }
     }
 
     internal fun <T> collectActionableDescendantMetadata(
@@ -360,6 +414,7 @@ object A11yTraversalAnalyzer {
         textOf: ((T) -> String?)? = null,
         boundsOf: ((T) -> Rect)? = null
     ): ActionableDescendantMetadata {
+        return SmartNextPerf.measure("descendant_metadata") {
         var hasClickableDescendant = false
         var hasFocusableDescendant = false
         val containerBounds = boundsOf?.invoke(container)
@@ -371,7 +426,9 @@ object A11yTraversalAnalyzer {
 
         while (queue.isNotEmpty()) {
             val (current, depth) = queue.removeFirst()
+            if (current is AccessibilityNodeInfo) SmartNextPerf.descendantVisit(current)
             if (depth > 0 && isVisible(current)) {
+                SmartNextPerf.count("actionable_descendant_checks")
                 if (isFocusable(current)) hasFocusableDescendant = true
                 val currentBounds = boundsOf?.invoke(current)
                 val hasValidBounds = currentBounds == null || !currentBounds.isEmpty
@@ -416,6 +473,8 @@ object A11yTraversalAnalyzer {
             actionableDescendantClassName = actionableCandidate?.node?.let(classNameOf),
             actionableDescendantContentDescription = actionableCandidate?.node?.let(contentDescriptionOf)
         )
+
+        }
     }
 
     private val BUTTON_LIKE_CLASS_HINTS = setOf("button", "imagebutton", "floatingactionbutton")
@@ -429,6 +488,7 @@ object A11yTraversalAnalyzer {
         node: AccessibilityNodeInfo,
         containerAncestor: AccessibilityNodeInfo?
     ): StaticTextPromotionDecision {
+        return SmartNextPerf.measure("static_text_promotion") {
         if (containerAncestor == null) return StaticTextPromotionDecision(false, "no_container_ancestor", false)
 
         val packageName = node.packageName?.toString()?.trim().orEmpty()
@@ -456,6 +516,8 @@ object A11yTraversalAnalyzer {
             ancestorBounds = ancestorBounds,
             rootBounds = rootBounds
         )
+
+        }
     }
 
     internal fun shouldPromoteOneConnectStaticTextCandidate(
@@ -520,6 +582,7 @@ object A11yTraversalAnalyzer {
     }
 
     internal fun shouldExcludeAsEmptyShell(node: FocusedNode): Boolean {
+        return SmartNextPerf.measure("empty_shell") {
         val current = node.node
         if (isSettingsRowViewId(current.viewIdResourceName) && current.isVisibleToUser && (current.isClickable || current.isFocusable)) {
             return false
@@ -554,6 +617,8 @@ object A11yTraversalAnalyzer {
             clickable = current.isClickable,
             childCount = current.childCount
         )
+
+        }
     }
 
     private fun shouldRetainUnlabeledAdjustableTarget(node: AccessibilityNodeInfo): Boolean {
@@ -615,6 +680,7 @@ object A11yTraversalAnalyzer {
         clickable: Boolean,
         childCount: Int
     ): Boolean {
+        return SmartNextPerf.measure("empty_shell") {
         val hasMergedLabel = !mergedText.isNullOrBlank() || !mergedContentDescription.isNullOrBlank()
         if (hasMergedLabel) return false
 
@@ -623,6 +689,8 @@ object A11yTraversalAnalyzer {
         }
 
         return childCount == 0
+
+        }
     }
 
     internal fun shouldTreatAsAliasWrapperDuplicate(
@@ -631,6 +699,7 @@ object A11yTraversalAnalyzer {
         primaryLabel: String?,
         secondaryLabel: String?
     ): Boolean {
+        return SmartNextPerf.measure("wrapper_alias_check") {
         val primaryBounds = Rect().also { primaryNode.getBoundsInScreen(it) }
         val secondaryBounds = Rect().also { secondaryNode.getBoundsInScreen(it) }
         val packageMatched = primaryNode.packageName?.toString() == secondaryNode.packageName?.toString()
@@ -650,11 +719,11 @@ object A11yTraversalAnalyzer {
         val inAncestorChain = isAncestorOf(
             ancestor = primaryNode,
             descendant = secondaryNode,
-            parentOf = { node -> node.parent }
+            parentOf = { node -> SmartNextPerf.getParent(node, "A11yTraversalAnalyzer.shouldTreatAsAliasWrapperDuplicate.parentOf") }
         ) || isAncestorOf(
             ancestor = secondaryNode,
             descendant = primaryNode,
-            parentOf = { node -> node.parent }
+            parentOf = { node -> SmartNextPerf.getParent(node, "A11yTraversalAnalyzer.shouldTreatAsAliasWrapperDuplicate.parentOf") }
         )
         if (!inAncestorChain) return false
         if (!oneConnectUpdateAppPair && !areSemanticallyEquivalentLabels(primaryLabel, secondaryLabel)) return false
@@ -685,6 +754,8 @@ object A11yTraversalAnalyzer {
             return false
         }
         return true
+
+        }
     }
 
     private fun isOneConnectUpdateAppAliasPair(
@@ -702,7 +773,7 @@ object A11yTraversalAnalyzer {
                 isAncestorOf(
                     ancestor = ancestor,
                     descendant = descendant,
-                    parentOf = { node -> node.parent }
+                    parentOf = { node -> SmartNextPerf.getParent(node, "A11yTraversalAnalyzer.isOneConnectUpdateAppAliasPair.parentOf") }
                 )
             }
         )
@@ -726,7 +797,7 @@ object A11yTraversalAnalyzer {
         largerLabel: String?,
         smallerLabel: String?
     ): Boolean {
-        if (!isAncestorOf(ancestor = largerNode, descendant = smallerNode, parentOf = { node -> node.parent })) {
+        if (!isAncestorOf(ancestor = largerNode, descendant = smallerNode, parentOf = { node -> SmartNextPerf.getParent(node, "A11yTraversalAnalyzer.canTreatAsActionControlWrapperDuplicate.parentOf") })) {
             return false
         }
         if (!hasStrongOverlapOrContainment(largerBounds, smallerBounds)) return false
@@ -751,13 +822,13 @@ object A11yTraversalAnalyzer {
         val rootLabel = recoverDescendantLabel(node)?.trim().orEmpty()
         val stack = ArrayDeque<AccessibilityNodeInfo>()
         for (i in 0 until node.childCount) {
-            node.getChild(i)?.let(stack::addLast)
+            SmartNextPerf.getChild(node, i, "A11yTraversalAnalyzer.hasDistinctInteractiveDescendant")?.let(stack::addLast)
         }
         while (stack.isNotEmpty()) {
             val current = stack.removeFirst()
             if (!current.isVisibleToUser || current == counterpart) {
                 for (i in 0 until current.childCount) {
-                    current.getChild(i)?.let(stack::addLast)
+                    SmartNextPerf.getChild(current, i, "A11yTraversalAnalyzer.hasDistinctInteractiveDescendant")?.let(stack::addLast)
                 }
                 continue
             }
@@ -771,7 +842,7 @@ object A11yTraversalAnalyzer {
                 }
             }
             for (i in 0 until current.childCount) {
-                current.getChild(i)?.let(stack::addLast)
+                SmartNextPerf.getChild(current, i, "A11yTraversalAnalyzer.hasDistinctInteractiveDescendant")?.let(stack::addLast)
             }
         }
         return false
@@ -862,7 +933,7 @@ object A11yTraversalAnalyzer {
         fun keyOf(focused: FocusedNode): TraversalSortKey {
             return keyCache[focused] ?: traversalSortKey(
                 value = focused.node,
-                parentOf = { node -> node.parent },
+                parentOf = { node -> SmartNextPerf.getParent(node, "A11yTraversalAnalyzer.keyOf.parentOf") },
                 boundsOf = { node ->
                     Rect().also { rect ->
                         node.getBoundsInScreen(rect)
@@ -916,6 +987,7 @@ object A11yTraversalAnalyzer {
         yBucketSize: Int,
         tieBreakerOf: (T) -> Long
     ): TraversalSortKey {
+        return SmartNextPerf.measure("sort_key") {
         val bucketSize = yBucketSize.toLong().coerceAtLeast(1L)
         val reversePath = mutableListOf<TraversalSortSegment>()
         val seen = IdentityHashMap<Any, Boolean>()
@@ -931,6 +1003,8 @@ object A11yTraversalAnalyzer {
             path = reversePath,
             tieBreaker = tieBreakerOf(value)
         )
+
+        }
     }
 
     private fun traversalSortSegment(rect: Rect, bucketSize: Long): TraversalSortSegment {
@@ -1457,6 +1531,7 @@ object A11yTraversalAnalyzer {
     }
 
     private fun collectDescendantTextCandidates(node: AccessibilityNodeInfo): List<String> {
+        return SmartNextPerf.measure("descendant_text") {
         val textCandidates = mutableListOf<String>()
         collectDescendantReadableText(
             node = node,
@@ -1464,6 +1539,8 @@ object A11yTraversalAnalyzer {
             sink = textCandidates
         )
         return textCandidates
+
+        }
     }
 
     internal fun shouldAllowRecoveredDescendantLabelForTraversal(textCandidates: List<String>): Boolean {
@@ -1655,7 +1732,7 @@ object A11yTraversalAnalyzer {
     internal fun countDirectInteractiveChildren(node: AccessibilityNodeInfo, limit: Int): Int {
         var count = 0
         for (index in 0 until node.childCount) {
-            val child = node.getChild(index) ?: continue
+            val child = SmartNextPerf.getChild(node, index, "A11yTraversalAnalyzer.countDirectInteractiveChildren") ?: continue
             if (!child.isVisibleToUser) continue
             val screenReaderFocusable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && child.isScreenReaderFocusable
             if (child.isClickable || child.isFocusable || screenReaderFocusable) {
@@ -1681,18 +1758,24 @@ object A11yTraversalAnalyzer {
     }
 
     internal fun resolveRootBounds(node: AccessibilityNodeInfo): Rect? {
+        return SmartNextPerf.measure("root_bounds") {
         var current: AccessibilityNodeInfo? = node
         var latest: AccessibilityNodeInfo? = node
         while (current != null) {
             latest = current
-            current = current.parent
+            current = SmartNextPerf.getParent(current, "A11yTraversalAnalyzer.resolveRootBounds")
         }
         return latest?.let {
             Rect().also { rootBounds -> it.getBoundsInScreen(rootBounds) }
         }
+
+        }
     }
 
     internal fun countClickableOrFocusableDescendants(node: AccessibilityNodeInfo, limit: Int): Int {
+        return SmartNextPerf.measure("interactive_descendants") {
+        SmartNextPerf.scan("interactive_descendants", node)
+
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue += node
         var count = 0
@@ -1706,15 +1789,22 @@ object A11yTraversalAnalyzer {
                 }
             }
             for (index in 0 until current.childCount) {
-                current.getChild(index)?.let(queue::addLast)
+                SmartNextPerf.getChild(current, index, "A11yTraversalAnalyzer.countClickableOrFocusableDescendants")?.let(queue::addLast)
             }
         }
         return count
+
+        }
     }
 
     internal fun recoverDescendantLabel(node: AccessibilityNodeInfo): String? {
+        return SmartNextPerf.measure("recover_label") {
+        SmartNextPerf.scan("recover_label", node)
+
         val textCandidates = collectDescendantTextCandidates(node)
         return recoverLabelFromDescendantTexts(textCandidates)
+
+        }
     }
 
     internal fun <T> findNodeIndexByIdentity(

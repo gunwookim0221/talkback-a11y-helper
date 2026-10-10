@@ -41,6 +41,7 @@ class RunSpec:
     identity_shadow_v2: bool = False
     traversal_identity_v2: bool = True
     traversal_profiler: bool = False
+    preflight_talkback_pid: str | None = None
 
     @property
     def feature_flags(self) -> dict[str, bool]:
@@ -66,6 +67,9 @@ class RunSpec:
 
     def build_subprocess_env(self, base_env: Mapping[str, str] | None = None) -> dict[str, str]:
         env = dict(os.environ if base_env is None else base_env)
+        env.pop("TB_TALKBACK_PREFLIGHT_PID", None)
+        if self.preflight_talkback_pid:
+            env["TB_TALKBACK_PREFLIGHT_PID"] = self.preflight_talkback_pid
         if self.serial:
             env["ANDROID_SERIAL"] = self.serial
         if self.output_dir:

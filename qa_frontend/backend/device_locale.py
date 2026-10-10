@@ -16,7 +16,6 @@ LANGUAGE_SETTINGS_INTENT = "android.settings.LOCALE_SETTINGS"
 SETTINGS_INTENT = "android.settings.SETTINGS"
 SAMSUNG_MANUFACTURER = "samsung"
 SAMSUNG_ONEUI_PROPERTY = "ro.build.version.oneui"
-LOCALE_PICKER_REMOTE_XML = "/sdcard/talkback_helper_locale_picker.xml"
 _LOCALE_LABELS = {
     "en-US": ("English (United States)", "English (United States)"),
     "ko-KR": ("Korean (South Korea)", "한국어(대한민국)"),
@@ -269,7 +268,31 @@ def _try_samsung_accessibility_fallback(
             "locale_picker_window": window,
         }
 
-    screen = _read_locale_picker_semantics(adb_runner, target_locale=target_locale)
+    helper_holder: dict[str, Any] = {"client": None, "ready": False}
+
+    def get_helper():
+        if helper_holder["client"] is not None:
+            return helper_holder["client"]
+        if helper_client_factory is None:
+            helper = A11yAdbClient(dev_serial=device_serial, start_monitor=False)
+        else:
+            try:
+                helper = helper_client_factory(dev_serial=device_serial, start_monitor=False)
+            except TypeError:
+                helper = helper_client_factory()
+        helper_holder["client"] = helper
+        return helper
+
+    def hierarchy_reader() -> dict[str, Any]:
+        helper = get_helper()
+        if not helper.check_helper_status(dev=device_serial):
+            raise RuntimeError("HIERARCHY_SNAPSHOT:SERVICE_UNAVAILABLE:helper not ready")
+        helper_holder["ready"] = True
+        return helper.dump_hierarchy(dev=device_serial)
+
+    screen = _read_locale_picker_semantics(
+        adb_runner, target_locale=target_locale, hierarchy_reader=hierarchy_reader
+    )
     if not screen.get("visible"):
         return {
             **direct_result,
@@ -312,14 +335,8 @@ def _try_samsung_accessibility_fallback(
         }
 
     try:
-        if helper_client_factory is None:
-            helper = A11yAdbClient(dev_serial=device_serial, start_monitor=False)
-        else:
-            try:
-                helper = helper_client_factory(dev_serial=device_serial, start_monitor=False)
-            except TypeError:
-                helper = helper_client_factory()
-        if not helper.check_helper_status(dev=device_serial):
+        helper = get_helper()
+        if not helper_holder["ready"] and not helper.check_helper_status(dev=device_serial):
             raise RuntimeError("helper_service_unavailable")
         helper_result = helper.set_system_language(
             dev=device_serial,
@@ -461,28 +478,21 @@ def _read_locale_picker_semantics(
     adb_runner: Callable[[list[str], float], dict[str, object]],
     *,
     target_locale: str = "ko-KR",
+    hierarchy_reader: Callable[[], dict[str, Any]] | None = None,
 ) -> dict[str, object]:
-    dump = adb_runner(["shell", "uiautomator", "dump", LOCALE_PICKER_REMOTE_XML], 8.0)
-    if not dump.get("ok"):
-        return {
-            "visible": False,
-            "reason": "uiautomator_dump_failed",
-            "readiness": _empty_locale_readiness(root_available=False),
-        }
-    raw = adb_runner(["shell", "cat", LOCALE_PICKER_REMOTE_XML], 8.0)
-    if not raw.get("ok"):
-        return {
-            "visible": False,
-            "reason": "uiautomator_dump_read_failed",
-            "readiness": _empty_locale_readiness(root_available=False),
-        }
     try:
-        hierarchy = ET.fromstring(str(raw.get("stdout", "")))
-    except ET.ParseError:
+        if hierarchy_reader is None:
+            hierarchy_reader = lambda: A11yAdbClient(start_monitor=False).dump_hierarchy()
+        from talkback_lib.hierarchy_snapshot import service_hierarchy_to_xml
+
+        hierarchy = ET.fromstring(service_hierarchy_to_xml(hierarchy_reader()))
+    except (OSError, RuntimeError, TypeError, ValueError, ET.ParseError) as exc:
+        readiness = _empty_locale_readiness(root_available=False)
+        readiness["serviceAvailable"] = False
         return {
             "visible": False,
-            "reason": "uiautomator_xml_invalid",
-            "readiness": _empty_locale_readiness(root_available=False),
+            "reason": f"service_hierarchy_acquisition_failed:{type(exc).__name__}:{exc}",
+            "readiness": readiness,
         }
 
     root = hierarchy.find("node")
@@ -638,7 +648,7 @@ def _locale_picker_failure_status(screen: dict[str, object]) -> str:
     if not isinstance(readiness, dict):
         return "WINDOW_NOT_READY"
     if readiness.get("rootAvailable") is False:
-        return "WINDOW_NOT_READY"
+        return "HIERARCHY_ACQUISITION_FAILED" if readiness.get("serviceAvailable") is False else "WINDOW_NOT_READY"
     if readiness.get("packageMatches") is False and readiness.get("rootPackage"):
         return "WRONG_SCREEN"
     return "WINDOW_NOT_READY"

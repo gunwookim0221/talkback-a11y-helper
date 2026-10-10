@@ -28,8 +28,10 @@ from talkback_lib.constants import (
     ACTION_CLICK_TARGET,
     ACTION_COMMAND,
     ACTION_DUMP_TREE,
+    ACTION_DUMP_HIERARCHY,
     ACTION_FOCUS_IN_BOUNDS,
     ACTION_FOCUS_TARGET,
+    ACTION_TARGET_FOCUS_COMMIT,
     ACTION_GET_FOCUS,
     ACTION_NEXT,
     ACTION_PING,
@@ -64,6 +66,7 @@ from talkback_lib.step_row_builder import (
     populate_get_focus_trace_fields,
 )
 from talkback_lib.step_collection_service import StepCollectionService
+from talkback_lib.window_lifecycle import capture_window_lifecycle, get_talkback_restart_event
 from talkback_lib.utils import (
     json_safe_value,
     normalize_bounds,
@@ -101,6 +104,7 @@ class A11yAdbClient:
         self._monitor_thread: threading.Thread | None = None
         self._last_log_marker: tuple[tuple[int, int, int, int, int, int], int] | None = None
         self.last_dump_metadata: dict[str, Any] = {}
+        self.last_hierarchy_metadata: dict[str, Any] = {}
         self.last_scroll_capabilities: list[dict[str, Any]] = []
         self.last_device_collection: dict[str, Any] = {}
         self.last_scroll_result: dict[str, Any] = {}
@@ -744,6 +748,9 @@ class A11yAdbClient:
         correlation_extras = self._evidence_correlation_extras()
         if correlation_extras and "evidenceTransactionId" not in cmd:
             cmd.extend(correlation_extras)
+        if action in {ACTION_SMART_NEXT, ACTION_FOCUS_IN_BOUNDS, ACTION_TARGET_FOCUS_COMMIT}:
+            # A delivery timeout must not be mistaken for an empty successful ACK.
+            return self._adb_device._run_adb_command(cmd, dev=dev, raise_on_failure=True)
         return self._run(cmd, dev=dev)
 
     @staticmethod
@@ -834,9 +841,11 @@ class A11yAdbClient:
         poll_interval_sec: float = 0.25,
     ) -> dict[str, Any]:
         cache_window_sec = 0.4
+        bounded_focus = prefix == "TARGET_ACTION_RESULT" and self._helper_bridge.is_focus_request(req_id)
         now_mono = time.monotonic()
         if (
             prefix == "TARGET_ACTION_RESULT"
+            and not bounded_focus
             and self._last_action_req_id == req_id
             and isinstance(self._last_action_payload, dict)
             and now_mono - self._last_action_timestamp < cache_window_sec
@@ -845,12 +854,40 @@ class A11yAdbClient:
         start = time.monotonic()
         interval = max(0.05, poll_interval_sec)
         logged_parse_errors: set[str] = set()
+        chunk_transport_state: dict[str, Any] = {"state": "absent"}
         self._safe_trace_print(
             f"[SMART_NEXT_TRACE] read_log_result_start prefix={prefix} req_id={req_id} wait_seconds={wait_seconds}"
         )
         while time.monotonic() - start < wait_seconds:
             logs = self._logcat_reader.dump_filtered(dev=dev)
-            payloads = self._extract_all_payloads(logs, prefix)
+            self._helper_bridge.observe_late_focus_results(logs)
+            if prefix == "SMART_NAV_RESULT":
+                self._helper_bridge.observe_late_smart_results(logs)
+            chunk_transport_state = self._logcat_reader.reassemble_chunked_payload(
+                logs, prefix, req_id
+            )
+            if chunk_transport_state.get("state") == "error":
+                return {
+                    "success": False,
+                    "status": "transport_error",
+                    "reason": str(chunk_transport_state.get("reason") or "invalid_chunks"),
+                    "reqId": req_id,
+                }
+            if chunk_transport_state.get("state") == "incomplete":
+                payloads = []
+            elif chunk_transport_state.get("state") == "complete":
+                payloads = [str(chunk_transport_state["payload"])]
+            else:
+                payloads = self._extract_all_payloads(logs, prefix)
+            if bounded_focus and len(payloads) > 1:
+                matches = 0
+                for candidate_payload in payloads:
+                    try:
+                        matches += self._parse_json_payload(candidate_payload, prefix).get("reqId") == req_id
+                    except Exception:
+                        pass
+                if matches > 1:
+                    return {"success": False, "status": "transport_error", "reason": "duplicate_terminal_result", "reqId": req_id}
             for payload in reversed(payloads):
                 try:
                     parsed = self._parse_json_payload(payload, prefix)
@@ -879,6 +916,10 @@ class A11yAdbClient:
                         )
                     continue
                 if parsed.get("reqId") == req_id:
+                    if bounded_focus and time.monotonic() - start >= wait_seconds:
+                        return {"success": False, "status": "transport_error", "reason": "late_focus_result", "reqId": req_id, "lateResult": True}
+                    if prefix == "SMART_NAV_RESULT" and time.monotonic() - start >= wait_seconds:
+                        return {"success": False, "status": "transport_error", "reason": "late_smart_nav_result", "reqId": req_id, "lateResult": True}
                     if prefix == "TARGET_ACTION_RESULT" and bool(parsed.get("success")):
                         self._last_action_payload = parsed
                         self._last_action_req_id = req_id
@@ -892,7 +933,19 @@ class A11yAdbClient:
             if remaining <= 0:
                 break
             time.sleep(min(interval, remaining))
+        if chunk_transport_state.get("state") == "incomplete":
+            return {
+                "success": False,
+                "status": "transport_error",
+                "reason": "incomplete_chunked_payload",
+                "missingChunks": list(chunk_transport_state.get("missing") or []),
+                "reqId": req_id,
+            }
         miss = {"success": False, "reason": f"{prefix} 로그를 찾지 못했습니다.", "reqId": req_id}
+        if prefix == "SMART_NAV_RESULT":
+            miss.update(status="transport_error", reason="smart_nav_result_wait_timeout")
+        if bounded_focus:
+            miss.update(status="transport_error", reason="focus_result_wait_timeout")
         self._safe_trace_print(
             f"[SMART_NEXT_TRACE] read_log_result_miss prefix={prefix} req_id={req_id} parsed={miss}"
         )
@@ -990,9 +1043,12 @@ class A11yAdbClient:
         return LogcatReader.has_req_marker(log_text=log_text, prefix=prefix, req_id=req_id)
 
     def clear_logcat(self, dev: Any = None) -> str:
-        if self._evidence_is_enabled():
-            self._evidence_collect_helper_logcat_events(dev, req_id=self._evidence_active_request_id or None)
-        return self._adb_device._clear_logcat_best_effort(dev=dev, timeout=1.5)
+        with self._helper_bridge._async_lock:
+            if self._helper_bridge._async_in_flight:
+                return "" # Preserve pending correlated results from either command family.
+            if self._evidence_is_enabled():
+                self._evidence_collect_helper_logcat_events(dev, req_id=self._evidence_active_request_id or None)
+            return self._adb_device._clear_logcat_best_effort(dev=dev, timeout=1.5)
 
     def _take_snapshot(self, dev: Any, save_path: str) -> None:
         """ADB screencap을 수행해 현재 화면을 로컬 파일로 저장합니다."""
@@ -1156,6 +1212,94 @@ class A11yAdbClient:
             return parsed
 
         raise RuntimeError("DUMP_TREE JSON 형식이 올바르지 않습니다.")
+
+    def dump_hierarchy(
+        self,
+        dev: Any = None,
+        wait_seconds: float = 30.0,
+    ) -> dict[str, Any]:
+        """Capture the service-owned hierarchy without opening UiAutomation."""
+        self.last_hierarchy_metadata = {}
+        if not self.check_helper_status(dev=dev):
+            raise RuntimeError("HIERARCHY_SNAPSHOT:SERVICE_UNAVAILABLE")
+        req_id = str(uuid.uuid4())[:12]
+        self._broadcast(dev, ACTION_DUMP_HIERARCHY, ["--es", "reqId", req_id])
+
+        start_time = time.monotonic()
+        logs = ""
+        terminal = f"DUMP_HIERARCHY_END {req_id}"
+        while time.monotonic() - start_time < max(0.1, wait_seconds):
+            logs = self._logcat_reader.dump_raw_filtered(dev=dev)
+            if terminal in logs:
+                break
+            time.sleep(0.25)
+        else:
+            raise TimeoutError(f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:terminal marker missing req_id={req_id}")
+
+        terminal_count = sum(line.strip().endswith(terminal) for line in logs.splitlines())
+        if terminal_count != 1:
+            raise RuntimeError(
+                f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:terminal_count={terminal_count} req_id={req_id}"
+            )
+        payloads = self._logcat_reader.extract_all_payloads(logs, "DUMP_HIERARCHY_RESULT")
+        matching_payloads: list[dict[str, Any]] = []
+        unmatched_result = False
+        for candidate in payloads:
+            try:
+                parsed_candidate = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed_candidate, dict):
+                if parsed_candidate.get("reqId") == req_id:
+                    matching_payloads.append(parsed_candidate)
+                else:
+                    unmatched_result = True
+        if not matching_payloads:
+            if unmatched_result:
+                raise RuntimeError(f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:request_id_mismatch req_id={req_id}")
+            assembled = self._logcat_reader.reassemble_chunked_payload(
+                logs,
+                "DUMP_HIERARCHY_RESULT",
+                req_id,
+                max_chunks=512,
+                max_payload_bytes=1024 * 1024,
+            )
+            if assembled.get("state") != "complete":
+                raise RuntimeError(
+                    f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:{assembled.get('reason', assembled.get('state'))} "
+                    f"req_id={req_id}"
+                )
+            payload_text = str(assembled.get("payload") or "")
+        else:
+            if len(matching_payloads) != 1:
+                raise RuntimeError(f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:duplicate_terminal req_id={req_id}")
+            payload = matching_payloads[0]
+            payload_text = ""
+        if payload_text:
+            try:
+                payload = json.loads(payload_text)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:invalid_json req_id={req_id}") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:invalid_payload req_id={req_id}")
+        if payload.get("reqId") != req_id:
+            raise RuntimeError(f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:request_id_mismatch req_id={req_id}")
+        if payload.get("success") is not True:
+            reason = str(payload.get("reason") or "SERIALIZATION_ERROR")
+            raise RuntimeError(f"HIERARCHY_SNAPSHOT:{reason}:{payload.get('message', '')}")
+        nodes = payload.get("nodes")
+        windows = payload.get("windows")
+        if not isinstance(nodes, list) or not nodes or not isinstance(windows, list) or not windows:
+            raise RuntimeError(f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:empty_hierarchy req_id={req_id}")
+        self.last_hierarchy_metadata = {
+            "schemaVersion": payload.get("schemaVersion"),
+            "source": payload.get("source"),
+            "windowCoverage": payload.get("windowCoverage"),
+            "windowCount": len(windows),
+            "nodeCount": payload.get("nodeCount"),
+            "reqId": req_id,
+        }
+        return payload
 
     def dump_scroll_capabilities(
         self,
@@ -1958,8 +2102,7 @@ class A11yAdbClient:
         self.last_merged_announcement = ""
 
         def _attempt_focus() -> tuple[bool, dict[str, Any]]:
-            self.clear_logcat(dev=dev)
-            req_id = str(uuid.uuid4())[:8]
+            req_id = uuid.uuid4().hex
             extras = [
                 "--es", "bounds", self._escape_adb_string(str(bounds or "")),
                 "--ez", "preferEmptyState", "true" if prefer_empty_state else "false",
@@ -1969,8 +2112,7 @@ class A11yAdbClient:
             ]
             extras.extend(self._evidence_correlation_extras())
             self._evidence_action_sent(action="FOCUS_IN_BOUNDS", req_id=req_id)
-            self._broadcast(dev, ACTION_FOCUS_IN_BOUNDS, extras)
-            result = self._read_log_result(dev, "TARGET_ACTION_RESULT", req_id)
+            result = self._helper_bridge.request_focus_command(dev, ACTION_FOCUS_IN_BOUNDS, req_id, extras)
             if self._recovery_evidence_active():
                 raw_payload = str(result.get("rawSnippet") or "") if isinstance(result, dict) else ""
                 self._safe_trace_print(
@@ -1988,8 +2130,6 @@ class A11yAdbClient:
                             f"success='' status='' detail='' errorType={type(result.get('parseError')).__name__} "
                             f"errorMessage={str(result.get('parseError') or '')[:160]!r}"
                         )
-            if self._is_target_action_payload_missing(result, req_id):
-                return False, {}
             self.last_target_action_result = self._normalize_target_action_payload(result)
             runtime = self.evidence_runtime
             transaction = self._evidence_active_transaction
@@ -2035,33 +2175,9 @@ class A11yAdbClient:
                 raw=result,
             )
 
-        def _focus_timeout() -> dict[str, Any]:
-            result = {"success": False, "reason": "timeout"}
-            self.last_target_action_result = result
-            runtime = self.evidence_runtime
-            transaction = self._evidence_active_transaction
-            if self._evidence_is_enabled() and runtime is not None and transaction:
-                runtime.emit(
-                    "ACTION_API_RESULT",
-                    producer="runner",
-                    phase=str(transaction.get("phase") or "recovery"),
-                    transaction=transaction,
-                    payload={"success": False, "reason": "timeout", "action": "FOCUS_IN_BOUNDS"},
-                )
-                self._evidence_helper_ack(result, req_id=self._evidence_active_request_id, source="timeout")
-            return self._normalize_action_result(
-                success=False,
-                status=STATUS_FAILED,
-                detail="timeout",
-                raw=result,
-            )
-
-        return self._run_with_retry(
-            wait_seconds=wait_,
-            sleep_seconds=0.5,
-            attempt_fn=_attempt_focus,
-            timeout_fn=_focus_timeout,
-        )
+        # wait_ was a retry budget, not a service operation deadline. One command
+        # gets the independent bounded result wait; uncertain actions are not resent.
+        return _attempt_focus()[1]
 
     def click_focused(self, dev: Any = None, wait_: int = 5) -> bool:
         if not self.check_helper_status(dev=dev):
@@ -2090,6 +2206,44 @@ class A11yAdbClient:
         return False
 
     def scroll(
+        self,
+        dev,
+        direction,
+        step_=50,
+        time_=1000,
+        bounds_=None,
+        *,
+        accessibility_fallback: bool = False,
+        device_list_normalization: bool = False,
+        container_path: str | None = None,
+        container_bounds: str | None = None,
+    ) -> bool:
+        action = f"SCROLL_{str(direction or '').strip().upper()[:24]}"
+        capture_window_lifecycle(self, dev, "before", action)
+        if get_talkback_restart_event(self):
+            self.last_scroll_result = {"success": False, "status": "TALKBACK_RESTARTED", "reason": "talkback_restarted"}
+            return False
+        try:
+            return self._scroll_impl(
+                dev,
+                direction,
+                step_=step_,
+                time_=time_,
+                bounds_=bounds_,
+                accessibility_fallback=accessibility_fallback,
+                device_list_normalization=device_list_normalization,
+                container_path=container_path,
+                container_bounds=container_bounds,
+            )
+        except Exception:
+            capture_window_lifecycle(self, dev, "exception", action)
+            raise
+        finally:
+            capture_window_lifecycle(
+                self, dev, "after", action, focus_node=getattr(self, "last_scroll_result", {})
+            )
+
+    def _scroll_impl(
         self,
         dev,
         direction,
@@ -2715,7 +2869,7 @@ class A11yAdbClient:
         # self.clear_logcat(dev=dev)
 
         def _attempt_smart_next() -> tuple[bool, dict[str, Any]]:
-            req_id = str(uuid.uuid4())[:8]
+            req_id = uuid.uuid4().hex
             self._safe_trace_print(f"[SMART_NEXT_TRACE] req_id_generated req_id={req_id} source=move_focus_smart")
             self._evidence_action_sent(action=ACTION_SMART_NEXT, req_id=req_id)
             result = self._helper_bridge._request_smart_next(dev=dev, req_id=req_id)
@@ -2751,6 +2905,79 @@ class A11yAdbClient:
             timeout_fn=_smart_next_timeout,
             run_immediately=True,
         )
+
+    def target_focus_commit(
+        self,
+        dev: Any = None,
+        *,
+        target: dict[str, Any],
+        wait_: float = 2.0,
+    ) -> dict[str, Any]:
+        capture_window_lifecycle(self, dev, "before", "TARGET_FOCUS_COMMIT")
+        if get_talkback_restart_event(self):
+            self.last_target_action_result = {"success": False, "status": "TALKBACK_RESTARTED", "reason": "talkback_restarted"}
+            return dict(self.last_target_action_result)
+        try:
+            return self._target_focus_commit_impl(dev=dev, target=target, wait_=wait_)
+        except Exception:
+            capture_window_lifecycle(self, dev, "exception", "TARGET_FOCUS_COMMIT")
+            raise
+        finally:
+            capture_window_lifecycle(
+                self,
+                dev,
+                "after",
+                "TARGET_FOCUS_COMMIT",
+                focus_node=getattr(self, "last_target_action_result", {}),
+            )
+
+    def _target_focus_commit_impl(
+        self,
+        dev: Any = None,
+        *,
+        target: dict[str, Any],
+        wait_: float = 2.0,
+    ) -> dict[str, Any]:
+        """Commit accessibility focus to one exact planner-selected instance."""
+        if not self.check_helper_status(dev=dev):
+            result = {"success": False, "status": "ERROR", "reason": "helper_unavailable"}
+            self.last_target_action_result = result
+            return result
+
+        bounds = str(target.get("bounds") or target.get("boundsInScreen") or "").strip()
+        resource_id = str(
+            target.get("resource_id") or target.get("rid")
+            or target.get("view_id") or target.get("viewIdResourceName") or ""
+        ).strip()
+        label = str(
+            target.get("label") or target.get("talkbackLabel")
+            or target.get("contentDescription") or target.get("text") or ""
+        ).strip()
+        class_name = str(target.get("class_name") or target.get("className") or target.get("class") or "").strip()
+        requested_target = {
+            "bounds": bounds,
+            "resourceId": resource_id,
+            "label": label,
+            "className": class_name,
+        }
+        self._evidence_begin_target_action(
+            "TARGET_FOCUS_COMMIT", requested_target=requested_target, phase="main_loop"
+        )
+        req_id = uuid.uuid4().hex
+        extras = [
+            "--es", "bounds", self._escape_adb_string(bounds),
+            "--es", "targetId", self._escape_adb_string(resource_id),
+            "--es", "targetLabel", self._escape_adb_string(label),
+            "--es", "className", self._escape_adb_string(class_name),
+            "--es", "reqId", req_id,
+        ]
+        extras.extend(self._evidence_correlation_extras())
+        self._evidence_action_sent(action=ACTION_TARGET_FOCUS_COMMIT, req_id=req_id)
+        result = self._helper_bridge.request_focus_command(dev, ACTION_TARGET_FOCUS_COMMIT, req_id, extras)
+        result = self._normalize_target_action_payload(result if isinstance(result, dict) else {})
+        self.last_target_action_result = result
+        self._evidence_helper_ack(result, req_id=req_id, source="inline")
+        return result
 
     def scrollFind(self, dev, name, wait_=30, direction_='updown', type_='all'):
         if not self.check_helper_status(dev=dev):

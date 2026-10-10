@@ -66,6 +66,19 @@ def test_life_bounds_tap_probe_returns_seed_preview():
                 """
             return ""
 
+        def dump_hierarchy(self, **_kwargs):
+            nodes = [
+                {"text": "Home Care", "viewIdResourceName": "com.pkg:id/title", "className": "android.widget.TextView",
+                 "packageName": "com.pkg", "boundsInScreen": "40,120,1040,220", "children": []},
+                {"text": "Suggestions", "viewIdResourceName": "com.pkg:id/header", "className": "android.widget.TextView",
+                 "packageName": "com.pkg", "boundsInScreen": "40,360,520,430", "children": []},
+                {"text": "More options", "viewIdResourceName": "com.pkg:id/more_menu_button", "className": "android.widget.Button",
+                 "packageName": "com.pkg", "boundsInScreen": "940,20,1040,120", "children": []},
+            ]
+            root = {"className": "android.widget.FrameLayout", "packageName": "com.pkg", "children": nodes}
+            return {"reqId": "test", "success": True, "nodes": [root],
+                    "windows": [{"root": root, "order": 0}], "nodeCount": 4}
+
     result = start_plugin_probe(
         {
             "card": {

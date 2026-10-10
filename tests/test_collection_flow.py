@@ -1215,6 +1215,7 @@ class DummyClient:
         self.focus_in_bounds_results = []
         self.dump_tree_calls = []
         self.dump_tree_sequence = []
+        self._last_dump_tree_nodes = []
         self.back_calls = 0
         self.last_target_action_result = {}
         self.focus_sequence = []
@@ -1291,8 +1292,18 @@ class DummyClient:
     def dump_tree(self, **kwargs):
         self.dump_tree_calls.append(kwargs)
         if self.dump_tree_sequence:
-            return self.dump_tree_sequence.pop(0)
+            self._last_dump_tree_nodes = self.dump_tree_sequence.pop(0)
+            return self._last_dump_tree_nodes
         return []
+
+    def dump_hierarchy(self, **_kwargs):
+        nodes = self._last_dump_tree_nodes
+        root = {
+            "text": "", "packageName": "com.samsung.android.oneconnect",
+            "className": "android.widget.FrameLayout", "boundsInScreen": "0,0,1080,2400",
+            "children": nodes,
+        }
+        return {"success": True, "nodes": [root], "windows": [{"root": root, "order": 0}], "nodeCount": 1}
 
     def _run(self, args, **kwargs):
         if args == ["shell", "input", "keyevent", "4"]:
@@ -7495,6 +7506,9 @@ def test_collect_step_candidate_priority_groups_skips_consumed_cluster_logical_e
     assert [candidate["label"] for candidate in content_candidates] == ["Latest activity"]
     assert [candidate["label"] for candidate in bottom_strip_candidates] == ["Activity", "Location"]
     assert meta["cluster_pre_filter_skipped"] == ["Weather information"]
+    retained_for_fairness = meta["cluster_pre_filter_skipped_candidates"]
+    assert [candidate["label"] for candidate in retained_for_fairness] == ["Weather information"]
+    assert retained_for_fairness[0]["rid"] == "com.example:id/weather_card"
 
 
 def test_should_suppress_row_persistence_for_low_value_leaf_when_parent_consumed():
@@ -10564,6 +10578,26 @@ def test_post_open_verify_matches_korean_plugin_scoped_aliases():
     )
 
 
+def test_food_korean_entry_verifies_evidence_backed_action_without_accepting_card_copy():
+    tab_cfg = _scenario_config("life_food_plugin")
+
+    assert "쇼핑리스트로 보내기" in tab_cfg["verify_tokens"]
+    assert collection_flow._matches_post_open_verify(
+        tab_cfg,
+        "",
+        "상위 메뉴로 이동",
+        "상위 메뉴로 이동",
+        extra_candidates=["쇼핑리스트로 보내기"],
+    )
+    assert not collection_flow._matches_post_open_verify(
+        tab_cfg,
+        "",
+        "상위 메뉴로 이동",
+        "상위 메뉴로 이동",
+        extra_candidates=["찹스테이크 마이셰프"],
+    )
+
+
 def test_post_open_negative_verify_matches_korean_aliases():
     assert collection_flow._has_post_open_negative_verify_token(
         {"negative_verify_tokens": ["add device"]},
@@ -10873,6 +10907,102 @@ def test_open_scenario_card_entry_handles_pet_care_onboarding_special_state(monk
     assert client.back_calls == 0
 
 
+def test_air_care_post_back_uses_fresh_life_list_check_when_analyzer_misses_app(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(
+        collection_flow,
+        "stabilize_anchor",
+        lambda **kwargs: {"ok": True, "selected": True, "reason": "selected_and_verified", "matched": True},
+    )
+    monkeypatch.setattr(collection_flow, "_run_pre_navigation_steps", lambda **kwargs: True)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(collection_flow, "_is_special_state_route_allowed", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        collection_flow,
+        "_classify_special_post_open_state",
+        lambda *_args, **_kwargs: (
+            True,
+            "setup_needed_or_empty_state",
+            {
+                "signals": ["long_intro", "cta"],
+                "special_hits": ["location setup"],
+                "cta_hits": ["location"],
+                "verify_hit": True,
+                "long_intro_like": True,
+                "low_content_diversity": True,
+                "cta_pair": False,
+                "top_chrome_intro_cta": True,
+                "intro_focus_like": True,
+                "handling": "back_after_read",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        collection_flow,
+        "_collect_special_state_grace_evidence",
+        lambda *_args, **_kwargs: {
+            "evidence": "strong_onboarding_token",
+            "strong_onboarding": True,
+            "home_like": False,
+            "focus_label": "Set geolocation",
+            "focus_visible": "Set geolocation to monitor outdoor air quality",
+            "top_visible": [],
+            "body_texts": [],
+            "home_like_hits": [],
+            "onboarding_hits": ["set geolocation"],
+            "onboarding_match_token": "set geolocation",
+            "onboarding_match_source": "visible_text",
+            "onboarding_match_text": "Set geolocation to monitor outdoor air quality",
+        },
+    )
+    analyzer_calls = []
+    monkeypatch.setattr(
+        collection_flow,
+        "_analyze_current_state",
+        lambda *_args, **_kwargs: analyzer_calls.append(True)
+        or {"package_signature_present": False, "app_bar_hits": 0},
+    )
+    list_check_calls = []
+
+    def verify_fresh_life_list(_client, _dev, *, phase):
+        list_check_calls.append(phase)
+        return True, "fresh_selected_life_tab_and_plugin_list"
+
+    monkeypatch.setattr(collection_flow, "_verify_fresh_life_list_state", verify_fresh_life_list)
+    client = DummyClient([_anchor_row(), _anchor_row()])
+    client.focus_sequence = [
+        {"viewIdResourceName": "com.example:id/title", "text": "Outdoor air quality"},
+        {"viewIdResourceName": "com.samsung.android.oneconnect:id/menu_services", "text": "Life"},
+    ]
+    client.last_post_click_transition_same_screen = False
+    client.last_post_click_transition_signal = "air_care_verify"
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_air_care_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["outdoor air quality"],
+        "special_state_tokens": ["set geolocation to monitor outdoor air quality"],
+        "special_state_cta_tokens": ["set geolocation"],
+        "special_state_handling": "back_after_read",
+    }
+    monkeypatch.setattr(
+        collection_flow,
+        "_collect_post_open_visible_text",
+        lambda *_args, **_kwargs: "Set geolocation to monitor outdoor air quality Dismiss",
+    )
+
+    ok = collection_flow.open_scenario(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    summary = getattr(client, "last_start_open_summary", {})
+    assert summary.get("entry_contract_reason") == "special_state_handled"
+    assert summary.get("special_state_detected") is True
+    assert list_check_calls.count("special_state_post_back") == 1
+    assert analyzer_calls == []
+    assert client.back_calls == 1
+
+
 def test_open_scenario_card_entry_keeps_normal_traversal_after_special_state_grace(monkeypatch):
     monkeypatch.setattr(collection_flow, "_verify_fresh_life_list_state", lambda *_args, **_kwargs: (True, "ready"))
     monkeypatch.setattr(collection_flow, "recover_to_start_state", lambda *_args, **_kwargs: True)
@@ -11162,6 +11292,127 @@ def test_special_state_korean_onboarding_evidence_still_routes_special_state():
     assert kind == "setup_needed_or_empty_state"
     assert "권한" in meta["onboarding_body_hits"]
     assert "설정하기" in meta["cta_hits"]
+
+
+def test_special_state_cta_requires_exact_actionable_korean_setup_label():
+    nodes = [
+        {"text": "권한을 연결해 주세요", "className": "android.widget.TextView"},
+        {"text": "설정하기", "className": "android.widget.Button", "clickable": True},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_air_care_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["air care"],
+        "special_state_tokens": ["권한"],
+        "special_state_cta_tokens": ["설정하기"],
+        "special_state_handling": "back_after_read",
+    }
+
+    detected, kind, meta = collection_flow._classify_special_post_open_state(
+        tab_cfg,
+        post_view_id="com.example:id/onboarding",
+        post_label="Air Care",
+        post_speech="Air Care 권한을 연결해 주세요 설정하기",
+        visible_verify_text="Air Care 권한을 연결해 주세요 설정하기",
+        matches_verify=True,
+        post_nodes=nodes,
+    )
+
+    assert detected is True
+    assert kind == "setup_needed_or_empty_state"
+    assert meta["cta_hits"] == ["설정하기"]
+
+
+def test_special_state_location_setup_action_is_detected_with_setup_context():
+    nodes = [
+        {"text": "실외 공기질을 확인하려면 위치 설정이 필요합니다", "className": "android.widget.TextView"},
+        {"text": "위치 설정", "className": "android.widget.Button", "clickable": True},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_air_care_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["air quality"],
+        "special_state_tokens": ["위치 설정"],
+        "special_state_cta_tokens": ["위치 설정"],
+        "special_state_handling": "back_after_read",
+    }
+
+    detected, kind, meta = collection_flow._classify_special_post_open_state(
+        tab_cfg,
+        post_view_id="com.example:id/location_setup",
+        post_label="위치 설정",
+        post_speech="실외 공기질을 확인하려면 위치 설정이 필요합니다 위치 설정",
+        visible_verify_text="실외 공기질을 확인하려면 위치 설정이 필요합니다 위치 설정",
+        matches_verify=True,
+        post_nodes=nodes,
+    )
+
+    assert detected is True
+    assert kind == "setup_needed_or_empty_state"
+    assert meta["cta_hits"] == ["위치 설정"]
+
+
+def test_air_care_description_setting_text_is_not_a_special_state_cta():
+    description = "방마다 딱 맞는 온습도 설정하기"
+    nodes = [
+        {"text": "실외 공기질 보통", "className": "android.widget.TextView"},
+        {"text": description, "className": "android.widget.TextView"},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_air_care_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["air quality"],
+        "special_state_cta_tokens": ["설정하기"],
+        "special_state_handling": "back_after_read",
+    }
+
+    detected, kind, meta = collection_flow._classify_special_post_open_state(
+        tab_cfg,
+        post_view_id="com.example:id/air_care",
+        post_label="Air Care",
+        post_speech=f"Air Care 실외 공기질 보통 {description}",
+        visible_verify_text=f"Air Care 실외 공기질 보통 {description}",
+        matches_verify=True,
+        post_nodes=nodes,
+    )
+
+    assert detected is False
+    assert kind == ""
+    assert "설정하기" not in meta["cta_hits"]
+
+
+def test_non_actionable_text_containing_setup_label_does_not_create_cta_pair():
+    nodes = [
+        {"text": "권한을 연결해 주세요. 자세한 내용을 확인한 뒤 설정하기를 진행해 주세요.", "className": "android.widget.TextView"},
+        {"text": "설정하기", "className": "android.widget.TextView"},
+    ]
+    tab_cfg = {
+        **_base_tab_cfg(),
+        "scenario_id": "life_air_care_plugin",
+        "entry_type": "card",
+        "verify_tokens": ["air care"],
+        "special_state_tokens": ["권한"],
+        "special_state_cta_tokens": ["설정하기"],
+        "special_state_handling": "back_after_read",
+    }
+
+    detected, kind, meta = collection_flow._classify_special_post_open_state(
+        tab_cfg,
+        post_view_id="com.example:id/onboarding",
+        post_label="Air Care",
+        post_speech="Air Care 권한을 연결해 주세요 설정하기",
+        visible_verify_text="Air Care 권한을 연결해 주세요 설정하기",
+        matches_verify=True,
+        post_nodes=nodes,
+    )
+
+    assert detected is False
+    assert kind == ""
+    assert "설정하기" not in meta["cta_hits"]
+    assert meta["cta_pair"] is False
 
 
 def test_special_state_cta_with_two_content_cards_uses_ready_override():
@@ -14050,7 +14301,7 @@ def test_life_reset_launches_smartthings_when_app_is_outside(monkeypatch):
     assert foreground_calls[0]["serial"] == "SERIAL"
 
 
-def test_verify_fresh_life_list_state_uses_window_xml_selected_fallback(monkeypatch):
+def test_verify_fresh_life_list_state_uses_service_hierarchy_selected_fallback(monkeypatch):
     client = DummyClient([])
     client.dump_tree_sequence = [_life_reset_r2_nodes()]
     selected_xml_nodes = _life_reset_r2_nodes(selected=True)
@@ -14076,10 +14327,15 @@ def test_load_scrolltouch_xml_nodes_preserves_selected_state():
     )
 
     class XmlClient:
-        def _run(self, args, **_kwargs):
-            if args[:3] == ["shell", "cat", "/sdcard/window_dump_scrolltouch.xml"]:
-                return xml_text
-            return ""
+        def dump_hierarchy(self, **_kwargs):
+            node = {
+                "text": "Life", "contentDescription": "", "viewIdResourceName": "",
+                "className": "android.widget.LinearLayout", "packageName": "com.samsung.android.oneconnect",
+                "clickable": True, "focusable": True, "selected": True, "visibleToUser": True,
+                "boundsInScreen": "[0,900][150,1000]", "children": [],
+            }
+            root = {"text": "", "packageName": "com.samsung.android.oneconnect", "children": [node]}
+            return {"success": True, "nodes": [root], "windows": [{"root": root, "order": 0}], "nodeCount": 2}
 
     nodes, reason = collection_flow._load_scrolltouch_xml_nodes(XmlClient(), "SERIAL")
     flat_nodes = collection_flow._iter_tree_nodes_with_parent(nodes)
@@ -14275,14 +14531,6 @@ def test_capture_pre_navigation_failure_bundle_saves_expected_files(tmp_path, mo
     monkeypatch.setattr(client, "_take_snapshot", lambda _dev, save_path: Path(save_path).write_bytes(b"png"), raising=False)
     monkeypatch.setattr(client, "_resolve_serial", lambda _dev: "SERIAL123", raising=False)
 
-    def _run(args, **kwargs):
-        if args[:3] == ["pull", "/sdcard/window_dump_20260101_120000.xml", str(Path("x"))]:
-            return ""
-        if args[0] == "pull":
-            Path(args[2]).write_text("<hierarchy/>", encoding="utf-8")
-        return ""
-
-    monkeypatch.setattr(client, "_run", _run, raising=False)
     monkeypatch.setattr(collection_flow, "datetime", SimpleNamespace(
         now=lambda tz=None: __import__("datetime").datetime(2026, 1, 1, 12, 0, 0, tzinfo=tz),
     ))
@@ -14423,13 +14671,7 @@ def test_capture_pre_navigation_failure_bundle_logs_partial_failure(monkeypatch,
     monkeypatch.setattr(client, "_take_snapshot", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("snap_fail")), raising=False)
     monkeypatch.setattr(client, "_resolve_serial", lambda _dev: "SERIAL123", raising=False)
 
-    def _run(args, **kwargs):
-        _ = kwargs
-        if args[0] == "pull":
-            raise RuntimeError("pull_fail")
-        return ""
-
-    monkeypatch.setattr(client, "_run", _run, raising=False)
+    monkeypatch.setattr(client, "dump_hierarchy", lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("pull_fail")))
     monkeypatch.setattr(collection_flow, "datetime", SimpleNamespace(
         now=lambda tz=None: __import__("datetime").datetime(2026, 1, 1, 12, 0, 0, tzinfo=tz),
     ))
@@ -14450,7 +14692,7 @@ def test_capture_pre_navigation_failure_bundle_logs_partial_failure(monkeypatch,
     assert any(
         "[CAPTURE][pre_nav_failure] failed" in line
         and "saved_files='helper_dump.json,focus_payload.json,meta.json'" in line
-        and "failed_files='screenshot.png:snap_fail,window_dump.xml:pull_fail'" in line
+        and "failed_files='screenshot.png:snap_fail,window_dump.xml:service_hierarchy_failed:pull_fail'" in line
         for _, line in logs
     )
 
@@ -15346,6 +15588,54 @@ def _run_phase_ordering_main_loop(monkeypatch, *, row, stop=False, reason=""):
     monkeypatch.setattr(collection_flow, "_maybe_select_next_local_tab", fake_select_next_local_tab)
     collection_flow._main_loop_phase(client, "SERIAL", phase_ctx)
     return events, phase_ctx
+
+
+def test_main_loop_invalidates_step_when_talkback_restarts_during_navigation(monkeypatch):
+    state = _phase_ordering_state()
+    client = DummyClient([_main_row(1)])
+    client._window_lifecycle_recorder = SimpleNamespace(restart_event=None)
+    from tb_runner.target_attempt_ledger import TargetAttemptLedger
+    client._target_attempt_ledger = TargetAttemptLedger()
+    attempt = client._target_attempt_ledger.begin("s1", 1, {})
+    client._target_attempt_ledger.finish(attempt, status="TARGET_MATCHED")
+    phase_ctx = SimpleNamespace(
+        tab_cfg=_base_tab_cfg(max_steps=2),
+        rows=[],
+        all_rows=[],
+        output_path="unused.xlsx",
+        output_base_dir=".",
+        scenario_perf=None,
+        checkpoint_every=100,
+        main_step_wait_seconds=0,
+        main_announcement_wait_seconds=0,
+        main_announcement_idle_wait_seconds=0,
+        main_announcement_max_extra_wait_seconds=0,
+        state=state,
+    )
+    logs = []
+
+    def action_detects_restart(**kwargs):
+        client._window_lifecycle_recorder.restart_event = {
+            "timestamp": "2026-10-07T00:00:00.000+00:00",
+            "phase": "after",
+            "action_type": "SMART_NEXT",
+            "previous_talkback_pid": "123",
+            "talkback_pid": "456",
+        }
+        return _main_row(kwargs["step_idx"])
+
+    monkeypatch.setattr(collection_flow, "_apply_step_collection_phase", action_detects_restart)
+    monkeypatch.setattr(collection_flow, "log", lambda message: logs.append(str(message)))
+
+    collection_flow._main_loop_phase(client, "SERIAL", phase_ctx)
+
+    assert phase_ctx.rows == []
+    assert phase_ctx.all_rows == []
+    assert state.stop_triggered is True
+    assert state.stop_reason == "talkback_restarted"
+    assert state.stop_step == 1
+    assert any("[TALKBACK_RESTART_ABORT]" in message for message in logs)
+    assert client._target_attempt_ledger.entries[attempt]["state"] == "INTERRUPTED_TALKBACK_RESTART"
 
 
 def test_stop_then_cta_grace_allows_continue_then_stops_after_exhaust():

@@ -1,5 +1,6 @@
 import json
 import sys
+import xml.etree.ElementTree as ET
 
 import pytest
 
@@ -29,14 +30,28 @@ class Client:
             raise RuntimeError("unavailable")
         return {"text": "Device", "accessibilityFocused": True}
 
+    def dump_hierarchy(self, **kwargs):
+        assert kwargs == {"dev": "serial"}
+        if self.xml is None:
+            raise RuntimeError("Hierarchy unavailable")
+        def node(element):
+            attrs = element.attrib
+            result = {"viewIdResourceName": attrs.get("resource-id", ""),
+                      "text": attrs.get("text", ""), "className": attrs.get("class", ""),
+                      "packageName": attrs.get("package", ""), "boundsInScreen": attrs.get("bounds", "")}
+            for name, xml_name in (("selected", "selected"), ("enabled", "enabled"),
+                    ("clickable", "clickable"), ("focusable", "focusable"),
+                    ("focused", "focused"), ("checked", "checked"),
+                    ("scrollable", "scrollable"), ("visibleToUser", "visible-to-user"),
+                    ("accessibilityFocused", "accessibility-focused")):
+                result[name] = attrs[xml_name] == "true" if xml_name in attrs else None
+            result["children"] = [node(child) for child in element]
+            return result
+        return {"success": True, "windows": [{"active": True, "focused": True,
+                "root": node(ET.fromstring(self.xml)[0])}]}
+
     def _run(self, command, **kwargs):
         self.calls.append(command)
-        if command[:3] == ["shell", "uiautomator", "dump"]:
-            if self.xml is None:
-                raise RuntimeError("XML unavailable")
-            return "UI hierarchy dumped"
-        if command[:2] == ["shell", "cat"]:
-            return self.xml
         if command == ["shell", "wm", "size"]:
             return "Physical size: 1080x2640\nOverride size: 1000x1000"
         if command == ["shell", "dumpsys", "window"]:
@@ -49,13 +64,13 @@ def test_capture_reuses_sources_and_copies_capability_before_focus_cache_changes
     value = diagnostic.capture_observation(client, "serial", scenario_id="home", step=2)
     assert value["capability"]["can_scroll_forward"] is True
     assert client.last_dump_metadata["canScrollDown"] is False
-    assert value["selected_tab"] == {"name": "home", "verified": True, "source": "xml_selected"}
+    assert value["selected_tab"] == {"name": "home", "verified": True, "source": "service_hierarchy_selected"}
     assert value["package_name"] == "com.samsung.android.oneconnect"
     assert value["activity_name"] == ".MainActivity"
     assert value["display_bounds"] == [0, 0, 1000, 1000]
-    assert value["source"] == "helper_capability+xml_semantics"
+    assert value["source"] == "helper_capability+service_hierarchy_semantics"
     assert value["overlay"]["source"] == "existing_popup_detector"
-    assert len(client.calls) == 4
+    assert len(client.calls) == 2
 
 
 def test_absent_xml_flags_remain_unknown_instead_of_false():
@@ -72,7 +87,7 @@ def test_xml_unavailable_preserves_partial_helper_and_unknown_tab():
     assert value["selected_tab"] is None
     assert value["navigation_context"] is None
     assert value["nodes"][0]["text"] == "Device"
-    assert "xml_capture:RuntimeError" in value["notes"]
+    assert "hierarchy_capture:RuntimeError" in value["notes"]
     assert build_state_fingerprint(value).to_dict()["core"]["selected_tab"] is None
 
 
@@ -146,3 +161,20 @@ def test_cli_requires_explicit_capture_or_replay(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         diagnostic.main()
     assert exc.value.code == 2
+
+
+def test_service_capture_preserves_actual_focus_and_never_uses_uiautomator():
+    client = Client(xml=XML.replace('selected="true"', 'selected="true" accessibility-focused="true" focused="false"'))
+    value = diagnostic.capture_observation(client, "serial")
+    assert value["nodes"][0]["focused"] is False
+    assert value["nodes"][0]["accessibilityFocused"] is True
+    assert all("uiautomator" not in command for command in client.calls)
+
+
+def test_missing_service_api_never_falls_back_to_uiautomator():
+    client = Client()
+    client.dump_hierarchy = None
+    value = diagnostic.capture_observation(client, "serial")
+    assert value["source"] == "helper_flat"
+    assert "hierarchy_capture:TypeError" in value["notes"]
+    assert all("uiautomator" not in command for command in client.calls)

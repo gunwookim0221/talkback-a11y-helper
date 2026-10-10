@@ -195,7 +195,7 @@ TAB_CONFIGS = [
                 "generic_weak_tokens": [],
             },
         },
-        "verify_tokens": ["smartthings cooking", "ingredients"],
+        "verify_tokens": ["smartthings cooking", "ingredients", "쇼핑리스트로 보내기"],
         "anchor_name": "(?i).*(navigate\\s*up|위로\\s*이동|상위\\s*메뉴로\\s*이동).*",
         "anchor_type": "a",
         "anchor": {
@@ -472,11 +472,13 @@ TAB_CONFIGS = [
         },
         "screen_context_mode": "bottom_tab",
         "stabilization_mode": "anchor_then_context",
-        "anchor_name": "(?i).*location.*qr.*code.*|.*장소\\s*qr\\s*코드.*",
-        "anchor_type": "b",
+        # This is the same body anchor verified by fallback in both locales.
+        # Keep Devices independent of Home's QR chrome configuration.
+        "anchor_name": "^com\\.samsung\\.android\\.oneconnect:id/search_icon$",
+        "anchor_type": "r",
         "anchor": {
-            "text_regex": "(?i).*location.*qr.*code.*|.*장소\\s*qr\\s*코드.*",
-            "announcement_regex": "(?i).*qr.*code.*|.*qr\\s*코드.*",
+            "resource_id_regex": "^com\\.samsung\\.android\\.oneconnect:id/search_icon$",
+            "allow_resource_id_only": True,
             "tie_breaker": "top_left",
         },
         "context_verify": {
@@ -1053,7 +1055,10 @@ TAB_CONFIGS = [
             "allow_resource_id_only": True,
         },
         "screen_context_mode": "bottom_tab",
-        "stabilization_mode": "anchor_then_context",
+        # The Menu tab no longer exposes the configured Settings label in its
+        # current root hierarchy. A verified selected Menu tab plus a ready
+        # content root is its semantic entry contract.
+        "stabilization_mode": "tab_context",
         "anchor_name": "(?i).*smartthings settings.*|.*settings.*|.*스마트싱스\\s*설정.*",
         "anchor_type": "a",
         "anchor": {

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
+from talkback_lib.window_lifecycle import TALKBACK_PACKAGE
 
 ONECONNECT_PACKAGE = "com.samsung.android.oneconnect"
 FATAL_EXCEPTION_TOKEN = "FATAL EXCEPTION"
@@ -103,8 +104,9 @@ class CrashEventStore:
 
 
 class OneConnectCrashDetector:
-    def __init__(self, store: CrashEventStore) -> None:
+    def __init__(self, store: CrashEventStore, *, process: str = ONECONNECT_PACKAGE) -> None:
         self.store = store
+        self.process = process
         self._current_block: list[str] = []
         self._in_fatal_block = False
 
@@ -146,14 +148,14 @@ class OneConnectCrashDetector:
 
     def _event_from_block(self, block: list[str]) -> CrashEvent | None:
         text = "".join(block)
-        if FATAL_EXCEPTION_TOKEN not in text or PROCESS_TOKEN not in text:
+        if FATAL_EXCEPTION_TOKEN not in text or f"Process: {self.process}," not in text:
             return None
         exception = _extract_exception(block)
         top_frame = _extract_top_frame(block)
         return CrashEvent(
             crash_event_id=self.store.next_event_id(),
-            crash_type="CONFIRMED_CRASH",
-            process=ONECONNECT_PACKAGE,
+            crash_type="CONFIRMED_CRASH" if self.process == ONECONNECT_PACKAGE else "TALKBACK_CRASH",
+            process=self.process,
             exception=exception,
             top_frame=top_frame,
             timestamp=_extract_timestamp(block) or datetime.now(timezone.utc).isoformat(),
@@ -197,6 +199,14 @@ class LogcatCapture:
             helper_dump_factory=helper_dump_factory,
         )
         self.detector = OneConnectCrashDetector(self.store)
+        # Keep TalkBack crashes out of the application's crash/recovery population.
+        self.talkback_detector = OneConnectCrashDetector(
+            CrashEventStore(output_dir / "talkback_monitor", serial=serial,
+                            runner_log_path=runner_log_path, run_factory=run_factory,
+                            helper_dump_factory=helper_dump_factory),
+            process=TALKBACK_PACKAGE,
+        )
+        self._run_factory = run_factory
         self._popen_factory = popen_factory
         self._process: subprocess.Popen[str] | None = None
         self._thread: threading.Thread | None = None
@@ -216,6 +226,7 @@ class LogcatCapture:
         )
         self._thread = threading.Thread(target=self._read_loop, daemon=True)
         self._thread.start()
+        self._capture_talkback_exit_info("start")
 
     def stop(self, *, timeout: float = 3.0) -> list[CrashEvent]:
         process = self._process
@@ -229,7 +240,21 @@ class LogcatCapture:
         if self._thread:
             self._thread.join(timeout=timeout)
         self._record_events(self.detector.finish())
+        self._record_events(self.talkback_detector.finish())
+        self._capture_talkback_exit_info("end")
         return list(self.events)
+
+    def _capture_talkback_exit_info(self, phase: str) -> None:
+        path = self.output_dir / f"talkback_exit_info_{phase}.txt"
+        try:
+            result = self._run_factory(
+                _adb_command(self.serial, ["shell", "dumpsys", "activity", "exit-info", TALKBACK_PACKAGE]),
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                encoding="utf-8", errors="replace", timeout=8.0, check=False,
+            )
+            path.write_text(str(result.stdout or ""), encoding="utf-8")
+        except Exception as exc:
+            path.write_text(f"UNAVAILABLE: {type(exc).__name__}: {exc}", encoding="utf-8")
 
     def _read_loop(self) -> None:
         try:
@@ -239,7 +264,9 @@ class LogcatCapture:
                     return
                 for line in stdout:
                     log_file.write(line)
+                    log_file.flush()
                     self._record_events(self.detector.feed_line(line))
+                    self._record_events(self.talkback_detector.feed_line(line))
         except Exception:
             return
 
@@ -339,14 +366,24 @@ def capture_crash_context(
         capture_errors["screenshot"] = screenshot_error
 
     window_path = event_dir / "crash_window_dump.xml"
-    window_error = _capture_window_dump(serial=serial, path=window_path, run_factory=run_factory)
+    try:
+        factory = helper_dump_factory or _default_helper_dump
+        hierarchy_payload = factory(serial)
+    except Exception as exc:
+        hierarchy_payload = None
+        capture_errors["helper_dump"] = str(exc)
+    window_error = _capture_window_dump(path=window_path, hierarchy_payload=hierarchy_payload)
     if window_error:
         capture_errors["window_dump"] = window_error
 
     helper_path = event_dir / "crash_helper_dump.json"
-    helper_error = _capture_helper_dump(serial=serial, path=helper_path, helper_dump_factory=helper_dump_factory)
+    helper_error = _capture_helper_dump(
+        path=helper_path,
+        hierarchy_payload=hierarchy_payload,
+        failure_reason=capture_errors.get("helper_dump"),
+    )
     if helper_error:
-        capture_errors["helper_dump"] = helper_error
+        capture_errors.setdefault("helper_dump", helper_error)
 
     current_package, foreground_error = _capture_current_package(serial=serial, run_factory=run_factory)
     if foreground_error:
@@ -401,49 +438,26 @@ def _capture_screenshot(*, serial: str | None, path: Path, run_factory: RunFacto
         return str(exc)
 
 
-def _capture_window_dump(*, serial: str | None, path: Path, run_factory: RunFactory) -> str | None:
-    remote_path = f"/sdcard/tb_crash_{path.parent.name}_window_dump.xml"
+def _capture_window_dump(*, path: Path, hierarchy_payload: Any) -> str | None:
     try:
-        dump_result = run_factory(
-            _adb_command(serial, ["shell", "uiautomator", "dump", remote_path]),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=12.0,
-            check=False,
-        )
-        if dump_result.returncode != 0:
-            return str(dump_result.stdout or f"returncode={dump_result.returncode}")
-        cat_result = run_factory(
-            _adb_command(serial, ["shell", "cat", remote_path]),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=8.0,
-            check=False,
-        )
-        if cat_result.returncode != 0:
-            return str(cat_result.stdout or f"returncode={cat_result.returncode}")
-        path.write_text(str(cat_result.stdout or ""), encoding="utf-8", errors="replace")
+        from talkback_lib.hierarchy_snapshot import service_hierarchy_to_xml
+
+        path.write_text(service_hierarchy_to_xml(hierarchy_payload), encoding="utf-8", errors="replace")
         return None
     except Exception as exc:
-        return str(exc)
+        return f"service_hierarchy_unavailable:{exc}"
 
 
 def _capture_helper_dump(
     *,
-    serial: str | None,
     path: Path,
-    helper_dump_factory: Callable[[str | None], Any] | None,
+    hierarchy_payload: Any,
+    failure_reason: str | None = None,
 ) -> str | None:
     try:
-        factory = helper_dump_factory or _default_helper_dump
-        payload = factory(serial)
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        if not isinstance(hierarchy_payload, dict) or hierarchy_payload.get("success") is not True:
+            raise ValueError(failure_reason or "service hierarchy payload unavailable")
+        path.write_text(json.dumps(hierarchy_payload, ensure_ascii=False, indent=2), encoding="utf-8")
         return None
     except Exception as exc:
         error_payload = {"nodes": None, "error": str(exc)}
@@ -455,8 +469,7 @@ def _default_helper_dump(serial: str | None) -> dict[str, object]:
     from talkback_lib import A11yAdbClient
 
     client = A11yAdbClient(dev_serial=serial, start_monitor=False)
-    nodes = client.dump_tree(dev=serial, wait_seconds=2.0)
-    return {"nodes": nodes, "metadata": getattr(client, "last_dump_metadata", {})}
+    return client.dump_hierarchy(dev=serial)
 
 
 def _capture_current_package(*, serial: str | None, run_factory: RunFactory) -> tuple[str | None, str | None]:
