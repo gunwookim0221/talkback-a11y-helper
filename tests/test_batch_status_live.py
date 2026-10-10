@@ -127,6 +127,7 @@ def test_parse_live_log_extracts_current_progress_and_preflight():
             "[STEP] END scenario='global_nav_main' step=0 visible='Home, Tab 1 of 5' move_result='moved' final_result='PASS'",
             "[QUALITY] step=0 final_result='REVIEW'",
             "[PERF][scenario_summary] scenario=global_nav_main total_steps=1",
+            "[PERF][scenario_contract_summary] scenario=global_nav_main total_steps=1 termination_status=COMPLETED termination_reason=terminal_reached nav_items_expected=5 nav_items_verified=5",
         ]
     )
 
@@ -149,6 +150,17 @@ def test_parse_live_log_extracts_current_progress_and_preflight():
     assert live["progress"]["observed_steps"] == 1
     assert live["progress"]["total_scenarios"] == 1
     assert live["progress"]["completed_steps"] == 1
+    assert live["progress"]["scenario_progress"] == [{
+        "id": "global_nav_main",
+        "status": "passed",
+        "steps": 1,
+        "termination_status": "COMPLETED",
+        "termination_reason": "terminal_reached",
+        "nav_items_expected": "5",
+        "nav_items_verified": "5",
+        "execution_status": "COMPLETED",
+        "comparison_status": "N/A",
+    }]
     assert live["progress"]["pass_count"] == 1
     assert live["progress"]["review_count"] == 1
     assert live["logs"]["latest_preflight_status"]["device_connected"] == "PASS"
@@ -158,6 +170,42 @@ def test_parse_live_log_extracts_current_progress_and_preflight():
     assert live["logs"]["latest_preflight_status"]["helper"] == "PASS"
     assert live["logs"]["latest_preflight_status"]["talkback"] == "enabled"
     assert live["logs"]["latest_quality_event"] == "[QUALITY] step=0 final_result='REVIEW'"
+
+
+def test_live_batch_status_exposes_terminal_scenario_contract_for_acceptance_monitor(
+    tmp_path,
+    monkeypatch,
+):
+    scenario_id = "device_smoke_sensor_plugin"
+    log_text = "\n".join(
+        [
+            f"[SCENARIO][entry_contract] success scenario='{scenario_id}' entry_type='card'",
+            f"[STEP] START scenario='{scenario_id}' step=0 target='Smoke sensor' action='smart_next'",
+            f"[PERF][scenario_contract_summary] scenario={scenario_id} total_steps=1 "
+            "termination_status=INCOMPLETE_ERROR termination_reason=tab_or_anchor_failed",
+        ]
+    )
+    manager = _configure_running_manager(
+        tmp_path,
+        monkeypatch,
+        batch_id="batch_terminal_contract_progress",
+        scenario_ids=[scenario_id],
+        log_text=log_text,
+    )
+
+    progress = manager.get_status()["progress"]
+
+    assert progress["failed_scenarios"] == 1
+    assert progress["terminal_scenarios"] == 1
+    assert progress["scenario_progress"] == [{
+        "id": scenario_id,
+        "status": "failed",
+        "steps": 1,
+        "termination_status": "INCOMPLETE_ERROR",
+        "termination_reason": "tab_or_anchor_failed",
+        "execution_status": "INCOMPLETE_ERROR",
+        "comparison_status": "N/A",
+    }]
 
 
 def test_batch_status_includes_stable_live_dashboard_fields(tmp_path, monkeypatch):

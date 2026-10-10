@@ -252,6 +252,7 @@ def _parse_live_log(log_text: str, *, scenario_ids: list[str] | None = None) -> 
         "passed_scenarios": int(parsed.get("passed_scenarios") or 0),
         "failed_scenarios": int(parsed.get("failed_scenarios") or 0),
         "warning_scenarios": int(parsed.get("warning_scenarios") or 0),
+        "scenario_progress": list(parsed.get("scenario_progress") or []),
         "observed_runtime_events": observed_runtime_events,
         "observed_steps": observed_step_count,
         "total_steps": max(int(parsed.get("total_step_count") or 0), observed_step_count),

@@ -3924,6 +3924,7 @@ def recover_to_device_start_state(
     recovery bounded: it sends Back only while the global navigation is absent,
     then uses the existing tab-selection/context verification contract.
     """
+    setattr(client, "last_device_tab_context_verified", False)
     policy = _resolve_recovery_policy(tab_cfg)
     scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip() or "unknown"
     wait_seconds = _get_wait_seconds(tab_cfg, "back_recovery_wait_seconds", MAIN_STEP_WAIT_SECONDS)
@@ -3993,6 +3994,7 @@ def recover_to_device_start_state(
                 context = tab_result.get("verify_context", {}) if isinstance(tab_result, dict) else {}
             actual = str(context.get("actual_selected_text", "") or "") if isinstance(context, dict) else ""
             if _device_recovery_context_verified(tab_result):
+                setattr(client, "last_device_tab_context_verified", True)
                 log(
                     f"[DEVICE_RESET] success=true scenario='{scenario_id}' "
                     f"reason='devices_context_verified' actual='{actual}'"
@@ -4029,11 +4031,13 @@ def recover_to_device_start_state(
 
 def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, Any]) -> bool:
     policy = _resolve_recovery_policy(tab_cfg)
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    if _is_device_plugin_scenario(scenario_id):
+        setattr(client, "last_device_tab_context_verified", False)
     if not policy.get("enabled", True):
         log("[RECOVER] skipped reason='disabled'")
         return True
 
-    scenario_id = str(tab_cfg.get("scenario_id", "") or "")
     if _is_device_plugin_scenario(scenario_id):
         reset_ok, reset_reason = recover_to_device_start_state(client, dev, tab_cfg)
         if reset_ok:
@@ -7255,6 +7259,103 @@ def _device_location_label(state: dict[str, Any]) -> str:
     return ""
 
 
+def _has_device_tab_root_signature(nodes: list[dict[str, Any]]) -> bool:
+    if not isinstance(nodes, list):
+        return False
+    visible_nodes = [
+        node
+        for node, _parent in _iter_tree_nodes_with_parent(nodes)
+        if isinstance(node, dict) and device_tab_logic._visible(node)
+    ]
+    search_present = any(
+        device_tab_logic._resource_id(node) == "com.samsung.android.oneconnect:id/search_icon"
+        for node in visible_nodes
+    )
+    return search_present and bool(device_tab_logic.collect_visible_device_cards(nodes))
+
+
+def _reveal_all_devices_location_chip(
+    client: A11yAdbClient,
+    dev: str,
+    nodes: list[dict[str, Any]],
+    dump_tree_fn: Any,
+    *,
+    step_wait_seconds: float,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None, str]:
+    """Reveal the left edge of the horizontal location-chip strip, boundedly."""
+    max_swipes = 3
+    current_nodes = nodes
+    strip = device_tab_logic.device_location_filter_strip(current_nodes)
+    if strip is None:
+        return current_nodes, None, "location_filter_strip_unavailable"
+    adb_device = getattr(client, "_adb_device", None)
+    swipe_fn = getattr(adb_device, "_swipe", None)
+    if not callable(swipe_fn):
+        return current_nodes, None, "location_filter_strip_swipe_unavailable"
+
+    for attempt in range(1, max_swipes + 1):
+        bounds = _parse_device_entry_bounds(strip.get("bounds", ""))
+        if not bounds:
+            return current_nodes, None, "location_filter_strip_bounds_invalid"
+        left, top, right, bottom = bounds
+        width = right - left
+        if width < 100:
+            return current_nodes, None, "location_filter_strip_too_narrow"
+        y = top + ((bottom - top) // 2)
+        inset = max(24, int(width * 0.08))
+        x_start = left + inset
+        x_end = right - inset
+        if x_end <= x_start:
+            return current_nodes, None, "location_filter_strip_swipe_bounds_invalid"
+        before_signature = str(strip.get("signature", "") or "")
+        log(
+            "[DEVICE][location][reveal] "
+            f"attempt={attempt}/{max_swipes} direction='left' "
+            f"strip='{left},{top},{right},{bottom}' "
+            f"chip_count={int(strip.get('chip_count', 0) or 0)}"
+        )
+        try:
+            swipe_fn(
+                dev=dev,
+                x1=x_start,
+                y1=y,
+                x2=x_end,
+                y2=y,
+                duration_ms=400,
+            )
+        except Exception as exc:
+            return current_nodes, None, f"location_filter_strip_swipe_failed:{type(exc).__name__}"
+        if step_wait_seconds > 0:
+            time.sleep(step_wait_seconds)
+        try:
+            refreshed = dump_tree_fn(dev=dev)
+        except Exception as exc:
+            return current_nodes, None, f"location_filter_strip_verify_dump_failed:{type(exc).__name__}"
+        current_nodes = refreshed if isinstance(refreshed, list) else []
+        candidate = device_tab_logic.find_all_devices_location_candidate(current_nodes)
+        if candidate is not None:
+            log(
+                "[DEVICE][location][reveal_result] candidate_found=true "
+                f"label='{candidate.get('label', '')}' bounds='{candidate.get('bounds', '')}'"
+            )
+            return current_nodes, candidate, "all_devices_chip_revealed"
+        next_strip = device_tab_logic.device_location_filter_strip(current_nodes)
+        if next_strip is None:
+            return current_nodes, None, "location_filter_strip_lost_after_swipe"
+        if str(next_strip.get("signature", "") or "") == before_signature:
+            log(
+                "[DEVICE][location][reveal_result] candidate_found=false "
+                "strip_changed=false stop=true"
+            )
+            return current_nodes, None, "location_filter_strip_no_visible_change"
+        strip = next_strip
+    log(
+        "[DEVICE][location][reveal_result] candidate_found=false "
+        f"strip_changed=true attempts={max_swipes}"
+    )
+    return current_nodes, None, "all_devices_chip_not_revealed_within_bound"
+
+
 def _detect_selected_device_location_with_hierarchy_fallback(
     client: A11yAdbClient,
     dev: str,
@@ -7780,11 +7881,32 @@ def _ensure_all_devices_location_selected(
     for attempt in range(1, 3):
         candidate = device_tab_logic.find_all_devices_location_candidate(nodes)
         if not candidate:
-            log(
-                "[DEVICE][location] selection_verify_failed "
-                f"expected='모든 기기|All devices' actual='{last_actual}' reason='all_devices_candidate_not_found'"
-            )
-            return False, nodes, "all_devices_candidate_not_found"
+            device_tab_context_verified = bool(getattr(client, "last_device_tab_context_verified", False))
+            if device_tab_context_verified and _has_device_tab_root_signature(nodes):
+                nodes, candidate, reveal_reason = _reveal_all_devices_location_chip(
+                    client,
+                    dev,
+                    nodes,
+                    dump_tree_fn,
+                    step_wait_seconds=step_wait_seconds,
+                )
+                state = _detect_selected_device_location_with_hierarchy_fallback(client, dev, nodes)
+                last_actual = _device_location_label(state)
+                log(
+                    "[DEVICE][location][reveal_state] "
+                    f"selected={str(bool(state.get('selected'))).lower()} "
+                    f"actual='{last_actual}' reason='{state.get('reason', '')}' "
+                    f"reveal_reason='{reveal_reason}'"
+                )
+                if bool(state.get("selected")):
+                    return True, nodes, "all_devices_already_selected_after_bounded_strip_recovery"
+            if not candidate:
+                log(
+                    "[DEVICE][location] selection_verify_failed "
+                    f"expected='모든 기기|All devices' actual='{last_actual}' "
+                    "reason='all_devices_candidate_not_found'"
+                )
+                return False, nodes, "all_devices_candidate_not_found"
 
         log(
             f"[DEVICE][location] tap_candidate='{candidate.get('stable_label') or candidate.get('label', '')}' "

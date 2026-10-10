@@ -483,6 +483,57 @@ def find_all_devices_location_candidate(nodes: list[dict[str, Any]]) -> dict[str
     return sorted(candidates, key=lambda item: (-int(item["score"]), item["top"], item["left"]))[0]
 
 
+def device_location_filter_strip(nodes: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Describe the visible horizontal location-chip strip on the Devices page.
+
+    The app can scroll its location chips independently of the device-card
+    list.  Keep this selector structural: only actionable LinearLayout chips
+    near the top of the page participate, and callers must still verify the
+    Devices tab context before using the returned bounds for a gesture.
+    """
+    chips: list[dict[str, Any]] = []
+    for node in nodes:
+        if not isinstance(node, dict) or not _visible(node):
+            continue
+        if _resource_id(node) == "com.samsung.android.oneconnect:id/search_icon":
+            continue
+        class_name = _text(node.get("className")).lower()
+        if "linearlayout" not in class_name:
+            continue
+        if not (_bool_value(node.get("clickable")) or _bool_value(node.get("effectiveClickable"))):
+            continue
+        label = _node_label(node)
+        bounds = _bounds_tuple(node)
+        if not label or not bounds:
+            continue
+        left, top, right, bottom = bounds
+        if top > LOCATION_FILTER_MAX_TOP or bottom <= top or right <= left:
+            continue
+        chips.append(_make_candidate(node, role="device_location_chip"))
+
+    if len(chips) < 2:
+        return None
+    row_top = min(int(chip["top"]) for chip in chips)
+    row_chips = [chip for chip in chips if int(chip["top"]) - row_top <= 24]
+    if len(row_chips) < 2:
+        return None
+    row_chips.sort(key=lambda chip: (int(chip["left"]), int(chip["right"]), str(chip["label"])))
+    left = min(int(chip["left"]) for chip in row_chips)
+    right = max(int(chip["right"]) for chip in row_chips)
+    top = max(int(chip["top"]) for chip in row_chips)
+    bottom = min(int(chip["bottom"]) for chip in row_chips)
+    if right <= left or bottom <= top:
+        return None
+    signature = "|".join(
+        f"{chip['label']}@{chip['bounds']}" for chip in row_chips
+    )
+    return {
+        "bounds": f"{left},{top},{right},{bottom}",
+        "signature": signature,
+        "chip_count": len(row_chips),
+    }
+
+
 def is_device_card_tap_avoid_node(node: dict[str, Any]) -> bool:
     if not isinstance(node, dict) or not _visible(node):
         return False

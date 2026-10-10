@@ -1,4 +1,4 @@
-"""Launch and supervise one explicitly selected Korean validation batch."""
+"""Launch and supervise one explicitly selected TalkBack validation batch."""
 
 from __future__ import annotations
 
@@ -131,6 +131,7 @@ def main() -> int:
     selection.add_argument("--scenario", action="append", dest="scenarios")
     parser.add_argument("--serial", required=True)
     parser.add_argument("--model", required=True)
+    parser.add_argument("--language-mode", choices=("ko-KR", "en-US"), default="ko-KR")
     parser.add_argument("--qa-runs-dir", type=Path, required=True)
     parser.add_argument("--evidence-dir", type=Path, required=True)
     parser.add_argument("--sample-file", required=True)
@@ -166,11 +167,12 @@ def main() -> int:
         "evidence_ledger": True,
         "traversal_profiler": True,
         "devices": [{"serial": args.serial, "model": args.model}],
-        "language_mode": "ko-KR",
+        "language_mode": args.language_mode,
     }
     print(f"MONITOR_START_TIMESTAMP={started_at.isoformat()}", flush=True)
     print(f"TALKBACK_BASELINE_PID={talkback_pid}", flush=True)
     print(f"HELPER_BASELINE_PID={helper_pid}", flush=True)
+    print(f"LANGUAGE_MODE={args.language_mode}", flush=True)
     print(f"SELECTED_SCENARIOS={len(scenarios)}", flush=True)
     try:
         started = _request(args.base_url, "/api/batch/start", payload)
@@ -219,6 +221,7 @@ def main() -> int:
                     hits.extend(monitor.feed_lifecycle(line))
 
             now = datetime.now(timezone.utc)
+            hits.extend(monitor.observe_scenario_failure_count(status, observed_at=now))
             current_pid = _pidof(args.serial, "com.samsung.android.accessibility.talkback")
             if current_pid:
                 consecutive_pid_errors = 0

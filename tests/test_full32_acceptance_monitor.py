@@ -9,6 +9,12 @@ from tools.full32_acceptance_monitor import AcceptanceMonitor, HELPER_PACKAGE, T
 
 
 START = datetime(2026, 10, 9, 7, 40, 0, tzinfo=timezone.utc)
+FAILED_RUN_FIRST_TERMINAL_LINE = (
+    "[20:23:56] [TRAVERSAL_SUMMARY] scenario='device_smoke_sensor_plugin' "
+    "attempted=0 moved=0 failed=0 rows=1 unique_visited=0 candidates=0 "
+    "semantic_covered=0 termination=INCOMPLETE_ERROR "
+    "reason='tab_or_anchor_failed' terminal_step=-1"
+)
 
 
 def monitor() -> AcceptanceMonitor:
@@ -232,3 +238,103 @@ def test_known_request_non_timeout_transport_error_is_a_blocker():
     subject.feed_line(broadcast(), source="runner")
     hits = subject.feed_line(terminal(reason="chunk_digest_mismatch"), source="runner")
     assert [h.code for h in hits] == ["smart_next_transport_error"]
+
+
+@pytest.mark.parametrize(
+    ("line", "expected_reason"),
+    [
+        (
+            "[20:23:56] [PERF][scenario_contract_summary] scenario=device_smoke_sensor_plugin "
+            "termination_status=INCOMPLETE_ERROR termination_reason=tab_or_anchor_failed",
+            "tab_or_anchor_failed",
+        ),
+        (
+            "[20:24:00] [TRAVERSAL_SUMMARY] scenario='device_tv_plugin' attempted=0 "
+            "termination=INCOMPLETE_ERROR reason='anchor_abort' terminal_step=-1",
+            "anchor_abort",
+        ),
+        (
+            "[20:24:01] [SCENARIO_RESULT] scenario_id=device_washer_plugin status=failed "
+            "reason=unresolved_automation_failure",
+            "unresolved_automation_failure",
+        ),
+    ],
+)
+def test_terminal_device_entry_automation_failure_is_a_hard_stop(line, expected_reason):
+    hits = monitor().feed_line(line, source="runner")
+    assert [hit.code for hit in hits] == ["scenario_result_hard_failure"]
+    assert expected_reason in hits[0].evidence
+
+
+def test_failed_english_full32_first_failure_replay_stops_at_smoke_sensor_terminal_record():
+    subject = monitor()
+    hits = subject.feed_line(FAILED_RUN_FIRST_TERMINAL_LINE, source="runner")
+
+    assert [hit.code for hit in hits] == ["scenario_result_hard_failure"]
+    assert "scenario=device_smoke_sensor_plugin" in hits[0].evidence
+    assert "reason=tab_or_anchor_failed" in hits[0].evidence
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "[20:24:00] [PERF][scenario_contract_summary] scenario=life_pet_care_plugin "
+        "termination_status=INCOMPLETE_NO_PROGRESS termination_reason=repeat_no_progress",
+        "[20:24:01] [TRAVERSAL_SUMMARY] scenario=devices_main termination=INCOMPLETE_SAFETY_LIMIT "
+        "reason=safety_limit",
+        "[20:24:02] [PERF][scenario_contract_summary] scenario=devices_main "
+        "termination_status=INCOMPLETE_NO_PROGRESS termination_reason=content_no_progress",
+        "[20:24:03] [TRAVERSAL_SUMMARY] scenario=device_camera_plugin termination=INCOMPLETE_ERROR "
+        "reason=confirmed_app_accessibility_defect",
+        "[20:24:04] [PERF][scenario_contract_summary] scenario=device_audio_plugin "
+        "termination_status=COMPLETED_WITH_WARNING termination_reason=known_warning",
+    ],
+)
+def test_accepted_incomplete_and_warning_terminal_states_do_not_stop(line):
+    assert monitor().feed_line(line, source="runner") == []
+
+
+def test_old_scenario_hard_failure_before_monitor_start_is_ignored():
+    line = (
+        "2026-10-09T07:39:59.000+00:00 [TRAVERSAL_SUMMARY] "
+        "scenario=device_smoke_sensor_plugin termination=INCOMPLETE_ERROR reason=tab_or_anchor_failed"
+    )
+    assert monitor().feed_line(line, source="runner") == []
+
+
+def test_batch_api_waits_for_terminal_contract_before_hard_stop():
+    subject = monitor()
+    baseline = {"progress": {"failed_scenarios": 0, "scenario_progress": []}}
+    # The live dashboard can temporarily classify an entered, active scenario
+    # as failed before it has emitted its terminal contract summary.
+    in_progress_failure = {
+        "progress": {
+            "failed_scenarios": 1,
+            "scenario_progress": [{"id": "device_smoke_sensor_plugin", "status": "failed"}],
+        },
+        "current": {"current_scenario_id": "device_smoke_sensor_plugin"},
+    }
+    terminal_failure = {
+        "progress": {
+            "failed_scenarios": 1,
+            "scenario_progress": [{
+                "id": "device_smoke_sensor_plugin",
+                "status": "failed",
+                "execution_status": "INCOMPLETE_ERROR",
+                "comparison_status": "FAIL",
+            }],
+        },
+        "current": {"current_scenario_id": "device_smoke_sensor_plugin"},
+    }
+
+    assert subject.observe_scenario_failure_count(baseline, observed_at=START + timedelta(seconds=1)) == []
+    assert subject.observe_scenario_failure_count(
+        in_progress_failure, observed_at=START + timedelta(seconds=2)
+    ) == []
+    hits = subject.observe_scenario_failure_count(terminal_failure, observed_at=START + timedelta(seconds=3))
+    assert [hit.code for hit in hits] == ["scenario_result_hard_failure"]
+    assert "device_smoke_sensor_plugin" in hits[0].evidence
+    assert "INCOMPLETE_ERROR" in hits[0].evidence
+    assert subject.observe_scenario_failure_count(
+        terminal_failure, observed_at=START + timedelta(seconds=4)
+    ) == []

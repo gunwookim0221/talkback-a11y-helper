@@ -23,6 +23,16 @@ _PROCESS_PID = re.compile(r"\bProcess:\s*([A-Za-z0-9_.]+)\s*,\s*PID:\s*(\d+)\b",
 _PACKAGE_FIELD = re.compile(r"\bpackage\s*[:=]\s*([A-Za-z0-9_.]+)", re.I)
 _PID_FIELD = re.compile(r"\b(?:target_)?pid\s*[:=]\s*(\d+)\b", re.I)
 _REQUEST_ID = re.compile(r"\b(?:req_?id|request_?id|correlation_?id)['\"]?\s*[:=]\s*['\"]?([A-Za-z0-9_.:-]+)", re.I)
+_SCENARIO_FIELD = re.compile(r"\bscenario(?:_id)?\s*[:=]\s*['\"]?([A-Za-z0-9_.:-]+)", re.I)
+_SCENARIO_STATUS_FIELD = re.compile(
+    r"\b(?:termination_status|termination|scenario_result_status|scenario_status|status)\s*[:=]\s*"
+    r"(?:'([^']*)'|\"([^\"]*)\"|([A-Za-z0-9_.:-]+))",
+    re.I,
+)
+_SCENARIO_REASON_FIELD = re.compile(
+    r"\b(?:termination_reason|reason)\s*[:=]\s*(?:'([^']*)'|\"([^\"]*)\"|([A-Za-z0-9_.:-]+))",
+    re.I,
+)
 _HELPER_ACTION = re.compile(r"\baction\s*[:=]\s*" + re.escape(HELPER_PACKAGE) + r"\.(SMART_NEXT|FOCUS_IN_BOUNDS|TARGET_FOCUS_COMMIT)\b")
 _LOGCAT_HEADER = re.compile(r"^\s*\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+(\d+)\s+\d+\s+[VDIWEF]\s+([^:]+):")
 _LOGCAT_LOCAL_TS = re.compile(r"^\s*(\d{2})-(\d{2})\s+(\d{2}:\d{2}:\d{2}\.\d+)")
@@ -127,6 +137,120 @@ class AcceptanceMonitor:
         self._requests: dict[str, HelperRequest] = {}
         self._request_ttl = timedelta(minutes=5)
         self._request_limit = 512
+        self._api_terminal_failures: set[str] = set()
+
+    @staticmethod
+    def _field_value(pattern: re.Pattern[str], line: str) -> str:
+        match = pattern.search(line)
+        if not match:
+            return ""
+        return next((value for value in match.groups() if value is not None), "").strip()
+
+    def _scenario_result_hit(self, line: str, event_timestamp: str | None) -> MonitorHit | None:
+        """Recognize only terminal scenario records and explicit failed statuses."""
+        contract_summary = "[PERF][scenario_contract_summary]" in line
+        traversal_summary = "[TRAVERSAL_SUMMARY]" in line
+        explicit_result = bool(re.search(
+            r"(?:\[SCENARIO_RESULT\]|\[SCENARIO\]\[(?:terminal|result)\])",
+            line,
+            re.I,
+        ))
+        scenario_match = _SCENARIO_FIELD.search(line)
+        scenario_id = scenario_match.group(1) if scenario_match else "unknown"
+        status = self._field_value(_SCENARIO_STATUS_FIELD, line).strip().lower()
+        reason = self._field_value(_SCENARIO_REASON_FIELD, line).strip().lower()
+
+        if contract_summary or traversal_summary:
+            terminal_status = status == "incomplete_error"
+            normalized_reason = re.sub(r"[\s-]+", "_", reason)
+            hard_automation_reason = bool(re.search(
+                r"(?:tab_or_anchor_failed|anchor_abort|entry_(?:failure|failed|error)|"
+                r"unresolved_automation_failure|automation_failure)",
+                normalized_reason,
+            ))
+            if terminal_status and hard_automation_reason:
+                return MonitorHit(
+                    "scenario_result_hard_failure",
+                    f"scenario={scenario_id} termination_status=INCOMPLETE_ERROR reason={reason}",
+                    event_timestamp,
+                )
+            # A parser-classified failed scenario is also an explicit terminal
+            # hard stop, while warning and accepted incomplete states continue.
+            if status == "failed":
+                return MonitorHit(
+                    "scenario_result_hard_failure",
+                    f"scenario={scenario_id} status=failed reason={reason or 'explicit_failed_status'}",
+                    event_timestamp,
+                )
+
+        if explicit_result and status == "failed":
+            return MonitorHit(
+                "scenario_result_hard_failure",
+                f"scenario={scenario_id} status=failed reason={reason or 'explicit_failed_status'}",
+                event_timestamp,
+            )
+
+        if line.lstrip().startswith("{"):
+            try:
+                event = json.loads(line)
+            except (TypeError, json.JSONDecodeError):
+                event = None
+            if isinstance(event, dict):
+                event_type = str(event.get("event_type") or event.get("event") or event.get("type") or "").lower()
+                result_status = str(event.get("scenario_status") or event.get("status") or "").lower()
+                if event_type in {"scenario_result", "scenario_terminal", "scenario_terminal_result"} and result_status == "failed":
+                    event_scenario = str(event.get("scenario_id") or event.get("scenario") or "unknown")
+                    event_reason = str(event.get("reason") or "explicit_failed_status")
+                    return MonitorHit(
+                        "scenario_result_hard_failure",
+                        f"scenario={event_scenario} status=failed reason={event_reason}",
+                        event_timestamp,
+                    )
+        return None
+
+    def observe_scenario_failure_count(
+        self,
+        status: dict,
+        *,
+        observed_at: datetime,
+    ) -> list[MonitorHit]:
+        """Use only API failures backed by a terminal scenario contract."""
+        observed_at = _as_utc(observed_at)
+        if observed_at < self.started_at or not isinstance(status, dict):
+            return []
+        progress = status.get("progress")
+        if not isinstance(progress, dict):
+            return []
+        try:
+            failed_count = max(0, int(progress.get("failed_scenarios") or 0))
+        except (TypeError, ValueError):
+            return []
+        if failed_count <= 0:
+            return []
+        scenario_progress = progress.get("scenario_progress")
+        if not isinstance(scenario_progress, list):
+            return []
+
+        hits: list[MonitorHit] = []
+        for item in scenario_progress:
+            if not isinstance(item, dict) or str(item.get("status") or "").lower() != "failed":
+                continue
+            scenario_id = str(item.get("id") or item.get("scenario_id") or "unknown")
+            # The live parser can temporarily call an entered, still-running
+            # scenario "failed" before its summary exists. execution_status is
+            # populated only from a terminal scenario-contract summary.
+            execution_status = str(item.get("execution_status") or "").strip()
+            if not execution_status or scenario_id in self._api_terminal_failures:
+                continue
+            self._api_terminal_failures.add(scenario_id)
+            comparison_status = str(item.get("comparison_status") or "").strip()
+            hits.append(MonitorHit(
+                "scenario_result_hard_failure",
+                f"batch API terminal scenario={scenario_id} execution_status={execution_status}"
+                + (f" comparison_status={comparison_status}" if comparison_status else ""),
+                observed_at.isoformat(),
+            ))
+        return hits
 
     def _request_hits(self, line: str, now: datetime) -> list[MonitorHit]:
         """Correlate live runner command ownership with its terminal result."""
@@ -312,6 +436,9 @@ class AcceptanceMonitor:
             arrival = _as_utc(observed_at or datetime.now(timezone.utc))
             if arrival >= self.started_at:
                 hits.extend(self._request_hits(latest, event_time or arrival))
+                scenario_hit = self._scenario_result_hit(latest, event_timestamp)
+                if scenario_hit is not None:
+                    hits.append(scenario_hit)
 
         # Other transport/integrity stops require explicit event markers and
         # request/correlation IDs.  Informational prose cannot satisfy them.

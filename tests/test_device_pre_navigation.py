@@ -1,7 +1,9 @@
 import sys
 from types import SimpleNamespace
 
-sys.modules.setdefault("pandas", SimpleNamespace(DataFrame=object, ExcelWriter=object))
+import pytest
+
+sys.modules.setdefault("pandas", SimpleNamespace(DataFrame=object, ExcelWriter=object, Series=object))
 sys.modules.setdefault("openpyxl", SimpleNamespace(load_workbook=lambda *_args, **_kwargs: None))
 sys.modules.setdefault("openpyxl.drawing.image", SimpleNamespace(Image=object))
 
@@ -124,6 +126,44 @@ def _scrollable_device_viewport():
 
 def _safe_device_nodes(*nodes):
     return [*nodes, _scrollable_device_viewport()]
+
+
+def _english_devices_root_without_visible_all_devices(*nodes):
+    search = _node(
+        "Search",
+        "com.samsung.android.oneconnect:id/search_icon",
+        {"l": 48, "t": 286, "r": 168, "b": 436},
+        class_name="android.widget.ImageView",
+    )
+    chips = [
+        _node("거실 거실", "", {"l": 171, "t": 286, "r": 286, "b": 436}, class_name="android.widget.LinearLayout"),
+        _node("Anywhere Anywhere", "", {"l": 286, "t": 286, "r": 603, "b": 436}, class_name="android.widget.LinearLayout"),
+        _node("No room assigned No room assigned", "", {"l": 603, "t": 286, "r": 1044, "b": 436}, class_name="android.widget.LinearLayout"),
+    ]
+    return [search, *chips, *nodes, _scrollable_device_viewport()]
+
+
+def _english_devices_root_with_selected_all_devices(*nodes):
+    search = _node(
+        "Search",
+        "com.samsung.android.oneconnect:id/search_icon",
+        {"l": 48, "t": 286, "r": 168, "b": 436},
+        class_name="android.widget.ImageView",
+    )
+    chips = [
+        _node(
+            "All devices All devices",
+            "",
+            {"l": 171, "t": 286, "r": 459, "b": 436},
+            class_name="android.widget.LinearLayout",
+            clickable=True,
+            focusable=True,
+            selected=True,
+        ),
+        _node("거실 거실", "", {"l": 459, "t": 286, "r": 574, "b": 436}, class_name="android.widget.LinearLayout"),
+        _node("Anywhere Anywhere", "", {"l": 574, "t": 286, "r": 891, "b": 436}, class_name="android.widget.LinearLayout"),
+    ]
+    return [search, *chips, *nodes, _scrollable_device_viewport()]
 
 
 def _assign_room_cta():
@@ -263,6 +303,96 @@ def test_enter_device_card_plugin_opens_smoke_card_by_stable_label(monkeypatch):
     assert reason == "visible_target_direct_entry"
     assert client.tap_xy_adb_calls[-1]["x"] == 280
     assert client.tap_xy_adb_calls[-1]["y"] == 800
+
+
+@pytest.mark.parametrize(
+    ("scenario_id", "target", "card_label"),
+    [
+        ("device_smoke_sensor_plugin", "Smoke sensor", "Smoke sensor Clear"),
+        ("device_tv_plugin", "TV", "TV Off"),
+        ("device_washer_plugin", "Washer", "Washer Off"),
+        ("device_door_lock_plugin", "Door Lock", "Door Lock Locked"),
+    ],
+)
+def test_english_device_entry_recovers_offscreen_all_devices_chip_for_shared_plugins(
+    monkeypatch,
+    scenario_id,
+    target,
+    card_label,
+):
+    initial = _english_devices_root_without_visible_all_devices(_device_card(card_label, 42, 628))
+    recovered = _english_devices_root_with_selected_all_devices(_device_card(card_label, 42, 628))
+    client = DummyDeviceClient([initial, recovered])
+    client.last_device_tab_context_verified = True
+    confirm_calls = []
+    monkeypatch.setattr(
+        collection_flow,
+        "_confirm_click_focused_transition",
+        lambda **_kwargs: (confirm_calls.append(True) or True, "screen_text"),
+    )
+    monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
+
+    ok, reason = collection_flow._run_enter_device_card_plugin(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_id": scenario_id},
+        step={"target_stable_labels": [target]},
+        target=target,
+        max_scroll_search_steps=1,
+        step_wait_seconds=0,
+        transition_fast_path=True,
+    )
+
+    assert ok is True
+    assert reason == "device_card_opened"
+    assert len(client.swipe_calls) == 1
+    assert client.swipe_calls[0]["x2"] > client.swipe_calls[0]["x1"]
+    assert len(client.tap_xy_adb_calls) == 1
+    assert confirm_calls == [True]
+
+
+def test_device_entry_does_not_swipe_unrelated_screen_for_missing_all_devices_chip(monkeypatch):
+    nodes = _english_devices_root_without_visible_all_devices(_device_card("TV Off", 42, 628))
+    client = DummyDeviceClient([nodes])
+    monkeypatch.setattr(collection_flow, "_load_scrolltouch_xml_nodes", lambda **_kwargs: ([], "not_available"))
+    monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
+
+    ok, refreshed, reason = collection_flow._ensure_all_devices_location_selected(
+        client=client,
+        dev="SERIAL",
+        nodes=nodes,
+        dump_tree_fn=client.dump_tree,
+        step_wait_seconds=0,
+    )
+
+    assert ok is False
+    assert refreshed is nodes
+    assert reason == "all_devices_candidate_not_found"
+    assert client.swipe_calls == []
+
+
+def test_device_entry_still_requires_post_open_verification_after_chip_recovery(monkeypatch):
+    initial = _english_devices_root_without_visible_all_devices(_device_card("Smoke sensor Clear", 42, 628))
+    recovered = _english_devices_root_with_selected_all_devices(_device_card("Smoke sensor Clear", 42, 628))
+    client = DummyDeviceClient([initial, recovered])
+    client.last_device_tab_context_verified = True
+    monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition", lambda **_kwargs: (False, "screen_text"))
+    monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
+
+    ok, reason = collection_flow._run_enter_device_card_plugin(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={"scenario_id": "device_smoke_sensor_plugin"},
+        step={"target_stable_labels": ["Smoke sensor"]},
+        target="Smoke sensor",
+        max_scroll_search_steps=1,
+        step_wait_seconds=0,
+        transition_fast_path=True,
+    )
+
+    assert ok is False
+    assert reason == "transition_not_confirmed:screen_text"
+    assert len(client.tap_xy_adb_calls) == 1
 
 
 def test_enter_device_card_plugin_matches_visible_target_before_room_expand(monkeypatch):
