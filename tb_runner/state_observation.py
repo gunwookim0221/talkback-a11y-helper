@@ -20,6 +20,7 @@ from tb_runner.state_fingerprint import (
     SCHEMA_VERSION as FINGERPRINT_SCHEMA, NORMALIZATION_VERSION, StateFingerprint,
     _bounds, _boolean, _label, _semantic_node, build_state_fingerprint, normalize_dynamic_text,
 )
+from tb_runner.phase3_context import resolve_phase3_context
 from tb_runner.semantic_substate import (
     LEGACY_SIDECAR_VERSION, SUBSTATE_SIDECAR_VERSION,
     extract_semantic_substates, legacy_substates, normalize_substate_records,
@@ -131,7 +132,19 @@ class StateObservation:
 
 
 def build_state_observation(raw: Mapping[str, Any]) -> StateObservation:
-    fp = build_state_fingerprint(raw)
+    context = resolve_phase3_context(raw)
+    fingerprint_input = raw
+    if context.get("status") == "VERIFIED_PLUGIN_CONTEXT" and context.get("verified") is True:
+        fingerprint_input = dict(raw)
+        fingerprint_input["navigation_context"] = {
+            "plugin": {"type": context["context_type"], "id": context["context_id"]}}
+        fingerprint_input["context_source"] = "phase3_plugin_context_verified"
+    elif (context.get("status") == "VERIFIED_ROOT_CONTEXT" and context.get("verified") is True
+          and (not raw.get("package_name") or not raw.get("activity_name"))):
+        fingerprint_input = dict(raw)
+        fingerprint_input["navigation_context"] = {"bottom_tab": context["context_id"]}
+        fingerprint_input["context_source"] = "phase3_root_context_verified"
+    fp = build_state_fingerprint(fingerprint_input)
     display = _bounds({"bounds": raw.get("display_bounds")})
     nodes = [n for n in flat_nodes(raw.get("nodes", []))
              if _boolean(n, ("isVisibleToUser", "visibleToUser", "visible")) is not False]
@@ -158,11 +171,16 @@ def build_state_observation(raw: Mapping[str, Any]) -> StateObservation:
 def observation_problems(observation: StateObservation) -> tuple[str, ...]:
     data = observation.fingerprint.to_dict()
     core, viewport = data["core"], data["viewport"]
+    transient = data["transient"]
     problems = []
-    for field in ("package_name", "activity_name", "navigation_context"):
+    verified_plugin = transient.get("context_source") == "phase3_plugin_context_verified"
+    verified_root = transient.get("context_source") == "phase3_root_context_verified"
+    verified_context = verified_plugin or verified_root
+    required_fields = ("navigation_context",) + (() if verified_context else ("package_name", "activity_name"))
+    for field in required_fields:
         if not core.get(field):
             problems.append("MISSING_" + field.upper())
-    if not core.get("selected_tab") or core.get("selected_tab_status") not in {"explicit_verified", "observed_selected_node"}:
+    if not verified_context and (not core.get("selected_tab") or core.get("selected_tab_status") not in {"explicit_verified", "observed_selected_node"}):
         problems.append("UNVERIFIED_SELECTED_CONTEXT")
     if not viewport.get("semantic_nodes") or observation.coverage == "UNOBSERVED":
         problems.append("UNOBSERVED_VIEWPORT")
@@ -170,6 +188,10 @@ def observation_problems(observation: StateObservation) -> tuple[str, ...]:
         problems.append("UNKNOWN_GEOMETRY")
     if viewport.get("scroll", {}).get("contradictory") is True:
         problems.append("CONTRADICTORY_CAPABILITY")
-    if data["transient"].get("context_source") == "conflicting_observation":
+    if transient.get("context_source") == "conflicting_observation":
         problems.append("CONFLICTING_CONTEXT")
+    scenario_id = str(transient.get("scenario_id") or "")
+    if scenario_id in {"life_food_plugin", "life_family_care_plugin", "life_find_plugin", "device_smoke_sensor_plugin"} \
+            and not verified_plugin and (core.get("navigation_context") or core.get("selected_tab")):
+        problems.append("UNVERIFIED_PLUGIN_CONTEXT")
     return tuple(sorted(problems))

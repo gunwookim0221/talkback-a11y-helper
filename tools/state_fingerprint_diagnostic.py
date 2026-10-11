@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
+from uuid import uuid4
 from typing import Any
 import xml.etree.ElementTree as ET
 
@@ -21,7 +22,8 @@ from tb_runner.state_fingerprint import build_state_fingerprint, write_fingerpri
 from talkback_lib.hierarchy_snapshot import service_hierarchy_to_xml
 
 
-def capture_observation(client: Any, serial: str | None, *, scenario_id: str = "diagnostic", step: int = 0) -> dict[str, Any]:
+def capture_observation(client: Any, serial: str | None, *, scenario_id: str = "diagnostic", step: int = 0,
+                       scenario_run_id: str | None = None) -> dict[str, Any]:
     """Read existing Helper/XML/focus sources; no gesture, click, recovery or APK.
 
     Keep transport capability copies before later reads mutate the client cache.
@@ -109,6 +111,7 @@ def capture_observation(client: Any, serial: str | None, *, scenario_id: str = "
                 display_bounds=display, capability=cap, focus_node=focus, overlay=overlay,
                 viewport=scroll_reliability.viewport(nodes, scenario_id, cap.get("container")),
                 timestamp=datetime.now(timezone.utc).isoformat(), scenario_id=scenario_id, step=step,
+                capture_id=uuid4().hex, scenario_run_id=scenario_run_id,
                 source=source, context_source=context_source, notes=notes)
 
 
