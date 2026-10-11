@@ -97,7 +97,7 @@ def validate_precondition(scenario: str, monitor: AcceptanceMonitor, baseline: d
         "bottom_nav_available": bottom_nav,
         "bottom_nav_candidate_count": len(nav_candidates),
         "current_tab": selected_tab,
-        "selected_tab_verified": bool(observation.get("selected_tab", {}).get("verified")),
+        "selected_tab_verified": tab_verified,
         "transient_overlay_present": overlay.get("observed"),
         "overlay_detector_source": overlay.get("source"),
         "start_state_valid": bool(
@@ -170,7 +170,7 @@ def _consume_new(
 
 
 def main(*, runner_module="tools.phase4a_shadow_smoke", env_prefix="TB_PHASE4A",
-         scenario_validator=None) -> int:
+         scenario_validator=None, scenario_budgets=None) -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     device_state_before = device_state()
     service_list = adb("shell", "settings", "get", "secure", "enabled_accessibility_services")
@@ -231,7 +231,7 @@ def main(*, runner_module="tools.phase4a_shadow_smoke", env_prefix="TB_PHASE4A",
     runtime_config_path = OUT / "runtime_config.json"
     runtime_config = json.loads((ROOT / "config" / "runtime_config.json").read_text(encoding="utf-8"))
     for scenario in SCENARIOS:
-        runtime_config.setdefault("scenarios", {}).setdefault(scenario, {})["max_steps"] = 5
+        runtime_config.setdefault("scenarios", {}).setdefault(scenario, {})["max_steps"] = (scenario_budgets or {}).get(scenario, 5)
     save_json(runtime_config_path, runtime_config)
 
     run_env = os.environ.copy()

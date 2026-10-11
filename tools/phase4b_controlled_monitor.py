@@ -11,6 +11,7 @@ from tools.phase4b_controlled_smoke import SCENARIOS, STAGES
 from tb_runner.phase4b_target_binding import actual_target_matches
 from tb_runner.phase4b_execution import focus_row
 from tb_runner.traversal_reliability import focus_instance, instance_id
+from tb_runner.action_provenance import final_actor_proven
 
 
 def controlled_target_evidence_failures(row):
@@ -38,6 +39,8 @@ def controlled_target_evidence_failures(row):
     actual = focus_instance(focus_row(row.get("actual_focus_after") or {}, row["scenario"]))
     reconciled = (row.get("focus_reconciliation") or {}).get("actual_focus_instance_id")
     if not actual or instance_id(actual) != reconciled:
+        if row.get("action_audit_chain") and final_actor_proven(row):
+            return reasons
         reasons.append("FINAL_ACTUAL_FOCUS_DISAGREES_WITH_PRODUCTION_RECONCILIATION")
     return reasons
 

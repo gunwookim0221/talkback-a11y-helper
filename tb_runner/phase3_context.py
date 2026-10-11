@@ -225,6 +225,20 @@ def resolve_phase3_context(raw: Mapping[str, Any]) -> dict[str, Any]:
     context_source = str(raw.get("context_source") or "").strip()
     labels, resource_ids = _labels_and_ids(raw)
 
+    config = _scenario_config(scenario_id)
+    if config and config.get("screen_context_mode") == "new_screen" and (
+            raw.get("phase3_plugin_context_evidence") is not None or scenario_id not in _PLUGIN_IDS):
+        from tb_runner.plugin_context_contract import generic_plugin_context
+        current, reason = _entry_is_current(raw, config)
+        # Use the existing configured root-tab contract, never the plugin name.
+        expected_tab = next((name for name in ("home", "devices", "life", "routines", "menu")
+                             if name in str(config.get("tab_name", "")).casefold()), None)
+        return generic_plugin_context(raw, config, entry_current=current, entry_reason=reason,
+                                      labels=labels, body_matches=_body_matches, selected=selected,
+                                      expected_tab=expected_tab, timestamp=_timestamp,
+                                      matched_profiles=[s for s in _PLUGIN_IDS
+                                          if _profile_match(s, raw, labels, resource_ids)])
+
     if scenario_id in _ROOT_IDS:
         expected = _ROOT_IDS[scenario_id]
         root_body = any(re.search(pattern, rid, re.IGNORECASE)

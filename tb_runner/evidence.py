@@ -477,6 +477,14 @@ class EvidenceRuntime:
             return ()
         return tuple(event for event in self._all_events if event.transaction_id == str(transaction_id))
 
+    def events_for_step(self, step_index: int) -> tuple[EvidenceEvent, ...]:
+        """Read current scenario primary/recovery events without changing runtime."""
+        key = str(step_index)
+        return tuple(event for event in self._all_events
+                     if event.scenario_tx_id == self._scenario_tx_id
+                     and (str(event.step_index) == key
+                          or str(event.step_index).startswith(key + ":recovery:")))
+
     def reduce_shadow(self, transaction_id: str) -> dict[str, str]:
         events = [event for event in self._all_events if event.transaction_id == transaction_id]
         return reduce_shadow_events(events)

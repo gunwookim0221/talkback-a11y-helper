@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, replace
 from copy import deepcopy
+from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
@@ -15,41 +16,52 @@ from talkback_lib.window_lifecycle import get_talkback_restart_event
 from tb_runner import collection_flow
 from tb_runner.discovery_candidates import build_discovery_snapshot
 from tb_runner.phase3_context import phase3_entry_evidence_from_main_loop, resolve_phase3_context
+from tb_runner.plugin_context_contract import plugin_context_evidence, navigation_epoch_guard
 from tb_runner.phase4a_inputs import production_action, runtime_input
 from tb_runner.phase4a_planner import plan_shadow
 from tb_runner.phase4b_authority import AuthorityEvidence, ExecutionBudget, execution_gate
 from tb_runner.phase4b_execution import coherent_focus, controlled_collect, safe_scroll_container, geometry_in_viewport
 from tb_runner.state_registry import StateRegistry
 from tools.state_fingerprint_diagnostic import capture_observation
+from tb_runner.action_provenance import build_action_chain, digest, action_chain_failures
 
 STAGES = (("home_main", "devices_main"), ("life_find_plugin", "device_smoke_sensor_plugin"),
           ("life_food_plugin", "life_family_care_plugin"))
 SCENARIOS = tuple(s for stage in STAGES for s in stage)
 
 
-def main():
-    scenario = os.environ.get("TB_PHASE4B_SMOKE_SCENARIO", "")
-    if os.environ.get("TB_PHASE4B_CONTROLLED") != "1" or scenario not in SCENARIOS:
+def main(*, generalized=False):
+    if generalized:
+        from tb_runner.phase4c_traversal import TraversalSession, SCENARIOS as selected_scenarios, BUDGETS
+        from tb_runner.dynamic_context import DestinationOwnership, rebind_execution
+    else:
+        selected_scenarios, BUDGETS = SCENARIOS, {s: 5 for s in SCENARIOS}
+    prefix = "TB_PHASE4C" if generalized else "TB_PHASE4B"
+    file_prefix = "phase4c" if generalized else "phase4b"
+    scenario = os.environ.get(prefix + "_SMOKE_SCENARIO", "")
+    if os.environ.get(prefix + "_CONTROLLED") != "1" or scenario not in selected_scenarios:
         raise ValueError("Explicit Phase 4B opt-in and supported scenario required")
-    out = Path(os.environ["TB_PHASE4B_SMOKE_OUT"]).resolve()
+    out = Path(os.environ[prefix + "_SMOKE_OUT"]).resolve()
     config = json.loads(Path(os.environ["TB_RUNTIME_CONFIG_PATH"]).read_text(encoding="utf-8"))
-    if config.get("scenarios", {}).get(scenario, {}).get("max_steps") != 5:
+    if config.get("scenarios", {}).get(scenario, {}).get("max_steps") != BUDGETS[scenario]:
         raise ValueError("Exactly five TOTAL production traversal steps required")
-    serial = os.environ.get("TB_PHASE4B_SERIAL", "R3CX40QFDBP")
+    serial = os.environ.get(prefix + "_SERIAL", "R3CX40QFDBP")
     run_dir = out / "run" / scenario
     run_dir.mkdir(parents=True, exist_ok=True)
-    registry_path = out / "phase4b_registry.json"
+    registry_path = out / (file_prefix + "_registry.json")
     registry = StateRegistry.load(registry_path) if registry_path.exists() else StateRegistry("phase4b-controlled-smoke")
     diagnostic = A11yAdbClient(start_monitor=False)
-    budget = ExecutionBudget()
+    budget = ExecutionBudget(max_actions=BUDGETS[scenario])
+    session = TraversalSession(scenario, BUDGETS[scenario]) if generalized else None
     active, pending = {}, {}
     original_loop = collection_flow._main_loop_phase
     original_step = collection_flow._apply_step_collection_phase
     original_persist = collection_flow._apply_row_persistence_phase
     original_reconcile = collection_flow._apply_focus_reconciliation
+    original_terminal = collection_flow._apply_content_terminal_phase
 
     def save(name, value):
-        with (out / name).open("a", encoding="utf-8") as stream:
+        with (out / name.replace("phase4b", file_prefix)).open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(value, ensure_ascii=False, default=str) + "\n")
         registry.save(registry_path)
 
@@ -57,11 +69,22 @@ def main():
         raw = capture_observation(diagnostic, kwargs["dev"], scenario_id=scenario,
                                   step=kwargs["step_idx"], scenario_run_id=active["run_id"])
         raw["phase3_entry_evidence"] = active["entry"]
-        snapshot = build_discovery_snapshot(raw, registry)
+        if generalized:
+            raw["navigation_epoch"] = active["navigation_epoch"]
+            raw["phase3_plugin_context_evidence"] = active["plugin_context"]
         context = resolve_phase3_context(raw)
+        if generalized and active.get("destination_owner"):
+            state = kwargs["state"]
+            recovering = bool(getattr(state, "forced_local_tab_target_rid", "")
+                or getattr(state, "forced_local_tab_target_action_label", "")
+                or getattr(state, "post_realign_pending_steps", 0) or getattr(state, "stop_triggered", False))
+            context = active["destination_owner"].assess(raw, recovery_active=recovering)
+        snapshot = build_discovery_snapshot(raw, registry)
         value = runtime_input(snapshot, context["status"], scenario_id=scenario, client=kwargs["client"],
                               state=kwargs["state"], rows=kwargs["phase_ctx"].all_rows, capability=raw.get("capability"))
         value = replace(value, safety_blocked=(raw.get("overlay") or {}).get("observed") is not False)
+        if session:
+            value = session.prepare(raw, value)
         raw["snapshot_hash"] = snapshot.candidate_set_hash
         return raw, value, context
 
@@ -71,11 +94,27 @@ def main():
         entry = phase3_entry_evidence_from_main_loop(phase_ctx, run_id, raw["timestamp"])
         active.update(run_id=run_id, entry=entry)
         raw["phase3_entry_evidence"] = entry
+        if generalized:
+            epoch = run_id + ":production-entry"
+            proof = plugin_context_evidence(entry, raw, deepcopy(getattr(client, "last_start_open_summary", {})), epoch)
+            active.update(navigation_epoch=epoch, plugin_context=proof)
+            raw.update(navigation_epoch=epoch, phase3_plugin_context_evidence=proof)
+            if proof:
+                active["destination_owner"] = DestinationOwnership(raw,
+                    event_sink=lambda event: save("phase4c_destination_events.jsonl", event))
+                active["navigation_count"] = 0
         save("phase4b_observations.jsonl", dict(kind="ENTRY_TO_TRAVERSAL", scenario=scenario, raw=raw,
              snapshot=build_discovery_snapshot(raw, registry).to_dict(), context=resolve_phase3_context(raw)))
         print("[PHASE4B_ENTRY] " + json.dumps(dict(scenario=scenario, entry="VERIFIED_MAIN_LOOP")), flush=True)
+        def invalidate_context():
+            active["navigation_count"] = active.get("navigation_count", 0) + 1
+            active["navigation_epoch"] = run_id + ":navigation:" + str(active["navigation_count"])
+        def navigation_observed(event):
+            if active.get("destination_owner"):
+                active["destination_owner"].navigation(event, active["navigation_epoch"])
         try:
-            return original_loop(client, dev, phase_ctx)
+            with navigation_epoch_guard(client, invalidate_context, navigation_observer=navigation_observed) if generalized else nullcontext():
+                return original_loop(client, dev, phase_ctx)
         finally:
             active.clear()
 
@@ -83,7 +122,9 @@ def main():
         if not active:
             return original_step(**kwargs)
         step, client, state = kwargs["step_idx"], kwargs["client"], kwargs["state"]
+        active["step_kwargs"] = kwargs
         raw, value, context = capture(kwargs)
+        active["before"] = raw, value
         recommendation = plan_shadow(value)
         # A separate immediate observation checks disappearance/semantic change.
         current_raw, current, current_context = capture(kwargs)
@@ -99,7 +140,16 @@ def main():
             geometry_in_viewport=geometry_in_viewport(current_raw, recommendation),
             scroll_container_proven=safe_scroll_container(current_raw, recommendation))
         decision = execution_gate(value, recommendation, current, evidence,
-                                  actions_used=budget.actions, degraded=budget.degraded)
+                                  actions_used=budget.actions, degraded=budget.degraded, action_limit=BUDGETS[scenario])
+        dynamic_context = None
+        if generalized and active.get("destination_owner"):
+            recommendation, decision, authority_transition = rebind_execution(value, recommendation, current, evidence,
+                raw, current_raw, actions_used=budget.actions, degraded=budget.degraded, action_limit=BUDGETS[scenario])
+            dynamic_context = dict(before=deepcopy(raw.get("destination_ownership")),
+                current=deepcopy(current_raw.get("destination_ownership")),
+                authority=authority_transition, events=deepcopy(active["destination_owner"].events))
+            if authority_transition["rebound"]:
+                active["before"] = current_raw, current
         chosen = recommendation.to_dict()
         audit = dict(scenario=scenario, step=step, state_id=chosen["planner_state_id"],
             context_status=current_context["status"], planner_action=chosen["recommended_action"],
@@ -112,13 +162,15 @@ def main():
             helper_request_id=None, helper_ack_result=None, attempt_credit=0, visit_credit=0,
             phase4b_visit_credit=0, production_visit_authority=True, scroll_result=None,
             actual_focus_before=current_raw.get("focus_node"), gate_evidence=asdict(evidence))
+        if dynamic_context is not None:
+            audit["dynamic_context"] = dynamic_context
         pending[step] = audit
         save("phase4b_observations.jsonl", dict(kind="PRE_CONTROLLED_STEP", scenario=scenario, step=step,
             raw=raw, snapshot=value.snapshot.to_dict(), context=context, history=asdict(value.history),
             current_raw=current_raw, current_snapshot=current.snapshot.to_dict(), current_history=asdict(current.history),
             planner_flags={k: getattr(value, k) for k in ("scroll_exhausted", "scroll_blocked", "pending_transition", "last_movement", "focus_plateau", "safety_blocked")},
             current_flags={k: getattr(current, k) for k in ("scroll_exhausted", "scroll_blocked", "pending_transition", "last_movement", "focus_plateau", "safety_blocked")},
-            gate_evidence=asdict(evidence), recommendation=chosen, gate=decision.to_dict()))
+            gate_evidence=asdict(evidence), recommendation=chosen, gate=decision.to_dict(), dynamic_context=dynamic_context))
         collect = client.collect_focus_step
         collector_used = False
         def refresh():
@@ -158,9 +210,40 @@ def main():
         row = kwargs["row"]
         if row.get("phase4b_before_row"):
             kwargs = {**kwargs, "previous_row": row["phase4b_before_row"]}
-        return original_reconcile(**kwargs)
+        result = original_reconcile(**kwargs)
+        if generalized:
+            audit = pending.get(kwargs["row"].get("step_index"))
+            if audit is not None:
+                audit["primary_production_outcome"] = deepcopy({k: kwargs["row"].get(k) for k in (
+                    "actual_focus_node", "get_focus_req_id", "move_result", "focus_reconciliation_evidence",
+                    "focus_transition_status", "visit_record_status")})
+        return result
+
+    def observed_terminal(client, dev, state, row, phase_ctx, step_idx, stop, reason, pending=False):
+        stop, reason = original_terminal(client, dev, state, row, phase_ctx, step_idx, stop, reason, pending)
+        if session and active.get("step_kwargs"):
+            after_raw, after, after_context = capture(active["step_kwargs"])
+            active["after"] = after_raw, after
+            stop, reason = session.protect_stop(stop, reason, after)
+        return stop, reason
 
     def observed_persist(**kwargs):
+        audit = pending.get(kwargs["step_idx"])
+        if generalized and audit is not None:
+            if audit.get("dynamic_context") and active.get("destination_owner"):
+                audit["dynamic_context"]["events"] = deepcopy(active["destination_owner"].events)
+                audit["dynamic_context"]["after"] = deepcopy((active.get("after") or active["before"])[0].get("destination_ownership"))
+            runtime = getattr(active["step_kwargs"]["client"], "evidence_runtime", None)
+            events = runtime.events_for_step(kwargs["step_idx"]) if runtime else ()
+            chain = build_action_chain(audit, kwargs["row"], events)
+            # Only append provenance fields. Existing outcomes still drive every
+            # budget/session/ledger decision below, including replaced-row gaps.
+            save("phase4c_step_action_evidence.jsonl", chain)
+            kwargs["row"]["step_action_id"] = chain["step_action_id"]
+            kwargs["row"]["step_action_provenance"] = dict(
+                schema=chain["schema"], step_action_id=chain["step_action_id"],
+                evidence_file="phase4c_step_action_evidence.jsonl", sha256=digest(chain))
+            audit.update(action_audit_chain=chain, audit_chain_complete=not action_chain_failures(chain, audit))
         result = original_persist(**kwargs)
         audit = pending.pop(kwargs["step_idx"], None)
         if audit is not None:
@@ -180,6 +263,11 @@ def main():
             if audit["planner_executed"]:
                 budget.production_outcome(new_visit=bool(audit["visit_credit"]))
                 audit["loop_budget"] = asdict(budget)
+            if session:
+                before_raw, before_value = active["before"]
+                after_raw, after_value = active.get("after", active["before"])
+                session.observe(audit, before_raw, before_value, after_raw, after_value, budget)
+                audit["loop_budget"] = asdict(budget)
             # Audit credits are copies of production outcomes, not ledger writes.
             save("phase4b_execution_trace.jsonl", audit)
             print("[PHASE4B_STEP] " + json.dumps({k: audit[k] for k in ("scenario", "step", "classification", "planner_executed", "visit_credit", "fallback_used")}), flush=True)
@@ -189,6 +277,8 @@ def main():
     collection_flow._apply_step_collection_phase = observed_step
     collection_flow._apply_row_persistence_phase = observed_persist
     collection_flow._apply_focus_reconciliation = reconciled
+    if session:
+        collection_flow._apply_content_terminal_phase = observed_terminal
     previous_argv = sys.argv
     sys.argv = ["script_test.py", "--serial", serial, "--output-dir", str(run_dir),
                 "--language-mode", "current", "--launch-mode", "warm", "--scenario", scenario]
@@ -201,6 +291,7 @@ def main():
         collection_flow._apply_step_collection_phase = original_step
         collection_flow._apply_row_persistence_phase = original_persist
         collection_flow._apply_focus_reconciliation = original_reconcile
+        collection_flow._apply_content_terminal_phase = original_terminal
         sys.argv = previous_argv
         registry.save(registry_path)
     return 0

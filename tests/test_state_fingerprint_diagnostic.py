@@ -69,7 +69,10 @@ def test_capture_reuses_sources_and_copies_capability_before_focus_cache_changes
     assert value["activity_name"] == ".MainActivity"
     assert value["display_bounds"] == [0, 0, 1000, 1000]
     assert value["source"] == "helper_capability+service_hierarchy_semantics"
-    assert value["overlay"]["source"] == "existing_popup_detector"
+    assert value["overlay"]["source"] == "evidence_modal_classifier"
+    assert value["overlay"]["classification"] == "NON_MODAL_CONTROL"
+    assert value["overlay"]["candidate_present"] is False
+    assert value["overlay"]["observed"] is False
     assert len(client.calls) == 2
 
 

@@ -59,6 +59,35 @@ def geometry_in_viewport(raw, recommendation):
                 and display[1] <= bounds[1] < bounds[3] <= display[3])
 
 
+def scroll_request_audit(client, scroll, audit, **kwargs):
+    """Observe SCROLL's native exact-request read without changing transport.
+
+    SCROLL has no active focus transaction, so _evidence_active_request_id is
+    not its request oracle. Capture the explicit SCROLL_RESULT read argument.
+    """
+    reader = getattr(client, "_read_log_result", None)
+    had_override = "_read_log_result" in vars(client)
+    if not callable(reader):
+        return scroll(**kwargs)
+    def observed_reader(*args, **read_kwargs):
+        prefix = read_kwargs.get("prefix", args[1] if len(args) > 1 else None)
+        request = read_kwargs.get("req_id", args[2] if len(args) > 2 else None)
+        result = reader(*args, **read_kwargs)
+        if prefix == "SCROLL_RESULT":
+            audit.update(helper_request_id=str(request or ""), helper_ack_result=deepcopy(result),
+                helper_result_correlated=bool(request and str(request) == str(result.get("reqId") or "")),
+                helper_request_source="SCROLL_RESULT_EXPLICIT_TRANSPORT_ARGUMENT")
+        return result
+    client._read_log_result = observed_reader
+    try:
+        return scroll(**kwargs)
+    finally:
+        if had_override:
+            client._read_log_result = reader
+        else:
+            del client._read_log_result
+
+
 def controlled_collect(*, client, dev, scenario, step, raw, recommendation, decision,
                        budget, collect, collect_kwargs, refresh, output_dir, audit, audit_sink=None):
     """At most one controlled action and one production fallback in a step.
@@ -109,8 +138,19 @@ def controlled_collect(*, client, dev, scenario, step, raw, recommendation, deci
             return fallback("SCROLL_CONTAINER_CHANGED")
         audit["planner_executed"] = True
         emit("BEFORE_CONTROLLED_SCROLL")
-        result, after = scroll_reliability.verified_scroll(client, dev, scenario, step,
-                                                         before=observed, output_base_dir=output_dir)
+        original_scroll = getattr(client, "scroll", None)
+        had_scroll_override = "scroll" in vars(client)
+        def correlated_scroll(**kwargs):
+            return scroll_request_audit(client, original_scroll, audit, **kwargs)
+        client.scroll = correlated_scroll
+        try:
+            result, after = scroll_reliability.verified_scroll(client, dev, scenario, step,
+                                                             before=observed, output_base_dir=output_dir)
+        finally:
+            if had_scroll_override:
+                client.scroll = original_scroll
+            else:
+                del client.scroll
         status = ("SCROLL_MOVED" if result["status"] == "SCROLL_MOVED" else
                   "SCROLL_NO_MOVEMENT" if result["before"]["valid"] and result["after"]["valid"]
                   and result["action_success"] and not result["viewport_changed"] else "SCROLL_INDETERMINATE")

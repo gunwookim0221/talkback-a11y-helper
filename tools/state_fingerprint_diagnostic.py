@@ -67,6 +67,7 @@ def capture_observation(client: Any, serial: str | None, *, scenario_id: str = "
     package = None
     activity = None
     context_source = "unobserved"
+    window_evidence = {}
     try:
         size = client._run(["shell", "wm", "size"], dev=serial, timeout=5)
         sizes = re.findall(r"(?:Physical|Override) size:\s*(\d+)x(\d+)", size)
@@ -74,10 +75,15 @@ def capture_observation(client: Any, serial: str | None, *, scenario_id: str = "
             width, height = map(int, sizes[-1])
             display = [0, 0, width, height]
         window = client._run(["shell", "dumpsys", "window"], dev=serial, timeout=8)
+        window_evidence = summarize_window_evidence(window)
         focused_windows = set(re.findall(r"mCurrentFocus=[^\n]*?\s([\w.]+)/([\w.$]+)", window))
         if len(focused_windows) == 1:
             package, activity = focused_windows.pop()
             context_source = "window_current_focus"
+            window_evidence["focused_activity_matches"] = (
+                window_evidence.get("focused_window_component") == activity
+                or window_evidence.get("focused_window_component") == f"{package}/{activity}"
+            )
         elif focused_windows:
             notes.append("window_capture:AMBIGUOUS_FOCUSED_WINDOWS")
         else:
@@ -96,11 +102,26 @@ def capture_observation(client: Any, serial: str | None, *, scenario_id: str = "
             notes.append("window_capture:XML_PACKAGE_CONFLICT")
     except Exception as exc:
         notes.append("window_capture:" + type(exc).__name__)
-    popup = detect_popup_candidate(dict(dump_tree_nodes=observed_nodes, focus_node=focus))
+    popup_row = dict(dump_tree_nodes=observed_nodes, focus_node=focus,
+                     window_evidence=window_evidence, display_bounds=display,
+                     package_name=package, activity_name=activity, context_source=context_source)
+    popup = detect_popup_candidate(popup_row)
     # This existing detector is bounded dismissal-oriented, not an overlay
     # absence oracle. Even detected=False can retain modal evidence.
-    overlay = dict(kind="popup" if popup.modal_evidence else "unknown",
-                   observed=bool(popup.modal_evidence), source="existing_popup_detector",
+    overlay = dict(kind="popup_candidate" if popup.candidate_evidence else popup.modal_classification.lower(),
+                   observed=popup.modal_classification != "NON_MODAL_CONTROL", source="evidence_modal_classifier",
+                   candidate_present=bool(popup.candidate_evidence),
+                   candidate_evidence=list(popup.candidate_evidence or []),
+                   classification=popup.modal_classification,
+                   modal_evidence=list(popup.modal_evidence or []),
+                   modal_assessment=dict(classification=popup.modal_classification,
+                       focused_activity_matches=window_evidence.get("focused_activity_matches", False),
+                       focused_window_type=window_evidence.get("focused_window_type"),
+                       window_count=window_evidence.get("window_count"),
+                       background_accessible=popup.modal_assessment.get("background_accessible"),
+                       background_actionable_count=popup.modal_assessment.get("background_actionable_count"),
+                       accessibility_focus_outside=popup.modal_assessment.get("accessibility_focus_outside"),
+                       candidate_area_ratio=popup.modal_assessment.get("candidate_area_ratio")),
                    nodes=list(popup.safe_buttons or []))
     if popup.dangerous_buttons:
         overlay["nodes"].extend(popup.dangerous_buttons)
@@ -108,11 +129,53 @@ def capture_observation(client: Any, serial: str | None, *, scenario_id: str = "
                 navigation_context={"bottom_tab": selected["logical_name"]} if selected else None,
                 selected_tab=dict(name=selected["logical_name"], verified=True,
                                   source="service_hierarchy_selected" if source == "helper_capability+service_hierarchy_semantics" else "helper_selected") if selected else None,
-                display_bounds=display, capability=cap, focus_node=focus, overlay=overlay,
+                display_bounds=display, capability=cap, focus_node=focus, window_evidence=window_evidence, overlay=overlay,
                 viewport=scroll_reliability.viewport(nodes, scenario_id, cap.get("container")),
                 timestamp=datetime.now(timezone.utc).isoformat(), scenario_id=scenario_id, step=step,
                 capture_id=uuid4().hex, scenario_run_id=scenario_run_id,
                 source=source, context_source=context_source, notes=notes)
+
+
+def summarize_window_evidence(window_dump: str) -> dict[str, Any]:
+    """Keep bounded WMS window identity/type evidence without storing dumpsys text."""
+    headers = list(re.finditer(r"(?m)^\s*Window\s+#\d+\s+(Window\{[^\n]+)", window_dump or ""))
+    windows = []
+    for index, match in enumerate(headers):
+        end = headers[index + 1].start() if index + 1 < len(headers) else len(window_dump)
+        block = window_dump[match.start():end]
+        header = match.group(1)
+        token = re.search(r"Window\{([^\s}]+)", header)
+        owner = re.search(r"\bu\d+\s+([^\s}]+)", header)
+        kind = re.search(r"\bty=([A-Z][A-Z0-9_]+)", block)
+        frame = re.search(r"\bmFrame=\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]", block)
+        windows.append(dict(token=token.group(1) if token else None,
+            owner=owner.group(1) if owner else None,
+            window_type=kind.group(1) if kind else None,
+            bounds=[int(v) for v in frame.groups()] if frame else None))
+    focus_lines = [line.strip() for line in (window_dump or "").splitlines() if "mCurrentFocus=" in line]
+    # Foldable/multi-display WMS output can report mCurrentFocus=null for a
+    # non-interactive cover display before the active display's focused window.
+    # Prefer the last concrete Window{} entry; retain the last null line only
+    # when WMS did not report any focused window.
+    current_line = next((line for line in reversed(focus_lines) if re.search(r"mCurrentFocus\s*=\s*Window\{", line)),
+                        focus_lines[-1] if focus_lines else "")
+    current = re.search(r"Window\{([^}]+)", current_line)
+    current_token = re.match(r"([^\s]+)", current.group(1)).group(1) if current and re.match(r"([^\s]+)", current.group(1)) else None
+    current_owner = re.search(r"\bu\d+\s+([^\s}]+)", current.group(1)) if current else None
+    focused = next((w for w in windows if current_token and w.get("token") == current_token), {})
+    owner = current_owner.group(1) if current_owner else focused.get("owner")
+    component = None
+    if owner and "/" in owner:
+        pkg, cls = owner.split("/", 1)
+        component = cls if cls.startswith(pkg + ".") else cls
+    app_line = next((line.strip() for line in (window_dump or "").splitlines() if "mFocusedApp=" in line), "")
+    return dict(window_count=len(windows), windows=windows,
+        window_types=sorted({w["window_type"] for w in windows if w.get("window_type")}),
+        current_focus_line=current_line or None, focused_window_token=current_token,
+        focused_window_owner=owner, focused_window_component=component,
+        focused_window_type=focused.get("window_type"), focused_window_bounds=focused.get("bounds"),
+        focused_window_is_dialog="DIALOG" in str(focused.get("window_type") or "").upper(),
+        focused_app_line=app_line or None)
 
 
 def main() -> int:

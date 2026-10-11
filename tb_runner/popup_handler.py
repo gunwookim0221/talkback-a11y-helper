@@ -91,6 +91,9 @@ class PopupCandidate:
     actionable_count: int = 0
     modal_evidence: list[str] | None = None
     popup_kind: str = ""
+    modal_classification: str = "AMBIGUOUS_OVERLAY"
+    candidate_evidence: list[str] | None = None
+    modal_assessment: dict[str, Any] | None = None
 
 
 def normalize_label(value: Any) -> str:
@@ -173,31 +176,160 @@ def _is_bottom_nav_like(node: dict[str, Any], label: str) -> bool:
     return False
 
 
-def _modal_evidence(nodes: list[dict[str, Any]], labels: list[str], action_nodes: list[dict[str, Any]]) -> list[str]:
-    evidence: list[str] = []
-    if any("dialog" in _node_class_name(node).lower() or "alert" in _node_class_name(node).lower() for node in nodes):
-        evidence.append("dialog_class")
-    if any("dialog" in _node_resource_id(node).lower() or "popup" in _node_resource_id(node).lower() for node in nodes):
-        evidence.append("popup_resource")
-    non_action_labels = [
-        label
-        for label in labels
-        if label and not is_safe_action_label(label) and not is_dangerous_action_label(label)
-    ]
-    modal_container_seen = any(
-        "dialog" in _node_class_name(node).lower()
-        or "alert" in _node_class_name(node).lower()
-        or "popup" in _node_resource_id(node).lower()
-        for node in nodes
-    )
-    if modal_container_seen and non_action_labels and action_nodes:
-        evidence.append("title_body_with_actions")
-    action_bounds = [_node_bounds(node) for node in action_nodes]
-    if action_bounds and all(bounds is not None for bounds in action_bounds):
-        tops = [bounds[1] for bounds in action_bounds if bounds is not None]
-        if tops and min(tops) >= 900:
-            evidence.append("bottom_sheet_actions")
-    return evidence
+def _candidate_evidence(nodes: list[dict[str, Any]]) -> list[str]:
+    """Semantic strings nominate popup candidates; they do not establish a modal."""
+    evidence = set()
+    for node in nodes:
+        if "popup" in _node_resource_id(node).lower():
+            evidence.add("popup_resource")
+        if "popup" in normalize_label(node.get("text")):
+            evidence.add("popup_text")
+        if "popup" in normalize_label(node.get("contentDescription")):
+            evidence.add("popup_description")
+    return sorted(evidence)
+
+
+def _bounds_tuple(value: Any) -> tuple[int, int, int, int] | None:
+    if isinstance(value, dict):
+        try:
+            return (int(value.get("left", value.get("l"))), int(value.get("top", value.get("t"))),
+                    int(value.get("right", value.get("r"))), int(value.get("bottom", value.get("b"))))
+        except (TypeError, ValueError):
+            return None
+    if isinstance(value, (list, tuple)) and len(value) == 4:
+        try:
+            return tuple(int(v) for v in value)
+        except (TypeError, ValueError):
+            return None
+    return parse_bounds_str(value)
+
+
+def classify_modal_state(row: dict[str, Any], nodes: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Classify overlay semantics from hierarchy/window/accessibility evidence.
+
+    Popup-like resource/text is candidate evidence only. Unknown overlay evidence
+    remains conservative. A localized control is cleared only when the active
+    same-activity window, background accessibility and external TalkBack focus
+    all corroborate a non-modal control.
+    """
+    nodes = nodes if nodes is not None else [n for n in _iter_nodes(
+        [row.get("focus_node", {}), *(row.get("dump_tree_nodes") or [])]) if _node_visible(n)]
+    candidate = _candidate_evidence(nodes)
+    dialog_nodes = [n for n in nodes if "dialog" in _node_class_name(n).lower()
+                    or "alert" in _node_class_name(n).lower()]
+    win = row.get("window_evidence") or {}
+    focused_type = str(win.get("focused_window_type") or row.get("focused_window_type") or "").upper()
+    focused_window = str(win.get("focused_window_component") or row.get("focused_window_component") or "")
+    activity = str(row.get("activity_name") or "")
+    focused_activity_matches = win.get("focused_activity_matches") is True or (
+        row.get("context_source") == "window_current_focus" and bool(activity)
+        and (not focused_window or focused_window == activity
+             or focused_window.endswith("/" + activity.split(".")[-1])))
+    dialog_window = bool(win.get("focused_window_is_dialog") or row.get("focused_window_is_dialog")
+                         or "DIALOG" in focused_type)
+    display = _bounds_tuple(row.get("display_bounds"))
+    display_area = max(0, display[2] - display[0]) * max(0, display[3] - display[1]) if display else 0
+    candidate_nodes = [n for n in nodes if "popup" in _node_resource_id(n).lower()
+                       or "popup" in normalize_label(n.get("text"))
+                       or "popup" in normalize_label(n.get("contentDescription"))]
+    rects = [_node_bounds(n) for n in candidate_nodes]
+    rects = [b for b in rects if b]
+    if rects and display_area:
+        union = (min(b[0] for b in rects), min(b[1] for b in rects),
+                 max(b[2] for b in rects), max(b[3] for b in rects))
+        candidate_area_ratio = max(0, union[2]-union[0]) * max(0, union[3]-union[1]) / display_area
+    else:
+        candidate_area_ratio = None
+    blocking_bounds = _bounds_tuple(row.get("blocking_overlay_bounds"))
+    blocking_area_ratio = None
+    if blocking_bounds and display_area:
+        blocking_area_ratio = max(0, blocking_bounds[2]-blocking_bounds[0]) * max(0, blocking_bounds[3]-blocking_bounds[1]) / display_area
+    elif row.get("blocking_overlay") is True:
+        blocking_area_ratio = 1.0
+
+    def within_candidate(bounds):
+        if not bounds or not rects:
+            return False
+        cx, cy = (bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2
+        return any(b[0] <= cx <= b[2] and b[1] <= cy <= b[3] for b in rects)
+
+    def in_candidate_subtree(node):
+        if node in candidate_nodes:
+            return True
+        return any("popup" in str(a.get("resource_id") or a.get("view_id_resource_name") or "").lower()
+                   for a in node.get("ancestors", []) if isinstance(a, dict))
+
+    focus = row.get("focus_node") or {}
+    focus_bounds = _bounds_tuple(focus.get("boundsInScreen") or focus.get("bounds"))
+    focus_outside = focus.get("accessibilityFocused") is True and bool(rects) and not within_candidate(focus_bounds)
+    background_nodes = [n for n in nodes if not in_candidate_subtree(n) and _node_visible(n)
+                        and n.get("enabled") is not False
+                        and (bool(n.get("clickable") or n.get("effectiveClickable") or n.get("focusable"))
+                             or n.get("accessibilityFocused") is True)]
+    background_accessible = (row.get("background_accessible") if isinstance(row.get("background_accessible"), bool)
+                             else bool(background_nodes and focus_outside))
+    explicit_background_blocked = row.get("background_accessible") is False
+    dismiss_action_present = row.get("dismiss_action_present") is True or any(
+        node_label(n) and is_safe_action_label(node_label(n)) and _node_actionable(n) for n in nodes)
+    modal_evidence = []
+    if dialog_nodes:
+        modal_evidence.append("dialog_class")
+        body_labels = [node_label(n) for n in nodes if node_label(n)
+                       and not is_safe_action_label(node_label(n))
+                       and not is_dangerous_action_label(node_label(n))]
+        actionable_nodes = [n for n in nodes if _node_actionable(n) and node_label(n)]
+        if body_labels and actionable_nodes:
+            modal_evidence.append("title_body_with_actions")
+    if dialog_window:
+        modal_evidence.append("focused_dialog_window")
+    if explicit_background_blocked:
+        modal_evidence.append("background_inaccessible")
+    if blocking_area_ratio is not None and blocking_area_ratio >= 0.35:
+        modal_evidence.append("blocking_region_substantial")
+    if dismiss_action_present:
+        modal_evidence.append("dismiss_action_present")
+    if focus_outside:
+        modal_evidence.append("accessibility_focus_outside_overlay")
+    elif focus.get("accessibilityFocused") is True and rects:
+        modal_evidence.append("accessibility_focus_inside_overlay")
+
+    if dialog_window or (dialog_nodes and explicit_background_blocked) or (
+            explicit_background_blocked and blocking_area_ratio is not None and blocking_area_ratio >= 0.35):
+        classification = "VERIFIED_MODAL"
+    elif dialog_nodes or (candidate_area_ratio is not None and candidate_area_ratio >= 0.35
+                          and not background_accessible) or (blocking_area_ratio is not None
+                          and blocking_area_ratio >= 0.35 and dismiss_action_present and not background_accessible):
+        classification = "LIKELY_MODAL"
+    elif (focused_activity_matches and not dialog_window and not dialog_nodes
+          and candidate_area_ratio is not None and candidate_area_ratio <= 0.10
+          and background_accessible and focus_outside):
+        classification = "NON_MODAL_CONTROL"
+    elif not candidate and not dialog_nodes and not dialog_window:
+        window_context_observed = bool(win.get("window_count") or focused_type or focused_window
+                                       or win.get("current_focus_line") or row.get("focused_window_type")
+                                       or row.get("focused_window_component"))
+        ordinary_app_window = focused_type in {"", "BASE_APPLICATION", "APPLICATION", "APPLICATION_STARTING"}
+        if window_context_observed and (not focused_activity_matches or not ordinary_app_window):
+            classification = "AMBIGUOUS_OVERLAY"
+        else:
+            classification = "NON_MODAL_CONTROL"
+    else:
+        classification = "AMBIGUOUS_OVERLAY"
+    return dict(classification=classification, candidate_evidence=candidate,
+                modal_evidence=sorted(set(modal_evidence)), focused_window_component=focused_window or None,
+                focused_window_type=focused_type or None, focused_activity_matches=focused_activity_matches,
+                dialog_class_count=len(dialog_nodes), background_accessible=bool(background_accessible),
+                background_actionable_count=len(background_nodes), accessibility_focus_outside=focus_outside,
+                candidate_area_ratio=candidate_area_ratio, blocking_area_ratio=blocking_area_ratio,
+                dismiss_action_present=dismiss_action_present)
+
+
+def _modal_evidence(nodes: list[dict[str, Any]], labels: list[str], action_nodes: list[dict[str, Any]],
+                    row: dict[str, Any] | None = None) -> list[str]:
+    """Return modal evidence only; popup strings never stand in for a modal root."""
+    _ = labels, action_nodes
+    result = classify_modal_state(row or {}, nodes)
+    return result["modal_evidence"]
 
 
 def _is_samsung_account_popup(nodes: list[dict[str, Any]], labels: list[str]) -> bool:
@@ -247,7 +379,9 @@ def detect_popup_candidate(row: dict[str, Any], *, max_actionable_count: int = 5
             safe_buttons.append(button)
 
     actionable_count = len(action_nodes)
-    modal_evidence = _modal_evidence(nodes, labels, action_nodes)
+    assessment = classify_modal_state(row, nodes)
+    modal_evidence = assessment["modal_evidence"]
+    candidate_evidence = assessment["candidate_evidence"]
     samsung_popup = _is_samsung_account_popup(nodes, labels)
     popup_kind = "samsung_account_two_step" if samsung_popup else ""
     if samsung_popup:
@@ -263,15 +397,19 @@ def detect_popup_candidate(row: dict[str, Any], *, max_actionable_count: int = 5
     signature_parts = sorted({normalize_label(label) for label in labels if normalize_label(label)})
     signature = "|".join(signature_parts[:12])
 
+    def result(detected: bool, reason: str) -> PopupCandidate:
+        return PopupCandidate(detected, reason, title, signature, safe_buttons, dangerous_buttons,
+                              actionable_count, modal_evidence, popup_kind,
+                              assessment["classification"], candidate_evidence, assessment)
     if dangerous_buttons:
-        return PopupCandidate(False, "dangerous_action_present", title, signature, safe_buttons, dangerous_buttons, actionable_count, modal_evidence, popup_kind)
+        return result(False, "dangerous_action_present")
     if not safe_buttons:
-        return PopupCandidate(False, "no_safe_action", title, signature, safe_buttons, dangerous_buttons, actionable_count, modal_evidence, popup_kind)
-    if not modal_evidence:
-        return PopupCandidate(False, "missing_modal_evidence", title, signature, safe_buttons, dangerous_buttons, actionable_count, modal_evidence, popup_kind)
+        return result(False, "no_safe_action")
+    if assessment["classification"] not in {"VERIFIED_MODAL", "LIKELY_MODAL"}:
+        return result(False, "missing_modal_evidence")
     if actionable_count > max_actionable_count:
-        return PopupCandidate(False, "too_many_actionable_candidates", title, signature, safe_buttons, dangerous_buttons, actionable_count, modal_evidence, popup_kind)
-    return PopupCandidate(True, "modal_candidate", title, signature, safe_buttons, dangerous_buttons, actionable_count, modal_evidence, popup_kind)
+        return result(False, "too_many_actionable_candidates")
+    return result(True, "modal_candidate")
 
 
 def tap_popup_button(client: Any, dev: str, button: dict[str, Any]) -> bool:

@@ -37,7 +37,8 @@ class AuthorityDecision:
 
 def execution_gate(original: PlannerInput, recommendation: ShadowRecommendation,
                    current: PlannerInput, evidence: AuthorityEvidence,
-                   *, actions_used: int = 0, degraded: bool = False) -> AuthorityDecision:
+                   *, actions_used: int = 0, degraded: bool = False,
+                   action_limit: int = 5) -> AuthorityDecision:
     """Revalidate the selected action against a fresh observation, fail closed."""
     def deny(reason, mode="FALLBACK_PRODUCTION"):
         return AuthorityDecision(False, mode, reason)
@@ -46,7 +47,9 @@ def execution_gate(original: PlannerInput, recommendation: ShadowRecommendation,
         return deny("EXECUTION_OPT_IN_REQUIRED", "SHADOW_ONLY")
     if degraded:
         return deny("PLANNER_DEGRADED_TO_PRODUCTION")
-    if actions_used >= 5:
+    if type(action_limit) is not int or not 1 <= action_limit <= 20:
+        return deny("INVALID_CONTROLLED_ACTION_BUDGET")
+    if actions_used >= action_limit:
         return deny("CONTROLLED_ACTION_BUDGET_EXHAUSTED")
     for flag, reason in ((evidence.fresh, "FRESH_OBSERVATION_REQUIRED"),
                          (evidence.recovery_clear, "RECOVERY_CONFLICT"),
@@ -146,8 +149,12 @@ class ExecutionBudget:
     last_state: Any = None
     target_attempts: dict[str, int] = field(default_factory=dict)
 
+    def __post_init__(self):
+        if type(self.max_actions) is not int or not 1 <= self.max_actions <= 20:
+            raise ValueError("controlled action budget must be 1..20")
+
     def reserve(self, mode: str, target: str | None, inventory: str, state: Any) -> None:
-        if self.degraded or self.actions >= min(self.max_actions, 5):
+        if self.degraded or self.actions >= self.max_actions:
             raise RuntimeError("controlled action budget unavailable")
         self.actions += 1
         self.scroll_attempts += mode == "CONTROLLED_SCROLL"
