@@ -31,6 +31,13 @@ SCENARIOS = tuple(s for stage in STAGES for s in stage)
 
 
 def main(*, generalized=False):
+    safety_mode = os.environ.get("TB_PHASE5A_ACTION_SAFETY_MODE", "off")
+    if safety_mode not in {"off", "shadow", "enforce"} or safety_mode != "off" and not generalized:
+        raise ValueError("Phase 5A safety requires generalized traversal and an explicit valid mode")
+    safety = None
+    if safety_mode != "off":
+        from tb_runner.phase5a_safety import SafetySession
+        safety = SafetySession(safety_mode)
     if generalized:
         from tb_runner.phase4c_traversal import TraversalSession, SCENARIOS as selected_scenarios, BUDGETS
         from tb_runner.dynamic_context import DestinationOwnership, rebind_execution
@@ -124,10 +131,16 @@ def main(*, generalized=False):
         step, client, state = kwargs["step_idx"], kwargs["client"], kwargs["state"]
         active["step_kwargs"] = kwargs
         raw, value, context = capture(kwargs)
+        safety_before = None
+        if safety:
+            value, safety_before = safety.prepare(value, raw)
         active["before"] = raw, value
         recommendation = plan_shadow(value)
         # A separate immediate observation checks disappearance/semantic change.
         current_raw, current, current_context = capture(kwargs)
+        safety_current = None
+        if safety:
+            current, safety_current = safety.prepare(current, current_raw)
         scope = all(raw.get(k) and raw.get(k) == current_raw.get(k) for k in ("package_name", "activity_name"))
         recovery = not (getattr(state, "forced_local_tab_target_rid", "")
                         or getattr(state, "forced_local_tab_target_action_label", "")
@@ -150,6 +163,9 @@ def main(*, generalized=False):
                 authority=authority_transition, events=deepcopy(active["destination_owner"].events))
             if authority_transition["rebound"]:
                 active["before"] = current_raw, current
+        if safety:
+            decision = safety.guard(current, current_raw, recommendation, decision, safety_current)
+            safety_current["before"] = safety_before
         chosen = recommendation.to_dict()
         audit = dict(scenario=scenario, step=step, state_id=chosen["planner_state_id"],
             context_status=current_context["status"], planner_action=chosen["recommended_action"],
@@ -164,6 +180,8 @@ def main(*, generalized=False):
             actual_focus_before=current_raw.get("focus_node"), gate_evidence=asdict(evidence))
         if dynamic_context is not None:
             audit["dynamic_context"] = dynamic_context
+        if safety_current is not None:
+            audit["action_safety"] = safety_current
         pending[step] = audit
         save("phase4b_observations.jsonl", dict(kind="PRE_CONTROLLED_STEP", scenario=scenario, step=step,
             raw=raw, snapshot=value.snapshot.to_dict(), context=context, history=asdict(value.history),
@@ -230,6 +248,12 @@ def main(*, generalized=False):
     def observed_persist(**kwargs):
         audit = pending.get(kwargs["step_idx"])
         if generalized and audit is not None:
+            if audit.get("action_safety") is not None:
+                audit["action_safety"]["final_outcome"] = dict(
+                    planner_executed=audit.get("planner_executed"), fallback_used=audit.get("fallback_used"),
+                    helper_request_id=audit.get("helper_request_id"),
+                    phase4_execution_gate=audit.get("execution_gate_result"),
+                    visit_record_status=kwargs["row"].get("visit_record_status"))
             if audit.get("dynamic_context") and active.get("destination_owner"):
                 audit["dynamic_context"]["events"] = deepcopy(active["destination_owner"].events)
                 audit["dynamic_context"]["after"] = deepcopy((active.get("after") or active["before"])[0].get("destination_ownership"))

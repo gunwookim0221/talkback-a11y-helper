@@ -1,0 +1,18 @@
+{
+  "schema": "safe-action-signals-v1",
+  "default_mode": "off",
+  "lexicon": {
+    "DESTRUCTIVE": ["delete", "remove", "reset", "factory reset", "erase", "unlink", "unregister", "삭제", "제거", "초기화", "연결 해제", "등록 해제"],
+    "ACCOUNT": ["sign out", "log out", "password", "authentication", "account change", "로그아웃", "비밀번호", "인증", "계정 변경"],
+    "PAYMENT": ["purchase", "payment", "pay", "buy", "order", "subscribe", "구매", "결제", "주문", "구독"],
+    "EXTERNAL_COMMUNICATION": ["send", "invite", "share", "call", "emergency", "external app", "보내기", "전송", "초대", "공유", "전화", "긴급", "외부 앱"],
+    "PHYSICAL_DEVICE": ["power on", "power off", "turn on", "turn off", "unlock", "lock door", "siren", "thermostat", "전원 켜기", "전원 끄기", "잠금 해제", "문 잠금", "사이렌", "온도 조절"],
+    "PRIVACY_SECURITY": ["privacy", "security", "permission", "camera privacy", "개인정보", "보안", "권한", "카메라 프라이버시"],
+    "MUTATING_SETTING": ["save settings", "apply settings", "설정 저장", "설정 적용"]
+  },
+  "physical_context": ["appliance", "washing machine", "washer", "door lock", "thermostat", "siren", "device control", "세탁기", "도어락", "기기 제어", "경보", "온도 조절"],
+  "physical_commands": ["start", "stop", "on", "off", "power", "disconnect", "시작", "정지", "전원", "켜기", "끄기", "연결 해제"],
+  "cancel_signals": ["cancel", "close", "dismiss", "취소", "닫기"],
+  "confirm_signals": ["confirm", "ok", "yes", "submit", "확인", "예", "제출"],
+  "metadata_rules": []
+}

@@ -101,7 +101,7 @@ def build_action_chain(audit, row, events):
                  actor="RECOVERY_ACTION" if strong else "PRIMARY_ACTION",
                  actor_transaction_id=strong[-1]["transaction_id"] if strong else "",
                  actor_result_event_id=strong[-1]["event_id"] if strong else (reconciliation[-1]["event_id"] if reconciliation else ""))
-    return dict(schema=SCHEMA, step_action_id=action_id,
+    chain = dict(schema=SCHEMA, step_action_id=action_id,
                 owner=dict(run_id=owner[0], scenario_tx_id=owner[1], scenario=scenario, step=step),
                 planner=dict(action=audit.get("planner_action"), target=deepcopy(audit.get("planner_target")),
                              gate=deepcopy(audit.get("execution_gate_result")),
@@ -122,6 +122,10 @@ def build_action_chain(audit, row, events):
                 events=events, final_outcome=final,
                 audit_visit_authority=False,
                 destination_recovery_ownership=deepcopy(audit.get("dynamic_context")))
+    if audit.get("action_safety") is not None:
+        chain["action_safety"] = dict(step_action_id=action_id, owner=deepcopy(chain["owner"]),
+                                    evidence=deepcopy(audit["action_safety"]))
+    return chain
 
 
 def action_chain_failures(chain, audit=None):
@@ -140,6 +144,22 @@ def action_chain_failures(chain, audit=None):
         reasons.append("CROSS_STEP_OR_SCENARIO_EVIDENCE_LEAK")
     if audit and chain.get("destination_recovery_ownership") != audit.get("dynamic_context"):
         reasons.append("DESTINATION_OWNERSHIP_PROVENANCE_MISMATCH")
+    safety = chain.get("action_safety")
+    if safety is None and audit and audit.get("action_safety") is not None:
+        reasons.append("SAFETY_PROVENANCE_MISSING")
+    if safety is not None:
+        evidence = safety.get("evidence") or {}
+        if safety.get("owner") != owner or safety.get("step_action_id") != expected_id or (
+                evidence.get("scenario"), evidence.get("step")) != (scenario, step):
+            reasons.append("SAFETY_EVIDENCE_OWNERSHIP_MISMATCH")
+        if audit and evidence != audit.get("action_safety"):
+            reasons.append("SAFETY_PROVENANCE_MISMATCH")
+        if evidence.get("mode") == "enforce" and (evidence.get("final_outcome") or {}).get("planner_executed"):
+            from tb_runner.safe_action_policy import evaluate_policy
+            selected = evidence.get("selected") or {}
+            eligible = evaluate_policy(selected.get("classification") or {}, selected.get("conditions") or {}).eligible
+            if selected.get("policy", {}).get("eligible") is not True or not eligible:
+                reasons.append("SAFETY_BLOCKED_ACTION_EXECUTED")
     events = chain.get("events") or []
     for event in events:
         if (event.get("scenario_id") != scenario or event.get("run_id") != owner.get("run_id")

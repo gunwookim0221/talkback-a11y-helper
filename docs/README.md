@@ -98,6 +98,7 @@ current Runner/Traversal Identity V2 경로가 담당합니다. **Controlled Rou
 다음 문서들은 당시 checkpoint를 기록한 evidence 또는 handoff입니다. 현재 운영을
 설명하는 문서로 읽지 말고, 날짜와 scope를 함께 확인하십시오.
 
+- [Phase 5A Safe Action Classification (2026-10-11)](design/talkback-phase5a-safe-action-classification-20261011.md): integration branch의 분류/정책 기반, shadow 검증과 Phase 5B readiness; production 기본값은 OFF
 - [Phase 8 Identity Shadow completion](design/talkback-identity-shadow-phase8-completion.md)
 - [Phase 9.5 Full Acceptance](design/talkback-phase9.5-full-acceptance.md)
 - [Phase 9.5.1 Regression Recovery](design/talkback-phase9.5.1-regression-recovery.md)
