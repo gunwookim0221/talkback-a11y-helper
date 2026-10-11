@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from types import SimpleNamespace
 
 from talkback_lib import (
@@ -45,6 +45,13 @@ class FakeA11yClient(A11yAdbClient):
         self.enabled_services_payload = "foo:com.example.custom/.A11yService"
         self._dump_counter = 0
         self.ping_ready = True
+
+    def _broadcast(self, dev, action, extras=None):
+        args = ["shell", "am", "broadcast", "-a", action, "-p", self.package_name]
+        if extras:
+            args.extend(extras)
+        self.calls.append((args, dev))
+        return "broadcast ok"
 
     def ping(self, dev=None, wait_=3.0):  # pylint: disable=unused-argument
         return self.ping_ready
@@ -460,7 +467,7 @@ class TouchIsinTest(unittest.TestCase):
         client = FakeA11yClient()
         client.logcat_payload = 'I/A11Y_HELPER: TARGET_ACTION_RESULT {"success":true,"reason":"content_like_focused_row","reqId":"REQFOCUS"}'
 
-        with patch("talkback_lib.uuid.uuid4", return_value="REQFOCUS-xxxx"):
+        with patch("talkback_lib.uuid.uuid4", return_value=SimpleNamespace(hex="REQFOCUS")):
             result = client.focus_in_bounds("SER", bounds="0,220,1080,2337", wait_=1)
 
         self.assertTrue(result["success"])
@@ -1329,29 +1336,38 @@ class TouchIsinTest(unittest.TestCase):
 class ClientInterfaceCompatTest(unittest.TestCase):
     def test_clear_logcat_is_public_and_uses_default_dev_serial(self):
         client = A11yAdbClient(dev_serial="R3CX40QFDBP", start_monitor=False)
-        calls = []
+        popen = MagicMock()
+        process = MagicMock()
+        process.returncode = 0
+        process.communicate.return_value = ("", "")
+        popen.return_value.__enter__.return_value = process
 
-        def fake_run(args, dev=None, timeout=30.0):
-            calls.append((args, dev))
-            return ""
-
-        with patch.object(client, "_run", side_effect=fake_run):
+        with patch("talkback_lib.adb_device.subprocess.Popen", popen):
             client.clear_logcat()
 
-        self.assertEqual(calls, [(["logcat", "-c"], None)])
+        command = popen.call_args.args[0]
+        self.assertEqual(command, ["adb", "-s", "R3CX40QFDBP", "logcat", "-c"])
 
     def test_clear_logcat_returns_empty_string_on_timeout(self):
         client = A11yAdbClient(start_monitor=False)
+        popen = MagicMock()
+        process = MagicMock()
+        process.communicate.side_effect = [
+            subprocess.TimeoutExpired(cmd=["adb", "-s", "SER", "logcat", "-c"], timeout=1.5),
+            ("", ""),
+        ]
+        popen.return_value.__enter__.return_value = process
 
         with patch.object(
-            client,
-            "_run",
-            side_effect=subprocess.TimeoutExpired(cmd=["adb", "logcat", "-c"], timeout=5.0),
-        ), patch("builtins.print") as print_mock:
+            client, "_evidence_is_enabled", return_value=False
+        ), patch("talkback_lib.adb_device.subprocess.Popen", popen), patch("builtins.print") as print_mock:
             result = client.clear_logcat(dev="SER")
 
         self.assertEqual(result, "")
-        print_mock.assert_called_once_with("[WARN] logcat -c timed out, skipping...")
+        process.kill.assert_called_once_with()
+        self.assertEqual(process.communicate.call_count, 2)
+        self.assertIn("[WARN][adb] best_effort logcat -c timeout after 1.5s:", print_mock.call_args.args[0])
+        self.assertTrue(print_mock.call_args.args[0].endswith("adb -s SER logcat -c"))
 
     def test_run_applies_default_serial_when_dev_is_missing(self):
         client = A11yAdbClient(adb_path="adb", dev_serial="R3CX40QFDBP", start_monitor=False)
@@ -1847,7 +1863,7 @@ class SmartMoveFocusTest(unittest.TestCase):
         client.logcat_payload = 'I/A11Y_HELPER: SMART_NAV_RESULT {"success":true,"status":"scrolled","reqId":"REQID701"}'
 
         with patch.object(client, "check_helper_status", return_value=True), patch(
-            "talkback_lib.uuid.uuid4", return_value="REQID701-xxxx"
+            "talkback_lib.uuid.uuid4", return_value=SimpleNamespace(hex="REQID701")
         ):
             result = client.move_focus_smart("SER", direction="next")
 
@@ -1860,7 +1876,7 @@ class SmartMoveFocusTest(unittest.TestCase):
         client.logcat_payload = 'I/A11Y_HELPER: SMART_NAV_RESULT {"success":true,"status":"unknown","reqId":"REQID702"}'
 
         with patch.object(client, "check_helper_status", return_value=True), patch(
-            "talkback_lib.uuid.uuid4", return_value="REQID702-xxxx"
+            "talkback_lib.uuid.uuid4", return_value=SimpleNamespace(hex="REQID702")
         ):
             result = client.move_focus_smart("SER", direction="next")
 
@@ -1873,7 +1889,7 @@ class SmartMoveFocusTest(unittest.TestCase):
         client.logcat_payload = 'I/A11Y_HELPER: SMART_NAV_RESULT {"success":true,"status":"moved_to_bottom_bar_direct","reqId":"REQID705"}'
 
         with patch.object(client, "check_helper_status", return_value=True), patch(
-            "talkback_lib.uuid.uuid4", return_value="REQID705-xxxx"
+            "talkback_lib.uuid.uuid4", return_value=SimpleNamespace(hex="REQID705")
         ):
             result = client.move_focus_smart("SER", direction="next")
 
@@ -1884,7 +1900,7 @@ class SmartMoveFocusTest(unittest.TestCase):
         client.logcat_payload = 'I/A11Y_HELPER: SMART_NAV_RESULT {"success":true,"status":"unknown","detail":"moved_aligned","reqId":"REQID706"}'
 
         with patch.object(client, "check_helper_status", return_value=True), patch(
-            "talkback_lib.uuid.uuid4", return_value="REQID706-xxxx"
+            "talkback_lib.uuid.uuid4", return_value=SimpleNamespace(hex="REQID706")
         ):
             result = client.move_focus_smart("SER", direction="next")
 
@@ -1898,7 +1914,7 @@ class SmartMoveFocusTest(unittest.TestCase):
         )
 
         with patch.object(client, "check_helper_status", return_value=True), patch(
-            "talkback_lib.uuid.uuid4", return_value="REQID707-xxxx"
+            "talkback_lib.uuid.uuid4", return_value=SimpleNamespace(hex="REQID707")
         ):
             result = client.move_focus_smart("SER", direction="next")
 
@@ -1911,7 +1927,7 @@ class SmartMoveFocusTest(unittest.TestCase):
         client.logcat_payload = 'I/A11Y_HELPER: SMART_NAV_RESULT {"success":true,"status":"moved","reqId":"REQID704"}'
 
         with patch.object(client, "check_helper_status", return_value=True), patch(
-            "talkback_lib.uuid.uuid4", return_value="REQID704-xxxx"
+            "talkback_lib.uuid.uuid4", return_value=SimpleNamespace(hex="REQID704")
         ):
             result = client.move_focus_smart("SER", direction="next")
 
@@ -1924,7 +1940,7 @@ class SmartMoveFocusTest(unittest.TestCase):
         client.logcat_payload = 'I/A11Y_HELPER: SMART_NAV_RESULT {"success":true,"status":"moved","reqId":"REQID703"}'
 
         with patch.object(client, "check_helper_status", return_value=True), patch(
-            "talkback_lib.uuid.uuid4", return_value="REQID703-xxxx"
+            "talkback_lib.uuid.uuid4", return_value=SimpleNamespace(hex="REQID703")
         ), patch.object(client, "dump_tree", side_effect=AssertionError("dump_tree should not be called")), patch.object(
             client, "get_focus", side_effect=AssertionError("get_focus should not be called")
         ):
@@ -1938,7 +1954,7 @@ class SmartMoveFocusTest(unittest.TestCase):
         client._update_helper_status_cache(serial="SER", result=True)
 
         with patch.object(client, "check_helper_status", side_effect=AssertionError("helper status should be cached")), patch(
-            "talkback_lib.uuid.uuid4", return_value="REQID709-xxxx"
+            "talkback_lib.uuid.uuid4", return_value=SimpleNamespace(hex="REQID709")
         ):
             result = client.move_focus_smart("SER", direction="next")
 
@@ -2021,7 +2037,7 @@ class SmartMoveFocusTest(unittest.TestCase):
 
 class FocusHelpersTest(unittest.TestCase):
     def test_client_algorithm_version_is_updated(self):
-        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.42")
+        self.assertEqual(CLIENT_ALGORITHM_VERSION, "1.7.71")
 
     def test_extract_visible_label_from_focus_prefers_text(self):
         focus_node = {"text": "  Visible Text  ", "contentDescription": "Desc"}
@@ -2215,6 +2231,8 @@ class FocusHelpersTest(unittest.TestCase):
         client.partial_payload = []
         client.focus_payload = {
             "talkbackLabel": "우리 집",
+            "focused": True,
+            "accessibilityFocused": False,
             "viewIdResourceName": "com.example:id/location",
             "boundsInScreen": {"l": 1, "t": 2, "r": 3, "b": 4},
         }
@@ -2232,11 +2250,13 @@ class FocusHelpersTest(unittest.TestCase):
         self.assertEqual(step["merged_announcement"], "")
         self.assertEqual(step["normalized_announcement"], "")
 
-    def test_collect_focus_step_does_not_override_existing_announcement_with_top_level_fallback(self):
+    def test_collect_focus_step_does_not_override_speech_from_input_focus_only(self):
         client = CollectFocusStepClient()
         client.partial_payload = ["기존 안내"]
         client.focus_payload = {
             "talkbackLabel": "대체 안내",
+            "focused": True,
+            "accessibilityFocused": False,
             "viewIdResourceName": "com.example:id/location",
             "boundsInScreen": {"l": 1, "t": 2, "r": 3, "b": 4},
         }
@@ -2253,6 +2273,24 @@ class FocusHelpersTest(unittest.TestCase):
 
         self.assertEqual(step["merged_announcement"], "기존 안내")
         self.assertEqual(step["normalized_announcement"], "기존 안내")
+
+    def test_collect_focus_step_prefers_confirmed_accessibility_focus_over_unmatched_speech(self):
+        client = CollectFocusStepClient()
+        client.partial_payload = ["기존 안내"]
+        client.focus_payload = {
+            "text": "현재 포커스",
+            "talkbackLabel": "현재 포커스",
+            "focused": False,
+            "accessibilityFocused": True,
+            "viewIdResourceName": "com.example:id/current_focus",
+            "boundsInScreen": {"l": 1, "t": 2, "r": 3, "b": 4},
+        }
+
+        step = client.collect_focus_step(dev="SERIAL", move=False, wait_seconds=0.2)
+
+        self.assertEqual(step["merged_announcement"], "현재 포커스")
+        self.assertEqual(step["announcement_stable_source"], "focus_label_fallback")
+        self.assertEqual(step["trim_reason"], "focus_anchor_snapshot_reject")
 
     def test_collect_focus_step_waits_extra_until_idle_timeout(self):
         client = CollectFocusStepClient()

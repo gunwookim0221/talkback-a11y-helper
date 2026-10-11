@@ -622,8 +622,12 @@ class StepCollectionService:
         )
         step["used_snapshot"] = bool(used_snapshot)
         step["snapshot_contaminated"] = bool(snapshot_contaminated)
+        actual_accessibility_focus_confirmed = (
+            isinstance(safe_focus_node, dict)
+            and safe_focus_node.get("accessibilityFocused") is True
+        )
         focus_final_affinity = self._focus_affinity_score(str(step.get("merged_announcement", "") or ""), focus_anchor_labels)
-        if step["used_snapshot"] and focus_anchor_labels and (
+        if step["used_snapshot"] and actual_accessibility_focus_confirmed and focus_anchor_labels and (
             focus_final_affinity <= 1 or (icon_only_focus and focus_final_affinity < 3)
         ):
             fallback_focus_announcement = str(focus_tb_label or "").strip()
