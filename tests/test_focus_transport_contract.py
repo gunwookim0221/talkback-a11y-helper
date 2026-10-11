@@ -168,6 +168,18 @@ def test_target_focus_commit_uses_same_transport_without_changing_descriptor(cli
     assert action == ACTION_TARGET_FOCUS_COMMIT
     assert extras[extras.index('targetId')+1] == "'id/exact'"
     assert extras[extras.index('bounds')+1] == "'[1,2][3,4]'"
+    assert 'requireFocusable' not in extras
+
+
+@pytest.mark.parametrize('required', [True, False, None, 'true'])
+def test_focusable_target_predicate_is_explicit_opt_in(client, monkeypatch, required):
+    commands, evidence = [], []
+    monkeypatch.setattr(client, '_broadcast', lambda dev,action,extras: commands.append(extras) or 'ACK')
+    monkeypatch.setattr(client, '_read_log_result', lambda dev,prefix,rid,**kw: {'reqId':rid,'success':True,'status':'TARGET_MATCHED'})
+    monkeypatch.setattr(client, '_evidence_begin_target_action', lambda *a,**kw: evidence.append(kw))
+    client._target_focus_commit_impl(target={'bounds':'[1,2][3,4]','resource_id':'id/exact','class_name':'Button','require_focusable':required})
+    assert ('requireFocusable' in commands[0]) is (required is True)
+    assert (evidence[0]['requested_target'].get('requireFocusable') is True) is (required is True)
 
 
 def test_focus_timeout_remains_an_explicit_failed_evidence_event(client, monkeypatch, clock):

@@ -169,7 +169,8 @@ def _consume_new(
     return hits
 
 
-def main() -> int:
+def main(*, runner_module="tools.phase4a_shadow_smoke", env_prefix="TB_PHASE4A",
+         scenario_validator=None) -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     device_state_before = device_state()
     service_list = adb("shell", "settings", "get", "secure", "enabled_accessibility_services")
@@ -234,7 +235,8 @@ def main() -> int:
     save_json(runtime_config_path, runtime_config)
 
     run_env = os.environ.copy()
-    run_env["TB_PHASE4A_SMOKE_OUT"] = str(OUT)
+    run_env[env_prefix + "_SMOKE_OUT"] = str(OUT)
+    run_env[env_prefix + "_SERIAL"] = SERIAL
     run_env["TB_RUNTIME_CONFIG_PATH"] = str(runtime_config_path)
     run_env["TB_EVIDENCE_LEDGER"] = "1"
     run_env["TB_TRAVERSAL_PROFILER"] = "1"
@@ -283,12 +285,12 @@ def main() -> int:
                     scenario_results.append({"scenario": scenario, "precondition": precondition, "started": False, "reason": "helper_pid_changed"})
                     break
 
-                run_env["TB_PHASE4A_SMOKE_SCENARIO"] = scenario
+                run_env[env_prefix + "_SMOKE_SCENARIO"] = scenario
                 started_at = datetime.now(timezone.utc)
                 runner_file.write((f"\n[PHASE4A_SMOKE_SUPERVISOR] scenario_start={scenario} time={started_at.isoformat()}\n").encode())
                 runner_file.flush()
                 process = subprocess.Popen(
-                    [sys.executable, "-u", "-m", "tools.phase4a_shadow_smoke"],
+                    [sys.executable, "-u", "-m", runner_module],
                     cwd=ROOT,
                     env=run_env,
                     stdout=runner_file,
@@ -338,6 +340,11 @@ def main() -> int:
                     "hard_hits": [{"code": h.code, "evidence": h.evidence} for h in scenario_hits],
                 }
                 scenario_results.append(scenario_result)
+                if scenario_validator is not None and not scenario_hits and not helper_changed and return_code == 0:
+                    scenario_result["acceptance"] = scenario_validator(scenario, OUT)
+                    if not scenario_result["acceptance"]["pass"]:
+                        smoke_stopped = True
+                        break
                 print("[SMOKE_SCENARIO_RESULT] " + json.dumps({k: v for k, v in scenario_result.items() if k != "precondition"}), flush=True)
                 if scenario_hits or helper_changed or return_code != 0:
                     smoke_stopped = True

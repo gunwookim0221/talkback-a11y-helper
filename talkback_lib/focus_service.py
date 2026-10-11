@@ -158,6 +158,11 @@ class FocusService:
                 strong_top_level_payload = bool(
                     (has_valid_bounds and has_text_like_label)
                     or (is_partial_salvaged and has_text_like_label)
+                    # A complete strict anonymous focus must not be replaced
+                    # by a dump's auxiliary input-focused node.
+                    or (not is_partial_salvaged and focus_node.get("accessibilityFocused") is True
+                        and bool(class_name) and has_valid_bounds
+                        and parsed_bounds[2] > parsed_bounds[0] and parsed_bounds[3] > parsed_bounds[1])
                 )
                 if not strong_top_level_payload and fast_mode:
                     strong_top_level_payload = has_valid_bounds

@@ -611,7 +611,9 @@ class A11yHelperService : AccessibilityService() {
                 bounds = bounds.toShortString(),
                 resourceId = node.viewIdResourceName.orEmpty(),
                 label = resolveNodeLabel(node),
-                className = node.className?.toString().orEmpty()
+                className = node.className?.toString().orEmpty(),
+                focusable = node.isFocusable,
+                enabled = node.isEnabled
             )
         }
         val resolution = TargetFocusMatcher.resolve(descriptor, candidates)
@@ -635,7 +637,9 @@ class A11yHelperService : AccessibilityService() {
                 bounds = Rect().also(node::getBoundsInScreen).toShortString(),
                 resourceId = node.viewIdResourceName.orEmpty(),
                 label = resolveNodeLabel(node),
-                className = node.className?.toString().orEmpty()
+                className = node.className?.toString().orEmpty(),
+                focusable = node.isFocusable,
+                enabled = node.isEnabled
             )
         }
         val matched = actualCandidate != null && TargetFocusMatcher.sameIdentity(descriptor, actualCandidate)
@@ -677,6 +681,7 @@ class A11yHelperService : AccessibilityService() {
                 put("resourceId", descriptor.resourceId)
                 put("label", descriptor.label)
                 put("className", descriptor.className)
+                if (descriptor.requireFocusable) put("requireFocusable", true)
             })
             if (target != null) put("target", compactFocusInBoundsSnapshot(target))
             if (actual != null) put("focused", compactFocusInBoundsSnapshot(actual))

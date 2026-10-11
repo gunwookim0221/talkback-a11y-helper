@@ -325,7 +325,8 @@ class A11yCommandReceiver : BroadcastReceiver() {
             bounds = intent.getStringExtra(EXTRA_BOUNDS)?.trim().orEmpty(),
             resourceId = intent.getStringExtra(EXTRA_TARGET_ID)?.trim().orEmpty(),
             label = intent.getStringExtra(EXTRA_TARGET_LABEL)?.trim().orEmpty(),
-            className = intent.getStringExtra(EXTRA_CLASS_NAME)?.trim().orEmpty()
+            className = intent.getStringExtra(EXTRA_CLASS_NAME)?.trim().orEmpty(),
+            requireFocusable = intent.getBooleanExtra("requireFocusable", false)
         )
         dispatchFocusCommand(service, "TARGET_FOCUS_COMMIT", reqId) {
             service.performTargetFocusCommit(descriptor, reqId, emitResult = false)

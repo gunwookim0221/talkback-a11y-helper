@@ -71,8 +71,37 @@ def observed_focus_instance(row: dict[str, Any]) -> dict[str, Any] | None:
             return None
         rid, bounds = row.get("focus_view_id", ""), row.get("focus_bounds", "")
         label = row.get("visible_label", "") or row.get("merged_announcement", "")
-    if not (rid or label) or not normalized_bounds(bounds):
+    if not normalized_bounds(bounds):
         return None
+    if not (rid or label):
+        # Anonymous focus is real evidence when its observed geometry/class
+        # and strict accessibility focus are coherent. Keep instance-v1;
+        # class is a comparison signal, never an invented label/history key.
+        actual_node = row.get("actual_focus_node", node)
+        if isinstance(actual_node, str):
+            try:
+                actual_node = json.loads(actual_node)
+            except (ValueError, TypeError):
+                return None
+        actual_node = actual_node if isinstance(actual_node, dict) else {}
+        flag = row.get("actual_focus_accessibility_focused")
+        node_flag = actual_node.get("accessibilityFocused")
+        if isinstance(flag, bool) and isinstance(node_flag, bool) and flag is not node_flag:
+            return None
+        if not (flag is True or (flag is None and node_flag is True)):
+            return None
+        class_name = row.get("actual_focus_class_name") or actual_node.get("className") or ""
+        node_class = actual_node.get("className")
+        node_bounds = actual_node.get("boundsInScreen") or actual_node.get("bounds")
+        geometry = parse_bounds_str(normalized_bounds(bounds))
+        if (not normalized(class_name) or not geometry or geometry[2] <= geometry[0] or geometry[3] <= geometry[1]
+                or (node_class and normalized(node_class) != normalized(class_name))
+                or (node_bounds and normalized_bounds(node_bounds) != normalized_bounds(bounds))
+                or normalized(row.get("focus_transition_status")) == "ambiguous"
+                or normalized(row.get("focus_reconciliation_confidence")) == "ambiguous"):
+            return None
+        return dict(scenario_id=row.get("scenario_id", ""), view_id=rid, bounds=bounds,
+                    label="", class_name=class_name)
     return dict(scenario_id=row.get("scenario_id", ""), view_id=rid, bounds=bounds, label=label)
 
 
@@ -202,6 +231,7 @@ class TraversalMetrics:
             proof = dict(scenario_id=observed["scenario_id"], step_index=row.get("step_index"),
                          actual_focus_resource_id=observed["view_id"],
                          actual_focus_bounds=normalized_bounds(observed["bounds"]), actual_focus_visible=observed["label"],
+                         actual_focus_class_name=row.get("actual_focus_class_name") or observed.get("class_name", ""),
                          actual_focus_accessibility_focused=a11y, actual_focus_input_focused=focused,
                          physical_visited=row.get("physical_visited"), row_source="actual_focus",
                          evidence_source="pre_persist_coherent_focus")

@@ -2960,6 +2960,9 @@ class A11yAdbClient:
             "label": label,
             "className": class_name,
         }
+        require_focusable = target.get("require_focusable") is True
+        if require_focusable:
+            requested_target["requireFocusable"] = True
         self._evidence_begin_target_action(
             "TARGET_FOCUS_COMMIT", requested_target=requested_target, phase="main_loop"
         )
@@ -2971,6 +2974,8 @@ class A11yAdbClient:
             "--es", "className", self._escape_adb_string(class_name),
             "--es", "reqId", req_id,
         ]
+        if require_focusable:
+            extras.extend(["--ez", "requireFocusable", "true"])
         extras.extend(self._evidence_correlation_extras())
         self._evidence_action_sent(action=ACTION_TARGET_FOCUS_COMMIT, req_id=req_id)
         result = self._helper_bridge.request_focus_command(dev, ACTION_TARGET_FOCUS_COMMIT, req_id, extras)

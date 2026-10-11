@@ -33,7 +33,7 @@ class FocusCommandTransportTest {
         fun next() { tasks.removeAt(0).run() }
     }
 
-    private fun receiverContract(command: String) {
+    private fun receiverContract(command: String, requireFocusable: Boolean = false) {
         ShadowLog.clear()
         val controller = Robolectric.buildService(A11yHelperService::class.java).create()
         val service = controller.get()
@@ -51,6 +51,7 @@ class FocusCommandTransportTest {
         }
         try {
             val intent = Intent(action).putExtra("reqId", "slow-$command").putExtra("bounds", "[0,0][100,100]")
+            if (requireFocusable) intent.putExtra("requireFocusable", true)
             context.sendOrderedBroadcast(intent, null, done, null, 0, null, null)
             ShadowLooper.idleMainLooper()
             assertTrue("Command ACK must precede arbitrarily delayed service work", ack)
@@ -66,6 +67,9 @@ class FocusCommandTransportTest {
             assertEquals("slow-$command", result.getString("reqId"))
             assertFalse(result.getBoolean("success")) // Root unavailable in this mock service.
             assertEquals(command, result.getString("action"))
+            if (command == "TARGET_FOCUS_COMMIT") {
+                assertEquals(requireFocusable, result.getJSONObject("requestedTarget").optBoolean("requireFocusable", false))
+            }
         } finally {
             context.unregisterReceiver(receiver)
             controller.destroy()
@@ -77,6 +81,9 @@ class FocusCommandTransportTest {
     }
     @Test fun targetCommitBroadcastCompletesBeforeWorkWithoutChangingResultContract() {
         receiverContract("TARGET_FOCUS_COMMIT")
+    }
+    @Test fun controlledFocusablePredicateSurvivesReceiverAndCorrelatedResult() {
+        receiverContract("TARGET_FOCUS_COMMIT", requireFocusable = true)
     }
     @Test fun sequenceAndDuplicateSuppressionSharedAcrossFocusCommands() {
         val queue = QueueExecutor()
