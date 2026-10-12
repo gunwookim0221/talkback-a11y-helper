@@ -157,6 +157,7 @@ separate Stage A/B/C from the two preflight probes:
 | Production fallbacks | 10 | 12 |
 | Secondary focus retargets / fallback rechecks | 35 / 35 | 38 / 38 |
 | Safe child entries / successful returns | 3 / 3 | 5 / 5 |
+| Safe alternatives / verified safe scrolls / read-only fallbacks | 103 / 6 / 10 | 121 / 6 / 12 |
 
 The secondary class totals for conditionally safe, risky, and forbidden targets
 were zero in both scopes. Unknown/risky/forbidden and known destructive,

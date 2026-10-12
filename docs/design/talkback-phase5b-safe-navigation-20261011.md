@@ -328,6 +328,9 @@ preflight. Across the staged rows there were 230 authorization invalidations,
 100 permit grants, and 10 production fallbacks. Three safe child entries had
 three successful returns. Including both preflight probes, secondary attempts
 were 39 (4 SAFE, 35 UNKNOWN), and five child entries returned successfully.
+The staged rows also selected 103 safe alternatives, six verified safe scrolls,
+and ten read-only production fallbacks; UNKNOWN candidates caused zero
+no-progress stops.
 
 Unknown, risky, forbidden, destructive, payment, account-mutation,
 physical-device-control, and external-send execution counts were zero. Phase 4
