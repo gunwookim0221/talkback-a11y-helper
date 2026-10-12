@@ -42,7 +42,8 @@ def main(*, generalized=False, safe_navigation=False):
         safety = SafetySession(safety_mode)
     if generalized:
         from tb_runner.phase4c_traversal import TraversalSession, SCENARIOS as selected_scenarios, BUDGETS
-        from tb_runner.dynamic_context import DestinationOwnership, rebind_execution
+        from tb_runner.dynamic_context import (DestinationOwnership, rebind_execution,
+                                               destination_ownership_rejection_diagnostic)
     else:
         selected_scenarios, BUDGETS = SCENARIOS, {s: 5 for s in SCENARIOS}
     if safe_navigation:
@@ -56,7 +57,26 @@ def main(*, generalized=False, safe_navigation=False):
         raise ValueError("Explicit Phase 4B opt-in and supported scenario required")
     out = Path(os.environ[prefix + "_SMOKE_OUT"]).resolve()
     config = json.loads(Path(os.environ["TB_RUNTIME_CONFIG_PATH"]).read_text(encoding="utf-8"))
-    if config.get("scenarios", {}).get(scenario, {}).get("max_steps") != BUDGETS[scenario]:
+    configured_max_steps = config.get("scenarios", {}).get(scenario, {}).get("max_steps")
+    phase5c_full32 = os.environ.get("TB_PHASE5C_FULL32_ACCEPTANCE") == "1"
+    controlled_action_budget = BUDGETS[scenario]
+    if phase5c_full32:
+        from tb_runner.phase5c_budget_policy import resolve_phase5c_budget_pair
+
+        expected_production = os.environ.get("TB_PHASE5C_PRODUCTION_MAX_STEPS")
+        expected_controlled = os.environ.get("TB_PHASE5C_CONTROLLED_ACTION_BUDGET")
+        try:
+            expected_production = int(expected_production) if expected_production is not None else None
+            expected_controlled = int(expected_controlled) if expected_controlled is not None else None
+        except ValueError as exc:
+            raise ValueError("Phase 5C budget mapping environment values must be integers") from exc
+        pair = resolve_phase5c_budget_pair(scenario, configured_max_steps, expected_controlled)
+        if pair["production_max_steps"] != expected_production:
+            raise ValueError("Phase 5C production max_steps changed after acceptance mapping")
+        if pair["controlled_action_budget"] != BUDGETS[scenario]:
+            raise ValueError("Phase 5C controlled action budget differs from the worker mapping")
+        controlled_action_budget = pair["controlled_action_budget"]
+    elif configured_max_steps != BUDGETS[scenario]:
         raise ValueError("Exactly five TOTAL production traversal steps required")
     serial = os.environ.get(prefix + "_SERIAL", "R3CX40QFDBP")
     run_dir = out / "run" / scenario
@@ -64,8 +84,8 @@ def main(*, generalized=False, safe_navigation=False):
     registry_path = out / (file_prefix + "_registry.json")
     registry = StateRegistry.load(registry_path) if registry_path.exists() else StateRegistry("phase4b-controlled-smoke")
     diagnostic = A11yAdbClient(start_monitor=False)
-    budget = ExecutionBudget(max_actions=BUDGETS[scenario])
-    session = TraversalSession(scenario, BUDGETS[scenario]) if generalized else None
+    budget = ExecutionBudget(max_actions=controlled_action_budget)
+    session = TraversalSession(scenario, controlled_action_budget) if generalized else None
     active, pending = {}, {}
     original_loop = collection_flow._main_loop_phase
     original_step = collection_flow._apply_step_collection_phase
@@ -114,12 +134,20 @@ def main(*, generalized=False, safe_navigation=False):
             proof = plugin_context_evidence(entry, raw, deepcopy(getattr(client, "last_start_open_summary", {})), epoch)
             active.update(navigation_epoch=epoch, plugin_context=proof)
             raw.update(navigation_epoch=epoch, phase3_plugin_context_evidence=proof)
-            if proof and (not navigation or navigation.plugin_lease_required(resolve_phase3_context(raw))):
-                active["destination_owner"] = DestinationOwnership(raw,
-                    event_sink=lambda event: save("phase4c_destination_events.jsonl", event))
+            entry_context = resolve_phase3_context(raw)
+            if proof and (not navigation or navigation.plugin_lease_required(entry_context)):
+                try:
+                    active["destination_owner"] = DestinationOwnership(raw,
+                        event_sink=lambda event: save("phase4c_destination_events.jsonl", event))
+                except ValueError as exc:
+                    save("phase4c_trusted_entry_rejections.jsonl",
+                         destination_ownership_rejection_diagnostic(raw, entry_context, exc))
+                    raise
                 active["navigation_count"] = 0
+        else:
+            entry_context = resolve_phase3_context(raw)
         save("phase4b_observations.jsonl", dict(kind="ENTRY_TO_TRAVERSAL", scenario=scenario, raw=raw,
-             snapshot=build_discovery_snapshot(raw, registry).to_dict(), context=resolve_phase3_context(raw)))
+             snapshot=build_discovery_snapshot(raw, registry).to_dict(), context=entry_context))
         print("[PHASE4B_ENTRY] " + json.dumps(dict(scenario=scenario, entry="VERIFIED_MAIN_LOOP")), flush=True)
         def invalidate_context():
             active["navigation_count"] = active.get("navigation_count", 0) + 1
@@ -174,11 +202,11 @@ def main(*, generalized=False, safe_navigation=False):
             geometry_in_viewport=geometry_in_viewport(current_raw, recommendation),
             scroll_container_proven=safe_scroll_container(current_raw, recommendation))
         decision = execution_gate(value, recommendation, current, evidence,
-                                  actions_used=budget.actions, degraded=budget.degraded, action_limit=BUDGETS[scenario])
+                                  actions_used=budget.actions, degraded=budget.degraded, action_limit=controlled_action_budget)
         dynamic_context = None
         if generalized and active.get("destination_owner"):
             recommendation, decision, authority_transition = rebind_execution(value, recommendation, current, evidence,
-                raw, current_raw, actions_used=budget.actions, degraded=budget.degraded, action_limit=BUDGETS[scenario])
+                raw, current_raw, actions_used=budget.actions, degraded=budget.degraded, action_limit=controlled_action_budget)
             dynamic_context = dict(before=deepcopy(raw.get("destination_ownership")),
                 current=deepcopy(current_raw.get("destination_ownership")),
                 authority=authority_transition, events=deepcopy(active["destination_owner"].events))

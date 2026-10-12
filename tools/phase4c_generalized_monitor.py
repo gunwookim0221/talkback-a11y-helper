@@ -10,6 +10,26 @@ from tb_runner.phase4c_traversal import STAGES, SCENARIOS, BUDGETS
 from tb_runner.action_provenance import chain_gates, action_chain_failures, digest
 from tb_runner.dynamic_context import ownership_failures, stable_digest
 
+# Full32 Phase 5 acceptance may retain a larger production traversal limit
+# while Phase 4C/5B controlled actions stay inside their bounded slice.
+PRODUCTION_MAX_STEPS = {}
+
+
+def production_step_limit(scenario):
+    value = PRODUCTION_MAX_STEPS.get(scenario, BUDGETS[scenario])
+    if type(value) is not int or value < 1:
+        raise ValueError(f"invalid production max_steps for {scenario}: {value!r}")
+    return value
+
+
+def planner_loop_unbounded(rows, production_max_steps, controlled_action_budget):
+    if type(production_max_steps) is not int or production_max_steps < 1:
+        raise ValueError("production max_steps must be a positive integer")
+    if type(controlled_action_budget) is not int or not 1 <= controlled_action_budget <= 20:
+        raise ValueError("controlled action budget must be 1..20")
+    controlled_actions = sum(bool(row.get("planner_executed")) for row in rows)
+    return len(rows) > production_max_steps or controlled_actions > controlled_action_budget
+
 
 def validate_scenario(scenario, out):
     rows = [r for r in read_lines(out / "phase4c_execution_trace.jsonl") if r["scenario"] == scenario]
@@ -22,13 +42,15 @@ def validate_scenario(scenario, out):
     reasons = []
     if len(entries) != 1:
         reasons.append("NORMAL_ENTRY_NOT_PROVEN")
-    if not rows or [r["step"] for r in rows] != list(range(1, len(rows)+1)) or len(rows) > BUDGETS[scenario]:
+    production_max_steps = production_step_limit(scenario)
+    if (not rows or [r["step"] for r in rows] != list(range(1, len(rows)+1))
+            or len(rows) > production_max_steps):
         reasons.append("BOUNDED_STEPS_NOT_PROVEN")
     if not any(r["planner_executed"] for r in rows):
         reasons.append("NO_CONTROLLED_EXECUTION")
     if not terminal or status in {"INCOMPLETE_ERROR", "ENTRY_FAILED", "ENTRY_ABORTED"} or "anchor" in str(reason).lower():
         reasons.append("PRODUCTION_TERMINAL_FAILURE")
-    if len(rows) < BUDGETS[scenario] and status == "INCOMPLETE_NO_PROGRESS" and not rows[-1].get("no_progress_proven"):
+    if len(rows) < production_max_steps and status == "INCOMPLETE_NO_PROGRESS" and not rows[-1].get("no_progress_proven"):
         reasons.append("EARLY_NO_PROGRESS_NOT_PROVEN")
     safety = Counter()
     audit_gates = Counter()
@@ -72,7 +94,9 @@ def validate_scenario(scenario, out):
                 reasons.append("SCROLL_REFRESH_MISSING")
         if r.get("gate_evidence", {}).get("focus_coherent") is True and r.get("focus_preview") and not r["focus_preview"].get("actual_focus_before_id"):
             reasons.append("BEFORE_FOCUS_IDENTITY_LOST")
-    safety["PLANNER_LOOP_UNBOUNDED"] = int(len(rows) > BUDGETS[scenario] or sum(r["planner_executed"] for r in rows) > BUDGETS[scenario])
+    safety["PLANNER_LOOP_UNBOUNDED"] = int(
+        planner_loop_unbounded(rows, production_max_steps, BUDGETS[scenario])
+    )
     reasons.extend(k for k,v in safety.items() if v)
     reasons.extend(k for k,v in audit_gates.items() if v)
     evidence_chains = read_lines(out / "phase4c_step_action_evidence.jsonl")

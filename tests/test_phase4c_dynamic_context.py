@@ -107,6 +107,7 @@ def test_contradictory_component_or_global_nav_drops_destination(change):
 def test_other_plugin_body_after_recovery_cannot_rebind():
     raw=observed();owner=DestinationOwnership(raw);owner.assess(capture(raw,1),recovery_active=True)
     bad=capture(raw,2);bad['nodes'][0]['text']='Washer'
+    bad['nodes'][0]['role']='heading'
     assert owner.assess(bad)['status']=='CONTRADICTORY_CONTEXT'
 
 

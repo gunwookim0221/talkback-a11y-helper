@@ -12,6 +12,7 @@ import re
 
 from tb_runner.plugin_context_contract import body_resources
 from tb_runner.phase3_context import resolve_phase3_context
+from tb_runner.scenario_config import TAB_CONFIGS
 from tb_runner.phase4a_planner import plan_shadow
 from tb_runner.phase4b_authority import execution_gate, AuthorityDecision
 from tb_runner.phase4b_execution import geometry_in_viewport
@@ -29,6 +30,47 @@ def time_value(raw):
         return value.timestamp() if value.tzinfo else None
     except (ValueError, KeyError, TypeError):
         return None
+
+
+def destination_ownership_rejection_diagnostic(raw, context=None, error=None):
+    """Build bounded pre-raise evidence without granting or changing authority."""
+    context = context if isinstance(context, dict) else resolve_phase3_context(raw)
+    scenario = str(raw.get("scenario_id") or "")
+    config = next((c for c in TAB_CONFIGS if c.get("scenario_id") == scenario), {})
+    tab_name = str(config.get("tab_name") or "").casefold()
+    expected = next((name for name in ("home", "devices", "life", "routines", "menu") if name in tab_name), None)
+    reasons = list(context.get("reasons") or [])
+    evidence = context.get("destination_evidence") or {}
+    labels = []
+    for node in raw.get("nodes", []):
+        if not isinstance(node, dict) or node.get("visibleToUser", node.get("isVisibleToUser", True)) is False:
+            continue
+        label = next((str(node.get(k) or "").strip() for k in
+                      ("text", "contentDescription", "talkbackLabel", "mergedLabel", "label")
+                      if str(node.get(k) or "").strip()), "")
+        if label:
+            labels.append(dict(label=label, resource_id=node.get("viewIdResourceName") or node.get("resourceId"),
+                               class_name=node.get("className") or node.get("class"),
+                               bounds=node.get("boundsInScreen"), role=node.get("role"),
+                               stable_node_path=node.get("stable_node_path")))
+    window = raw.get("window_evidence") if isinstance(raw.get("window_evidence"), dict) else {}
+    return dict(
+        schema_version="destination-ownership-rejection-v1",
+        scenario=scenario, expected_destination=expected,
+        context_status=context.get("status"), context_reason=reasons,
+        failed_predicate=(reasons[0] if reasons else "DESTINATION_OWNERSHIP_STATUS_OR_IDENTITY"),
+        observed_destination_signals=list(context.get("observed_signals") or []),
+        other_destination_signals=dict(lexical_hints=evidence.get("lexical_hints", []),
+                                       structural_evidence=evidence.get("structural_evidence", []),
+                                       strict_profile_matches=evidence.get("strict_profile_matches", [])),
+        navigation_epoch=raw.get("navigation_epoch"), destination_ownership=False,
+        destination_identity=(raw.get("phase3_plugin_context_evidence") or {}).get("destination_identity"),
+        activity=dict(package_name=raw.get("package_name"), activity_name=raw.get("activity_name"),
+                      context_source=raw.get("context_source")),
+        window={key: window.get(key) for key in
+                ("window_count", "focused_window_type", "focused_window_component", "focused_activity_matches", "windows")},
+        selected_tab=deepcopy(raw.get("selected_tab")), body_markers=dict(resource_ids=body_resources(raw), labels=labels),
+        error=str(error) if error is not None else "Trusted normal plugin entry required")
 
 
 class DestinationOwnership:

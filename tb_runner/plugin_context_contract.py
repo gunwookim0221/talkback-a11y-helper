@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any, Mapping
+from copy import deepcopy
 import re
 from contextlib import contextmanager
 
@@ -13,6 +14,90 @@ def body_resources(raw: Mapping[str, Any]) -> list[str]:
                    and (n.get("viewIdResourceName") or n.get("resourceId"))
                    and not str(n.get("viewIdResourceName") or n.get("resourceId")).startswith(
                        "com.samsung.android.oneconnect:id/menu_")})
+
+
+_GENERIC_RESOURCE_WORDS = {
+    "action", "app", "body", "button", "card", "container", "content", "fragment",
+    "item", "layout", "main", "page", "primary", "root", "screen", "service", "view",
+    "web", "webview", "widget",
+}
+
+
+def _marker_aliases(config: Mapping[str, Any]) -> list[str]:
+    """Return configured, human-readable destination names, not body regexes."""
+    aliases: list[str] = []
+    for step in config.get("pre_navigation", []):
+        if not isinstance(step, Mapping):
+            continue
+        for value in step.get("target_stable_labels", []):
+            text = " ".join(str(value or "").split())
+            if text and text not in aliases:
+                aliases.append(text)
+    return aliases
+
+
+def _destination_marker_evidence(config: Mapping[str, Any], raw: Mapping[str, Any], labels: list[str]) -> dict[str, list[dict[str, Any]]]:
+    """Separate incidental lexical hints from structural destination identity."""
+    aliases = _marker_aliases(config)
+    lexical: list[dict[str, Any]] = []
+    for label in labels:
+        for alias in aliases:
+            try:
+                if re.search(r"(?<!\w)" + re.escape(alias) + r"(?!\w)", label, re.I):
+                    lexical.append(dict(alias=alias, label=label))
+            except re.error:
+                continue
+
+    nodes = [n for n in raw.get("nodes", []) if isinstance(n, Mapping)
+             and n.get("visibleToUser", n.get("isVisibleToUser", True)) is not False]
+    aliases_folded = {" ".join(a.split()).casefold(): a for a in aliases}
+    structural: list[dict[str, Any]] = []
+    heading_roles = {"heading", "screen_title", "screen-title", "title"}
+    title_containers = re.compile(r"(?:^|[:_/.-])(?:toolbar|actionbar|appbar|screen[_-]?title)(?:$|[:_/.-])", re.I)
+    for node in nodes:
+        label = next((" ".join(str(node.get(k) or "").split()) for k in
+                      ("text", "contentDescription", "talkbackLabel", "mergedLabel", "label")
+                      if str(node.get(k) or "").strip()), "")
+        alias = aliases_folded.get(label.casefold())
+        role = str(node.get("role") or node.get("accessibilityRole") or "").casefold()
+        if alias and (role in heading_roles or node.get("heading") is True or node.get("isHeading") is True):
+            structural.append(dict(kind="semantic_destination_heading", scenario_id=config.get("scenario_id"),
+                                   alias=alias, label=label, resource_id=node.get("viewIdResourceName") or node.get("resourceId"),
+                                   node_path=node.get("stable_node_path")))
+            continue
+        ancestors = node.get("ancestors", [])
+        if alias and any(title_containers.search(str(a.get("resource_id") or "")) or
+                         title_containers.search(str(a.get("class_name") or ""))
+                         for a in ancestors if isinstance(a, Mapping)):
+            structural.append(dict(kind="configured_title_container", scenario_id=config.get("scenario_id"),
+                                   alias=alias, label=label, resource_id=node.get("viewIdResourceName") or node.get("resourceId"),
+                                   node_path=node.get("stable_node_path")))
+
+    entry_match = config.get("entry_match")
+    resource_patterns = entry_match.get("resource_patterns", []) if isinstance(entry_match, Mapping) else []
+    for node in nodes:
+        rid = str(node.get("viewIdResourceName") or node.get("resourceId") or "").strip()
+        if ":id/" not in rid:
+            continue
+        normalized_rid = re.sub(r"[^a-z0-9]+", "", rid.casefold())
+        specific_alias = next((alias for alias in aliases
+                               if len(re.sub(r"[^a-z0-9]+", "", alias.casefold())) >= 5
+                               and re.sub(r"[^a-z0-9]+", "", alias.casefold()) in normalized_rid), None)
+        configured_resource_match = bool(resource_patterns and any(
+            re.search(str(pattern), rid, re.I) for pattern in resource_patterns if pattern))
+        resource_name = re.split(r"[:/]+", rid.casefold())[-1]
+        resource_words = set(re.findall(r"[a-z0-9]+", resource_name))
+        configured_words = set()
+        for pattern in resource_patterns if configured_resource_match else []:
+            configured_words.update(re.findall(r"[a-z0-9]{4,}", str(pattern).casefold()))
+        configured_words = {word for word in configured_words
+                            if word not in _GENERIC_RESOURCE_WORDS
+                            and word not in {"preinstalledservicecard", "servicecard"}}
+        configured_marker = bool(configured_words & resource_words)
+        if specific_alias or configured_marker:
+            structural.append(dict(kind="destination_specific_resource", scenario_id=config.get("scenario_id"),
+                                   alias=specific_alias, resource_id=rid, node_path=node.get("stable_node_path")))
+    return dict(lexical_hints=lexical, structural_evidence=structural)
 
 
 @contextmanager
@@ -91,6 +176,7 @@ def generic_plugin_context(raw, config, *, entry_current, entry_reason, labels,
                            matched_profiles=()):
     """Resolve an owned proof against current observations; never infer by name."""
     proof = raw.get("phase3_plugin_context_evidence")
+    destination_evidence: dict[str, Any] = {"lexical_hints": [], "structural_evidence": []}
     def result(status, reason, signals=()):
         return dict(status=status, context_tier=("PARTIAL_PLUGIN_CONTEXT" if status == "PARTIAL_CONTEXT" else status),
                     context_type="plugin", context_id=(proof.get("destination_identity")
@@ -98,6 +184,7 @@ def generic_plugin_context(raw, config, *, entry_current, entry_reason, labels,
                     context_source="generic_production_entry+post_open+current_runtime",
                     confidence="HIGH" if status == "VERIFIED_PLUGIN_CONTEXT" else "LOW",
                     verified=status == "VERIFIED_PLUGIN_CONTEXT", observed_signals=list(signals),
+                    destination_evidence=deepcopy(destination_evidence),
                     reasons=[reason] if reason else [])
     if not entry_current:
         return result("UNRESOLVED_CONTEXT", entry_reason)
@@ -133,24 +220,31 @@ def generic_plugin_context(raw, config, *, entry_current, entry_reason, labels,
     # Contradictions use configured destination markers, not a plugin-name table.
     from tb_runner.scenario_config import TAB_CONFIGS
     target_body = body_matches(config, labels)
-    def destination_marker(c):
-        # Body contracts often include shared words such as "History". These
-        # cannot independently prove a different destination. Require its
-        # configured entry title/alias as well, or a strict observed profile.
-        tokens = [str(token).strip() for step in c.get("pre_navigation", [])
-                  for token in [step.get("target", ""), *step.get("target_stable_labels", [])]
-                  if str(token).strip()]
-        return any(re.search(r"(?<!\w)" + re.escape(token) + r"(?!\w)", label, re.I)
-                   for token in tokens for label in labels)
-    others = [c["scenario_id"] for c in TAB_CONFIGS
-              if c.get("screen_context_mode") == "new_screen"
-              and c.get("scenario_id") != raw.get("scenario_id")
-              and body_matches(c, labels) and destination_marker(c)]
-    others += [s for s in matched_profiles if s != raw.get("scenario_id")]
+    other_destination_ids = []
+    lexical_hints = []
+    structural_evidence = []
+    for other_config in TAB_CONFIGS:
+        if (other_config.get("screen_context_mode") != "new_screen"
+                or other_config.get("scenario_id") == raw.get("scenario_id")
+                or not body_matches(other_config, labels)):
+            continue
+        evidence = _destination_marker_evidence(other_config, raw, labels)
+        if evidence["lexical_hints"]:
+            lexical_hints.extend(evidence["lexical_hints"])
+        if evidence["structural_evidence"]:
+            structural_evidence.extend(evidence["structural_evidence"])
+            other_destination_ids.append(other_config["scenario_id"])
+    profiled_others = [s for s in matched_profiles if s != raw.get("scenario_id")]
+    other_destination_ids.extend(profiled_others)
+    destination_evidence = dict(
+        lexical_hints=lexical_hints,
+        structural_evidence=structural_evidence,
+        strict_profile_matches=profiled_others,
+    )
     if len(matched_profiles) > 1:
         return result("CONTRADICTORY_CONTEXT", "MULTIPLE_PLUGIN_CONTEXT_MATCHES", matched_profiles)
-    if others:
-        return result("CONTRADICTORY_CONTEXT", "OTHER_CONFIGURED_DESTINATION_BODY", others)
+    if other_destination_ids:
+        return result("CONTRADICTORY_CONTEXT", "OTHER_CONFIGURED_DESTINATION_BODY", other_destination_ids)
     trusted = (package == "com.samsung.android.oneconnect" and package == proof.get("package_name")
                and bool(activity) and activity == proof.get("activity_name")
                and raw.get("context_source") in {"window_current_focus", "activity_resumed"}

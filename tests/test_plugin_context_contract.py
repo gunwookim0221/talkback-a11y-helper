@@ -74,6 +74,7 @@ def test_wrong_selected_tab_is_contradictory():
 def test_different_runtime_destination_is_contradictory():
     raw = observation()
     raw["nodes"][0]["text"] = "Washer"
+    raw["nodes"][0]["role"] = "heading"
     assert resolve_phase3_context(raw)["status"] == "CONTRADICTORY_CONTEXT"
 
 
