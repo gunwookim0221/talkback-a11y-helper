@@ -17213,20 +17213,32 @@ def _execute_overlay_for_candidate(
     row_view_id = str(row.get("focus_view_id", "") or "").strip()
     row_label = str(row.get("visible_label", "") or "").strip()
     if row_view_id:
-        clicked = client.touch(
+        click_result = client.touch(
             dev=dev,
             name=f"^{re.escape(row_view_id)}$",
             type_="r",
             wait_=3,
         )
     elif row_label:
-        clicked = client.touch(
+        click_result = client.touch(
             dev=dev,
             name=f"^{re.escape(row_label)}$",
             type_="a",
             wait_=3,
         )
+    else:
+        click_result = False
+    blocked_before_dispatch = bool(isinstance(click_result, dict)
+        and click_result.get("dispatch_status") == "BLOCKED_BEFORE_DISPATCH")
+    clicked = False if blocked_before_dispatch else bool(click_result)
     if not clicked:
+        if blocked_before_dispatch:
+            expanded_overlay_entries.add(fingerprint)
+            log(
+                f"[PHASE5B][secondary_action_blocked] scenario='{tab_cfg.get('scenario_id', '')}' "
+                f"step={row.get('step_index')} target='{row_view_id or row_label}' "
+                "dispatch_status='BLOCKED_BEFORE_DISPATCH' continuation='PRODUCTION_TRAVERSAL'"
+            )
         log(
             f"[OVERLAY] post_click classification='unchanged' scenario='{tab_cfg.get('scenario_id', '')}' "
             f"tab='{tab_cfg.get('tab_name', '')}' step={row.get('step_index')} "
@@ -17234,8 +17246,8 @@ def _execute_overlay_for_candidate(
         )
         return OverlayPhaseResult(
             candidate_checked=True,
-            candidate_reason=candidate_reason,
-            classification="unchanged",
+            candidate_reason=("phase5b_secondary_dispatch_blocked" if blocked_before_dispatch else candidate_reason),
+            classification=("blocked_by_phase5b" if blocked_before_dispatch else "unchanged"),
             post_realign_pending_steps_delta=0,
         )
 

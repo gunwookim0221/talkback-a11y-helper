@@ -171,6 +171,48 @@ def test_target_focus_commit_uses_same_transport_without_changing_descriptor(cli
     assert 'requireFocusable' not in extras
 
 
+def test_phase5b_preflight_block_happens_before_action_sent_or_helper_dispatch(client, monkeypatch):
+    evidence = []
+    monkeypatch.setattr(client, '_evidence_begin_target_action', lambda *a,**kw:evidence.append('begin'))
+    monkeypatch.setattr(client, '_evidence_action_sent', lambda **kw:evidence.append('sent'))
+    monkeypatch.setattr(client._helper_bridge, 'request_focus_command',
+        lambda *a,**kw:pytest.fail('preflight-blocked target reached Helper'))
+    client._phase5b_preflight_target_focus = lambda **kwargs: False
+    result = client._target_focus_commit_impl(target={
+        'bounds':'78,635,309,683','resource_id':'com.samsung.android.oneconnect:id/device_name',
+        'class_name':'android.widget.TextView','label':'세이프 버튼'})
+    assert result['success'] is False and result['status']=='PHASE5B_AUTHORIZATION_BLOCKED'
+    assert result['action']=='TARGET_FOCUS_COMMIT' and result['reqId']
+    assert evidence == []
+
+
+def test_phase5b_bounds_only_recovery_block_happens_before_action_sent_or_helper_dispatch(client, monkeypatch):
+    evidence = []
+    monkeypatch.setattr(client, '_evidence_action_sent', lambda **kw:evidence.append('sent'))
+    monkeypatch.setattr(client._helper_bridge, 'request_focus_command',
+        lambda *a,**kw:pytest.fail('preflight-blocked bounds focus reached Helper'))
+    client._phase5b_preflight_bounds_focus = lambda **kwargs: False
+    result = client.focus_in_bounds(bounds='66,316,525,1012')
+    assert result['success'] is False
+    assert result['dispatch_status'] == 'BLOCKED_BEFORE_DISPATCH'
+    assert result['action'] == 'FOCUS_IN_BOUNDS' and result['reqId']
+    assert evidence == []
+
+
+def test_phase5b_secondary_activation_block_is_pre_dispatch_and_not_retried(client, monkeypatch):
+    seen = []
+    monkeypatch.setattr(client, '_refresh_tree_if_needed', lambda *args, **kwargs: None)
+    monkeypatch.setattr(client, 'clear_logcat', lambda **kwargs: None)
+    monkeypatch.setattr(client, '_broadcast', lambda *args, **kwargs: pytest.fail('blocked activation reached Helper'))
+    client._phase5b_preflight_activation = lambda **kwargs: seen.append(kwargs) or False
+    result = client.touch(dev='serial', name=r'^More\ options$', type_='a', wait_=5)
+    assert result['success'] is False
+    assert result['status'] == 'PHASE5B_AUTHORIZATION_BLOCKED'
+    assert result['dispatch_status'] == 'BLOCKED_BEFORE_DISPATCH'
+    assert result['action'] == 'CLICK_TARGET' and result['reqId']
+    assert len(seen) == 1 and seen[0]['target']['action_type'] == 'CLICK'
+
+
 @pytest.mark.parametrize('required', [True, False, None, 'true'])
 def test_focusable_target_predicate_is_explicit_opt_in(client, monkeypatch, required):
     commands, evidence = [], []

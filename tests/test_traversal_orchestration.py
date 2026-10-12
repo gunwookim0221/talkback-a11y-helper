@@ -2,13 +2,86 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from tb_runner.traversal_evidence_gate import evaluate_traversal_gate
 from tb_runner.traversal_orchestration import (
+    RecoveryExecutionServices,
     RecoveryCoordinator,
+    RecoveryExecutor,
     StopPolicy,
     TraversalCoordinator,
     VisitTracker,
 )
+
+
+def test_blocked_recovery_dispatch_has_no_post_action_observation_or_visit():
+    class Candidate:
+        candidate_id = "candidate:blocked"
+        canonical_key = "instance:blocked"
+        bounds = (66, 316, 525, 1012)
+        label = "Unknown"
+
+        def requested_observation(self):
+            return {"bounds": "66,316,525,1012"}
+
+    class Diagnostics:
+        recovered_candidate_attempts = 0
+
+        def record_recovery_attempt(self):
+            return self
+
+    state = SimpleNamespace(
+        traversal_diagnostics=Diagnostics(),
+        recovery_attempted_candidate_ids=set(),
+        recovery_hard_failed_candidate_ids=set(),
+        recovery_visited_candidate_ids=set(),
+    )
+    closed = []
+    logs = []
+    candidate = Candidate()
+    select_calls = []
+
+    def select_candidate():
+        select_calls.append(True)
+        return candidate if len(select_calls) == 1 else None
+
+    client = SimpleNamespace(
+        _evidence_begin_target_action=lambda *a, **kw: {"transaction_id": "tx:blocked"},
+        _evidence_set_step=lambda *a, **kw: None,
+        _evidence_active_transaction={"transaction_id": "tx:blocked"},
+        evidence_runtime=SimpleNamespace(close_transaction=lambda tx, **kw: closed.append((tx, kw))),
+        focus_in_bounds=lambda **kw: {"success": False, "dispatch_status": "BLOCKED_BEFORE_DISPATCH"},
+        collect_focus_step=lambda **kw: pytest.fail("blocked recovery must not observe or reconcile movement"),
+    )
+    services = RecoveryExecutionServices(
+        enabled=lambda: True,
+        select_candidate=select_candidate,
+        resolve_decision=lambda row: pytest.fail("blocked recovery cannot award a visit"),
+        emit_evidence=lambda *a, **kw: pytest.fail("blocked recovery has no dispatched action result"),
+        capture_crop=lambda *a, **kw: pytest.fail("blocked recovery cannot capture a visit"),
+        register_inventory=lambda *a, **kw: pytest.fail("blocked recovery cannot register a visit"),
+        log=logs.append,
+        truncate=lambda value, count: value[:count],
+        monotonic=lambda: 1.0,
+        action_wait_seconds=0.1,
+    )
+    outcome = RecoveryExecutor.execute(
+        client=client,
+        dev="serial",
+        phase_ctx=SimpleNamespace(tab_cfg={"tab_name": "Life"}),
+        state=state,
+        row={},
+        step_idx=9,
+        services=services,
+    )
+
+    assert outcome["attempted"] and not outcome["recovered"]
+    assert not outcome["block_stop"]
+    assert closed and closed[0][1]["status"] == "blocked"
+    assert client._evidence_active_transaction is None
+    assert state.recovery_hard_failed_candidate_ids == {candidate.candidate_id, candidate.canonical_key}
+    assert any("recovery_blocked" in line for line in logs)
 
 
 def test_traversal_coordinator_preserves_gate_arguments_and_results():

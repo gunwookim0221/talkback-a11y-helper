@@ -17997,6 +17997,37 @@ def test_plugin_more_options_opens_overlay_once_and_recovers(monkeypatch):
     assert len(client.touch_calls) == 1
 
 
+def test_phase5b_blocked_plugin_menu_dispatch_is_skipped_without_retry(monkeypatch):
+    row = {
+        **_main_row(238),
+        "visible_label": "More options",
+        "normalized_visible_label": "more options",
+        "focus_view_id": "",
+        "focus_bounds": "920,24,1050,160",
+        "focus_class_name": "android.widget.ImageView",
+    }
+    tab_cfg = {**_base_tab_cfg(max_steps=1), "scenario_id": "life_family_care_plugin"}
+    expanded = set()
+    client = DummyClient([])
+    touch_calls = []
+    def blocked_touch(**kwargs):
+        touch_calls.append(kwargs)
+        return {"success": False, "status": "PHASE5B_AUTHORIZATION_BLOCKED",
+            "dispatch_status": "BLOCKED_BEFORE_DISPATCH"}
+    client.touch = blocked_touch
+    monkeypatch.setattr(collection_flow, "log", lambda *_args, **_kwargs: None)
+    first = collection_flow._overlay_phase(client=client, dev="SERIAL", tab_cfg=tab_cfg,
+        row=row, rows=[], all_rows=[], output_path="unused.xlsx", output_base_dir=".",
+        scenario_perf=None, main_step_index_by_fingerprint={}, expanded_overlay_entries=expanded)
+    second = collection_flow._overlay_phase(client=client, dev="SERIAL", tab_cfg=tab_cfg,
+        row=row, rows=[], all_rows=[], output_path="unused.xlsx", output_base_dir=".",
+        scenario_perf=None, main_step_index_by_fingerprint={}, expanded_overlay_entries=expanded)
+    assert first.classification == "blocked_by_phase5b"
+    assert first.candidate_reason == "phase5b_secondary_dispatch_blocked"
+    assert second.classification == "unchanged"
+    assert len(touch_calls) == 1
+
+
 def test_plugin_more_options_rejects_body_more_button(monkeypatch):
     row = {
         **_main_row(233),

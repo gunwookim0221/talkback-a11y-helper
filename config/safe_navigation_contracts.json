@@ -1,0 +1,17 @@
+{
+  "schema": "safe-navigation-contracts-v1",
+  "default_enabled": false,
+  "max_child_entries_per_scenario": 1,
+  "contracts": [
+    {
+      "id": "application_overflow_menu",
+      "package": "com.samsung.android.oneconnect",
+      "resource_id": "com.samsung.android.oneconnect:id/more_menu_button_container",
+      "label_pattern": "(?i)(more options|more|더 보기|더보기|추가 옵션)?",
+      "effect": "read_only_navigation",
+      "return_transport": "BACK",
+      "child_kind": "READ_ONLY_MENU",
+      "no_editable_or_checkable_child": true
+    }
+  ]
+}

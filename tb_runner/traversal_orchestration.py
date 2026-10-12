@@ -197,17 +197,39 @@ class RecoveryExecutor:
                 exclude_top_chrome=True,
                 exclude_bottom_nav=True,
                 )
-            with measure_runtime("verification_poll"):
-                recovery_row = client.collect_focus_step(
-                dev=dev,
-                step_index=recovery_step_key,
-                move=False,
-                direction="next",
-                wait_seconds=phase_ctx.main_step_wait_seconds,
-                announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
-                announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
-                announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
+            if action_result.get("dispatch_status") == "BLOCKED_BEFORE_DISPATCH":
+                # A rejected transport cannot own a post-action observation or
+                # recovery result; that could attribute prior movement to a
+                # command that never reached Helper.
+                services.log(
+                    f"[TRAVERSAL_V2][recovery_blocked] candidate='{candidate.candidate_id}' "
+                    "reason='dispatch_blocked_before_action_sent'"
                 )
+                runtime = getattr(client, "evidence_runtime", None)
+                active = getattr(client, "_evidence_active_transaction", None)
+                if runtime is not None and active:
+                    try:
+                        runtime.close_transaction(
+                            active,
+                            status="blocked",
+                            phase="recovery",
+                            payload={"reason": "dispatch_blocked_before_action_sent"},
+                        )
+                    except Exception:
+                        pass
+                    setattr(client, "_evidence_active_transaction", None)
+            else:
+                with measure_runtime("verification_poll"):
+                    recovery_row = client.collect_focus_step(
+                    dev=dev,
+                    step_index=recovery_step_key,
+                    move=False,
+                    direction="next",
+                    wait_seconds=phase_ctx.main_step_wait_seconds,
+                    announcement_wait_seconds=phase_ctx.main_announcement_wait_seconds,
+                    announcement_idle_wait_seconds=phase_ctx.main_announcement_idle_wait_seconds,
+                    announcement_max_extra_wait_seconds=phase_ctx.main_announcement_max_extra_wait_seconds,
+                    )
         except Exception as exc:
             services.log(
                 f"[TRAVERSAL_V2][recovery_error] candidate='{candidate.candidate_id}' "

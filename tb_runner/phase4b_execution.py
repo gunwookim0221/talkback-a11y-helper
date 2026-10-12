@@ -4,6 +4,7 @@ Imported only by the explicit Phase 4B harness. No normal runner hook enables it
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
 from copy import deepcopy
 
 from talkback_lib.window_lifecycle import get_talkback_restart_event
@@ -89,7 +90,8 @@ def scroll_request_audit(client, scroll, audit, **kwargs):
 
 
 def controlled_collect(*, client, dev, scenario, step, raw, recommendation, decision,
-                       budget, collect, collect_kwargs, refresh, output_dir, audit, audit_sink=None):
+                       budget, collect, collect_kwargs, refresh, output_dir, audit, audit_sink=None,
+                       focus_authorization=None):
     """At most one controlled action and one production fallback in a step.
 
     The returned row still travels through the complete production main loop.
@@ -184,10 +186,13 @@ def controlled_collect(*, client, dev, scenario, step, raw, recommendation, deci
         return original_target_commit(**{**kwargs, "target": {**kwargs["target"], "require_focusable": True}})
     client.target_focus_commit = focusable_commit
     try:
-        _, status, observed_focus = collection_flow._maybe_realign_focus_to_representative(
-            row=target_meta, client=client, dev=dev, selected_node=node,
-            selected_rid=target["resource_id"], selected_label="", selected_bounds=target["bounds"],
-            scenario_id=scenario, step_idx=step, force_reason="phase4b_gated_structural_target")
+        authorization = (focus_authorization(target, node) if focus_authorization is not None
+                        else nullcontext())
+        with authorization:
+            _, status, observed_focus = collection_flow._maybe_realign_focus_to_representative(
+                row=target_meta, client=client, dev=dev, selected_node=node,
+                selected_rid=target["resource_id"], selected_label="", selected_bounds=target["bounds"],
+                scenario_id=scenario, step_idx=step, force_reason="phase4b_gated_structural_target")
     finally:
         if had_target_override:
             client.target_focus_commit = original_target_commit

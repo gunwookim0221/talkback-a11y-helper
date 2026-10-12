@@ -30,7 +30,9 @@ STAGES = (("home_main", "devices_main"), ("life_find_plugin", "device_smoke_sens
 SCENARIOS = tuple(s for stage in STAGES for s in stage)
 
 
-def main(*, generalized=False):
+def main(*, generalized=False, safe_navigation=False):
+    if safe_navigation and (not generalized or os.environ.get("TB_PHASE5B_CONTROLLED") != "1"):
+        raise ValueError("Safe navigation requires explicit bounded Phase 5B opt-in")
     safety_mode = os.environ.get("TB_PHASE5A_ACTION_SAFETY_MODE", "off")
     if safety_mode not in {"off", "shadow", "enforce"} or safety_mode != "off" and not generalized:
         raise ValueError("Phase 5A safety requires generalized traversal and an explicit valid mode")
@@ -43,6 +45,10 @@ def main(*, generalized=False):
         from tb_runner.dynamic_context import DestinationOwnership, rebind_execution
     else:
         selected_scenarios, BUDGETS = SCENARIOS, {s: 5 for s in SCENARIOS}
+    if safe_navigation:
+        from tb_runner.phase5b_navigation import SafeNavigationSession, SafetyBlocked, SCENARIOS as selected_scenarios, BUDGETS
+        if safety_mode != "enforce":
+            raise ValueError("Phase 5B requires Phase 5A enforcement")
     prefix = "TB_PHASE4C" if generalized else "TB_PHASE4B"
     file_prefix = "phase4c" if generalized else "phase4b"
     scenario = os.environ.get(prefix + "_SMOKE_SCENARIO", "")
@@ -71,6 +77,8 @@ def main(*, generalized=False):
         with (out / name.replace("phase4b", file_prefix)).open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(value, ensure_ascii=False, default=str) + "\n")
         registry.save(registry_path)
+
+    navigation = SafeNavigationSession(scenario, save, safety_config=safety.config if safety else None) if safe_navigation else None
 
     def capture(kwargs):
         raw = capture_observation(diagnostic, kwargs["dev"], scenario_id=scenario,
@@ -106,7 +114,7 @@ def main(*, generalized=False):
             proof = plugin_context_evidence(entry, raw, deepcopy(getattr(client, "last_start_open_summary", {})), epoch)
             active.update(navigation_epoch=epoch, plugin_context=proof)
             raw.update(navigation_epoch=epoch, phase3_plugin_context_evidence=proof)
-            if proof:
+            if proof and (not navigation or navigation.plugin_lease_required(resolve_phase3_context(raw))):
                 active["destination_owner"] = DestinationOwnership(raw,
                     event_sink=lambda event: save("phase4c_destination_events.jsonl", event))
                 active["navigation_count"] = 0
@@ -121,8 +129,21 @@ def main(*, generalized=False):
                 active["destination_owner"].navigation(event, active["navigation_epoch"])
         try:
             with navigation_epoch_guard(client, invalidate_context, navigation_observer=navigation_observed) if generalized else nullcontext():
-                return original_loop(client, dev, phase_ctx)
+                with navigation.firewall(client, dev) if navigation else nullcontext():
+                    try:
+                        return original_loop(client, dev, phase_ctx)
+                    except Exception as exc:
+                        if navigation and isinstance(exc, SafetyBlocked):
+                            save("phase5b_failure.jsonl", dict(scenario=scenario, reason=str(exc),
+                                step=(navigation.raw or {}).get("step"), raw=navigation.raw))
+                            # Exit outside ordinary scenario crash/retry handling.
+                            raise SystemExit(3) from exc
+                        raise
         finally:
+            if navigation:
+                save("phase5b_session_summary.jsonl", dict(scenario=scenario, blocked_candidate_repeats=navigation.blocked_repeats,
+                    blocked_scope_count=len(navigation.blocked), transport_blocks=len(navigation.command_blocks),
+                    completed_navigation_probe=navigation.completed, attempt_credit=0, visit_credit=0))
             active.clear()
 
     def observed_step(**kwargs):
@@ -166,6 +187,8 @@ def main(*, generalized=False):
         if safety:
             decision = safety.guard(current, current_raw, recommendation, decision, safety_current)
             safety_current["before"] = safety_before
+        if navigation:
+            navigation.observe(current_raw, safety_current)
         chosen = recommendation.to_dict()
         audit = dict(scenario=scenario, step=step, state_id=chosen["planner_state_id"],
             context_status=current_context["status"], planner_action=chosen["recommended_action"],
@@ -200,9 +223,13 @@ def main(*, generalized=False):
             collector_used = True
             return controlled_collect(client=client, dev=kwargs["dev"], scenario=scenario, step=step,
                 raw=current_raw, recommendation=recommendation, decision=decision, budget=budget,
-                collect=collect, collect_kwargs=collect_kwargs, refresh=refresh,
+                collect=(lambda **kw: navigation.collect(collect, kw, audit, client)) if navigation else collect,
+                collect_kwargs=collect_kwargs, refresh=refresh,
                 output_dir=str(run_dir), audit=audit,
-                audit_sink=lambda event: save("phase4b_action_audit.jsonl", event))
+                audit_sink=lambda event: save("phase4b_action_audit.jsonl", event),
+                focus_authorization=(lambda target, node: navigation.authorize_focus_target(
+                    raw=current_raw, value=current, target=target, phase4_gate=decision,
+                    step=step, dispatch_kind="PRIMARY")) if navigation else None)
         had_instance = "collect_focus_step" in client.__dict__
         prior_instance = client.__dict__.get("collect_focus_step")
         client.collect_focus_step = controlled
@@ -295,6 +322,23 @@ def main(*, generalized=False):
             # Audit credits are copies of production outcomes, not ledger writes.
             save("phase4b_execution_trace.jsonl", audit)
             print("[PHASE4B_STEP] " + json.dumps({k: audit[k] for k in ("scenario", "step", "classification", "planner_executed", "visit_credit", "fallback_used")}), flush=True)
+        if navigation and kwargs["step_idx"] == 5:
+            def nav_capture(observe_owner=True):
+                if observe_owner:
+                    raw, value, context = capture(active["step_kwargs"])
+                    state = active["step_kwargs"]["state"]
+                    raw["phase5b_recovery_clear"] = not (getattr(state,"forced_local_tab_target_rid","")
+                        or getattr(state,"forced_local_tab_target_action_label","")
+                        or getattr(state,"post_realign_pending_steps",0) or getattr(state,"stop_triggered",False))
+                    return raw, value, context
+                raw = capture_observation(diagnostic, active["step_kwargs"]["dev"], scenario_id=scenario,
+                    step=kwargs["step_idx"], scenario_run_id=active["run_id"])
+                raw["phase3_entry_evidence"] = active["entry"]
+                raw["navigation_epoch"] = active["navigation_epoch"]
+                snapshot = build_discovery_snapshot(raw, registry)
+                return raw, replace(active["before"][1], snapshot=snapshot), resolve_phase3_context(raw)
+            navigation.roundtrip(client=active["step_kwargs"]["client"], dev=active["step_kwargs"]["dev"],
+                capture=nav_capture, step=kwargs["step_idx"])
         return result
 
     collection_flow._main_loop_phase = observed_loop

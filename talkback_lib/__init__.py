@@ -1860,6 +1860,26 @@ class A11yAdbClient:
                 target_id=target_id,
             )
             extras += ["--es", "reqId", req_id]
+            # Phase 5B may install a target/action preflight while its
+            # execution firewall is active. Refuse unowned activation before
+            # sending anything to Helper; returning done=True prevents the
+            # normal touch retry loop from repeating a denied request.
+            preflight = getattr(self, "_phase5b_preflight_activation", None)
+            if callable(preflight):
+                request = dict(action_type="LONG_CLICK" if long_ else "CLICK",
+                    name=parsed_name, target_type=parsed_type, target_text=target_text,
+                    target_id=target_id, index=index_, class_name=class_name,
+                    clickable=clickable, focusable=focusable)
+                try:
+                    preflight_allowed = preflight(target=request, request_id=req_id, dev=dev) is True
+                except Exception:
+                    preflight_allowed = False
+                if not preflight_allowed:
+                    result = dict(success=False, status="PHASE5B_AUTHORIZATION_BLOCKED",
+                        reason="phase5b_activation_dispatch_preflight_denied",
+                        dispatch_status="BLOCKED_BEFORE_DISPATCH", action="CLICK_TARGET", reqId=req_id)
+                    self.last_target_action_result = dict(result)
+                    return True, result
             self._broadcast(
                 dev,
                 ACTION_CLICK_TARGET,
@@ -2111,6 +2131,26 @@ class A11yAdbClient:
                 "--es", "reqId", req_id,
             ]
             extras.extend(self._evidence_correlation_extras())
+            # Phase 5B installs this opt-in hook while its execution firewall
+            # is active. Bounds-only focus has no exact target identity, so a
+            # denied request must stop before ACTION_SENT and before Helper.
+            preflight = getattr(self, "_phase5b_preflight_bounds_focus", None)
+            if callable(preflight):
+                try:
+                    preflight_allowed = preflight(bounds=str(bounds or ""), request_id=req_id, dev=dev) is True
+                except Exception:
+                    preflight_allowed = False
+                if not preflight_allowed:
+                    result = {
+                        "success": False,
+                        "status": STATUS_FAILED,
+                        "reason": "phase5b_focus_dispatch_preflight_denied",
+                        "dispatch_status": "BLOCKED_BEFORE_DISPATCH",
+                        "action": "FOCUS_IN_BOUNDS",
+                        "reqId": req_id,
+                    }
+                    self.last_target_action_result = dict(result)
+                    return False, result
             self._evidence_action_sent(action="FOCUS_IN_BOUNDS", req_id=req_id)
             result = self._helper_bridge.request_focus_command(dev, ACTION_FOCUS_IN_BOUNDS, req_id, extras)
             if self._recovery_evidence_active():
@@ -2963,10 +3003,26 @@ class A11yAdbClient:
         require_focusable = target.get("require_focusable") is True
         if require_focusable:
             requested_target["requireFocusable"] = True
+        req_id = uuid.uuid4().hex
+        # Phase 5B installs this optional, opt-in callback while its controlled
+        # execution firewall is active. Check before recording ACTION_SENT so
+        # a correctly blocked target is not represented as a dispatched action.
+        # The ADB boundary independently repeats the authorization check.
+        preflight = getattr(self, "_phase5b_preflight_target_focus", None)
+        if callable(preflight):
+            try:
+                preflight_allowed = preflight(target=requested_target, request_id=req_id, dev=dev) is True
+            except Exception:
+                preflight_allowed = False
+            if not preflight_allowed:
+                result = dict(success=False, status="PHASE5B_AUTHORIZATION_BLOCKED",
+                    reason="phase5b_focus_dispatch_preflight_denied", action="TARGET_FOCUS_COMMIT",
+                    reqId=req_id)
+                self.last_target_action_result = result
+                return dict(result)
         self._evidence_begin_target_action(
             "TARGET_FOCUS_COMMIT", requested_target=requested_target, phase="main_loop"
         )
-        req_id = uuid.uuid4().hex
         extras = [
             "--es", "bounds", self._escape_adb_string(bounds),
             "--es", "targetId", self._escape_adb_string(resource_id),
