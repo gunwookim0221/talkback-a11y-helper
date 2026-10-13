@@ -739,6 +739,9 @@ class A11yAdbClient:
         return self._helper_bridge._ping_helper(dev=dev, wait_=wait_)
 
     def _broadcast(self, dev: Any, action: str, extras: list[str] | None = None) -> str:
+        hard_stop = getattr(self, "_phase5c_hard_stop_state", None)
+        if hard_stop is not None:
+            hard_stop.guard(f"helper:{action}")
         cmd = ["shell", "am", "broadcast", "-a", action, "-p", self.package_name]
         if extras:
             cmd.extend(extras)

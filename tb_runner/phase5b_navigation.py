@@ -171,7 +171,14 @@ class SafeNavigationSession:
         self.completed = False
         self.blocked = {}
         self.command_blocks = []
+        self._active_client = None
         self.blocked_repeats = 0
+
+    def _guard_hard_stop(self, operation):
+        client = self._active_client
+        hard_stop = getattr(client, "_phase5c_hard_stop_state", None) if client is not None else None
+        if hard_stop is not None:
+            hard_stop.guard(operation)
 
     @staticmethod
     def plugin_lease_required(context):
@@ -221,6 +228,7 @@ class SafeNavigationSession:
     def authorize_focus_target(self, *, raw, value, target, phase4_gate, step,
                                dispatch_kind="PRIMARY"):
         """Issue one native-focus permit for the exact Phase 4/5A gated target."""
+        self._guard_hard_stop("planner_target_authorization")
         from tb_runner.phase5a_safety import safety_context, conditions_for
         from tb_runner.action_safety import configured_metadata
         from tb_runner.safe_action_policy import evaluate_policy
@@ -299,6 +307,7 @@ class SafeNavigationSession:
 
     @contextmanager
     def authorize(self, kind, request=None, authorization=None):
+        self._guard_hard_stop(f"authorize:{kind}")
         if self.permit is not None:
             raise SafetyBlocked("Nested execution permit")
         self.permit = dict(kind=kind, request=request, consumed=False,
@@ -343,6 +352,7 @@ class SafeNavigationSession:
         controlled planner step. Classify the observed target for audit, but
         do not infer a Phase 4 execution gate or inherit a focus permit.
         """
+        self._guard_hard_stop("preflight:activation")
         from tb_runner.action_safety import configured_metadata
         from tb_runner.safe_action_policy import evaluate_policy
         from tb_runner.scroll_reliability import flat_nodes
@@ -421,6 +431,7 @@ class SafeNavigationSession:
         return False
 
     def _focus_command_allowed(self, command, *, dispatch_boundary=True):
+        self._guard_hard_stop("preflight:focus_dispatch")
         permit = self.permit
         supplied = _extras(command)
         command_type = str(command[command.index("-a") + 1]).rsplit(".", 1)[-1]
@@ -504,6 +515,7 @@ class SafeNavigationSession:
 
     def preflight_focus_dispatch(self, *, target, request_id, dev=None):
         """Authorize before the client journals ACTION_SENT; ADB still rechecks."""
+        self._guard_hard_stop("preflight:focus_dispatch")
         identity = focus_target_identity(target)
         command = ["shell", "am", "broadcast", "-a", ACTION_TARGET_FOCUS_COMMIT,
             "-p", "com.iotpart.sqe.talkbackhelper"] + [
@@ -513,6 +525,7 @@ class SafeNavigationSession:
 
     def preflight_bounds_focus_dispatch(self, *, bounds, request_id, dev=None):
         """Reject bounds-only recovery before it can be journaled as dispatched."""
+        self._guard_hard_stop("preflight:bounds_focus_dispatch")
         command = ["shell", "am", "broadcast", "-a", ACTION_FOCUS_IN_BOUNDS,
             "-p", "com.iotpart.sqe.talkbackhelper", "--es", "bounds", str(bounds or ""),
             "--es", "reqId", str(request_id or "")]
@@ -591,6 +604,8 @@ class SafeNavigationSession:
         """Lowest existing ADB dispatch boundary, covering recovery and fallback."""
         saved = []
         forwarding = []
+        prior_active_client = self._active_client
+        self._active_client = client
         callback_name = "_phase5b_preflight_target_focus"
         bounds_callback_name = "_phase5b_preflight_bounds_focus"
         activation_callback_name = "_phase5b_preflight_activation"
@@ -611,6 +626,7 @@ class SafeNavigationSession:
             if not callable(original): return
             had, prior = name in vars(obj), vars(obj).get(name)
             def guarded(command, *args, **kwargs):
+                self._guard_hard_stop(f"transport:{name}")
                 requested_dev = kwargs.get("dev", args[0] if args else dev)
                 # TalkBackClient._run -> AdbExecutor.run -> AdbDevice is one
                 # dispatch. Consume its permit once, then accept exactly one
@@ -654,6 +670,7 @@ class SafeNavigationSession:
         had_scroll, prior_scroll = "scroll" in vars(client), vars(client).get("scroll")
         if callable(original_scroll):
             def safe_scroll(*args, **kwargs):
+                self._guard_hard_stop("planner_scroll")
                 cap = (self.raw or {}).get("capability") or {}
                 container = cap.get("container") or {}
                 if not (cap.get("axis_contract") == "axis-v1" and cap.get("contradictory") is False
@@ -668,6 +685,7 @@ class SafeNavigationSession:
         try:
             yield
         finally:
+            self._active_client = prior_active_client
             if callable(original_scroll):
                 if had_scroll: client.scroll = prior_scroll
                 else: vars(client).pop("scroll", None)
@@ -676,6 +694,7 @@ class SafeNavigationSession:
                 else: vars(obj).pop(name,None)
 
     def collect(self, collect, kwargs, audit, client):
+        self._guard_hard_stop("fallback_or_collection")
         # A controlled action has already opened the current step transaction;
         # its move=False collection is the post-action observation. Other
         # move=False callers (for example local-tab recovery) still need a
@@ -702,6 +721,7 @@ class SafeNavigationSession:
         Journal the actual exact GET_FOCUS request/ACK as the primary read-only
         operation so audit ownership is complete without inventing a focus move.
         """
+        self._guard_hard_stop("fallback_observation")
         self.invalidate_authorization("FALLBACK_BOUNDARY")
         raw = self.raw or {}
         audit.update(fallback_safety_class="SAFE", fallback_policy_decision="READ_ONLY_FOCUS_OBSERVATION")
@@ -715,9 +735,15 @@ class SafeNavigationSession:
         reader,broadcast=client._read_log_result,client._broadcast
         saved={name:(name in vars(client),vars(client).get(name)) for name in ["_read_log_result","_broadcast"]}
         request={"ids": [], "acknowledged_ids": [], "transaction_id": ""}
+        source_request_id = str(audit.get("helper_request_id") or "")
+        observation_type = ("POST_ACTION" if audit.get("planner_executed") else
+                            "FALLBACK" if audit.get("fallback_used") else "RECOVERY")
         audit["fallback_observation_ownership"] = dict(
             status="UNRESOLVED", step=kwargs.get("step_index"),
-            transaction_id="", request_ids=[], acknowledged_request_ids=[])
+            transaction_id="", request_ids=[], acknowledged_request_ids=[],
+            request_domains={},
+            request_domain="FOCUS_OBSERVATION", read_only=True,
+            observation_type=observation_type, source_action_request_id=source_request_id)
         def observed_broadcast(dev,action,extras=None):
             if action.endswith('.GET_FOCUS') and extras and 'reqId' in extras:
                 req=extras[extras.index('reqId')+1]
@@ -730,7 +756,10 @@ class SafeNavigationSession:
                 audit["fallback_observation_ownership"] = dict(
                     status="UNRESOLVED", step=kwargs.get("step_index"),
                     transaction_id=request["transaction_id"], request_ids=list(request["ids"]),
-                    acknowledged_request_ids=list(request["acknowledged_ids"]))
+                    acknowledged_request_ids=list(request["acknowledged_ids"]),
+                    request_domains={req: "FOCUS_OBSERVATION" for req in request["ids"]},
+                    request_domain="FOCUS_OBSERVATION", read_only=True,
+                    observation_type=observation_type, source_action_request_id=source_request_id)
             return broadcast(dev,action,extras)
         def observed_reader(*args,**kw):
             result=reader(*args,**kw)
@@ -746,7 +775,10 @@ class SafeNavigationSession:
                             getattr(client,"evidence_runtime",None),"is_enabled",False) else "UNRESOLVED",
                         step=kwargs.get("step_index"), transaction_id=request["transaction_id"],
                         request_ids=list(request["ids"]),
-                        acknowledged_request_ids=list(request["acknowledged_ids"]))
+                        acknowledged_request_ids=list(request["acknowledged_ids"]),
+                        request_domains={req: "FOCUS_OBSERVATION" for req in request["ids"]},
+                        request_domain="FOCUS_OBSERVATION", read_only=True,
+                        observation_type=observation_type, source_action_request_id=source_request_id)
                     # This is an exact read-only receipt, never movement success.
                     client.last_smart_nav_result=dict(reqId=str(req),success=False,status='OBSERVED_NO_MOVE')
                 else:
@@ -761,6 +793,12 @@ class SafeNavigationSession:
             # inherit movement from an earlier request/navigation transaction.
             before_focus=client.get_focus(dev=kwargs.get('dev'),allow_fallback_dump=False,mode='fast') or {}
             row=collect(**kwargs)
+            owner = audit.get("fallback_observation_ownership")
+            if isinstance(owner, dict):
+                node = row.get("actual_focus_node") if isinstance(row, dict) else None
+                owner["production_request_id"] = (
+                    row.get("get_focus_req_id") if isinstance(row, dict) else None
+                ) or ((node or {}).get("reqId") if isinstance(node, dict) else None) or ""
             from tb_runner.phase4b_execution import focus_row
             row['phase4b_before_row']=focus_row(before_focus,self.scenario)
             return row

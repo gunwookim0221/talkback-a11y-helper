@@ -13,7 +13,7 @@ import re
 from tb_runner.phase4b_execution import focus_row
 from tb_runner.traversal_reliability import focus_instance, instance_id
 
-SCHEMA = "step-action-provenance-v1"
+SCHEMA = "step-action-provenance-v2"
 EVENT_TYPES = {"ACTION_SENT", "HELPER_ACK_RECEIVED", "POST_FOCUS_OBSERVED",
                "FOCUS_RECONCILIATION", "PRODUCTION_TRAVERSAL_GATE_DECIDED",
                "RECOVERY_CANDIDATE_RESULT", "TRANSACTION_CLOSED"}
@@ -52,6 +52,17 @@ def production_focus_identity(node, scenario, observed_resource_id):
     return instance_id(actual) if actual else ''
 
 
+def _request_domain(command_type):
+    command = str(command_type or "").rsplit(".", 1)[-1].upper()
+    if command == "GET_FOCUS":
+        return "FOCUS_OBSERVATION"
+    if command in {"EVIDENCE_EVENTS", "PING", "DUMP_TREE", "DUMP_HIERARCHY"}:
+        return "READ_ONLY_HELPER"
+    if command:
+        return "ACTION_DISPATCH"
+    return "UNKNOWN"
+
+
 def build_action_chain(audit, row, events):
     """Snapshot existing evidence; no runtime state or row outcome is mutated."""
     scenario, step = audit["scenario"], audit["step"]
@@ -71,13 +82,28 @@ def build_action_chain(audit, row, events):
         if not sent:
             continue
         is_recovery = any(":recovery:" in str(e["step_index"]) for e in sent)
+        request_ids = [e["payload"].get("request_id") for e in sent]
+        request_domains = {}
+        request_types = {}
+        for event in sent:
+            request_id = event["payload"].get("request_id")
+            if not request_id:
+                continue
+            command_type = event["payload"].get("command_type")
+            request_types.setdefault(request_id, set()).add(str(command_type or ""))
+            request_domains.setdefault(request_id, set()).add(_request_domain(command_type))
         actions.append(dict(action_id=action_id+":"+tx, role="RECOVERY_ACTION" if is_recovery else "PRIMARY_ACTION",
-                            transaction_id=tx, request_ids=[e["payload"].get("request_id") for e in sent],
+                            transaction_id=tx, request_ids=request_ids,
+                            request_domains={req: sorted(values) for req, values in request_domains.items()},
+                            request_types={req: sorted(values) for req, values in request_types.items()},
                             event_ids=[e["event_id"] for e in group]))
     # SCROLL has a separate native exact-request transport observer, not a focus transaction.
     if audit.get("actual_execution_mode") == "CONTROLLED_SCROLL" and audit.get("planner_executed"):
         actions.insert(0, dict(action_id=action_id+":scroll", role="PRIMARY_ACTION",
                               request_ids=[audit.get("helper_request_id")], transaction_id="",
+                               request_domains={audit.get("helper_request_id"): ["ACTION_DISPATCH"]},
+                               request_types={audit.get("helper_request_id"): [audit.get("scroll_action") or audit.get("planner_action") or "SCROLL_FORWARD"]},
+                               action_type=audit.get("scroll_action") or audit.get("planner_action") or "SCROLL_FORWARD",
                               helper_result=deepcopy(audit.get("helper_ack_result")),
                               correlated=audit.get("helper_result_correlated"),
                               source=audit.get("helper_request_source"), event_ids=[]))
@@ -101,6 +127,41 @@ def build_action_chain(audit, row, events):
                  actor="RECOVERY_ACTION" if strong else "PRIMARY_ACTION",
                  actor_transaction_id=strong[-1]["transaction_id"] if strong else "",
                  actor_result_event_id=strong[-1]["event_id"] if strong else (reconciliation[-1]["event_id"] if reconciliation else ""))
+    primary_request_id = audit.get("helper_request_id")
+    primary_action = next((action for action in actions if primary_request_id in action.get("request_ids", [])), None)
+    primary_domains = (primary_action or {}).get("request_domains", {}).get(primary_request_id, [])
+    primary_domain = primary_domains[0] if len(primary_domains) == 1 else (
+        "UNKNOWN" if primary_request_id else "NONE")
+    observation_owner = deepcopy(audit.get("fallback_observation_ownership"))
+    production_observation_request_id = (audit.get("primary_production_outcome") or {}).get("get_focus_req_id")
+    if not production_observation_request_id:
+        production_observation_request_id = row.get("get_focus_req_id") or (final_node or {}).get("reqId")
+    lineage = None
+    if observation_owner is not None:
+        primary_result = audit.get("helper_ack_result") or {}
+        source_ack_request_id = primary_result.get("reqId") or ""
+        if primary_domain == "FOCUS_OBSERVATION":
+            source_acknowledged = bool(
+                source_ack_request_id == primary_request_id
+                and observation_owner.get("status") == "PROVEN"
+                and primary_request_id in set(observation_owner.get("acknowledged_request_ids") or [])
+            )
+        else:
+            source_acknowledged = bool(
+                source_ack_request_id == primary_request_id
+                and audit.get("helper_result_correlated") is True
+            )
+        lineage = dict(
+            source_action_id=primary_action.get("action_id") if primary_action else "",
+            source_action_request_id=primary_request_id or "",
+            source_request_domain=primary_domain,
+            source_ack_request_id=source_ack_request_id,
+            source_action_acknowledged=source_acknowledged,
+            observation_transaction_id=observation_owner.get("transaction_id") or "",
+            observation_request_ids=list(observation_owner.get("request_ids") or []),
+            production_observation_request_id=production_observation_request_id or "",
+            observation_type=observation_owner.get("observation_type") or "UNKNOWN",
+        )
     chain = dict(schema=SCHEMA, step_action_id=action_id,
                 owner=dict(run_id=owner[0], scenario_tx_id=owner[1], scenario=scenario, step=step),
                 planner=dict(action=audit.get("planner_action"), target=deepcopy(audit.get("planner_target")),
@@ -108,6 +169,7 @@ def build_action_chain(audit, row, events):
                              execution_mode=audit.get("actual_execution_mode"),
                              production_fallback_used=audit.get("fallback_used")),
                 primary_request_id=audit.get("helper_request_id"),
+                 primary_request_domain=primary_domain,
                 primary_helper_result=deepcopy(audit.get("helper_ack_result")),
                 original_focus_before=deepcopy(audit.get("actual_focus_before")),
                 original_focus_after=deepcopy(audit.get("immediate_actual_focus")),
@@ -122,7 +184,8 @@ def build_action_chain(audit, row, events):
                 events=events, final_outcome=final,
                 audit_visit_authority=False,
                 destination_recovery_ownership=deepcopy(audit.get("dynamic_context")),
-                fallback_observation_ownership=deepcopy(audit.get("fallback_observation_ownership")))
+                 fallback_observation_ownership=observation_owner,
+                 action_to_observation_lineage=lineage)
     if audit.get("action_safety") is not None:
         chain["action_safety"] = dict(step_action_id=action_id, owner=deepcopy(chain["owner"]),
                                     evidence=deepcopy(audit["action_safety"]))
@@ -192,9 +255,19 @@ def action_chain_failures(chain, audit=None):
             if not req or req in request_owner and request_owner[req] != action['action_id']:
                 reasons.append("MISMATCHED_REQUEST_OWNERSHIP")
             request_owner[req] = action['action_id']
+            domains = action.get("request_domains") or {}
+            if domains and req not in domains:
+                reasons.append("MISMATCHED_REQUEST_OWNERSHIP")
+            if len(domains.get(req, [])) != 1:
+                reasons.append("MISMATCHED_REQUEST_OWNERSHIP")
+            request_types = action.get("request_types") or {}
+            recorded_types = set(request_types.get(req, []))
             if not tx:
                 result = action.get("helper_result") or {}
-                if not (action.get("source") == "SCROLL_RESULT_EXPLICIT_TRANSPORT_ARGUMENT"
+                if not (domains.get(req) == ["ACTION_DISPATCH"]
+                        and len(recorded_types) == 1
+                        and _request_domain(next(iter(recorded_types), "")) == "ACTION_DISPATCH"
+                        and action.get("source") == "SCROLL_RESULT_EXPLICIT_TRANSPORT_ARGUMENT"
                         and action.get("correlated") is True and result.get("reqId") == req):
                     reasons.append("MISMATCHED_REQUEST_OWNERSHIP")
                 continue
@@ -203,6 +276,19 @@ def action_chain_failures(chain, audit=None):
             if not sent or not acks:
                 reasons.append("ORPHAN_RECOVERY_ACTION" if role == "RECOVERY_ACTION" else "ORPHAN_PRIMARY_ACTION")
             for ack in acks:
+                sent_commands = {str(event["payload"].get("command_type") or "").rsplit(".", 1)[-1].upper()
+                                 for event in sent}
+                expected_domain = "FOCUS_OBSERVATION" if sent_commands == {"GET_FOCUS"} else (
+                    "READ_ONLY_HELPER" if sent_commands and sent_commands.issubset(
+                        {"EVIDENCE_EVENTS", "PING", "DUMP_TREE", "DUMP_HIERARCHY"})
+                    else "ACTION_DISPATCH")
+                normalized_recorded_types = {
+                    str(command).rsplit(".", 1)[-1].upper() for command in recorded_types
+                }
+                if (expected_domain not in domains.get(req, [])
+                        or normalized_recorded_types != sent_commands
+                        or {_request_domain(command) for command in sent_commands} != {expected_domain}):
+                    reasons.append("MISMATCHED_REQUEST_OWNERSHIP")
                 result = ack['payload'].get('helper_result') or {}
                 correlation = result.get('evidenceCorrelation') or {}
                 if result.get('reqId') not in {None, '', req} or correlation and any(
@@ -220,6 +306,46 @@ def action_chain_failures(chain, audit=None):
         observation_events = [e for e in events if e.get('transaction_id') == owned_tx]
         sent_ids = {e['payload'].get('request_id') for e in observation_events if e['event_type'] == 'ACTION_SENT'}
         ack_ids = {e['payload'].get('request_id') for e in observation_events if e['event_type'] == 'HELPER_ACK_RECEIVED'}
+        production_request_id = (chain.get("primary_production_outcome") or {}).get("get_focus_req_id")
+        if not production_request_id and audit:
+            production_request_id = (audit.get("primary_production_outcome") or {}).get("get_focus_req_id")
+        if not production_request_id and audit:
+            production_request_id = (audit.get("production_row") or {}).get("get_focus_req_id")
+        if not production_request_id:
+            production_request_id = (chain.get("final_outcome") or {}).get("verification_request_id")
+        owner_domains = observation_owner.get("request_domains") or {}
+        lineage = chain.get("action_to_observation_lineage") or {}
+        source_request = lineage.get("source_action_request_id")
+        source_action = next((action for action in actions if action.get("action_id") == lineage.get("source_action_id")), None)
+        source_domain = lineage.get("source_request_domain")
+        lineage_valid = (
+            lineage.get("observation_transaction_id") == owned_tx
+            and set(lineage.get("observation_request_ids") or []) == set(request_ids)
+            and lineage.get("production_observation_request_id") == production_request_id
+            and observation_owner.get("production_request_id") == production_request_id
+            and production_request_id in set(request_ids)
+            and production_request_id in set(acknowledged_ids)
+            and observation_owner.get("request_domain") == "FOCUS_OBSERVATION"
+            and observation_owner.get("read_only") is True
+            and observation_owner.get("observation_type") in {
+                "POST_ACTION", "FALLBACK", "RECOVERY", "READ_ONLY"
+            }
+        )
+        if source_request:
+            source_domains = (source_action or {}).get("request_domains", {}).get(source_request, [])
+            lineage_valid = lineage_valid and bool(source_action) and source_domain in source_domains
+            lineage_valid = lineage_valid and (
+                lineage.get("source_action_acknowledged") is True
+                and lineage.get("source_ack_request_id") == source_request
+            )
+            if source_domain == "ACTION_DISPATCH":
+                lineage_valid = lineage_valid and source_request not in set(request_ids)
+            elif source_domain == "FOCUS_OBSERVATION":
+                lineage_valid = lineage_valid and source_request in set(request_ids)
+            else:
+                lineage_valid = False
+        elif source_domain not in {None, "", "NONE"}:
+            lineage_valid = False
         if (observation_owner.get('status') != 'PROVEN'
                 or audit and audit.get('fallback_observation_ownership') != observation_owner
                 or observation_owner.get('step') != step
@@ -229,8 +355,20 @@ def action_chain_failures(chain, audit=None):
                 or not set(request_ids).issubset(sent_ids)
                 or not set(request_ids).issubset(ack_ids)
                 or not set(request_ids).issubset(set(acknowledged_ids))
-                or audit and audit.get('helper_request_id') not in set(acknowledged_ids)):
+                or any(owner_domains.get(req) != "FOCUS_OBSERVATION" for req in request_ids)
+                or not lineage_valid):
             reasons.append('FALLBACK_OBSERVATION_OWNERSHIP_UNPROVEN')
+    primary_domain = chain.get("primary_request_domain")
+    if audit and audit.get("planner_executed") is True:
+        gate = audit.get("execution_gate_result") or {}
+        if audit.get("planner_authorized") is not True or gate.get("allowed") is not True:
+            reasons.append("UNAUTHORIZED_PRIMARY_ACTION")
+    if chain.get("primary_request_id"):
+        primary_action_id = request_owner.get(chain["primary_request_id"])
+        primary_action = next((action for action in actions if action.get("action_id") == primary_action_id), None)
+        if not primary_action or primary_domain not in (primary_action.get("request_domains") or {}).get(
+                chain["primary_request_id"], []):
+            reasons.append("MISMATCHED_REQUEST_OWNERSHIP")
     if chain.get('primary_request_id') and chain['primary_request_id'] not in request_owner:
         reasons.append('MISMATCHED_REQUEST_OWNERSHIP')
     primary_result = chain.get('primary_helper_result') or {}

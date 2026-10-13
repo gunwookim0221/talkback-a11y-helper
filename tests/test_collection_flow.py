@@ -17669,10 +17669,13 @@ def _run_persistence_main_loop(
     overlay_fn=None,
     rows=None,
     all_rows=None,
+    max_steps=1,
+    client=None,
+    after_persist=None,
 ):
     state = _phase_ordering_state()
     phase_ctx = SimpleNamespace(
-        tab_cfg=_base_tab_cfg(max_steps=1),
+        tab_cfg=_base_tab_cfg(max_steps=max_steps),
         rows=[] if rows is None else rows,
         all_rows=[] if all_rows is None else all_rows,
         output_path="unused.xlsx",
@@ -17722,8 +17725,51 @@ def _run_persistence_main_loop(
         return SimpleNamespace(post_realign_pending_steps_delta=0)
 
     monkeypatch.setattr(collection_flow, "_overlay_phase", overlay_fn or default_overlay)
-    collection_flow._main_loop_phase(DummyClient([row]), "SERIAL", phase_ctx)
+    client = client or DummyClient(row if isinstance(row, list) else [row])
+    if after_persist is not None:
+        original_persist = collection_flow._apply_row_persistence_phase
+
+        def persist_then_hook(**kwargs):
+            result = original_persist(**kwargs)
+            after_persist(client, kwargs)
+            return result
+
+        monkeypatch.setattr(collection_flow, "_apply_row_persistence_phase", persist_then_hook)
+    collection_flow._main_loop_phase(client, "SERIAL", phase_ctx)
     return phase_ctx, save_calls, overlay_calls
+
+
+def test_phase5c_audit_hard_stop_blocks_next_step_and_overlay_without_interrupt(monkeypatch):
+    from tb_runner.phase5c_hard_stop import Phase5CHardStopState, commit_audit_hard_stop
+
+    client = DummyClient([_main_row(1), _main_row(2)])
+    controller = Phase5CHardStopState(scenario="s1", run_id="run-hard-stop")
+
+    def commit_after_first_persist(current_client, kwargs):
+        if kwargs["step_idx"] == 1:
+            commit_audit_hard_stop(
+                controller=controller,
+                client=current_client,
+                state=kwargs["state"],
+                row=kwargs["row"],
+                step=1,
+                reasons=["FALLBACK_OBSERVATION_OWNERSHIP_UNPROVEN"],
+                action_id="step-action-1",
+            )
+
+    phase_ctx, _saves, overlay_calls = _run_persistence_main_loop(
+        monkeypatch,
+        row=[_main_row(1), _main_row(2)],
+        max_steps=2,
+        client=client,
+        after_persist=commit_after_first_persist,
+    )
+
+    assert [call["step_index"] for call in client.collect_focus_step_calls] == [1]
+    assert len(phase_ctx.rows) == 1
+    assert overlay_calls == []
+    assert phase_ctx.state.stop_reason == "audit_chain_incomplete"
+    assert phase_ctx.state.stop_step == 1
 
 
 def test_row_persistence_suppressed_row_does_not_update_anything(monkeypatch):

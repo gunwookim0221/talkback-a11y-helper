@@ -42,6 +42,55 @@ def primary_only():
     return value
 
 
+def devices_scroll_case(requests=("focus-before", "focus-production")):
+    value = primary_only()
+    audit = value["audit"]
+    row = audit["production_row"]
+    source = value["events"][0]
+    action_request = "scroll-action"
+    transaction = "tx:post-scroll-observation"
+    scenario = audit["scenario"]
+    step = audit["step"]
+    owner = dict(status="PROVEN", step=step, transaction_id=transaction,
+        request_ids=list(requests), acknowledged_request_ids=list(requests),
+        request_domains={request: "FOCUS_OBSERVATION" for request in requests},
+        request_domain="FOCUS_OBSERVATION", read_only=True, observation_type="POST_ACTION",
+        source_action_request_id=action_request, production_request_id=requests[-1])
+    next_sequence = max(event["producer_sequence"] for event in value["events"]) + 1
+    for request in requests:
+        common = {key: source[key] for key in (
+            "schema_version", "run_id", "scenario_tx_id", "logical_action_id", "attempt_id",
+            "producer", "producer_instance_id", "scenario_id", "plugin_family", "phase",
+            "surface_id", "surface_revision")}
+        common.update(transaction_id=transaction, step_index=step, parent_transaction_id=None,
+            causation_event_id=None, provenance={"evidence_enabled": True},
+            runner_received_wall_time_utc=None)
+        sent = dict(common, event_id=f"evt:{request}:sent", event_type="ACTION_SENT",
+            producer_sequence=next_sequence, wall_time_utc="2026-01-01T00:00:00Z",
+            payload={"command_type":"com.iotpart.sqe.talkbackhelper.GET_FOCUS","request_id":request})
+        next_sequence += 1
+        ack = dict(common, event_id=f"evt:{request}:ack", event_type="HELPER_ACK_RECEIVED",
+            producer_sequence=next_sequence, wall_time_utc="2026-01-01T00:00:01Z",
+            payload={"request_id":request,"helper_result":{"reqId":request,"success":True}})
+        next_sequence += 1
+        value["events"].extend((sent, ack))
+    row["get_focus_req_id"] = requests[-1]
+    row["actual_focus_node"]["reqId"] = requests[-1]
+    audit.update(actual_execution_mode="CONTROLLED_SCROLL", planner_action="SCROLL_FORWARD",
+        planner_authorized=True, planner_executed=True,
+        execution_gate_result={"allowed":True,"mode":"CONTROLLED_SCROLL"},
+        helper_request_id=action_request,
+        helper_ack_result={"reqId":action_request,"success":True,"action":"SCROLL_FORWARD"},
+        helper_result_correlated=True,
+        helper_request_source="SCROLL_RESULT_EXPLICIT_TRANSPORT_ARGUMENT",
+        scroll_action="SCROLL_FORWARD",
+        primary_production_outcome={"get_focus_req_id":requests[-1],
+            "actual_focus_node":deepcopy(row["actual_focus_node"]),
+            "focus_reconciliation_evidence":deepcopy(row["focus_reconciliation_evidence"])},
+        fallback_observation_ownership=owner)
+    return value
+
+
 def test_exact_food_old_mismatch_and_new_complete_actor_chain():
     value = food()
     assert controlled_target_evidence_failures(value['audit']) == ['FINAL_ACTUAL_FOCUS_DISAGREES_WITH_PRODUCTION_RECONCILIATION']
@@ -115,17 +164,106 @@ def test_production_fallback_keeps_original_planner_decision():
 
 
 def test_current_fallback_observation_ownership_is_explicit_and_fail_closed():
-    value=food();audit,chain=linked(value)
-    action=chain['actions'][0]
-    request=action['request_ids'][0]
-    ownership=dict(status='PROVEN',step=audit['step'],transaction_id=action['transaction_id'],
-        request_ids=[request],acknowledged_request_ids=[request])
-    audit['helper_request_id']=request
-    audit['fallback_observation_ownership']=ownership
-    chain['fallback_observation_ownership']=deepcopy(ownership)
+    audit,chain=linked(devices_scroll_case())
+    owner=chain['fallback_observation_ownership']
+    assert chain['primary_request_id']=='scroll-action'
+    assert chain['primary_request_domain']=='ACTION_DISPATCH'
+    assert owner['request_ids']==['focus-before','focus-production']
+    assert chain['action_to_observation_lineage']['source_request_domain']=='ACTION_DISPATCH'
+    assert chain['action_to_observation_lineage']['production_observation_request_id']=='focus-production'
     assert action_chain_failures(chain,audit)==[]
     chain['fallback_observation_ownership']['acknowledged_request_ids']=[]
+    audit['fallback_observation_ownership']['acknowledged_request_ids']=[]
     assert 'FALLBACK_OBSERVATION_OWNERSHIP_UNPROVEN' in action_chain_failures(chain,audit)
+
+
+def test_controlled_scroll_and_multiple_current_get_focus_requests_have_separate_domains():
+    audit,chain=linked(devices_scroll_case())
+    assert chain['primary_request_id'] not in chain['fallback_observation_ownership']['request_ids']
+    obs_action=next(a for a in chain['actions'] if a['transaction_id']=='tx:post-scroll-observation')
+    assert obs_action['request_domains']=={
+        'focus-before':['FOCUS_OBSERVATION'],'focus-production':['FOCUS_OBSERVATION']}
+    assert chain['action_to_observation_lineage']['source_action_acknowledged'] is True
+    assert action_chain_failures(chain,audit)==[]
+
+
+def test_scroll_request_is_validated_in_its_action_domain():
+    audit,chain=linked(devices_scroll_case())
+    scroll=next(a for a in chain['actions'] if a['transaction_id']=='')
+    assert scroll['request_domains']['scroll-action']==['ACTION_DISPATCH']
+    scroll['correlated']=False
+    assert 'MISMATCHED_REQUEST_OWNERSHIP' in action_chain_failures(chain,audit)
+
+
+@pytest.mark.parametrize('mutation',[
+    'observation_ack_missing','previous_step_receipt','primary_substitution',
+    'wrong_request_domain','broken_action_lineage','wrong_production_request',
+])
+def test_observation_ownership_remains_current_and_fail_closed(mutation):
+    audit,chain=linked(devices_scroll_case())
+    owner=chain['fallback_observation_ownership']
+    obs=next(a for a in chain['actions'] if a['transaction_id']==owner['transaction_id'])
+    if mutation=='observation_ack_missing':
+        owner['acknowledged_request_ids']=['focus-before']
+        audit['fallback_observation_ownership']=deepcopy(owner)
+    elif mutation=='previous_step_receipt':
+        owner['request_ids']=['receipt:previous-step']
+        owner['acknowledged_request_ids']=['receipt:previous-step']
+        audit['fallback_observation_ownership']=deepcopy(owner)
+    elif mutation=='primary_substitution':
+        owner['request_ids']=['scroll-action']
+        owner['acknowledged_request_ids']=['scroll-action']
+        audit['fallback_observation_ownership']=deepcopy(owner)
+    elif mutation=='wrong_request_domain':
+        owner['request_domains']['focus-production']='ACTION_DISPATCH'
+        audit['fallback_observation_ownership']=deepcopy(owner)
+    elif mutation=='broken_action_lineage':
+        chain['action_to_observation_lineage']['observation_transaction_id']='tx:other'
+    else:
+        chain['action_to_observation_lineage']['production_observation_request_id']='focus-before'
+    assert 'FALLBACK_OBSERVATION_OWNERSHIP_UNPROVEN' in action_chain_failures(chain,audit)
+
+
+def test_true_request_mismatch_still_fails_closed():
+    audit,chain=linked(devices_scroll_case())
+    obs=next(a for a in chain['actions'] if a['transaction_id']=='tx:post-scroll-observation')
+    ack=next(event for event in chain['events']
+        if event['event_type']=='HELPER_ACK_RECEIVED' and event['payload']['request_id']=='focus-production')
+    ack['payload']['helper_result']['reqId']='stale'
+    assert 'MISMATCHED_REQUEST_OWNERSHIP' in action_chain_failures(chain,audit)
+
+
+def test_controlled_action_must_still_have_current_execution_authority():
+    audit,chain=linked(devices_scroll_case())
+    audit['execution_gate_result']['allowed']=False
+    chain['planner']['gate']['allowed']=False
+    assert 'UNAUTHORIZED_PRIMARY_ACTION' in action_chain_failures(chain,audit)
+
+
+def test_phase5b_passive_fallback_receipt_is_a_focus_observation():
+    value=devices_scroll_case()
+    audit=value['audit']
+    audit['actual_execution_mode']='FALLBACK_PRODUCTION'
+    audit['planner_executed']=False
+    audit['fallback_used']=True
+    audit['helper_request_id']='focus-production'
+    audit['helper_ack_result']={'reqId':'focus-production','success':False,'status':'OBSERVED_NO_MOVE'}
+    owner=audit['fallback_observation_ownership']
+    owner['observation_type']='FALLBACK'
+    owner['source_action_request_id']='focus-production'
+    audit['fallback_observation_ownership']=owner
+    # Provenance input remains immutable and production visit ownership is unchanged.
+    before=deepcopy(value)
+    linked_audit,chain=linked(value)
+    assert chain['audit_visit_authority'] is False
+    assert linked_audit['production_row']['visit_record_status']==before['audit']['production_row']['visit_record_status']
+    assert not action_chain_failures(chain,linked_audit)
+
+
+def test_air_care_and_home_care_saved_acceptance_invariants_are_not_special_cased():
+    audit,chain=linked(primary_only())
+    assert not action_chain_failures(chain,audit)
+    assert chain['audit_visit_authority'] is False
 
 
 def test_current_fallback_observation_with_stale_step_is_rejected():

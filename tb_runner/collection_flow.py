@@ -18250,6 +18250,15 @@ def _main_loop_phase(
         state.reliability_metrics = TraversalMetrics()
     state.local_tab_revisit_guard_state = LocalTabRevisitGuardState()
     for step_idx in range(start_step_index, tab_cfg["max_steps"] + 1):
+        hard_stop = getattr(client, "_phase5c_hard_stop_state", None)
+        if hard_stop is not None and hard_stop.latched:
+            record = hard_stop.snapshot() or {}
+            state.stop_triggered = True
+            state.stop_reason = record.get("terminal_reason") or "audit_chain_incomplete"
+            state.stop_step = int(record.get("step") or max(0, step_idx - 1))
+            log(f"[PHASE5C_HARD_STOP][step_blocked] scenario='{tab_cfg.get('scenario_id', '')}' "
+                f"next_step={step_idx} hard_stop_step={state.stop_step} action='skip'")
+            break
         if _abort_main_loop_for_talkback_restart(
             client=client,
             state=state,
@@ -19036,6 +19045,13 @@ def _main_loop_phase(
         if persistence_stop or (step_idx % phase_ctx.checkpoint_every == 0):
             _save_focusable_inventory(client, phase_ctx.output_path)
             _save_focusable_coverage(client, phase_ctx.output_path, phase_ctx.all_rows)
+
+        hard_stop = getattr(client, "_phase5c_hard_stop_state", None)
+        if hard_stop is not None and hard_stop.latched:
+            record = hard_stop.snapshot() or {}
+            log(f"[PHASE5C_HARD_STOP][committed] scenario='{tab_cfg.get('scenario_id', '')}' "
+                f"step={step_idx} reason='{record.get('terminal_reason')}' action='stop_before_overlay'")
+            break
 
         overlay_result = _overlay_phase(
             client=client,
@@ -19832,6 +19848,29 @@ def _run_start_pipeline(
     return result
 
 
+def _emit_scenario_terminal_event(evidence_runtime, payload, hard_stop=None):
+    """Persist one terminal record, preserving hard-stop failure visibility."""
+    record = hard_stop.snapshot() if hard_stop is not None else None
+    terminal = dict(payload)
+    if record is not None:
+        terminal.update(
+            reason="AUDIT_HARD_STOP",
+            termination_status=record["terminal_status"],
+            termination_reason=record["terminal_reason"],
+            audit_hard_stop=record,
+        )
+    try:
+        evidence_runtime.emit(
+            "SCENARIO_TERMINAL",
+            producer="runner",
+            phase="scenario_end",
+            payload=terminal,
+        )
+    except Exception:
+        if record is not None:
+            raise
+
+
 def _collect_tab_rows_inner(
     client: A11yAdbClient,
     dev: str,
@@ -20067,11 +20106,14 @@ def _collect_tab_rows_inner(
         state=state,
     )
     _main_loop_phase(client, dev, phase_ctx)
-    _maybe_run_food_post_traversal_handoff(client, dev, phase_ctx)
+    hard_stop = getattr(client, "_phase5c_hard_stop_state", None)
+    if hard_stop is None or not hard_stop.latched:
+        _maybe_run_food_post_traversal_handoff(client, dev, phase_ctx)
     _persist_phase(phase_ctx)
     _save_focusable_inventory(client, output_path)
     _save_focusable_coverage(client, output_path, all_rows)
-    _maybe_execute_coverage_probe_engine(client, dev, output_path, str(tab_cfg.get("scenario_id", "") or ""))
+    if hard_stop is None or not hard_stop.latched:
+        _maybe_execute_coverage_probe_engine(client, dev, output_path, str(tab_cfg.get("scenario_id", "") or ""))
     main_steps_completed = sum(1 for row in rows if int(row.get("step_index", -1) or -1) > 0)
     setattr(
         client,
@@ -20087,22 +20129,22 @@ def _collect_tab_rows_inner(
     if bool(getattr(evidence_runtime, "is_enabled", False)):
         try:
             _emit_traversal_identity_diagnostics(evidence_runtime, state.traversal_diagnostics)
-            evidence_runtime.emit(
-                "SCENARIO_TERMINAL",
-                producer="runner",
-                phase="scenario_end",
-                payload={
-                    "reason": "TRAVERSAL_STOPPED" if state.stop_reason else "TRAVERSAL_COMPLETED",
-                    **state.reliability_metrics.summary(rows, state.stop_reason),
-                    **(state.content_terminal.summary(state.stop_reason, state.stop_step)
-                       if getattr(state, "content_terminal", None) is not None else {}),
-                    "legacy_stop_reason": str(state.stop_reason or ""),
-                    "main_steps_completed": int(main_steps_completed),
-                    "traversal_started": True,
-                },
-            )
+            terminal_payload = {
+                "reason": "TRAVERSAL_STOPPED" if state.stop_reason else "TRAVERSAL_COMPLETED",
+                **state.reliability_metrics.summary(rows, state.stop_reason),
+                **(state.content_terminal.summary(state.stop_reason, state.stop_step)
+                   if getattr(state, "content_terminal", None) is not None else {}),
+                "legacy_stop_reason": str(state.stop_reason or ""),
+                "main_steps_completed": int(main_steps_completed),
+                "traversal_started": True,
+            }
+            _emit_scenario_terminal_event(evidence_runtime, terminal_payload, hard_stop)
         except Exception:
-            pass
+            # A committed Phase 5C hard-stop requires an explicit terminal
+            # evidence record. Surface persistence failure so the supervisor
+            # rejects the scenario instead of silently losing termination.
+            if hard_stop is not None and hard_stop.latched:
+                raise
 
     return rows
 

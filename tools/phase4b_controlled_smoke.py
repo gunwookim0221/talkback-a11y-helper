@@ -24,6 +24,7 @@ from tb_runner.phase4b_execution import coherent_focus, controlled_collect, safe
 from tb_runner.state_registry import StateRegistry
 from tools.state_fingerprint_diagnostic import capture_observation
 from tb_runner.action_provenance import build_action_chain, digest, action_chain_failures
+from tb_runner.phase5c_hard_stop import Phase5CHardStopState, commit_audit_hard_stop
 
 STAGES = (("home_main", "devices_main"), ("life_find_plugin", "device_smoke_sensor_plugin"),
           ("life_food_plugin", "life_family_care_plugin"))
@@ -101,6 +102,8 @@ def main(*, generalized=False, safe_navigation=False):
     navigation = SafeNavigationSession(scenario, save, safety_config=safety.config if safety else None) if safe_navigation else None
 
     def capture(kwargs):
+        if active.get("hard_stop_state") is not None:
+            active["hard_stop_state"].guard("diagnostic_observation")
         raw = capture_observation(diagnostic, kwargs["dev"], scenario_id=scenario,
                                   step=kwargs["step_idx"], scenario_run_id=active["run_id"])
         raw["phase3_entry_evidence"] = active["entry"]
@@ -125,9 +128,15 @@ def main(*, generalized=False, safe_navigation=False):
 
     def observed_loop(client, dev, phase_ctx):
         run_id = scenario + ":" + uuid.uuid4().hex
+        hard_stop_state = Phase5CHardStopState(scenario=scenario, run_id=run_id) if phase5c_full32 else None
+        if hard_stop_state is not None:
+            client._phase5c_hard_stop_state = hard_stop_state
+            # Preflight captures use a separate diagnostic client, so both
+            # transports must share the same scenario hard-stop authority.
+            diagnostic._phase5c_hard_stop_state = hard_stop_state
         raw = capture_observation(diagnostic, dev, scenario_id=scenario, scenario_run_id=run_id)
         entry = phase3_entry_evidence_from_main_loop(phase_ctx, run_id, raw["timestamp"])
-        active.update(run_id=run_id, entry=entry)
+        active.update(run_id=run_id, entry=entry, hard_stop_state=hard_stop_state)
         raw["phase3_entry_evidence"] = entry
         if generalized:
             epoch = run_id + ":production-entry"
@@ -178,6 +187,8 @@ def main(*, generalized=False, safe_navigation=False):
         if not active:
             return original_step(**kwargs)
         step, client, state = kwargs["step_idx"], kwargs["client"], kwargs["state"]
+        if active.get("hard_stop_state") is not None:
+            active["hard_stop_state"].guard(f"preflight:step:{step}")
         active["step_kwargs"] = kwargs
         raw, value, context = capture(kwargs)
         safety_before = None
@@ -322,7 +333,24 @@ def main(*, generalized=False, safe_navigation=False):
             kwargs["row"]["step_action_provenance"] = dict(
                 schema=chain["schema"], step_action_id=chain["step_action_id"],
                 evidence_file="phase4c_step_action_evidence.jsonl", sha256=digest(chain))
-            audit.update(action_audit_chain=chain, audit_chain_complete=not action_chain_failures(chain, audit))
+            failures = action_chain_failures(chain, audit)
+            audit.update(action_audit_chain=chain, audit_chain_complete=not failures)
+            if failures and phase5c_full32:
+                hard_stop_state = active.get("hard_stop_state")
+                if hard_stop_state is None:
+                    raise RuntimeError("Phase 5C audit rejection has no authoritative stop state")
+                record = commit_audit_hard_stop(
+                    controller=hard_stop_state,
+                    client=active["step_kwargs"]["client"],
+                    state=kwargs["state"],
+                    row=kwargs["row"],
+                    step=kwargs["step_idx"],
+                    reasons=failures,
+                    action_id=chain["step_action_id"],
+                )
+                kwargs["stop"] = True
+                save("phase5c_hard_stops.jsonl", record)
+                audit["phase5c_hard_stop"] = record
         result = original_persist(**kwargs)
         audit = pending.pop(kwargs["step_idx"], None)
         if audit is not None:
@@ -350,7 +378,8 @@ def main(*, generalized=False, safe_navigation=False):
             # Audit credits are copies of production outcomes, not ledger writes.
             save("phase4b_execution_trace.jsonl", audit)
             print("[PHASE4B_STEP] " + json.dumps({k: audit[k] for k in ("scenario", "step", "classification", "planner_executed", "visit_credit", "fallback_used")}), flush=True)
-        if navigation and kwargs["step_idx"] == 5:
+        if navigation and kwargs["step_idx"] == 5 and not (
+                active.get("hard_stop_state") is not None and active["hard_stop_state"].latched):
             def nav_capture(observe_owner=True):
                 if observe_owner:
                     raw, value, context = capture(active["step_kwargs"])
