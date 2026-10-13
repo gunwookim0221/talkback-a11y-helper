@@ -1805,6 +1805,39 @@ class SmartMoveFocusTest(unittest.TestCase):
         self.assertTrue(client.last_get_focus_trace.get("success_false_top_level_dump_found"))
         dump_mock.assert_called_once()
 
+    def test_get_focus_preserves_offscreen_raw_a11y_focus_separately_from_input_fallback(self):
+        client = FakeA11yClient()
+        client.logcat_payload = (
+            'I/A11Y_HELPER: FOCUS_RESULT '
+            '{"success":false,"reqId":"REQID619","viewIdResourceName":"DASC_0172-34",'
+            '"className":"android.view.View","boundsInScreen":{"l":744,"t":94,"r":1026,"b":94},'
+            '"accessibilityFocused":true,"focused":false,"visibleToUser":false}'
+        )
+        input_fallback = {
+            "text": "Clothing Care", "className": "android.widget.TextView",
+            "boundsInScreen": {"l": 180, "t": 196, "r": 564, "b": 280},
+            "accessibilityFocused": False, "focused": True,
+        }
+        with (
+            patch("talkback_lib.uuid.uuid4", return_value="REQID619-xxxx"),
+            patch.object(client, "dump_tree", return_value=[input_fallback]),
+        ):
+            result = client.get_focus("SER")
+
+        self.assertEqual(result.get("text"), "Clothing Care")
+        self.assertIs(result.get("accessibilityFocused"), False)
+        trace = client.last_get_focus_trace
+        self.assertTrue(trace["raw_accessibility_focus_present"])
+        self.assertEqual(trace["raw_accessibility_focus_source"], "helper_get_focus_response")
+        self.assertEqual(trace["raw_accessibility_focus_node"]["viewIdResourceName"], "DASC_0172-34")
+        self.assertTrue(trace["raw_accessibility_focus_node"]["accessibilityFocused"])
+        self.assertIn("zero_area_bounds", trace["raw_accessibility_focus_rejection_reason"])
+        self.assertIn("replaced_by_dump_fallback", trace["raw_accessibility_focus_rejection_reason"])
+        self.assertEqual(trace["diagnostic_focus_source"], "hierarchy_dump_input_focus")
+        self.assertEqual(trace["diagnostic_focus_node"]["text"], "Clothing Care")
+        self.assertTrue(trace["diagnostic_focus_node"]["focused"])
+        self.assertFalse(trace["diagnostic_focus_node"]["accessibilityFocused"])
+
     def test_get_focus_skips_helper_status_probe_when_recent_cache_is_ready(self):
         client = FakeA11yClient()
         client.logcat_payload = (

@@ -36,6 +36,29 @@ def test_focus_trace_preserves_partial_root_only_as_corroborating_evidence():
     assert step["get_focus_final_payload_source"] == "none"
 
 
+def test_focus_trace_keeps_raw_accessibility_and_diagnostic_nodes_separate():
+    step = {}
+    raw = {"viewIdResourceName": "DASC_0172-34", "accessibilityFocused": True,
+           "boundsInScreen": "744,94,1026,94"}
+    diagnostic = {"text": "Clothing Care", "focused": True, "accessibilityFocused": False}
+
+    populate_get_focus_trace_fields(step, {
+        "raw_accessibility_focus_present": True,
+        "raw_accessibility_focus_source": "helper_get_focus_response",
+        "raw_accessibility_focus_node": raw,
+        "raw_accessibility_focus_rejection_reason": "zero_area_bounds;replaced_by_dump_fallback",
+        "diagnostic_focus_node": diagnostic,
+        "diagnostic_focus_source": "hierarchy_dump_input_focus",
+        "diagnostic_focus_reason": "dump_replaced_insufficient_helper_focus_payload",
+    })
+
+    assert step["get_focus_raw_accessibility_focus_present"] is True
+    assert step["get_focus_raw_accessibility_focus_node"] == raw
+    assert step["get_focus_raw_accessibility_focus_rejection_reason"] == "zero_area_bounds;replaced_by_dump_fallback"
+    assert step["get_focus_diagnostic_focus_node"] == diagnostic
+    assert step["get_focus_diagnostic_focus_source"] == "hierarchy_dump_input_focus"
+
+
 def test_trim_context_to_focus_anchor_trims_merged_context():
     service = _service()
 

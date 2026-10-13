@@ -114,6 +114,51 @@ def test_primary_success_no_recovery_retains_one_chain():
     assert chain['recovery_result_event_ids'] == []
 
 
+def test_explicit_unresolved_primary_reconciliation_completes_audit_without_visit():
+    value = devices_scroll_case()
+    audit = value["audit"]
+    row = audit["production_row"]
+    diagnostic = deepcopy(row["actual_focus_node"])
+    diagnostic.update(accessibilityFocused=False, focused=True, text="Clothing Care")
+    row.update(actual_focus_node=diagnostic, actual_focus_accessibility_focused=False,
+               actual_focus_input_focused=True, visit_record_status="UNAVAILABLE",
+               focus_transition_status="UNAVAILABLE")
+    row["focus_reconciliation_evidence"] = {
+        "actual_focus_instance_id": "", "diagnostic_focus_instance_id": "diagnostic-only",
+        "classification": "NO_STRICT_ACTUAL_FOCUS", "focus_transition_status": "UNAVAILABLE",
+        "reconciliation_status": "UNRESOLVED", "focus_move_proven": False,
+        "production_visit_credit": 0,
+    }
+    audit["actual_focus_after"] = deepcopy(diagnostic)
+    audit["primary_production_outcome"]["actual_focus_node"] = deepcopy(diagnostic)
+    audit["visit_credit"] = 0
+    value["events"] = [event for event in value["events"] if event["event_type"] != "FOCUS_RECONCILIATION"]
+
+    missing_audit, missing_chain = linked(value)
+    assert "PRIMARY_RECONCILIATION_MISSING" in action_chain_failures(missing_chain, missing_audit)
+
+    owner = audit["fallback_observation_ownership"]
+    observation = next(event for event in value["events"]
+                       if event["transaction_id"] == owner["transaction_id"])
+    unresolved = deepcopy(observation)
+    unresolved["event_id"] = "evt:explicit-unresolved-reconciliation"
+    unresolved["event_type"] = "FOCUS_RECONCILIATION"
+    unresolved["payload"] = {
+        "actual_focus_instance_id": "", "diagnostic_focus_instance_id": "diagnostic-only",
+        "classification": "NO_STRICT_ACTUAL_FOCUS", "focus_transition_status": "UNAVAILABLE",
+        "reconciliation_status": "UNRESOLVED", "focus_move_proven": False,
+        "production_visit_credit": 0,
+    }
+    value["events"].append(unresolved)
+    resolved_audit, resolved_chain = linked(value)
+
+    assert action_chain_failures(resolved_chain, resolved_audit) == []
+    assert resolved_chain["primary_reconciliation_event_ids"] == [unresolved["event_id"]]
+    assert resolved_chain["final_outcome"]["actor_result_event_id"] == unresolved["event_id"]
+    assert resolved_chain["final_outcome"]["actual_focus_instance_id"] == ""
+    assert resolved_audit["visit_credit"] == 0
+
+
 @pytest.mark.parametrize('primary_status', ['failure', 'ambiguous', 'ack_failure_actual_move'])
 def test_primary_status_is_not_rewritten_by_recovery(primary_status):
     value = food()

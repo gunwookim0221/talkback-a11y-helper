@@ -7,6 +7,48 @@ import uuid
 from typing import Any
 
 
+_FOCUS_SOURCE_FIELDS = (
+    "viewIdResourceName", "resourceId", "resource_id", "className", "class",
+    "packageName", "package", "windowId", "window_id", "text",
+    "contentDescription", "talkbackLabel", "mergedLabel", "boundsInScreen",
+    "bounds", "accessibilityFocused", "accessibility_focused", "focused",
+    "inputFocused", "visibleToUser", "focusable", "clickable", "enabled",
+    "selected", "stableNodePath", "nodePath", "path", "parentResourceId",
+    "parentClassName", "childIndex",
+)
+
+
+def _focus_source_snapshot(node: Any) -> dict[str, Any]:
+    if not isinstance(node, dict):
+        return {}
+    return {key: node[key] for key in _FOCUS_SOURCE_FIELDS if key in node}
+
+
+def _record_diagnostic_focus(trace: dict[str, Any], node: Any, *, reason: str) -> None:
+    if not isinstance(node, dict) or node.get("accessibilityFocused") is True:
+        return
+    if node.get("focused") is not True and node.get("inputFocused") is not True:
+        return
+    trace["diagnostic_focus_node"] = _focus_source_snapshot(node)
+    trace["diagnostic_focus_source"] = "hierarchy_dump_input_focus"
+    trace["diagnostic_focus_reason"] = reason
+
+
+def _raw_focus_rejection_reason(client: Any, node: dict[str, Any]) -> str:
+    reasons = []
+    if node.get("visibleToUser") is False:
+        reasons.append("not_visible_to_user")
+    try:
+        bounds = client._parse_bounds_tuple(client._normalize_bounds(node))
+    except Exception:
+        bounds = None
+    if not bounds:
+        reasons.append("invalid_or_missing_bounds")
+    elif bounds[2] <= bounds[0] or bounds[3] <= bounds[1]:
+        reasons.append("zero_area_bounds")
+    return ";".join(reasons)
+
+
 class FocusService:
     def __init__(self, client: Any) -> None:
         self.client = client
@@ -93,6 +135,12 @@ class FocusService:
         self.client.last_get_focus_trace["success_field_present"] = success_field_present
         focus_node, payload_candidate_source = self.client._extract_focus_payload_candidate(result=result)
         self.client.last_get_focus_trace["focus_payload_source"] = payload_candidate_source
+        if isinstance(focus_node, dict) and focus_node.get("accessibilityFocused") is True:
+            trace = self.client.last_get_focus_trace
+            trace["raw_accessibility_focus_present"] = True
+            trace["raw_accessibility_focus_source"] = "helper_get_focus_response"
+            trace["raw_accessibility_focus_node"] = _focus_source_snapshot(focus_node)
+            trace["raw_accessibility_focus_rejection_reason"] = _raw_focus_rejection_reason(self.client, focus_node)
         partial_parse_success = bool(result.get("partial_parse_success"))
         partial_payload_trusted = bool(result.get("partial_payload_trusted"))
         self.client.last_get_focus_trace["partial_parse_success"] = partial_parse_success
@@ -224,6 +272,16 @@ class FocusService:
                     self.client.last_get_focus_trace["fallback_node_label"] = label
                     self.client.last_get_focus_trace["fallback_node_view_id"] = view_id
                     self.client.last_get_focus_trace["fallback_node_bounds"] = bounds
+                    _record_diagnostic_focus(
+                        self.client.last_get_focus_trace,
+                        fallback_focus_node,
+                        reason="dump_replaced_insufficient_helper_focus_payload",
+                    )
+                    if self.client.last_get_focus_trace.get("raw_accessibility_focus_present"):
+                        prior_reason = str(self.client.last_get_focus_trace.get("raw_accessibility_focus_rejection_reason") or "")
+                        self.client.last_get_focus_trace["raw_accessibility_focus_rejection_reason"] = ";".join(
+                            item for item in (prior_reason, "replaced_by_dump_fallback") if item
+                        )
                     self.client.last_get_focus_trace["focus_payload_source"] = "fallback_dump"
                     self.client.last_get_focus_trace["final_payload_source"] = "fallback_dump"
                     self.client.last_get_focus_trace["total_elapsed_sec"] = time.monotonic() - started
@@ -282,6 +340,11 @@ class FocusService:
             started=started,
         )
         if fallback_focus_node:
+            _record_diagnostic_focus(
+                self.client.last_get_focus_trace,
+                fallback_focus_node,
+                reason="fallback_dump_after_unusable_helper_focus",
+            )
             label = self.client.extract_visible_label_from_focus(fallback_focus_node)
             view_id = str(fallback_focus_node.get("viewIdResourceName", "") or "")
             bounds = self.client._normalize_bounds(fallback_focus_node)

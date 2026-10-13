@@ -298,6 +298,9 @@ def _resolve_traversal_evidence_decision(
 
 def _emit_move_outcome(client: Any, row: dict[str, Any], result: dict[str, Any], ack: dict[str, str]) -> None:
     scenario_id = str(row.get("scenario_id", "") or "").strip()
+    strict_focus = focus_instance(row)
+    production_identity = instance_id(strict_focus) if strict_focus else ""
+    diagnostic_identity = str(result.get("actual_focus_instance_id", "") or "")
     movement_payload = {
         "scenario_id": scenario_id,
         "step_index": row.get("step_index"),
@@ -306,7 +309,8 @@ def _emit_move_outcome(client: Any, row: dict[str, Any], result: dict[str, Any],
         "command_ack_result": ack["result"],
         "command_ack_normalized_result": ack["normalized_result"],
         "actual_focus_before_id": result.get("actual_focus_before_id", ""),
-        "actual_focus_instance_id": result.get("actual_focus_instance_id", ""),
+        "actual_focus_instance_id": production_identity,
+        "diagnostic_focus_instance_id": diagnostic_identity if diagnostic_identity != production_identity else "",
         "focus_transition_status": result.get("focus_transition_status", "UNAVAILABLE"),
         "mapping_confidence": result.get("mapping_confidence", "UNMATCHED"),
         "candidate_in_expected_population": bool(result.get("candidate_in_expected_population", False)),
@@ -324,6 +328,111 @@ def _emit_move_outcome(client: Any, row: dict[str, Any], result: dict[str, Any],
         f"visit={movement_payload['visit_record_status']} progress={str(movement_payload['progress']).lower()}"
     )
     _emit_row_evidence(client, row, "MOVE_OUTCOME", phase="movement_outcome", payload=movement_payload)
+
+
+def _focus_reconciliation_event_payload(
+    *,
+    client: Any,
+    row: dict[str, Any],
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    """Build an append-only outcome record without promoting diagnostic focus."""
+    payload = {
+        key: value for key, value in result.items()
+        if key not in {"mapped_candidate", "actual_item"}
+    }
+    strict_focus = focus_instance(row)
+    production_identity = instance_id(strict_focus) if strict_focus else ""
+    diagnostic_identity = str(result.get("actual_focus_instance_id", "") or "")
+    transition = str(result.get("focus_transition_status", "UNAVAILABLE") or "UNAVAILABLE")
+    classification = str(result.get("classification", "UNAVAILABLE") or "UNAVAILABLE")
+    unresolved = classification == "NO_STRICT_ACTUAL_FOCUS" or transition in {"UNAVAILABLE", "AMBIGUOUS"}
+    lineage = row.get("_focus_reconciliation_lineage")
+    if not isinstance(lineage, dict):
+        lineage_by_step = getattr(client, "_focus_reconciliation_lineage_by_step", None)
+        step_key = str(row.get("step_index", "") or "")
+        candidate_lineage = lineage_by_step.get(step_key) if isinstance(lineage_by_step, dict) else None
+        if isinstance(candidate_lineage, dict) and str(candidate_lineage.get("scenario_id") or "") == str(row.get("scenario_id") or ""):
+            lineage = candidate_lineage
+            lineage_by_step.pop(step_key, None)
+    lineage = lineage if isinstance(lineage, dict) else {}
+    transaction_id = ""
+    try:
+        _runtime, transaction = _evidence_transaction_for_row(client, row)
+        transaction_id = str((transaction or {}).get("transaction_id") or "")
+    except Exception:
+        transaction_id = ""
+    observation_ids = lineage.get("observation_request_ids")
+    if not isinstance(observation_ids, list):
+        observation_ids = []
+    production_observation_request = str(row.get("get_focus_req_id", "") or "")
+    if not observation_ids and production_observation_request:
+        observation_ids = [production_observation_request]
+    payload.update({
+        # The legacy result identity can describe an input-focused diagnostic
+        # node. Keep it separately; the authoritative field follows the same
+        # strict production qualification as the final actor validator.
+        "actual_focus_instance_id": production_identity,
+        "production_focus_identity_available": bool(production_identity),
+        "diagnostic_focus_instance_id": diagnostic_identity if diagnostic_identity != production_identity else "",
+        "reconciliation_status": "UNRESOLVED" if unresolved else "RESOLVED",
+        "reconciliation_reason": (
+            "NO_STRICT_ACTUAL_FOCUS" if classification == "NO_STRICT_ACTUAL_FOCUS"
+            else "AMBIGUOUS_FOCUS_EVIDENCE" if transition == "AMBIGUOUS"
+            else "FOCUS_MOVEMENT_UNAVAILABLE" if transition == "UNAVAILABLE"
+            else ""
+        ),
+        "focus_move_proven": bool(not unresolved and transition == "CONFIRMED_MOVED" and production_identity),
+        "production_visit_credit": int(bool(
+            production_identity
+            and result.get("reconciled_visit_instance_id") == production_identity
+            and result.get("visit_record_status") == "RECORDED"
+        )),
+        "actual_focus_source": str(row.get("actual_focus_payload_source", row.get("focus_payload_source", "none")) or "none"),
+        "raw_accessibility_focus_present": bool(row.get("get_focus_raw_accessibility_focus_present", False)),
+        "raw_accessibility_focus_source": str(row.get("get_focus_raw_accessibility_focus_source", "") or ""),
+        "raw_accessibility_focus_node": (
+            dict(row.get("get_focus_raw_accessibility_focus_node"))
+            if isinstance(row.get("get_focus_raw_accessibility_focus_node"), dict) else {}
+        ),
+        "raw_accessibility_focus_rejection_reason": str(
+            row.get("get_focus_raw_accessibility_focus_rejection_reason", "") or ""
+        ),
+        "diagnostic_focus_source": str(row.get("get_focus_diagnostic_focus_source", "") or ""),
+        "diagnostic_focus_node": (
+            dict(row.get("get_focus_diagnostic_focus_node"))
+            if isinstance(row.get("get_focus_diagnostic_focus_node"), dict) else {}
+        ),
+        "diagnostic_focus_reason": str(row.get("get_focus_diagnostic_focus_reason", "") or ""),
+        "primary_action_request_id": str(
+            lineage.get("primary_action_request_id")
+            or row.get("phase5c_primary_action_request_id")
+            or row.get("smart_nav_req_id")
+            or ""
+        ),
+        "primary_action_type": str(lineage.get("primary_action_type") or row.get("smart_nav_action_type") or ""),
+        "observation_transaction_id": str(lineage.get("observation_transaction_id") or transaction_id),
+        "observation_request_ids": list(observation_ids),
+        "production_observation_request_id": str(
+            lineage.get("production_observation_request_id") or production_observation_request
+        ),
+        "current_reconciliation_transaction_id": transaction_id,
+    })
+    return payload
+
+
+def _record_focus_reconciliation(client: Any, row: dict[str, Any], result: dict[str, Any]) -> None:
+    payload = _focus_reconciliation_event_payload(client=client, row=row, result=result)
+    row["focus_reconciliation_evidence"] = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    _emit_row_evidence(
+        client,
+        row,
+        "FOCUS_RECONCILIATION",
+        phase="focus_reconciliation",
+        payload=payload,
+    )
 
 
 def _apply_focus_reconciliation(
@@ -384,10 +493,7 @@ def _apply_focus_reconciliation(
             consumed_cluster_signatures=set(getattr(state, "consumed_cluster_signatures", set()) or set()),
         )
         focus_reconciliation.apply_reconciliation_to_row(row, result)
-        row["focus_reconciliation_evidence"] = json.dumps(
-            {key: value for key, value in result.items() if key not in {"mapped_candidate", "actual_item"}},
-            ensure_ascii=False, sort_keys=True, separators=(",", ":"),
-        )
+        _record_focus_reconciliation(client, row, result)
         _emit_move_outcome(client, row, result, ack)
         return result
 
@@ -454,12 +560,6 @@ def _apply_focus_reconciliation(
     observe_reconciliation = getattr(metrics, "observe_reconciliation", None)
     if callable(observe_reconciliation):
         observe_reconciliation(row)
-    evidence_payload = {
-        key: value
-        for key, value in result.items()
-        if key not in {"mapped_candidate", "actual_item"}
-    }
-    payload = json.dumps(evidence_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     log(
         f"[FOCUS_RECONCILIATION] scenario='{scenario_id}' step={row.get('step_index')} "
         f"selected='{result['selection_candidate_instance_id']}' actual='{result['actual_focus_instance_id']}' "
@@ -470,14 +570,7 @@ def _apply_focus_reconciliation(
         f"inventory='{inventory_source}' "
         f"cases='{','.join(result['cases']) or 'none'}'"
     )
-    _emit_row_evidence(
-        client,
-        row,
-        "FOCUS_RECONCILIATION",
-        phase="focus_reconciliation",
-        payload=evidence_payload,
-    )
-    row["focus_reconciliation_evidence"] = payload
+    _record_focus_reconciliation(client, row, result)
     _emit_move_outcome(client, row, result, ack)
     return result
 

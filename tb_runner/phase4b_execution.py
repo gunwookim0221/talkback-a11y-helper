@@ -98,6 +98,46 @@ def controlled_collect(*, client, dev, scenario, step, raw, recommendation, deci
     The pure reconciliation preview decides fallback only; its credit is never
     applied. Production reconciliation and metrics are the sole visit owners.
     """
+    def attach_reconciliation_lineage(row):
+        if not isinstance(row, dict):
+            return row
+        owner = audit.get("fallback_observation_ownership")
+        owner = owner if isinstance(owner, dict) else {}
+        observation_ids = owner.get("request_ids")
+        observation_ids = list(observation_ids) if isinstance(observation_ids, list) else []
+        production_request = str(owner.get("production_request_id") or row.get("get_focus_req_id") or "")
+        if not observation_ids and production_request:
+            observation_ids = [production_request]
+        observation_transaction_id = str(owner.get("transaction_id") or "")
+        if not observation_transaction_id:
+            lookup = getattr(client, "_evidence_transaction_for_step", None)
+            if callable(lookup):
+                try:
+                    observation_transaction_id = str(lookup(step) or "")
+                except Exception:
+                    observation_transaction_id = ""
+        lineage = {
+            "scenario_id": str(row.get("scenario_id") or scenario),
+            "primary_action_request_id": str(audit.get("helper_request_id") or ""),
+            "primary_action_type": str(
+                audit.get("scroll_action") or audit.get("planner_action") or audit.get("production_fallback_action") or ""
+            ),
+            "fallback_action_request_id": str(audit.get("fallback_helper_request_id") or ""),
+            "observation_transaction_id": observation_transaction_id,
+            "observation_request_ids": observation_ids,
+            "production_observation_request_id": production_request,
+        }
+        lineage_by_step = getattr(client, "_focus_reconciliation_lineage_by_step", None)
+        if not isinstance(lineage_by_step, dict):
+            lineage_by_step = {}
+            try:
+                setattr(client, "_focus_reconciliation_lineage_by_step", lineage_by_step)
+            except Exception:
+                row["_focus_reconciliation_lineage"] = lineage
+                return row
+        lineage_by_step[str(row.get("step_index", step) or step)] = lineage
+        return row
+
     def emit(event):
         if audit_sink is not None:
             audit_sink(dict(event=event, **deepcopy(audit)))
@@ -114,7 +154,7 @@ def controlled_collect(*, client, dev, scenario, step, raw, recommendation, deci
         if not audit.get("planner_executed"):
             audit.update(helper_request_id=ack.get("reqId"), helper_ack_result=ack)
         emit("AFTER_PRODUCTION_FALLBACK")
-        return row
+        return attach_reconciliation_lineage(row)
 
     if not decision.allowed:
         audit["classification"] = ("PRODUCTION_ONLY" if decision.mode == "SHADOW_ONLY" else
@@ -167,7 +207,7 @@ def controlled_collect(*, client, dev, scenario, step, raw, recommendation, deci
             return fallback(status)
         row = collect(**{**collect_kwargs, "move": False})
         row.update(move_result="scrolled", scroll_transition=result, phase4b_before_row=before)
-        return row
+        return attach_reconciliation_lineage(row)
 
     target = chosen["recommended_target"]
     # Select exactly the freshly gated node, never a label/scenario guess.
@@ -214,6 +254,7 @@ def controlled_collect(*, client, dev, scenario, step, raw, recommendation, deci
     row["phase4b_before_row"] = before
     row["move_result"] = client._normalize_action_result(success=bool(ack.get("success")),
                                                          status="MOVED" if ack.get("success") else "FAILED", raw=ack)
+    attach_reconciliation_lineage(row)
     preview = focus_reconciliation.reconcile_focus(row=row, previous_row=before, scenario_id=scenario,
         inventory=raw.get("nodes", []), expected_candidates=raw.get("nodes", []),
         physical_visit_confirmed=False, planning_consumed=False)

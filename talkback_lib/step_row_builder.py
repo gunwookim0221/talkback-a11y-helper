@@ -124,6 +124,17 @@ def populate_get_focus_trace_fields(step: dict[str, Any], trace: dict[str, Any])
     step["get_focus_partial_root_evidence"] = (
         dict(partial_root_evidence) if isinstance(partial_root_evidence, dict) else {}
     )
+    raw_focus = trace.get("raw_accessibility_focus_node", {})
+    diagnostic_focus = trace.get("diagnostic_focus_node", {})
+    step["get_focus_raw_accessibility_focus_present"] = bool(trace.get("raw_accessibility_focus_present", False))
+    step["get_focus_raw_accessibility_focus_source"] = str(trace.get("raw_accessibility_focus_source", "") or "")
+    step["get_focus_raw_accessibility_focus_node"] = dict(raw_focus) if isinstance(raw_focus, dict) else {}
+    step["get_focus_raw_accessibility_focus_rejection_reason"] = str(
+        trace.get("raw_accessibility_focus_rejection_reason", "") or ""
+    )
+    step["get_focus_diagnostic_focus_node"] = dict(diagnostic_focus) if isinstance(diagnostic_focus, dict) else {}
+    step["get_focus_diagnostic_focus_source"] = str(trace.get("diagnostic_focus_source", "") or "")
+    step["get_focus_diagnostic_focus_reason"] = str(trace.get("diagnostic_focus_reason", "") or "")
 
 
 def extract_smart_nav_row_fields(smart_nav_result: dict[str, Any], last_smart_nav_terminal: bool) -> dict[str, Any]:

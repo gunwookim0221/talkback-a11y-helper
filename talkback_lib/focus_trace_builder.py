@@ -42,6 +42,13 @@ def build_initial_get_focus_trace(serial: str, req_id: str, mode: str) -> dict[s
         "partial_fields_from_root_only": False,
         "partial_children_truncated": False,
         "untrusted_partial_payload_rejected": False,
+        "raw_accessibility_focus_present": False,
+        "raw_accessibility_focus_source": "",
+        "raw_accessibility_focus_node": {},
+        "raw_accessibility_focus_rejection_reason": "",
+        "diagnostic_focus_node": {},
+        "diagnostic_focus_source": "",
+        "diagnostic_focus_reason": "",
     }
 
 

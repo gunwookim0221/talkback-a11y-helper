@@ -4,6 +4,7 @@ from tb_runner import collection_flow as flow
 from tb_runner.traversal_reliability import TraversalMetrics
 from collections import deque
 from types import SimpleNamespace
+from tb_runner.evidence import EvidenceRuntime
 
 
 def candidate(rid, label, bounds, **extra):
@@ -381,6 +382,89 @@ def test_unavailable_focus_still_serializes_the_command_ack():
     assert current["command_ack_status"] == "FAIL"
     assert current["visit_record_status"] == "UNAVAILABLE"
     assert '"command_ack_status":"FAIL"' in current["move_outcome_evidence"]
+
+
+def test_non_strict_reconciliation_emits_current_unresolved_event_without_visit_credit(tmp_path):
+    runtime = EvidenceRuntime(output_path=tmp_path / "events.jsonl", enabled=True)
+    runtime.set_step(6, phase="main_loop")
+    transaction = runtime.begin_transaction("SAFE_FALLBACK_OBSERVATION", phase="main_loop")
+    diagnostic_node = {
+        "text": "Clothing Care", "className": "android.widget.TextView",
+        "boundsInScreen": "180,196,564,280", "accessibilityFocused": False, "focused": True,
+    }
+    current = {
+        "scenario_id": "life_clothing_care_plugin", "scenario_type": "content", "step_index": 6,
+        "row_source": "actual_focus", "focus_node": diagnostic_node, "actual_focus_node": diagnostic_node,
+        "focus_bounds": "180,196,564,280", "actual_focus_bounds": "180,196,564,280",
+        "actual_focus_resource_id": "", "actual_focus_visible": "Clothing Care",
+        "actual_focus_speech": "Clothing Care", "actual_focus_accessibility_focused": False,
+        "actual_focus_input_focused": True, "actual_focus_class_name": "android.widget.TextView",
+        "actual_focus_payload_source": "fallback_dump",
+        "get_focus_raw_accessibility_focus_present": True,
+        "get_focus_raw_accessibility_focus_source": "helper_get_focus_response",
+        "get_focus_raw_accessibility_focus_node": {
+            "viewIdResourceName": "DASC_0172-34", "className": "android.view.View",
+            "boundsInScreen": "744,94,1026,94", "accessibilityFocused": True,
+            "visibleToUser": False,
+        },
+        "get_focus_raw_accessibility_focus_rejection_reason": "not_visible_to_user;zero_area_bounds;replaced_by_dump_fallback",
+        "get_focus_diagnostic_focus_node": diagnostic_node,
+        "get_focus_diagnostic_focus_source": "hierarchy_dump_input_focus",
+        "get_focus_diagnostic_focus_reason": "dump_replaced_insufficient_helper_focus_payload",
+        "get_focus_req_id": "7c679e20", "move_result": "scrolled",
+    }
+    client = SimpleNamespace(
+        evidence_runtime=runtime,
+        _evidence_transaction_for_step=lambda step: transaction["transaction_id"] if str(step) == "6" else "",
+        _focus_reconciliation_lineage_by_step={"6": {
+            "scenario_id": "life_clothing_care_plugin",
+            "primary_action_request_id": "94078825", "primary_action_type": "SCROLL_FORWARD",
+            "observation_transaction_id": transaction["transaction_id"],
+            "observation_request_ids": ["848b0d2a", "7c679e20"],
+            "production_observation_request_id": "7c679e20",
+        }},
+    )
+    previous = {
+        "scenario_id": current["scenario_id"], "row_source": "actual_focus",
+        "actual_focus_node": {"viewIdResourceName": "DASC_0172-34", "className": "android.view.View",
+                               "boundsInScreen": "744,538,1026,634", "accessibilityFocused": True},
+        "actual_focus_accessibility_focused": True, "actual_focus_resource_id": "DASC_0172-34",
+        "actual_focus_bounds": "744,538,1026,634", "actual_focus_class_name": "android.view.View",
+        "actual_focus_visible": "", "actual_focus_speech": "",
+    }
+    state = SimpleNamespace(
+        reliability_metrics=TraversalMetrics(), consumed_cluster_signatures=set(),
+        consumed_cluster_logical_signatures=set(),
+    )
+
+    result = flow._apply_focus_reconciliation(
+        client=client, row=current, previous_row=previous, state=state,
+        progress_decision=None, visit_decision=None,
+    )
+
+    events = runtime.events_for_transaction(transaction["transaction_id"])
+    reconciliation = [event for event in events if event.event_type == "FOCUS_RECONCILIATION"]
+    move_outcomes = [event for event in events if event.event_type == "MOVE_OUTCOME"]
+    assert len(reconciliation) == 1
+    assert len(move_outcomes) == 1
+    payload = reconciliation[0].payload
+    assert payload["current_reconciliation_transaction_id"] == transaction["transaction_id"]
+    assert payload["primary_action_request_id"] == "94078825"
+    assert payload["observation_request_ids"] == ["848b0d2a", "7c679e20"]
+    assert payload["reconciliation_status"] == "UNRESOLVED"
+    assert payload["reconciliation_reason"] == "NO_STRICT_ACTUAL_FOCUS"
+    assert payload["actual_focus_instance_id"] == ""
+    assert payload["diagnostic_focus_instance_id"]
+    assert payload["production_focus_identity_available"] is False
+    assert payload["raw_accessibility_focus_present"] is True
+    assert payload["diagnostic_focus_node"]["text"] == "Clothing Care"
+    assert move_outcomes[0].payload["actual_focus_instance_id"] == ""
+    assert move_outcomes[0].payload["diagnostic_focus_instance_id"] == payload["diagnostic_focus_instance_id"]
+    assert payload["focus_move_proven"] is False
+    assert payload["production_visit_credit"] == 0
+    assert result["visit_record_status"] == "UNAVAILABLE"
+    assert current["focus_reconciliation_applied"] is False
+    assert client._focus_reconciliation_lineage_by_step == {}
 
 
 def test_unmatched_actual_instance_still_records_visit_separately_from_expected_coverage():
