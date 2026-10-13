@@ -121,7 +121,8 @@ def build_action_chain(audit, row, events):
                                            actual_focus=(audit.get("primary_production_outcome") or {}).get("actual_focus_node"))],
                 events=events, final_outcome=final,
                 audit_visit_authority=False,
-                destination_recovery_ownership=deepcopy(audit.get("dynamic_context")))
+                destination_recovery_ownership=deepcopy(audit.get("dynamic_context")),
+                fallback_observation_ownership=deepcopy(audit.get("fallback_observation_ownership")))
     if audit.get("action_safety") is not None:
         chain["action_safety"] = dict(step_action_id=action_id, owner=deepcopy(chain["owner"]),
                                     evidence=deepcopy(audit["action_safety"]))
@@ -210,6 +211,26 @@ def action_chain_failures(chain, audit=None):
     for event in events:
         if event['event_type'] == 'ACTION_SENT' and event['payload'].get('request_id') not in request_owner:
             reasons.append("ORPHAN_PRIMARY_ACTION")
+    observation_owner = chain.get('fallback_observation_ownership')
+    if observation_owner is not None:
+        owned_tx = observation_owner.get('transaction_id')
+        request_ids = observation_owner.get('request_ids') or []
+        acknowledged_ids = observation_owner.get('acknowledged_request_ids') or []
+        observation_action = next((a for a in actions if a.get('transaction_id') == owned_tx), None)
+        observation_events = [e for e in events if e.get('transaction_id') == owned_tx]
+        sent_ids = {e['payload'].get('request_id') for e in observation_events if e['event_type'] == 'ACTION_SENT'}
+        ack_ids = {e['payload'].get('request_id') for e in observation_events if e['event_type'] == 'HELPER_ACK_RECEIVED'}
+        if (observation_owner.get('status') != 'PROVEN'
+                or audit and audit.get('fallback_observation_ownership') != observation_owner
+                or observation_owner.get('step') != step
+                or not owned_tx or not request_ids
+                or not observation_action
+                or not set(request_ids).issubset(set(observation_action.get('request_ids') or []))
+                or not set(request_ids).issubset(sent_ids)
+                or not set(request_ids).issubset(ack_ids)
+                or not set(request_ids).issubset(set(acknowledged_ids))
+                or audit and audit.get('helper_request_id') not in set(acknowledged_ids)):
+            reasons.append('FALLBACK_OBSERVATION_OWNERSHIP_UNPROVEN')
     if chain.get('primary_request_id') and chain['primary_request_id'] not in request_owner:
         reasons.append('MISMATCHED_REQUEST_OWNERSHIP')
     primary_result = chain.get('primary_helper_result') or {}

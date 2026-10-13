@@ -339,6 +339,9 @@ class EvidenceRuntime:
             "action_type": action_type,
             "phase": phase,
             "state": "open",
+            # Keep step scope on the in-memory owner so observational adapters
+            # can distinguish an open action in this step from stale state.
+            "step_index": self._step_index,
         }
         event = self.emit(
             "TRANSACTION_OPENED",

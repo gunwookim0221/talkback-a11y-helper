@@ -669,7 +669,9 @@ def test_observation_fallback_records_exact_native_request_and_no_move(monkeypat
     assert sent==[{'action':'com.iotpart.sqe.talkbackhelper.GET_FOCUS','req_id':'owned'}]
     assert acks[0][1]['req_id']=='owned'
     assert acks[0][0]['reqId']==('stale' if stale else 'owned')
-    assert client.last_smart_nav_result['success'] is False
+    assert client.last_smart_nav_result == ({} if stale else
+        dict(reqId='owned',success=False,status='OBSERVED_NO_MOVE'))
+    assert audit['fallback_observation_ownership']['status']=='UNRESOLVED'
     assert row['phase4b_before_row']['actual_focus_accessibility_focused'] is True
     assert client._broadcast is prior_broadcast and client._read_log_result is prior_reader
 
@@ -678,5 +680,80 @@ def test_observation_fallback_records_exact_native_request_and_no_move(monkeypat
 def test_successful_controlled_post_focus_keeps_original_transaction(monkeypatch,move):
     s,_=session();calls=[];original=lambda **kw:calls.append(('production',kw))
     monkeypatch.setattr(s,'fallback',lambda *args:calls.append(('fallback',args[1])))
-    s.collect(original,{'move':move}, {}, SimpleNamespace())
-    assert calls==[('fallback' if move else 'production',{'move':move})]
+    client=SimpleNamespace(evidence_runtime=SimpleNamespace(is_enabled=True),
+        _evidence_active_transaction=dict(state='open',step_index=1))
+    s.collect(original,{'move':move,'step_index':1}, {}, client)
+    assert calls==[('fallback' if move else 'production',{'move':move,'step_index':1})]
+
+
+@pytest.mark.parametrize('response_req,expected_status',[
+    ('observation:current','PROVEN'),('observation:stale','UNRESOLVED'),('', 'UNRESOLVED')])
+def test_move_false_without_current_step_transaction_journals_owned_observation(
+        response_req,expected_status):
+    s,records=session();raw,_,_=focus_case();s.raw=raw;s.raw['step']=19
+    sent=[];acks=[];broadcasts=[];reads=[];step={'value':None}
+    client=SimpleNamespace(evidence_runtime=SimpleNamespace(is_enabled=True),
+        _evidence_active_transaction=None,last_smart_nav_result={
+            'reqId':'observation:previous','success':False,'status':'OBSERVED_NO_MOVE'},
+        last_smart_nav_terminal=False)
+    client._evidence_set_step=lambda value,**kw:step.update(value=value)
+    def begin(action):
+        client._evidence_active_transaction=dict(transaction_id='tx:current',state='open',
+            step_index=step['value'],action_type=action,phase='main_loop')
+    client._evidence_begin_step_action=begin
+    client._evidence_action_sent=lambda **kw:sent.append((client._evidence_active_transaction['transaction_id'],kw))
+    client._evidence_helper_ack=lambda result,**kw:acks.append((client._evidence_active_transaction['transaction_id'],result,kw))
+    def broadcast(dev,action,extras=None):
+        broadcasts.append((dev,action,extras))
+    def read(dev,prefix,req_id):
+        reads.append((prefix,req_id))
+        return {'reqId':response_req,'success':True}
+    client._broadcast=broadcast;client._read_log_result=read
+    client.get_focus=lambda **kw:raw['nodes'][0]
+    def collect(**kwargs):
+        client._broadcast('serial','com.iotpart.sqe.talkbackhelper.GET_FOCUS',
+            ['--es','reqId','observation:current'])
+        result=client._read_log_result('serial','FOCUS_RESULT','observation:current')
+        return {'step_index':kwargs['step_index'],'actual_focus_node':raw['nodes'][0],
+            'helper_result':result}
+    audit={}
+    row=s.collect(collect,dict(dev='serial',move=False,step_index=19),audit,client)
+    assert row['helper_result']['reqId']==response_req
+    assert client._evidence_active_transaction['step_index']==19
+    assert sent==[('tx:current',dict(action='com.iotpart.sqe.talkbackhelper.GET_FOCUS',req_id='observation:current'))]
+    assert len(acks)==1 and acks[0][0]=='tx:current' and acks[0][2]['req_id']=='observation:current'
+    ownership=audit['fallback_observation_ownership']
+    assert ownership['status']==expected_status
+    assert ownership['step']==19 and ownership['transaction_id']=='tx:current'
+    assert ownership['request_ids']==['observation:current']
+    if expected_status=='PROVEN':
+        assert ownership['acknowledged_request_ids']==['observation:current']
+        assert client.last_smart_nav_result==dict(reqId='observation:current',success=False,status='OBSERVED_NO_MOVE')
+    else:
+        assert ownership['acknowledged_request_ids']==[]
+        assert client.last_smart_nav_result=={}
+    assert len(broadcasts)==1 and reads==[('FOCUS_RESULT','observation:current')]
+    assert any(name=='phase5b_fallback_safety.jsonl' for name,_ in records)
+
+
+def test_move_false_rejects_open_transaction_from_previous_step():
+    s,records=session();raw,_,_=focus_case();s.raw=raw
+    sent=[];client=SimpleNamespace(evidence_runtime=SimpleNamespace(is_enabled=True),
+        _evidence_active_transaction=dict(transaction_id='tx:stale',state='open',step_index=18),
+        _evidence_set_step=lambda *a,**kw:None,
+        _evidence_begin_step_action=lambda *a,**kw:client._evidence_active_transaction.update(
+            transaction_id='tx:current',step_index=19),
+        _evidence_action_sent=lambda **kw:sent.append(kw),
+        _evidence_helper_ack=lambda *a,**kw:None,
+        _broadcast=lambda *a,**kw:None,
+        _read_log_result=lambda *a,**kw:{'reqId':'current'})
+    client.get_focus=lambda **kw:raw['nodes'][0]
+    def collect(**kwargs):
+        client._broadcast('serial','com.iotpart.sqe.talkbackhelper.GET_FOCUS',['--es','reqId','current'])
+        client._read_log_result('serial','FOCUS_RESULT','current')
+        return {'step_index':kwargs['step_index']}
+    audit={};s.collect(collect,dict(dev='serial',move=False,step_index=19),audit,client)
+    assert client._evidence_active_transaction['transaction_id']=='tx:current'
+    assert sent==[dict(action='com.iotpart.sqe.talkbackhelper.GET_FOCUS',req_id='current')]
+    assert audit['fallback_observation_ownership']['status']=='PROVEN'
+    assert any(r[0]=='phase5b_fallback_safety.jsonl' for r in records)

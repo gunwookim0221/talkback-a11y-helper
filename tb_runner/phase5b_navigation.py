@@ -676,9 +676,23 @@ class SafeNavigationSession:
                 else: vars(obj).pop(name,None)
 
     def collect(self, collect, kwargs, audit, client):
-        # Successful controlled focus/scroll already collects with move=False.
-        # Preserve that exact production observation and causal transaction.
+        # A controlled action has already opened the current step transaction;
+        # its move=False collection is the post-action observation. Other
+        # move=False callers (for example local-tab recovery) still need a
+        # separately owned, read-only observation transaction.
         if kwargs.get('move') is False:
+            runtime = getattr(client, "evidence_runtime", None)
+            active = getattr(client, "_evidence_active_transaction", None)
+            step = kwargs.get("step_index")
+            owned_here = bool(
+                getattr(runtime, "is_enabled", False)
+                and isinstance(active, dict)
+                and active.get("state") == "open"
+                and step is not None
+                and str(active.get("step_index")) == str(step)
+            )
+            if getattr(runtime, "is_enabled", False) and not owned_here:
+                return self.fallback(collect, kwargs, audit, client)
             return collect(**kwargs)
         return self.fallback(collect, kwargs, audit, client)
 
@@ -700,12 +714,23 @@ class SafeNavigationSession:
         client._evidence_begin_step_action("SAFE_FALLBACK_OBSERVATION")
         reader,broadcast=client._read_log_result,client._broadcast
         saved={name:(name in vars(client),vars(client).get(name)) for name in ["_read_log_result","_broadcast"]}
-        request={}
+        request={"ids": [], "acknowledged_ids": [], "transaction_id": ""}
+        audit["fallback_observation_ownership"] = dict(
+            status="UNRESOLVED", step=kwargs.get("step_index"),
+            transaction_id="", request_ids=[], acknowledged_request_ids=[])
         def observed_broadcast(dev,action,extras=None):
             if action.endswith('.GET_FOCUS') and extras and 'reqId' in extras:
                 req=extras[extras.index('reqId')+1]
                 request['id']=str(req)
+                request["ids"].append(str(req))
+                active=getattr(client,"_evidence_active_transaction",None)
+                request["transaction_id"]=(str(active.get("transaction_id") or "")
+                    if isinstance(active,dict) else "")
                 client._evidence_action_sent(action=action,req_id=req)
+                audit["fallback_observation_ownership"] = dict(
+                    status="UNRESOLVED", step=kwargs.get("step_index"),
+                    transaction_id=request["transaction_id"], request_ids=list(request["ids"]),
+                    acknowledged_request_ids=list(request["acknowledged_ids"]))
             return broadcast(dev,action,extras)
         def observed_reader(*args,**kw):
             result=reader(*args,**kw)
@@ -713,9 +738,21 @@ class SafeNavigationSession:
             req=kw.get('req_id',args[2] if len(args)>2 else None)
             if prefix=='FOCUS_RESULT' and str(req)==request.get('id'):
                 client._evidence_helper_ack(result,req_id=req,source='phase5b_read_only_fallback')
-                # The Phase4 fallback observer requires a request receipt, not
-                # a SMART_NEXT success claim. Leave navigation success false.
-                client.last_smart_nav_result=dict(reqId=str(req),success=False,status='OBSERVED_NO_MOVE')
+                response_req=str((result or {}).get("reqId") or (result or {}).get("requestId") or "")
+                if response_req == str(req):
+                    request["acknowledged_ids"].append(str(req))
+                    audit["fallback_observation_ownership"] = dict(
+                        status="PROVEN" if request["transaction_id"] and getattr(
+                            getattr(client,"evidence_runtime",None),"is_enabled",False) else "UNRESOLVED",
+                        step=kwargs.get("step_index"), transaction_id=request["transaction_id"],
+                        request_ids=list(request["ids"]),
+                        acknowledged_request_ids=list(request["acknowledged_ids"]))
+                    # This is an exact read-only receipt, never movement success.
+                    client.last_smart_nav_result=dict(reqId=str(req),success=False,status='OBSERVED_NO_MOVE')
+                else:
+                    # A stale/mismatched Helper payload cannot become this
+                    # step's receipt, even when the query used the new ID.
+                    client.last_smart_nav_result={}
             return result
         client._broadcast,client._read_log_result=observed_broadcast,observed_reader
         try:

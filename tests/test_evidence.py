@@ -72,9 +72,10 @@ def test_ledger_write_failure_is_isolated(tmp_path: Path) -> None:
 
 def test_runtime_parent_child_and_correlation_metadata(tmp_path: Path) -> None:
     runtime = EvidenceRuntime(output_path=tmp_path / "talkback_compare.xlsx", run_id="run_fixed")
-    runtime.start_scenario("home_safe_plugin", "home")
+    runtime.start_scenario("home_safe_plugin", "home", step_index=19)
     parent = runtime.begin_transaction("SMART_NEXT", phase="main_loop")
     child = runtime.begin_transaction("REALIGN_FOCUS", phase="realign", parent_transaction_id=parent["transaction_id"])
+    assert parent["step_index"] == child["step_index"] == 19
     assert child["parent_transaction_id"] == parent["transaction_id"]
     extras = runtime.correlation_extras(parent)
     assert "evidenceRunId" in extras

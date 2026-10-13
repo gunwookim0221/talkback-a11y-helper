@@ -114,6 +114,30 @@ def test_production_fallback_keeps_original_planner_decision():
     assert not action_chain_failures(chain, audit)
 
 
+def test_current_fallback_observation_ownership_is_explicit_and_fail_closed():
+    value=food();audit,chain=linked(value)
+    action=chain['actions'][0]
+    request=action['request_ids'][0]
+    ownership=dict(status='PROVEN',step=audit['step'],transaction_id=action['transaction_id'],
+        request_ids=[request],acknowledged_request_ids=[request])
+    audit['helper_request_id']=request
+    audit['fallback_observation_ownership']=ownership
+    chain['fallback_observation_ownership']=deepcopy(ownership)
+    assert action_chain_failures(chain,audit)==[]
+    chain['fallback_observation_ownership']['acknowledged_request_ids']=[]
+    assert 'FALLBACK_OBSERVATION_OWNERSHIP_UNPROVEN' in action_chain_failures(chain,audit)
+
+
+def test_current_fallback_observation_with_stale_step_is_rejected():
+    audit,chain=linked()
+    action=chain['actions'][0];request=action['request_ids'][0]
+    owner=dict(status='PROVEN',step=audit['step']-1,transaction_id=action['transaction_id'],
+        request_ids=[request],acknowledged_request_ids=[request])
+    audit['helper_request_id']=request;audit['fallback_observation_ownership']=owner
+    chain['fallback_observation_ownership']=deepcopy(owner)
+    assert 'FALLBACK_OBSERVATION_OWNERSHIP_UNPROVEN' in action_chain_failures(chain,audit)
+
+
 def test_step_action_identity_is_deterministic_and_scoped():
     audit, chain = linked()
     assert linked()[1]['step_action_id'] == chain['step_action_id']
