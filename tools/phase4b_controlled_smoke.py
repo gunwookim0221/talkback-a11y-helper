@@ -151,8 +151,24 @@ def main(*, generalized=False, safe_navigation=False):
                 except ValueError as exc:
                     save("phase4c_trusted_entry_rejections.jsonl",
                          destination_ownership_rejection_diagnostic(raw, entry_context, exc))
+                    if safe_navigation:
+                        from tb_runner.entry_safety import append_entry_audit
+                        append_entry_audit(dict(event="ENTRY_CONTEXT_AUTHORITY", scenario=scenario,
+                            status=entry_context.get("status"), trusted_entry_verified=False,
+                            reason=str(exc)))
                     raise
                 active["navigation_count"] = 0
+                if safe_navigation:
+                    from tb_runner.entry_safety import append_entry_audit
+                    verified = entry_context.get("status") == "VERIFIED_PLUGIN_CONTEXT"
+                    summary = getattr(client, "last_start_open_summary", {})
+                    if isinstance(summary, dict):
+                        summary["context_authority_verified"] = verified
+                        summary["trusted_entry_verified"] = verified
+                        setattr(client, "last_start_open_summary", summary)
+                    append_entry_audit(dict(event="ENTRY_CONTEXT_AUTHORITY", scenario=scenario,
+                        status=entry_context.get("status"), trusted_entry_verified=verified,
+                        destination_ownership_id=active["destination_owner"].ownership_id))
         else:
             entry_context = resolve_phase3_context(raw)
         save("phase4b_observations.jsonl", dict(kind="ENTRY_TO_TRAVERSAL", scenario=scenario, raw=raw,

@@ -6132,6 +6132,10 @@ def _confirm_click_focused_transition(
     saw_conflicting_screen_signature = False
     saw_air_care_signature = False
     saw_air_list_screen_evidence = False
+    entry_safety_enforced = (
+        os.environ.get("TB_PHASE5B_CONTROLLED") == "1"
+        and os.environ.get("TB_PHASE5A_ACTION_SAFETY_MODE") == "enforce"
+    )
 
     for poll_idx in range(max_poll_count):
         probe_index = poll_idx + 1
@@ -6141,6 +6145,15 @@ def _confirm_click_focused_transition(
                 current_nodes = dump_tree_fn(dev=dev)
             except Exception:
                 current_nodes = []
+        source_list_context = False
+        if entry_safety_enforced and tab_cfg.get("screen_context_mode") == "new_screen":
+            from tb_runner.entry_safety import classify_post_open, hierarchy_digest
+
+            source_list_context = classify_post_open(
+                current_nodes,
+                source_digest=hierarchy_digest(baseline_nodes or []),
+                target_title_present=True,
+            )["state"] == "SOURCE_LIST_CONTEXT"
         energy_signature_seen = False
         air_list_screen_evidence = _collect_air_list_screen_evidence(current_nodes) if strict_life_air_care_mode else {}
         has_air_text = False
@@ -6187,7 +6200,7 @@ def _confirm_click_focused_transition(
             if strict_life_energy_mode and _safe_regex_search(patterns.get("context_text", ""), node_label_blob):
                 energy_signature_seen = True
             matched, signal = _node_matches_transition_pattern(node, patterns)
-            if matched:
+            if matched and not source_list_context:
                 if strict_life_air_care_mode and signal == "anchor_match":
                     continue
                 if strict_life_energy_mode and signal == "anchor_match" and not energy_signature_seen:
@@ -6196,7 +6209,7 @@ def _confirm_click_focused_transition(
         # XML entry may have loaded before the first (post-tap) baseline dump.
         # Verify that destination directly using the same body identity contract
         # as post-open verification, rather than requiring another repaint.
-        if tab_cfg.get("screen_context_mode") == "new_screen" and not (
+        if tab_cfg.get("screen_context_mode") == "new_screen" and not source_list_context and not (
             strict_life_energy_mode or strict_life_air_care_mode
         ):
             visible_nodes = [n for n, _ in _iter_tree_nodes_with_parent(current_nodes) if _node_is_visible(n)]
@@ -6237,7 +6250,7 @@ def _confirm_click_focused_transition(
                 allow_fallback_dump=not transition_fast_path,
             )
             focus_matched, _ = _node_matches_transition_pattern(focus_node, patterns)
-            if focus_matched:
+            if focus_matched and not source_list_context:
                 if strict_life_air_care_mode:
                     focus_label = _node_label_blob(focus_node)
                     if _safe_regex_search(_LIFE_AIR_CARE_VERIFY_REGEX, focus_label):
@@ -6313,6 +6326,8 @@ def _confirm_click_focused_transition(
                 f"has_plugin_body_focus={str(has_plugin_body_focus).lower()} decision='{probe_decision}'"
             )
 
+    if entry_safety_enforced and source_list_context:
+        return False, "source_list_context"
     if strict_life_energy_mode and saw_conflicting_screen_signature:
         return False, "conflicting_screen_signature"
     if strict_life_energy_mode and (saw_dump_change or saw_focus_change):
@@ -7016,6 +7031,50 @@ def _run_xml_scroll_search_tap(
                     "success=true outcome='RECOVERED_STABLE' "
                     "continue='existing_target_entry'"
                 )
+            entry_safety_enforced = (
+                os.environ.get("TB_PHASE5B_CONTROLLED") == "1"
+                and os.environ.get("TB_PHASE5A_ACTION_SAFETY_MODE") == "enforce"
+            )
+            entry_permit = None
+            entry_baseline_nodes = None
+            entry_baseline_window = ""
+            before_click_events = {}
+            if entry_safety_enforced:
+                from tb_runner import entry_safety
+
+                entry_baseline_nodes = client.dump_tree(dev=dev)
+                entry_baseline_window = _extract_window_focus_line(client, dev)
+                setattr(client, "last_entry_source_digest", entry_safety.hierarchy_digest(entry_baseline_nodes))
+                setattr(client, "last_entry_source_window", entry_baseline_window)
+                current_roots, current_reason = _load_scrolltouch_xml_nodes(client=client, dev=dev)
+                resolution = entry_safety.resolve_navigation_owner(
+                    xml_nodes, selected_node, str(selected.get("matched_phrase") or "")
+                )
+                entry_permit = entry_safety.authorize_entry(
+                    resolution, current_roots, scenario=scenario_id,
+                    matched_phrase=str(selected.get("matched_phrase") or ""),
+                )
+                entry_safety.append_entry_audit(dict(
+                    event="ENTRY_AUTHORIZATION", scenario=scenario_id,
+                    candidate_identity=entry_safety._identity(selected_node),
+                    resolved_owner=resolution.get("owner_identity"),
+                    original_tap_point=[center_x, center_y],
+                    dispatch_tap_point=entry_permit.get("point"),
+                    snapshot_digest=entry_permit.get("snapshot_digest"),
+                    transaction_id=entry_permit.get("transaction_id"),
+                    authorized=entry_permit["authorized"],
+                    reason=entry_permit["reason"],
+                    safety_class=(entry_permit.get("classification") or {}).get("safety_class"),
+                    current_hierarchy_reason=current_reason,
+                ))
+                if not entry_permit["authorized"]:
+                    failure_reason = "entry_safety:" + str(entry_permit["reason"])
+                    break
+                center_x, center_y = entry_permit["point"]
+                before_click_events = entry_safety.capture_click_events(client, dev)
+                hard_stop = getattr(client, "_phase5c_hard_stop_state", None)
+                if hard_stop is not None:
+                    hard_stop.guard("entry_tap_dispatch")
             tap_ok = False
             if hasattr(client, "tap_xy_adb"):
                 tap_ok = bool(client.tap_xy_adb(dev=dev, x=center_x, y=center_y))
@@ -7030,11 +7089,37 @@ def _run_xml_scroll_search_tap(
             if not tap_ok:
                 failure_reason = "bounds_missing"
                 break
+            if entry_safety_enforced:
+                summary = getattr(client, "last_start_open_summary", {})
+                if isinstance(summary, dict):
+                    summary["entry_action_executed"] = True
+                    summary["entry_action_authorized"] = True
+                    summary["entry_transaction_id"] = entry_permit["transaction_id"]
+                    setattr(client, "last_start_open_summary", summary)
+                entry_safety.append_entry_audit(dict(
+                    event="ENTRY_DISPATCH", scenario=scenario_id,
+                    transaction_id=entry_permit["transaction_id"],
+                    authorized_target=entry_permit["target_identity"],
+                    dispatched_point=[center_x, center_y], executed=True,
+                ))
+                hit_result = entry_safety.verify_actual_hit(
+                    entry_permit, before_click_events,
+                    entry_safety.capture_click_events(client, dev),
+                )
+                entry_safety.append_entry_audit(dict(
+                    event="ENTRY_ACTUAL_HIT", scenario=scenario_id,
+                    transaction_id=entry_permit["transaction_id"], **hit_result,
+                ))
+                if not hit_result["matched"]:
+                    failure_reason = "entry_safety:" + hit_result["reason"]
+                    break
             confirm_ok, confirm_signal = _confirm_click_focused_transition(
                 client=client,
                 dev=dev,
                 tab_cfg=tab_cfg,
                 transition_fast_path=transition_fast_path,
+                baseline_nodes=entry_baseline_nodes,
+                baseline_window_focus=entry_baseline_window,
             )
             setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
             setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
@@ -10124,6 +10209,14 @@ def _run_pre_navigation_steps(
                     transition_fast_path=transition_fast_path,
                 )
                 if not step_ok:
+                    if (
+                        os.environ.get("TB_PHASE5B_CONTROLLED") == "1"
+                        and os.environ.get("TB_PHASE5A_ACTION_SAFETY_MODE") == "enforce"
+                    ):
+                        actual_reason = f"xml_entry_failed:{xml_reason}"
+                        log(f"[SCENARIO][pre_nav][xmlentry] abort='entry_safety_boundary' reason='{actual_reason}'")
+                        setattr(client, "last_pre_nav_failure_reason", actual_reason)
+                        return False
                     recovery_result = getattr(client, "last_recoverable_precondition", {})
                     recovery_outcome = (
                         str(recovery_result.get("outcome", "") or "")
@@ -11047,6 +11140,13 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict, *, output_base
             "pre_navigation_attempted": bool(has_pre_navigation),
             "pre_navigation_success": False,
             "open_completed": False,
+            "entry_action_executed": False,
+            "entry_action_authorized": False,
+            "plugin_open_verified": False,
+            "destination_identity_verified": False,
+            "root_plugin_body_verified": False,
+            "context_authority_verified": False,
+            "trusted_entry_verified": False,
             "entry_type": entry_type,
             "entry_contract_reason": _ENTRY_REASON_VERIFY_FAILED,
             "entry_contract_detail": "",
@@ -11977,6 +12077,42 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict, *, output_base
             start_open_summary["entry_contract_detail"] = "life_list_post_open_evidence"
             setattr(client, "last_start_open_summary", start_open_summary)
         return False
+    if (
+        entry_type == _ENTRY_TYPE_CARD
+        and is_plugin_pre_nav_scenario
+        and os.environ.get("TB_PHASE5B_CONTROLLED") == "1"
+        and os.environ.get("TB_PHASE5A_ACTION_SAFETY_MODE") == "enforce"
+    ):
+        from tb_runner.entry_safety import append_entry_audit, classify_post_open
+
+        source_window = str(getattr(client, "last_entry_source_window", "") or "")
+        current_window = _extract_window_focus_line(client, dev)
+        post_open_screen = classify_post_open(
+            identity_nodes,
+            source_digest=str(getattr(client, "last_entry_source_digest", "") or ""),
+            activity_changed=bool(source_window and current_window and source_window != current_window),
+            target_title_present=bool(matches_verify),
+        )
+        append_entry_audit(dict(
+            event="ENTRY_POST_OPEN", scenario=scenario_id,
+            transaction_id=(getattr(client, "last_start_open_summary", {}) or {}).get("entry_transaction_id"),
+            **post_open_screen,
+        ))
+        summary = getattr(client, "last_start_open_summary", {})
+        if isinstance(summary, dict):
+            summary["post_open_state"] = post_open_screen["state"]
+            summary["destination_identity_verified"] = post_open_screen["destination_identity"]
+            summary["root_plugin_body_verified"] = post_open_screen["root_plugin_body"]
+            summary["plugin_open_verified"] = post_open_screen["state"] == "PLUGIN_BODY"
+            setattr(client, "last_start_open_summary", summary)
+        if post_open_screen["state"] != "PLUGIN_BODY":
+            log(f"[SCENARIO][entry_contract] failed scenario='{scenario_id}' "
+                f"reason='post_open_{post_open_screen['state'].lower()}'")
+            if isinstance(summary, dict):
+                summary["entry_contract_reason"] = _ENTRY_REASON_VERIFY_FAILED
+                summary["entry_contract_detail"] = "post_open_" + post_open_screen["state"].lower()
+                setattr(client, "last_start_open_summary", summary)
+            return False
     special_state_detected, special_state_kind, special_state_meta = _classify_special_post_open_state(
         tab_cfg,
         post_view_id=post_view_id,
