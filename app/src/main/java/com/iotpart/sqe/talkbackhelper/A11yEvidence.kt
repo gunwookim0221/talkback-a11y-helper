@@ -3,9 +3,13 @@ package com.iotpart.sqe.talkbackhelper
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
+import android.graphics.Rect
 import org.json.JSONObject
 import org.json.JSONArray
+import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
@@ -24,6 +28,15 @@ object A11yEvidence {
     private val eventsByReqId = ConcurrentHashMap<String, MutableList<JSONObject>>()
     private val eventSequence = AtomicLong(0L)
     private val cleanupHandler = Handler(Looper.getMainLooper())
+    private data class EntryClickCapture(
+        val reqId: String,
+        val transactionId: String,
+        val armedElapsedRealtimeMs: Long,
+        val leaseDeadlineElapsedRealtimeMs: Long,
+        val cursorEventSequence: Long,
+        val dispatchUptimeMs: Long? = null,
+    )
+    @Volatile private var activeEntryClickCapture: EntryClickCapture? = null
 
     private val extraKeys = mapOf(
         "run_id" to "evidenceRunId",
@@ -47,6 +60,152 @@ object A11yEvidence {
     }
 
     fun hasCorrelation(reqId: String): Boolean = correlationByReqId.containsKey(reqId)
+
+    fun armEntryClickCapture(reqId: String, transactionId: String, leaseMs: Long): JSONObject {
+        val safeReqId = reqId.trim()
+        val safeTransactionId = transactionId.trim()
+        if (safeReqId.isEmpty() || safeReqId == "none" || safeTransactionId.isEmpty()) {
+            return JSONObject().put("ok", false).put("reason", "ENTRY_CLICK_CAPTURE_CORRELATION_MISSING")
+        }
+        val now = SystemClock.elapsedRealtime()
+        val capture = EntryClickCapture(
+            reqId = safeReqId,
+            transactionId = safeTransactionId,
+            armedElapsedRealtimeMs = now,
+            leaseDeadlineElapsedRealtimeMs = now + leaseMs.coerceIn(500L, 5000L),
+            cursorEventSequence = eventSequence.get(),
+        )
+        synchronized(this) {
+            if (activeEntryClickCapture != null) {
+                return JSONObject().put("ok", false).put("reason", "ENTRY_CLICK_CAPTURE_ALREADY_ACTIVE")
+            }
+            correlationByReqId[safeReqId] = JSONObject().put("transaction_id", safeTransactionId)
+            eventsByReqId[safeReqId] = mutableListOf()
+            activeEntryClickCapture = capture
+        }
+        cleanupHandler.postDelayed({
+            synchronized(this) {
+                if (activeEntryClickCapture?.reqId == safeReqId) {
+                    activeEntryClickCapture = null
+                    correlationByReqId.remove(safeReqId)
+                    eventsByReqId.remove(safeReqId)
+                }
+            }
+        }, capture.leaseDeadlineElapsedRealtimeMs - now + 250L)
+        Log.i(TAG, "[ENTRY_CLICK_CAPTURE][armed] reqId=$safeReqId transactionId=$safeTransactionId cursor=${capture.cursorEventSequence}")
+        return entryClickSnapshot(safeReqId).put("ok", true).put("reason", "ARMED")
+    }
+
+    fun markEntryClickDispatch(reqId: String, dispatchUptimeMs: Long): JSONObject {
+        if (dispatchUptimeMs < 0L) {
+            return JSONObject().put("ok", false).put("reason", "ENTRY_CLICK_CAPTURE_DISPATCH_CURSOR_INVALID")
+        }
+        synchronized(this) {
+            val capture = activeEntryClickCapture
+                ?: return JSONObject().put("ok", false).put("reason", "ENTRY_CLICK_CAPTURE_NOT_ARMED")
+            if (capture.reqId != reqId) return JSONObject().put("ok", false).put("reason", "ENTRY_CLICK_CAPTURE_REQUEST_MISMATCH")
+            activeEntryClickCapture = capture.copy(dispatchUptimeMs = dispatchUptimeMs)
+        }
+        return entryClickSnapshot(reqId).put("ok", true).put("reason", "DISPATCH_MARKED")
+    }
+
+    fun captureEntryClickEvent(event: AccessibilityEvent): Boolean {
+        val capture = activeEntryClickCapture ?: return false
+        if (SystemClock.elapsedRealtime() > capture.leaseDeadlineElapsedRealtimeMs) return false
+        val receivedElapsed = SystemClock.elapsedRealtime()
+        val payload = runCatching {
+            val source = event.source
+            val sourceStatus = if (source == null) "FIELD_ABSENT" else "FIELD_PRESENT"
+            val sourceData = source?.let { node ->
+                val bounds = Rect()
+                node.getBoundsInScreen(bounds)
+                val hasBounds = bounds.width() > 0 && bounds.height() > 0
+                JSONObject().apply {
+                    put("resource_id", node.viewIdResourceName ?: JSONObject.NULL)
+                    put("class_name", node.className?.toString() ?: JSONObject.NULL)
+                    put("text", node.text?.toString() ?: JSONObject.NULL)
+                    put("content_description", node.contentDescription?.toString() ?: JSONObject.NULL)
+                    put("bounds", if (hasBounds) JSONObject().put("left", bounds.left).put("top", bounds.top)
+                        .put("right", bounds.right).put("bottom", bounds.bottom) else JSONObject.NULL)
+                    put("window_id", if (node.windowId >= 0) node.windowId else JSONObject.NULL)
+                    put("enabled", node.isEnabled)
+                    put("clickable", node.isClickable)
+                    put("focusable", node.isFocusable)
+                    put("resource_id_status", if (node.viewIdResourceName.isNullOrBlank()) "FIELD_ABSENT" else "FIELD_PRESENT")
+                    put("class_name_status", if (node.className == null) "FIELD_ABSENT" else "FIELD_PRESENT")
+                    put("text_status", if (node.text == null) "FIELD_ABSENT" else "FIELD_PRESENT")
+                    put("content_description_status", if (node.contentDescription == null) "FIELD_ABSENT" else "FIELD_PRESENT")
+                    put("bounds_status", if (hasBounds) "FIELD_PRESENT" else "FIELD_ABSENT")
+                    put("window_id_status", if (node.windowId >= 0) "FIELD_PRESENT" else "FIELD_ABSENT")
+                }
+            }
+            JSONObject().apply {
+                put("event_type", "TYPE_VIEW_CLICKED")
+                put("event_time_uptime_ms", event.eventTime)
+                put("package", event.packageName?.toString() ?: JSONObject.NULL)
+                put("class_name", event.className?.toString() ?: JSONObject.NULL)
+                put("text", event.text.joinToString(" ") { it?.toString().orEmpty() }.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+                put("content_description", source?.contentDescription?.toString() ?: JSONObject.NULL)
+                put("enabled", event.isEnabled)
+                put("window_id", if (event.windowId >= 0) event.windowId else JSONObject.NULL)
+                put("source", sourceData ?: JSONObject.NULL)
+                put("source_status", sourceStatus)
+                put("source_node_id", JSONObject.NULL)
+                put("source_node_id_status", "FIELD_ABSENT")
+                put("source_process_id", JSONObject.NULL)
+                put("source_process_id_status", "FIELD_ABSENT")
+                put("parser_source", "helper_accessibility_event")
+                put("raw_reference", "${capture.reqId}:${event.eventTime}:${event.packageName}")
+                put("captured_elapsed_realtime_ms", receivedElapsed)
+                put("dispatch_uptime_ms", capture.dispatchUptimeMs ?: JSONObject.NULL)
+                put("cursor_event_sequence", capture.cursorEventSequence)
+            }
+        }.getOrElse { error ->
+            JSONObject().put("event_type", "TYPE_VIEW_CLICKED")
+                .put("event_time_uptime_ms", event.eventTime)
+                .put("package", event.packageName?.toString() ?: JSONObject.NULL)
+                .put("source_status", "FIELD_PARSE_FAILED")
+                .put("source_parse_error", error.javaClass.simpleName)
+                .put("parser_source", "helper_accessibility_event")
+                .put("raw_reference", "${capture.reqId}:${event.eventTime}:${event.packageName}")
+                .put("captured_elapsed_realtime_ms", receivedElapsed)
+                .put("cursor_event_sequence", capture.cursorEventSequence)
+        }
+        emit("ENTRY_CLICK_OBSERVED", capture.reqId, payload)
+        return true
+    }
+
+    fun disarmEntryClickCapture(reqId: String): JSONObject {
+        synchronized(this) {
+            val capture = activeEntryClickCapture
+            if (capture != null && capture.reqId != reqId) {
+                return JSONObject().put("ok", false).put("reason", "ENTRY_CLICK_CAPTURE_REQUEST_MISMATCH")
+            }
+            if (capture?.reqId == reqId) activeEntryClickCapture = null
+        }
+        val snapshot = entryClickSnapshot(reqId).put("ok", true).put("reason", "DISARMED")
+        synchronized(this) {
+            correlationByReqId.remove(reqId)
+            eventsByReqId.remove(reqId)
+        }
+        return snapshot
+    }
+
+    fun entryClickSnapshot(reqId: String): JSONObject {
+        val events = synchronized(eventsByReqId.getOrPut(reqId) { mutableListOf() }) {
+            JSONArray().apply { eventsByReqId[reqId]?.forEach { put(JSONObject(it.toString())) } }
+        }
+        val capture = activeEntryClickCapture?.takeIf { it.reqId == reqId }
+        return JSONObject().apply {
+            put("reqId", reqId)
+            put("transactionId", correlationByReqId[reqId]?.optString("transaction_id") ?: "")
+            put("cursorEventSequence", capture?.cursorEventSequence ?: JSONObject.NULL)
+            put("dispatchUptimeMs", capture?.dispatchUptimeMs ?: JSONObject.NULL)
+            put("armedElapsedRealtimeMs", capture?.armedElapsedRealtimeMs ?: JSONObject.NULL)
+            put("active", capture != null)
+            put("evidenceEvents", events)
+        }
+    }
 
     fun requestedTarget(intent: Intent?): JSONObject {
         return JSONObject().apply {

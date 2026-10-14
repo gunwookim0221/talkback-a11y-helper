@@ -31,6 +31,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val ACTION_PING = "com.iotpart.sqe.talkbackhelper.PING"
         private const val ACTION_COMMAND = "com.iotpart.sqe.talkbackhelper.ACTION_COMMAND"
         private const val ACTION_EVIDENCE_EVENTS = "com.iotpart.sqe.talkbackhelper.EVIDENCE_EVENTS"
+        private const val ACTION_ENTRY_CLICK_CAPTURE = "com.iotpart.sqe.talkbackhelper.ENTRY_CLICK_CAPTURE"
         private const val EXTRA_TARGET_NAME = "targetName"
         private const val EXTRA_TARGET_TYPE = "targetType"
         private const val EXTRA_TARGET_INDEX = "targetIndex"
@@ -109,8 +110,35 @@ class A11yCommandReceiver : BroadcastReceiver() {
             ACTION_PING -> handlePing(intent)
             ACTION_COMMAND -> handleExternalCommand(context, intent)
             ACTION_EVIDENCE_EVENTS -> handleEvidenceEvents(intent)
+            ACTION_ENTRY_CLICK_CAPTURE -> handleEntryClickCapture(intent)
             else -> Unit
         }
+    }
+
+    private fun handleEntryClickCapture(intent: Intent) {
+        val responseReqId = parseReqId(intent)
+        val captureReqId = intent.getStringExtra("captureReqId")?.trim()?.takeIf { it.isNotEmpty() }
+            ?: responseReqId
+        val operation = intent.getStringExtra("operation")?.trim()?.lowercase().orEmpty()
+        val transactionId = intent.getStringExtra("transactionId")?.trim().orEmpty()
+        val leaseMs = intent.getLongExtra("leaseMs", 2500L).coerceIn(500L, 5000L)
+        val result = when (operation) {
+            "begin" -> if (A11yHelperService.instance == null) {
+                org.json.JSONObject().put("ok", false).put("reason", "HELPER_SERVICE_UNAVAILABLE")
+            } else {
+                A11yEvidence.armEntryClickCapture(captureReqId, transactionId, leaseMs)
+            }
+            "mark_dispatch" -> A11yEvidence.markEntryClickDispatch(
+                captureReqId,
+                intent.getLongExtra("dispatchUptimeMs", -1L),
+            )
+            "snapshot" -> A11yEvidence.entryClickSnapshot(captureReqId).put("ok", true).put("reason", "SNAPSHOT")
+            "end" -> A11yEvidence.disarmEntryClickCapture(captureReqId)
+            else -> org.json.JSONObject().put("ok", false).put("reason", "ENTRY_CLICK_CAPTURE_OPERATION_INVALID")
+        }.put("operation", operation).put("requestedTransactionId", transactionId)
+            .put("captureReqId", captureReqId).put("reqId", responseReqId)
+        A11yResultTransport.encode("ENTRY_CLICK_CAPTURE_RESULT", responseReqId, result.toString())
+            .forEach { Log.i(TAG, it) }
     }
 
     private fun handleGetFocus(context: Context, intent: Intent) {

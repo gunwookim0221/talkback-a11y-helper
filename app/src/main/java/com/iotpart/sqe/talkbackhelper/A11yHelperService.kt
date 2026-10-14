@@ -93,6 +93,10 @@ class A11yHelperService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         val type = event.eventType
+        if (type == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            A11yEvidence.captureEntryClickEvent(event)
+            return
+        }
         if (type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED ||
             type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || type == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
             SmartNextLookupTrace.structureChanged()

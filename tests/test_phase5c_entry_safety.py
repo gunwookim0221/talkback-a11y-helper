@@ -212,9 +212,17 @@ def test_xml_entry_enforces_exact_owner_before_physical_tap(monkeypatch, tmp_pat
         def dump_tree(self, **_): return wrapped
         def tap_xy_adb(self, **kw): self.taps.append((kw["x"],kw["y"])); return True
     client = Client()
-    events = iter([{}, {"7": dict(package="com.samsung.android.oneconnect",
-                                  bounds=(20,120,1000,180), text="[Example Service]")}])
-    monkeypatch.setattr(entry_safety, "capture_click_events", lambda *_: next(events))
+    capture = dict(req_id="capture", armed={"ok": True}, talkback_baseline={})
+    event = dict(event_time="1500", package="com.samsung.android.oneconnect", class_name="android.view.ViewGroup",
+                 bounds=(20,120,1000,180), text="[Example Service]")
+    monkeypatch.setattr(entry_safety, "begin_transaction_click_capture", lambda *_a, **_k: capture)
+    def dispatch(client, _dev, point):
+        client.taps.append(tuple(point))
+        return dict(executed=True, dispatch_uptime_ms=1000, dispatch_started_monotonic_ns=1_000_000_000)
+    monkeypatch.setattr(entry_safety, "dispatch_authorized_entry_tap", dispatch)
+    monkeypatch.setattr(entry_safety, "mark_transaction_click_dispatch", lambda *_a, **_k: {"ok": True})
+    monkeypatch.setattr(entry_safety, "collect_transaction_click_events", lambda *_a, **_k: dict(
+        ok=True, candidate_events=[event], deadline_uptime_ms=2000))
     ok, reason = collection_flow._run_xml_scroll_search_tap(
         client, "SERIAL", tab_cfg={"scenario_id": "life_example_plugin"},
         target="Example Service", type_="card", max_scroll_search_steps=0,
@@ -237,7 +245,15 @@ def test_xml_entry_blocks_unproven_actual_hit_and_does_not_confirm(monkeypatch, 
     monkeypatch.setattr(collection_flow, "_extract_window_focus_line", lambda *_: "source")
     monkeypatch.setattr(collection_flow, "_confirm_click_focused_transition",
                         lambda **_: (_ for _ in ()).throw(AssertionError("must stop before confirm")))
-    monkeypatch.setattr(entry_safety, "capture_click_events", lambda *_: {})
+    capture = dict(req_id="capture", armed={"ok": True}, talkback_baseline={})
+    monkeypatch.setattr(entry_safety, "begin_transaction_click_capture", lambda *_a, **_k: capture)
+    def dispatch(client, _dev, point):
+        client.taps.append(tuple(point))
+        return dict(executed=True, dispatch_uptime_ms=1000, dispatch_started_monotonic_ns=1_000_000_000)
+    monkeypatch.setattr(entry_safety, "dispatch_authorized_entry_tap", dispatch)
+    monkeypatch.setattr(entry_safety, "mark_transaction_click_dispatch", lambda *_a, **_k: {"ok": True})
+    monkeypatch.setattr(entry_safety, "collect_transaction_click_events", lambda *_a, **_k: dict(
+        ok=True, candidate_events=[], deadline_uptime_ms=2000))
     class Client:
         taps = []
         def dump_tree(self, **_): return wrapped

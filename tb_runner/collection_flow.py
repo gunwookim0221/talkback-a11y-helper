@@ -7039,6 +7039,7 @@ def _run_xml_scroll_search_tap(
             entry_baseline_nodes = None
             entry_baseline_window = ""
             before_click_events = {}
+            entry_click_capture = None
             if entry_safety_enforced:
                 from tb_runner import entry_safety
 
@@ -7071,12 +7072,44 @@ def _run_xml_scroll_search_tap(
                     failure_reason = "entry_safety:" + str(entry_permit["reason"])
                     break
                 center_x, center_y = entry_permit["point"]
-                before_click_events = entry_safety.capture_click_events(client, dev)
+                entry_click_capture = entry_safety.begin_transaction_click_capture(
+                    client, dev, transaction_id=entry_permit["transaction_id"],
+                )
+                before_click_events = entry_click_capture.get("talkback_baseline") or {}
+                entry_safety.append_entry_audit(dict(
+                    event="ENTRY_CLICK_CAPTURE_STARTED", scenario=scenario_id,
+                    transaction_id=entry_permit["transaction_id"],
+                    request_id=entry_click_capture.get("req_id"),
+                    authorized_target=entry_permit["target_identity"],
+                    pre_dispatch_cursor_monotonic_ns=entry_click_capture.get("cursor_started_monotonic_ns"),
+                    helper_cursor_event_sequence=entry_click_capture.get("helper_cursor_event_sequence"),
+                    talkback_baseline_event_ids=sorted(before_click_events),
+                    capture_armed=(entry_click_capture.get("armed") or {}).get("ok") is True,
+                    capture_reason=(entry_click_capture.get("armed") or {}).get("reason"),
+                ))
+                if (entry_click_capture.get("armed") or {}).get("ok") is not True:
+                    cleanup = entry_safety.end_transaction_click_capture(
+                        client, dev, capture_session=entry_click_capture,
+                        transaction_id=entry_permit["transaction_id"],
+                    )
+                    entry_safety.append_entry_audit(dict(
+                        event="ENTRY_CLICK_CAPTURE_CLEANUP", scenario=scenario_id,
+                        transaction_id=entry_permit["transaction_id"],
+                        request_id=entry_click_capture.get("req_id"), cleanup_result=cleanup,
+                    ))
+                    failure_reason = "entry_safety:ENTRY_CLICK_CAPTURE_ARM_FAILED"
+                    break
                 hard_stop = getattr(client, "_phase5c_hard_stop_state", None)
                 if hard_stop is not None:
                     hard_stop.guard("entry_tap_dispatch")
             tap_ok = False
-            if hasattr(client, "tap_xy_adb"):
+            dispatch_receipt = None
+            if entry_safety_enforced:
+                dispatch_receipt = entry_safety.dispatch_authorized_entry_tap(
+                    client, dev, entry_permit["point"],
+                )
+                tap_ok = bool(dispatch_receipt.get("executed"))
+            elif hasattr(client, "tap_xy_adb"):
                 tap_ok = bool(client.tap_xy_adb(dev=dev, x=center_x, y=center_y))
             else:
                 run_fn = getattr(client, "_run", None)
@@ -7087,6 +7120,23 @@ def _run_xml_scroll_search_tap(
                     except Exception:
                         tap_ok = False
             if not tap_ok:
+                if entry_safety_enforced:
+                    cleanup = entry_safety.end_transaction_click_capture(
+                        client, dev, capture_session=entry_click_capture,
+                        transaction_id=entry_permit["transaction_id"],
+                    )
+                    entry_safety.append_entry_audit(dict(
+                        event="ENTRY_DISPATCH", scenario=scenario_id,
+                        transaction_id=entry_permit["transaction_id"],
+                        authorized_target=entry_permit["target_identity"],
+                        dispatched_point=[center_x, center_y], executed=False,
+                        dispatch_uptime_ms=(dispatch_receipt or {}).get("dispatch_uptime_ms"),
+                        dispatch_started_monotonic_ns=(dispatch_receipt or {}).get("dispatch_started_monotonic_ns"),
+                        dispatch_completed_monotonic_ns=(dispatch_receipt or {}).get("dispatch_completed_monotonic_ns"),
+                        dispatch_cursor_status=(dispatch_receipt or {}).get("reason"),
+                        dispatch_command=(dispatch_receipt or {}).get("command"),
+                        capture_cleanup=cleanup,
+                    ))
                 failure_reason = "bounds_missing"
                 break
             if entry_safety_enforced:
@@ -7100,12 +7150,62 @@ def _run_xml_scroll_search_tap(
                     event="ENTRY_DISPATCH", scenario=scenario_id,
                     transaction_id=entry_permit["transaction_id"],
                     authorized_target=entry_permit["target_identity"],
-                    dispatched_point=[center_x, center_y], executed=True,
+                    dispatched_point=[center_x, center_y], executed=tap_ok,
+                    dispatch_uptime_ms=(dispatch_receipt or {}).get("dispatch_uptime_ms"),
+                    dispatch_started_monotonic_ns=(dispatch_receipt or {}).get("dispatch_started_monotonic_ns"),
+                    dispatch_completed_monotonic_ns=(dispatch_receipt or {}).get("dispatch_completed_monotonic_ns"),
+                    dispatch_cursor_status=(dispatch_receipt or {}).get("reason"),
+                    dispatch_command=(dispatch_receipt or {}).get("command"),
                 ))
-                hit_result = entry_safety.verify_actual_hit(
-                    entry_permit, before_click_events,
-                    entry_safety.capture_click_events(client, dev),
+                dispatch_uptime_ms = (dispatch_receipt or {}).get("dispatch_uptime_ms")
+                mark_result = entry_safety.mark_transaction_click_dispatch(
+                    client, dev, capture_session=entry_click_capture,
+                    transaction_id=entry_permit["transaction_id"],
+                    dispatch_uptime_ms=dispatch_uptime_ms,
                 )
+                collection = entry_safety.collect_transaction_click_events(
+                    client, dev, transaction_id=entry_permit["transaction_id"],
+                    hierarchy_roots=current_roots, permit={**entry_permit, "dispatch_uptime_ms": dispatch_uptime_ms},
+                    before_talkback_events=before_click_events,
+                    capture_session=entry_click_capture,
+                    dispatch_started_monotonic_ns=(dispatch_receipt or {}).get("dispatch_started_monotonic_ns"),
+                    dispatch_completed_monotonic_ns=(dispatch_receipt or {}).get("dispatch_completed_monotonic_ns"),
+                )
+                activity_after = ("" if str(collection.get("reason") or "").startswith("AUTHORITATIVE_HARD_STOP")
+                                  else _extract_window_focus_line(client, dev))
+                activity_transition_evidence = dict(
+                    source="dumpsys window windows",
+                    before=entry_baseline_window,
+                    after=activity_after,
+                    changed=bool(entry_baseline_window and activity_after
+                                 and entry_baseline_window != activity_after),
+                    observed_monotonic_ns=time.monotonic_ns(),
+                    evidence_role="SECONDARY_ONLY",
+                )
+                collection["activity_transition"] = activity_transition_evidence
+                if dispatch_uptime_ms is None or mark_result.get("ok") is not True:
+                    hit_result = dict(
+                        matched=False,
+                        reason="ENTRY_DISPATCH_CURSOR_UNAVAILABLE" if dispatch_uptime_ms is None
+                            else "ENTRY_CLICK_CAPTURE_DISPATCH_MARK_FAILED",
+                        evidence_strength="INSUFFICIENT", candidate_count=len(collection.get("candidate_events") or []),
+                        events=collection.get("candidate_events") or [],
+                        dispatch_marker=mark_result,
+                    )
+                elif collection.get("ok") is not True:
+                    hit_result = dict(
+                        matched=False, reason="ENTRY_CLICK_COLLECTION_FAILED",
+                        evidence_strength="INSUFFICIENT", candidate_count=len(collection.get("candidate_events") or []),
+                        events=collection.get("candidate_events") or [], collection=collection,
+                    )
+                else:
+                    hit_result = entry_safety.verify_actual_hit(
+                        entry_permit, {}, collection.get("candidate_events") or [],
+                        roots=current_roots, dispatch_uptime_ms=dispatch_uptime_ms,
+                        collection=collection,
+                    )
+                hit_result["collection"] = collection
+                hit_result["dispatch_marker"] = mark_result
                 entry_safety.append_entry_audit(dict(
                     event="ENTRY_ACTUAL_HIT", scenario=scenario_id,
                     transaction_id=entry_permit["transaction_id"], **hit_result,
@@ -7121,6 +7221,16 @@ def _run_xml_scroll_search_tap(
                 baseline_nodes=entry_baseline_nodes,
                 baseline_window_focus=entry_baseline_window,
             )
+            if entry_safety_enforced:
+                entry_safety.append_entry_audit(dict(
+                    event="ENTRY_POST_OPEN_TRANSITION", scenario=scenario_id,
+                    transaction_id=entry_permit["transaction_id"],
+                    authorized_target=entry_permit["target_identity"],
+                    activity_transition_evidence=activity_transition_evidence,
+                    transition_confirmed=confirm_ok,
+                    transition_signal=str(confirm_signal or ""),
+                    actual_hit_verdict="PROVEN" if hit_result.get("matched") else "REJECTED",
+                ))
             setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
             setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
             if confirm_ok:
