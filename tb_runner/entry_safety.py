@@ -37,6 +37,35 @@ def _walk(roots):
                      if isinstance(child, dict))
 
 
+def _index_full_hierarchy(roots):
+    """Return a validated full-tree index with ancestry from the current roots.
+
+    Candidate identity is object-bound to this snapshot. A detached candidate,
+    a repeated node object, or malformed child collection cannot supply a
+    trustworthy lineage and must not be resolved by a partial subtree.
+    """
+    if not isinstance(roots, (list, tuple)):
+        return None, "HIERARCHY_LINEAGE_UNPROVEN"
+    indexed = []
+    seen = set()
+    stack = [(node, ()) for node in reversed(roots)]
+    while stack:
+        node, ancestry = stack.pop()
+        if not isinstance(node, dict) or id(node) in seen:
+            return None, "HIERARCHY_LINEAGE_UNPROVEN"
+        seen.add(id(node))
+        indexed.append((node, ancestry))
+        children = node.get("children")
+        if children is None:
+            children = []
+        if not isinstance(children, (list, tuple)):
+            return None, "HIERARCHY_LINEAGE_UNPROVEN"
+        if any(not isinstance(child, dict) for child in children):
+            return None, "HIERARCHY_LINEAGE_UNPROVEN"
+        stack.extend((child, (*ancestry, node)) for child in reversed(children))
+    return indexed, None
+
+
 def _bounds(node):
     return parse_bounds_str(str(node.get("boundsInScreen") or node.get("bounds") or ""))
 
@@ -52,6 +81,91 @@ def _actionable(node):
 def _own_label(node):
     return " ".join(str(node.get(key) or "").strip() for key in
                     ("text", "contentDescription", "talkbackLabel") if str(node.get(key) or "").strip())
+
+
+def _action_semantics(node):
+    """Return complete, comparable action semantics or None when incomplete."""
+    role = normalize_text(node.get("role"))
+    actions = node.get("actions")
+    if not role or not isinstance(actions, (list, tuple)) or not actions:
+        return None
+    normalized_actions = []
+    for action in actions:
+        if isinstance(action, dict):
+            action_id = action.get("id")
+            action_name = normalize_text(action.get("name") or action.get("label"))
+            if action_id is None and not action_name:
+                return None
+            normalized_actions.append((str(action_id or ""), action_name))
+        elif isinstance(action, (str, int)):
+            normalized_actions.append((str(action), ""))
+        else:
+            return None
+    if not normalized_actions:
+        return None
+    return (
+        role,
+        normalize_text(_own_label(node)),
+        tuple(sorted(normalized_actions)),
+        node.get("clickable") is True,
+        node.get("effectiveClickable") is True,
+        node.get("focusable") is True,
+        node.get("checkable") is True,
+        node.get("enabled") is not False,
+    )
+
+
+def _proven_equivalent_owner_ancestor(ancestor, owner, matched_phrase, indexed):
+    """Whether an actionable ancestor is evidenced as the same nav action.
+
+    Containment alone is insufficient. Require matching explicit navigation
+    semantics and a structural container class before excluding an ancestor
+    from independent hit-owner competition.
+    """
+    class_name = str(ancestor.get("className") or "").lower()
+    structural = any(token in class_name for token in ("viewgroup", "layout", "container"))
+    ancestor_bounds, owner_bounds = _bounds(ancestor), _bounds(owner)
+    if (not structural or not ancestor_bounds or not owner_bounds
+            or not (ancestor_bounds[0] <= owner_bounds[0] and ancestor_bounds[1] <= owner_bounds[1]
+                    and ancestor_bounds[2] >= owner_bounds[2] and ancestor_bounds[3] >= owner_bounds[3])):
+        return False
+    ancestor_semantics = _action_semantics(ancestor)
+    owner_semantics = _action_semantics(owner)
+    ancestor_label, owner_label = _words(_own_label(ancestor)), _words(_own_label(owner))
+    if ancestor_label and ancestor_label != _words(matched_phrase):
+        return False
+    has_ancestor_semantics = bool(normalize_text(ancestor.get("role")) or ancestor.get("actions"))
+    has_owner_semantics = bool(normalize_text(owner.get("role")) or owner.get("actions"))
+    if has_ancestor_semantics or has_owner_semantics:
+        return (ancestor_label == _words(matched_phrase) and ancestor_semantics is not None
+                and owner_semantics is not None and ancestor_semantics == owner_semantics)
+    # Legacy dumps may omit role/actions. For an equal-bounds wrapper, require
+    # the same exposed click/focus state and one phrase-matched navigation target
+    # in that branch. A distinct same-area control keeps the chain unresolved.
+    capability = lambda node: (
+        node.get("clickable") is True, node.get("effectiveClickable") is True,
+        node.get("focusable") is True, node.get("checkable") is True,
+        node.get("enabled") is not False,
+    )
+    owner_label = _words(_own_label(owner))
+    phrase_words = _words(matched_phrase)
+    if (ancestor_bounds != owner_bounds or capability(ancestor) != capability(owner)
+            or ancestor.get("checkable") is True or owner.get("checkable") is True
+            or not (owner_label == phrase_words or owner_label.startswith(phrase_words + " "))):
+        return False
+    if ancestor_label and ancestor_label != owner_label:
+        return False
+    for node, ancestors in indexed:
+        if (node is owner or not any(parent is ancestor for parent in ancestors)
+                or not _actionable(node) or _bounds(node) != owner_bounds):
+            continue
+        node_class = str(node.get("className") or "")
+        node_label = _words(_own_label(node))
+        if (node.get("checkable") is True
+                or re.search(r"(?i)(switch|toggle|button|checkbox)", node_class)
+                or (node_label and not (node_label == phrase_words or node_label.startswith(phrase_words + " ")))):
+            return False
+    return True
 
 
 def _words(value):
@@ -105,23 +219,35 @@ def _point_for_owner(owner, roots):
 def resolve_navigation_owner(roots, selected, matched_phrase):
     """Prefer a unique actionable own-label target; otherwise an exposed card area.
 
-    Every proposed point is checked against independent actionable descendants.
-    Overlapping wrappers of identical geometry remain one logical hit area.
+    Candidate and owner ancestry are derived from the full current hierarchy.
+    Overlapping ancestors are excluded only when explicit action semantics prove
+    that they are structural wrappers for the same navigation owner.
     """
     phrase = normalize_text(matched_phrase)
     if not phrase or not isinstance(selected, dict):
         return dict(ok=False, reason="TARGET_PHRASE_OR_CANDIDATE_MISSING")
-    subtree = [(node, ancestors) for node, ancestors in _walk([selected]) if _bounds(node)]
+    indexed, index_error = _index_full_hierarchy(roots)
+    if index_error:
+        return dict(ok=False, reason=index_error)
+    selected_records = [(node, ancestors) for node, ancestors in indexed if node is selected]
+    if len(selected_records) != 1:
+        return dict(ok=False, reason="HIERARCHY_LINEAGE_UNPROVEN")
+    subtree = [(node, ancestors) for node, ancestors in indexed
+               if (node is selected or any(ancestor is selected for ancestor in ancestors))
+               and _bounds(node)]
     exact = [(node, ancestors) for node, ancestors in subtree if _actionable(node)
              and normalize_text(_own_label(node)) == phrase]
-    # Distinct own-label actions are ambiguous; nested equal-bounds wrappers
-    # are resolved to the deepest observed node.
-    exact_bounds = {_bounds(node) for node, _ in exact}
-    if len(exact_bounds) > 1:
-        return dict(ok=False, reason="MULTIPLE_NAMED_ACTION_OWNERS")
     if exact:
         exact.sort(key=lambda pair: len(pair[1]), reverse=True)
         owner = exact[0][0]
+        owner_ancestors = exact[0][1]
+        # Multiple exact-label nodes are one owner only when they form a single
+        # ancestor chain and every clickable wrapper is proven equivalent.
+        # Siblings or incomplete semantics stay distinct.
+        for candidate, _ in exact[1:]:
+            if not any(candidate is ancestor for ancestor in owner_ancestors) or not _proven_equivalent_owner_ancestor(
+                    candidate, owner, phrase, indexed):
+                return dict(ok=False, reason="MULTIPLE_NAMED_ACTION_OWNERS")
         reason = "UNIQUE_NAMED_ACTION_OWNER"
     elif _actionable(selected):
         same_geometry_named = [(node, chain) for node, chain in subtree
@@ -138,18 +264,36 @@ def resolve_navigation_owner(roots, selected, matched_phrase):
     point = _point_for_owner(owner, roots)
     if point is None:
         return dict(ok=False, reason="NO_UNOCCUPIED_OWNER_HIT_AREA")
-    owner_bounds = _bounds(owner)
-    # A click at this point must not be owned by another independent control.
-    owner_ancestors = {id(ancestor) for node, chain in subtree if node is owner for ancestor in chain}
-    conflicts = [(node, ancestors) for node, ancestors in _walk(roots)
-                 if node is not owner and id(node) not in owner_ancestors
-                 and _actionable(node) and _contains(_bounds(node), point)
-                 and _bounds(node) != owner_bounds]
+    owner_records = [(node, ancestors) for node, ancestors in indexed if node is owner]
+    if len(owner_records) != 1:
+        return dict(ok=False, reason="HIERARCHY_LINEAGE_UNPROVEN")
+    owner_ancestors = owner_records[0][1]
+    # All other actionable nodes at the proposed point remain competitors,
+    # including equal-bounds descendants and unrelated overlapping siblings.
+    conflicts = []
+    for node, ancestors in indexed:
+        if node is owner or not _actionable(node) or not _contains(_bounds(node), point):
+            continue
+        # _point_for_owner already checks every actionable descendant and only
+        # permits equal-geometry descendants that expose no separate semantics.
+        if any(ancestor is owner for ancestor in ancestors):
+            continue
+        if any(node is ancestor for ancestor in owner_ancestors) and _proven_equivalent_owner_ancestor(
+                node, owner, phrase, indexed):
+            continue
+        conflicts.append(node)
     if conflicts:
-        return dict(ok=False, reason="HIT_OWNER_AMBIGUOUS")
+        return dict(ok=False, reason="HIT_OWNER_AMBIGUOUS",
+                    owner_identity=_identity(owner), point=point,
+                    candidate_identity=_identity(selected),
+                    candidate_lineage=[_identity(node) for node in selected_records[0][1]],
+                    owner_lineage=[_identity(node) for node in owner_ancestors],
+                    conflicting_owner_identities=[_identity(node) for node in conflicts])
     return dict(ok=True, reason=reason, owner=owner, owner_identity=_identity(owner),
                 point=point, snapshot_digest=hierarchy_digest(roots),
-                candidate_identity=_identity(selected))
+                candidate_identity=_identity(selected),
+                candidate_lineage=[_identity(node) for node in selected_records[0][1]],
+                owner_lineage=[_identity(node) for node in owner_ancestors])
 
 
 def authorize_entry(resolution, roots, *, scenario, matched_phrase):

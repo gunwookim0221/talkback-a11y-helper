@@ -13,10 +13,27 @@ def node(rid, label, bounds, *, clickable=False, children=None, klass="android.v
 
 def mixed_card():
     header = node("app:id/header", "Example Service", "[20,120][1000,180]", clickable=True)
+    header.update(role="button", actions=[16])
     child = node("app:id/mode", "Armed Stay", "[400,300][700,540]", clickable=True, checkable=True)
-    card = node("app:id/card", "", "[20,100][1000,600]", clickable=True,
+    card = node("app:id/card", "Example Service", "[20,100][1000,600]", clickable=True,
                 children=[header, child])
+    card.update(role="button", actions=[16])
     return [card], card, header, child
+
+
+def nested_action_card():
+    away = node("demo:id/action_away", "Armed Away", "[80,340][350,520]", clickable=True, checkable=True)
+    stay = node("demo:id/action_stay", "Armed Stay", "[390,340][660,520]", clickable=True, checkable=True)
+    disarm = node("demo:id/action_disarm", "Disarm", "[700,340][970,520]", clickable=True, checkable=True)
+    header = node("demo:id/navigation_header", "Home Monitor", "[30,120][1050,180]", clickable=True)
+    header.update(role="button", actions=[16])
+    inner = node("demo:id/card_content", "Home Monitor", "[20,100][1060,600]", clickable=True,
+                 children=[header, away, stay, disarm])
+    inner.update(role="button", actions=[16])
+    outer = node("demo:id/service_card", "Home Monitor", "[10,80][1070,620]", clickable=True,
+                 children=[inner])
+    outer.update(role="button", actions=[16])
+    return [outer], outer, inner, header, [away, stay, disarm]
 
 
 def test_mixed_card_resolves_named_navigation_owner_away_from_independent_child():
@@ -27,6 +44,78 @@ def test_mixed_card_resolves_named_navigation_owner_away_from_independent_child(
     assert not (400 <= result["point"][0] < 700 and 300 <= result["point"][1] < 540)
     permit = authorize_entry(result, roots, scenario="life_example_plugin", matched_phrase="Example Service")
     assert permit["authorized"] and permit["target_identity"]["resource_id"] == "app:id/header"
+
+
+def test_full_tree_lineage_makes_outer_and_header_selection_order_invariant():
+    roots, outer, inner, header, controls = nested_action_card()
+    outer_result = resolve_navigation_owner(roots, outer, "Home Monitor")
+    header_result = resolve_navigation_owner(roots, header, "Home Monitor")
+
+    assert outer_result["ok"] and header_result["ok"]
+    assert outer_result["owner"] is header_result["owner"] is header
+    assert outer_result["point"] == header_result["point"]
+    assert outer_result["candidate_lineage"] == []
+    assert [item["resource_id"] for item in header_result["candidate_lineage"]] == [
+        "demo:id/service_card", "demo:id/card_content"]
+    assert header_result["owner_lineage"] == header_result["candidate_lineage"]
+    assert all(control is not outer_result["owner"] for control in controls)
+    assert all(not (bounds[0] <= outer_result["point"][0] < bounds[2]
+                    and bounds[1] <= outer_result["point"][1] < bounds[3])
+               for bounds in ((80, 340, 350, 520), (390, 340, 660, 520), (700, 340, 970, 520)))
+
+
+def test_unknown_clickable_ancestor_remains_a_competing_owner():
+    roots, _outer, _inner, header, _controls = nested_action_card()
+    outer = roots[0]
+    outer["contentDescription"] = ""
+    outer.pop("role")
+    outer.pop("actions")
+
+    result = resolve_navigation_owner(roots, header, "Home Monitor")
+    assert not result["ok"] and result["reason"] == "HIT_OWNER_AMBIGUOUS"
+    assert result["conflicting_owner_identities"][0]["resource_id"] == "demo:id/service_card"
+
+
+def test_actionable_ancestor_with_distinct_action_semantics_remains_a_competitor():
+    roots, _outer, _inner, header, _controls = nested_action_card()
+    outer = roots[0]
+    outer["contentDescription"] = ""
+    outer.update(role="group", actions=[16, 32], checkable=True)
+
+    result = resolve_navigation_owner(roots, header, "Home Monitor")
+    assert not result["ok"] and result["reason"] == "HIT_OWNER_AMBIGUOUS"
+    assert result["conflicting_owner_identities"][0]["resource_id"] == "demo:id/service_card"
+
+
+def test_independent_actionable_descendant_overlapping_owner_point_is_rejected():
+    roots, outer, _inner, header, _controls = nested_action_card()
+    control = node("demo:id/overlapping_action", "Turn off", "[400,120][700,180]",
+                   clickable=True, checkable=True)
+    outer["children"][0]["children"].append(control)
+
+    result = resolve_navigation_owner(roots, header, "Home Monitor")
+    assert not result["ok"]
+    assert result["reason"] in {"NO_UNOCCUPIED_OWNER_HIT_AREA", "HIT_OWNER_AMBIGUOUS"}
+
+
+def test_unrelated_overlapping_sibling_remains_a_competitor():
+    roots, outer, _inner, header, _controls = nested_action_card()
+    sibling = node("demo:id/overlap", "Other action", "[400,120][700,180]", clickable=True)
+    outer["children"].append(sibling)
+
+    result = resolve_navigation_owner(roots, header, "Home Monitor")
+    assert not result["ok"] and result["reason"] == "HIT_OWNER_AMBIGUOUS"
+
+
+def test_detached_or_corrupt_full_tree_lineage_fails_closed():
+    roots, _outer, _inner, header, _controls = nested_action_card()
+    detached = deepcopy(header)
+    assert resolve_navigation_owner(roots, detached, "Home Monitor") == {
+        "ok": False, "reason": "HIERARCHY_LINEAGE_UNPROVEN"}
+
+    roots[0]["children"] = "not-a-child-list"
+    result = resolve_navigation_owner(roots, roots[0], "Home Monitor")
+    assert not result["ok"] and result["reason"] == "HIERARCHY_LINEAGE_UNPROVEN"
 
 
 def test_parent_center_cannot_inherit_navigation_authorization_for_security_child():
@@ -58,7 +147,9 @@ def test_equal_geometry_independent_toggle_blocks_wrapper_authorization():
 
 def test_equal_geometry_named_navigation_descendant_can_own_entry():
     content = node("app:id/content", "Video, No clips detected today", "[20,100][1000,600]", clickable=True)
+    content["focusable"] = True
     wrapper = node("app:id/card", "", "[20,100][1000,600]", clickable=True, children=[content])
+    wrapper["focusable"] = True
     result = resolve_navigation_owner([wrapper], wrapper, "video")
     assert result["ok"] and result["owner"] is content
     assert authorize_entry(result, [wrapper], scenario="life_video_plugin", matched_phrase="video")["authorized"]

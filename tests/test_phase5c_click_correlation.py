@@ -16,10 +16,12 @@ def node(rid, label, bounds, *, klass="android.view.ViewGroup", clickable=False,
 
 def owned_tree():
     owner = node("app:id/monitorHeaderGroup", "Home Monitor", "[30,1421][1050,1469]", clickable=True)
+    owner.update(role="button", actions=[16])
     child = node("app:id/awayButton", "Armed Stay", "[50,1500][300,1600]", clickable=True,
                  klass="android.widget.Button")
-    card = node("app:id/monitorCard", "", "[20,1400][1060,1700]", clickable=True,
+    card = node("app:id/monitorCard", "Home Monitor", "[20,1400][1060,1700]", clickable=True,
                 children=[owner, child])
+    card.update(role="button", actions=[16])
     return [card], owner, child
 
 
