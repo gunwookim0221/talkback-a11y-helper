@@ -61,6 +61,7 @@ from talkback_lib.helper_bridge import HelperBridge
 from talkback_lib.logcat_reader import LogcatReader
 from talkback_lib.focus_trace_builder import build_initial_get_focus_trace, extract_focus_payload_candidate
 from talkback_lib.focus_service import FocusService
+from talkback_lib.hierarchy_identity import attach_hierarchy_identity_metadata
 from talkback_lib.step_row_builder import (
     populate_focus_fields_from_node,
     populate_get_focus_trace_fields,
@@ -105,6 +106,7 @@ class A11yAdbClient:
         self._last_log_marker: tuple[tuple[int, int, int, int, int, int], int] | None = None
         self.last_dump_metadata: dict[str, Any] = {}
         self.last_hierarchy_metadata: dict[str, Any] = {}
+        self._hierarchy_capture_sequence = 0
         self.last_scroll_capabilities: list[dict[str, Any]] = []
         self.last_device_collection: dict[str, Any] = {}
         self.last_scroll_result: dict[str, Any] = {}
@@ -1294,6 +1296,16 @@ class A11yAdbClient:
         windows = payload.get("windows")
         if not isinstance(nodes, list) or not nodes or not isinstance(windows, list) or not windows:
             raise RuntimeError(f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:empty_hierarchy req_id={req_id}")
+        with self._state_lock:
+            self._hierarchy_capture_sequence += 1
+            capture_sequence = self._hierarchy_capture_sequence
+        capture_id = f"{req_id}:{capture_sequence}:{uuid.uuid4()}"
+        payload = attach_hierarchy_identity_metadata(
+            payload,
+            capture_id=capture_id,
+            capture_sequence=capture_sequence,
+        )
+        identity_metadata = payload["identityMetadata"]
         self.last_hierarchy_metadata = {
             "schemaVersion": payload.get("schemaVersion"),
             "source": payload.get("source"),
@@ -1301,6 +1313,11 @@ class A11yAdbClient:
             "windowCount": len(windows),
             "nodeCount": payload.get("nodeCount"),
             "reqId": req_id,
+            "identitySchemaName": identity_metadata["schema_name"],
+            "identitySchemaVersion": identity_metadata["schema_version"],
+            "snapshotId": identity_metadata["snapshot"]["snapshot_id"],
+            "captureSequence": capture_sequence,
+            "snapshotFingerprint": identity_metadata["snapshot_fingerprint"]["value"],
         }
         return payload
 

@@ -146,6 +146,31 @@ object A11yNavigator {
             put("reqId", reqId)
             put("success", true)
             put("schemaVersion", "service-hierarchy-v1")
+            put("nodeMetadataSchemaName", "talkback.helper.read_only_node_metadata")
+            put("nodeMetadataSchemaVersion", "1.0")
+            put("nodeMetadataCapabilities", JSONObject().apply {
+                put("source_node_id", Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                put("resource_id", true)
+                put("class_name", true)
+                put("text", true)
+                put("content_description", true)
+                put("bounds", true)
+                put("clickable", true)
+                put("focusable", true)
+                put("enabled", true)
+                put("selected", true)
+                put("accessibility_focused", true)
+                put("input_focused", true)
+                put("scrollable", true)
+                put("visible_to_user", true)
+                put("actions", true)
+                put("window_id", true)
+                put("package", true)
+                put("semantic_role", false)
+                put("production_qualified_focus_identity", false)
+                put("activity", false)
+                put("platform_generation_id", false)
+            })
             put("source", "accessibility_service_windows")
             put("windowCoverage", if (serviceWindows.isNotEmpty()) "all_service_visible_windows" else "active_root_fallback")
             put("nodeCount", totalNodes[0])
@@ -167,6 +192,11 @@ object A11yNavigator {
             throw IllegalStateException("SERIALIZATION_LIMIT_EXCEEDED:nodes>$HIERARCHY_SNAPSHOT_MAX_NODES")
         }
         val bounds = Rect().also(node::getBoundsInScreen)
+        val uniqueId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            runCatching { node.uniqueId }.getOrNull()
+        } else {
+            null
+        }
         val children = JSONArray()
         for (index in 0 until node.childCount) {
             val child = SmartNextPerf.getChild(node, index, "A11yNavigator.hierarchyNodeToJson")
@@ -179,12 +209,17 @@ object A11yNavigator {
             put("viewIdResourceName", node.viewIdResourceName ?: JSONObject.NULL)
             put("className", node.className?.toString() ?: JSONObject.NULL)
             put("packageName", node.packageName?.toString() ?: JSONObject.NULL)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                put("sourceNodeId", uniqueId ?: JSONObject.NULL)
+            }
+            put("windowId", node.windowId)
             put("boundsInScreen", rectToJson(bounds))
             put("clickable", node.isClickable)
             put("effectiveClickable", node.isClickable)
             put("enabled", node.isEnabled)
             put("focusable", node.isFocusable)
             put("focused", node.isFocused)
+            put("inputFocused", node.isFocused)
             put("accessibilityFocused", node.isAccessibilityFocused)
             put("selected", node.isSelected)
             put("scrollable", node.isScrollable)
@@ -193,8 +228,40 @@ object A11yNavigator {
             put("checked", node.isChecked)
             put("visibleToUser", node.isVisibleToUser)
             put("isVisibleToUser", node.isVisibleToUser)
+            put("actions", JSONArray().apply {
+                node.actionList.forEach { action ->
+                    put(JSONObject().apply {
+                        put("id", action.id)
+                        put("name", hierarchyActionName(action.id))
+                        put("label", action.label?.toString() ?: JSONObject.NULL)
+                    })
+                }
+            })
             put("children", children)
         }
+    }
+
+    private fun hierarchyActionName(id: Int): String = when (id) {
+        AccessibilityNodeInfo.AccessibilityAction.ACTION_FOCUS.id -> "ACTION_FOCUS"
+        AccessibilityNodeInfo.AccessibilityAction.ACTION_CLEAR_FOCUS.id -> "ACTION_CLEAR_FOCUS"
+        AccessibilityNodeInfo.AccessibilityAction.ACTION_CLICK.id -> "ACTION_CLICK"
+        AccessibilityNodeInfo.AccessibilityAction.ACTION_LONG_CLICK.id -> "ACTION_LONG_CLICK"
+        AccessibilityNodeInfo.AccessibilityAction.ACTION_ACCESSIBILITY_FOCUS.id -> "ACTION_ACCESSIBILITY_FOCUS"
+        AccessibilityNodeInfo.AccessibilityAction.ACTION_CLEAR_ACCESSIBILITY_FOCUS.id -> "ACTION_CLEAR_ACCESSIBILITY_FOCUS"
+        AccessibilityNodeInfo.AccessibilityAction.ACTION_NEXT_AT_MOVEMENT_GRANULARITY.id -> "ACTION_NEXT_AT_MOVEMENT_GRANULARITY"
+        AccessibilityNodeInfo.AccessibilityAction.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY.id -> "ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY"
+        AccessibilityNodeInfo.AccessibilityAction.ACTION_NEXT_HTML_ELEMENT.id -> "ACTION_NEXT_HTML_ELEMENT"
+        AccessibilityNodeInfo.AccessibilityAction.ACTION_PREVIOUS_HTML_ELEMENT.id -> "ACTION_PREVIOUS_HTML_ELEMENT"
+        AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_FORWARD.id -> "ACTION_SCROLL_FORWARD"
+        AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_BACKWARD.id -> "ACTION_SCROLL_BACKWARD"
+        AccessibilityNodeInfo.AccessibilityAction.ACTION_COPY.id -> "ACTION_COPY"
+        AccessibilityNodeInfo.AccessibilityAction.ACTION_PASTE.id -> "ACTION_PASTE"
+        AccessibilityNodeInfo.AccessibilityAction.ACTION_CUT.id -> "ACTION_CUT"
+        AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_SELECTION.id -> "ACTION_SET_SELECTION"
+        AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_TEXT.id -> "ACTION_SET_TEXT"
+        16908344 -> "ACTION_SCROLL_UP"
+        16908346 -> "ACTION_SCROLL_DOWN"
+        else -> "ACTION_$id"
     }
 
     private fun rectToJson(rect: Rect): JSONObject = JSONObject().apply {

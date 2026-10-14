@@ -175,8 +175,12 @@ def test_service_hierarchy_single_line_result_is_request_correlated(monkeypatch)
 
     result = client.dump_hierarchy(wait_seconds=0.1)
 
-    assert result == payload
+    assert result["reqId"] == payload["reqId"]
+    assert result["nodes"] == payload["nodes"]
+    assert result["identityMetadata"]["schema_name"] == "talkback.read_only_hierarchy_identity"
+    assert result["identityMetadata"]["snapshot"]["request_id"]["value"] == "hierarchy-re"
     assert client.last_hierarchy_metadata["reqId"] == "hierarchy-re"
+    assert client.last_hierarchy_metadata["snapshotId"] == result["identityMetadata"]["snapshot"]["snapshot_id"]
 
 
 def test_service_hierarchy_chunked_result_reassembles(monkeypatch):
@@ -195,6 +199,36 @@ def test_service_hierarchy_chunked_result_reassembles(monkeypatch):
 
     assert result["reqId"] == "hierarchy-re"
     assert result["nodes"][0]["text"] == "가" * 1800
+    assert result["identityMetadata"]["snapshot"]["capture_sequence"]["value"] == 1
+
+
+def test_two_hierarchy_acquisitions_have_distinct_capture_ids_with_same_timestamp(monkeypatch):
+    root = {"text": "Home", "children": []}
+    payload = {
+        "reqId": "hierarchy-re",
+        "success": True,
+        "schemaVersion": "service-hierarchy-v1",
+        "nodes": [root],
+        "windows": [{"root": root, "order": 0, "id": 1, "active": True, "focused": True}],
+        "nodeCount": 1,
+    }
+    logs = "\n".join([
+        f"I/A11Y_HELPER: DUMP_HIERARCHY_RESULT {json.dumps(payload)}",
+        "I/A11Y_HELPER: DUMP_HIERARCHY_END hierarchy-re",
+    ])
+    client = _prepare_hierarchy_client(monkeypatch, logs)
+    monkeypatch.setattr(
+        "talkback_lib.hierarchy_identity.datetime",
+        type("FixedDateTime", (), {"now": staticmethod(lambda *_args, **_kwargs: __import__("datetime").datetime(2026, 10, 15, tzinfo=__import__("datetime").timezone.utc))}),
+    )
+
+    first = client.dump_hierarchy(wait_seconds=0.1)["identityMetadata"]["snapshot"]
+    second = client.dump_hierarchy(wait_seconds=0.1)["identityMetadata"]["snapshot"]
+
+    assert first["captured_at"]["value"] == second["captured_at"]["value"]
+    assert first["capture_id"] != second["capture_id"]
+    assert first["capture_sequence"]["value"] == 1
+    assert second["capture_sequence"]["value"] == 2
 
 
 def test_service_hierarchy_rejects_a_result_for_another_request(monkeypatch):
