@@ -73,16 +73,29 @@ internal object ExactNodeResolver {
         put("failure_code", failureCode)
     }
 
-    private fun validate(request: JSONObject, hardStopActive: Boolean, helperServiceInstanceId: String?): String? {
+    /** Stateless continuity check; action replay protection belongs to the durable action store. */
+    internal fun resolveForAction(requestJson:String,hierarchy:JSONObject,connectionEpoch:String):JSONObject {
+        if(hasDuplicateJsonKey(requestJson))return failureAck(null,"REQUEST_INVALID",0)
+        return try {
+            val request=JSONObject(requestJson)
+            val error=validateOnly(request,false,connectionEpoch)
+            if(error!=null)failureAck(request,error,0) else resolveValidated(request,hierarchy)
+        } catch(error:Exception) { failureAck(null,"REQUEST_INVALID",0) }
+    }
+
+    internal fun validateOnly(request: JSONObject, hardStopActive: Boolean, helperServiceInstanceId: String?): String? =
+        validate(request, hardStopActive, helperServiceInstanceId, claim = false)
+
+    private fun validate(request: JSONObject, hardStopActive: Boolean, helperServiceInstanceId: String?, claim: Boolean = true): String? {
         if (!hasExactly(request, requiredRequestFields, requestFields)) return "REQUEST_INVALID"
         if (request.optString("protocol_version") != PROTOCOL_VERSION) return "PROTOCOL_VERSION_UNSUPPORTED"
         if (request.optString("command") != COMMAND || request.optString("action_type") != ACTION_TYPE) return "ACTION_EXECUTION_DISABLED"
         if (hardStopActive || request.opt("hard_stop_active") != false) return "HARD_STOP_ACTIVE"
         for (key in listOf("request_id", "transaction_id", "permit_id", "request_nonce", "expected_package",
                 "authorized_snapshot_id", "reacquire_snapshot_id", "helper_service_instance_id", "host_session_id", "stop_epoch")) {
-            if (!validId(request.optString(key))) return "REQUEST_INVALID"
+            if (request.opt(key) !is String || !validId(request.optString(key))) return "REQUEST_INVALID"
         }
-        if (!validId(request.optString("source_request_id"))) return "REQUEST_INVALID"
+        if (request.opt("source_request_id") !is String || !validId(request.optString("source_request_id"))) return "REQUEST_INVALID"
         if (helperServiceInstanceId != null && request.optString("helper_service_instance_id") != helperServiceInstanceId) {
             return "HELPER_SERVICE_INSTANCE_MISMATCH"
         }
@@ -94,13 +107,14 @@ internal object ExactNodeResolver {
         val ownershipFields = setOf("run_id", "scenario_id", "scenario_transaction_id", "step_action_id", "parent_action_id")
         if (!hasExactly(ownership, ownershipFields, ownershipFields)) return "REQUEST_INVALID"
         for (key in listOf("run_id", "scenario_id", "scenario_transaction_id", "step_action_id")) {
-            if (!validId(ownership.optString(key))) return "REQUEST_INVALID"
+            if (ownership.opt(key) !is String || !validId(ownership.optString(key))) return "REQUEST_INVALID"
         }
         val parentAction = ownership.opt("parent_action_id")
         if (parentAction !== JSONObject.NULL && !validId(parentAction as? String ?: return "REQUEST_INVALID")) return "REQUEST_INVALID"
 
         val target = request.optJSONObject("target_identity") ?: return "METADATA_INCOMPLETE"
         if (!hasExactly(target, targetFields, targetFields)) return "METADATA_INCOMPLETE"
+        for(field in listOf("resource_id","class_name","node_local_id","package","snapshot_id"))if(target.opt(field) !is String)return "METADATA_INCOMPLETE"
         if (request.optString("target_identity_schema") != "talkback.exact-node-descriptor.v1") return "REQUEST_INVALID"
         if (target.optString("package") != request.optString("expected_package")) return "PACKAGE_MISMATCH"
         if (!sameJsonValue(target.opt("window_id"), expectedWindow.opt("id"))) return "WINDOW_MISMATCH"
@@ -152,6 +166,7 @@ internal object ExactNodeResolver {
         val calculated = requestDigest(request)
         if (digest != calculated) return "REQUEST_INVALID"
 
+        if (!claim) return null // Action channel has a separate durable claim; never executes here.
         val requestId = request.optString("request_id")
         val nonce = request.optString("request_nonce")
         val permitId = request.optString("permit_id")
@@ -360,6 +375,7 @@ internal object ExactNodeResolver {
         val target = request?.optJSONObject("target_identity")
         return JSONObject()
             .put("protocol_version", PROTOCOL_VERSION)
+            .put("ack_schema_version", "1.1")
             .put("request_id", request?.optString("request_id").orEmpty().ifBlank { "unavailable" })
             .put("transaction_id", request?.optString("transaction_id").orEmpty().ifBlank { "unavailable" })
             .put("permit_id", request?.optString("permit_id").orEmpty().ifBlank { "unavailable" })
@@ -444,7 +460,7 @@ internal object ExactNodeResolver {
     private fun isNonnegativeInteger(value: Any?): Boolean = value is Number &&
         value.toDouble().isFinite() && value.toDouble() >= 0.0 && value.toDouble() % 1.0 == 0.0
 
-    private fun hasDuplicateJsonKey(json: String): Boolean = runCatching {
+    internal fun hasDuplicateJsonKey(json: String): Boolean = runCatching {
         JsonReader(StringReader(json)).use { reader ->
             reader.isLenient = false
             fun skipValue(): Boolean = when (reader.peek()) {
@@ -482,16 +498,7 @@ internal object ExactNodeResolver {
 
     private fun sameJsonValue(left: Any?, right: Any?): Boolean = canonical(left) == canonical(right)
 
-    private fun canonical(value: Any?): String = when (value) {
-        null, JSONObject.NULL -> "null"
-        is JSONObject -> value.keys().asSequence().toList().sorted().joinToString(prefix = "{", postfix = "}") { key ->
-            JSONObject.quote(key) + ":" + canonical(value.opt(key))
-        }
-        is JSONArray -> (0 until value.length()).joinToString(prefix = "[", postfix = "]") { canonical(value.opt(it)) }
-        is String -> JSONObject.quote(value)
-        is Number, is Boolean -> value.toString()
-        else -> JSONObject.quote(value.toString())
-    }
+    private fun canonical(value: Any?): String = ExactProtocolJson.canonical(value)
 
     private fun requestDigest(request: JSONObject): String {
         val copy = JSONObject()

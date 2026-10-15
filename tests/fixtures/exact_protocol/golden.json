@@ -1,0 +1,2158 @@
+{
+  "schema": "exact-canonical.v1",
+  "cases": [
+    {
+      "name": "minimal-valid",
+      "request": {
+        "protocol_version": "talkback.exact-navigation.v1",
+        "command": "RESOLVE_EXACT_NODE",
+        "request_id": "golden:0",
+        "transaction_id": "tx:0",
+        "permit_id": "permit:0",
+        "request_nonce": "nonce:0",
+        "ownership": {
+          "run_id": "run:golden",
+          "scenario_id": "synthetic",
+          "scenario_transaction_id": "scenario:1",
+          "step_action_id": "step:0",
+          "parent_action_id": null
+        },
+        "action_type": "EXACT_READ_ONLY_NAVIGATION",
+        "expected_package": "com.example.smartthings",
+        "expected_window": {
+          "id": 7,
+          "type": 1
+        },
+        "authorized_snapshot_id": "A",
+        "reacquire_snapshot_id": "B",
+        "target_identity_schema": "talkback.exact-node-descriptor.v1",
+        "target_identity": {
+          "package": "com.example.smartthings",
+          "window_id": 7,
+          "resource_id": "com.example.smartthings:id/navigation",
+          "class_name": "android.widget.Button",
+          "text": "Open",
+          "content_description": null,
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 100,
+            "bottom": 100
+          },
+          "source_node_id": null,
+          "source_node_id_provenance": "ABSENT_IN_SOURCE",
+          "node_local_id": "B:0:0",
+          "hierarchy_path": {
+            "window_order": 0,
+            "child_indices": [
+              0
+            ]
+          },
+          "parent_identity": {
+            "resource_id": "com.example.smartthings:id/root",
+            "class_name": "android.widget.Button",
+            "package": "com.example.smartthings",
+            "text": null,
+            "content_description": null,
+            "clickable": false,
+            "focusable": true,
+            "enabled": true,
+            "visible": true,
+            "child_index": 0,
+            "actions": []
+          },
+          "lineage_signature": [
+            {
+              "resource_id": "com.example.smartthings:id/root",
+              "class_name": "android.widget.Button",
+              "package": "com.example.smartthings",
+              "text": null,
+              "content_description": null,
+              "clickable": false,
+              "focusable": true,
+              "enabled": true,
+              "visible": true,
+              "child_index": 0,
+              "actions": []
+            }
+          ],
+          "child_structure_signature": [],
+          "actions": [
+            {
+              "id": 16,
+              "name": "ACTION_CLICK",
+              "label": null
+            }
+          ],
+          "semantic_role": null,
+          "snapshot_id": "B",
+          "field_provenance": {
+            "package": {
+              "status": "PRESENT",
+              "source_field": "packageName",
+              "derivation": "source_value"
+            },
+            "resource_id": {
+              "status": "PRESENT",
+              "source_field": "viewIdResourceName",
+              "derivation": "source_value"
+            },
+            "class_name": {
+              "status": "PRESENT",
+              "source_field": "className",
+              "derivation": "source_value"
+            },
+            "text": {
+              "status": "PRESENT",
+              "source_field": "text",
+              "derivation": "source_value"
+            },
+            "content_description": {
+              "status": "ABSENT_IN_SOURCE",
+              "source_field": "contentDescription",
+              "derivation": "source_value"
+            },
+            "bounds": {
+              "status": "PRESENT",
+              "source_field": "boundsInScreen",
+              "derivation": "source_value"
+            },
+            "actions": {
+              "status": "PRESENT",
+              "source_field": "actions",
+              "derivation": "source_value"
+            },
+            "source_node_id": {
+              "status": "ABSENT_IN_SOURCE",
+              "source_field": "sourceNodeId",
+              "derivation": "source_value"
+            },
+            "semantic_role": {
+              "status": "NOT_SUPPORTED_BY_SOURCE",
+              "source_field": null,
+              "derivation": "source_value"
+            }
+          }
+        },
+        "target_action_set": [
+          {
+            "id": 16,
+            "name": "ACTION_CLICK",
+            "label": null
+          }
+        ],
+        "target_lineage_signature": [
+          {
+            "resource_id": "com.example.smartthings:id/root",
+            "class_name": "android.widget.Button",
+            "package": "com.example.smartthings",
+            "text": null,
+            "content_description": null,
+            "clickable": false,
+            "focusable": true,
+            "enabled": true,
+            "visible": true,
+            "child_index": 0,
+            "actions": []
+          }
+        ],
+        "target_child_structure_signature": [],
+        "created_at": "2026-01-01T00:00:00Z",
+        "expires_at": "2035-01-01T00:00:00Z",
+        "permit_created_at": "2026-01-01T00:00:00Z",
+        "permit_expires_at": "2035-01-01T00:00:00Z",
+        "hard_stop_active": false,
+        "source_request_id": "capture:B",
+        "helper_service_instance_id": "helper:golden",
+        "host_session_id": "host:golden",
+        "stop_epoch": "stop:0",
+        "evidence_refs": [],
+        "request_digest": "167222141ee97ee7f48793b9af359ce98ffc2ddb20def8cae2bbf112767b71de"
+      },
+      "wire": "{\"action_type\":\"EXACT_READ_ONLY_NAVIGATION\",\"authorized_snapshot_id\":\"A\",\"command\":\"RESOLVE_EXACT_NODE\",\"created_at\":\"2026-01-01T00:00:00Z\",\"evidence_refs\":[],\"expected_package\":\"com.example.smartthings\",\"expected_window\":{\"id\":7,\"type\":1},\"expires_at\":\"2035-01-01T00:00:00Z\",\"hard_stop_active\":false,\"helper_service_instance_id\":\"helper:golden\",\"host_session_id\":\"host:golden\",\"ownership\":{\"parent_action_id\":null,\"run_id\":\"run:golden\",\"scenario_id\":\"synthetic\",\"scenario_transaction_id\":\"scenario:1\",\"step_action_id\":\"step:0\"},\"permit_created_at\":\"2026-01-01T00:00:00Z\",\"permit_expires_at\":\"2035-01-01T00:00:00Z\",\"permit_id\":\"permit:0\",\"protocol_version\":\"talkback.exact-navigation.v1\",\"reacquire_snapshot_id\":\"B\",\"request_digest\":\"167222141ee97ee7f48793b9af359ce98ffc2ddb20def8cae2bbf112767b71de\",\"request_id\":\"golden:0\",\"request_nonce\":\"nonce:0\",\"source_request_id\":\"capture:B\",\"stop_epoch\":\"stop:0\",\"target_action_set\":[{\"id\":16,\"label\":null,\"name\":\"ACTION_CLICK\"}],\"target_child_structure_signature\":[],\"target_identity\":{\"actions\":[{\"id\":16,\"label\":null,\"name\":\"ACTION_CLICK\"}],\"bounds\":{\"bottom\":100,\"left\":0,\"right\":100,\"top\":0},\"child_structure_signature\":[],\"class_name\":\"android.widget.Button\",\"content_description\":null,\"field_provenance\":{\"actions\":{\"derivation\":\"source_value\",\"source_field\":\"actions\",\"status\":\"PRESENT\"},\"bounds\":{\"derivation\":\"source_value\",\"source_field\":\"boundsInScreen\",\"status\":\"PRESENT\"},\"class_name\":{\"derivation\":\"source_value\",\"source_field\":\"className\",\"status\":\"PRESENT\"},\"content_description\":{\"derivation\":\"source_value\",\"source_field\":\"contentDescription\",\"status\":\"ABSENT_IN_SOURCE\"},\"package\":{\"derivation\":\"source_value\",\"source_field\":\"packageName\",\"status\":\"PRESENT\"},\"resource_id\":{\"derivation\":\"source_value\",\"source_field\":\"viewIdResourceName\",\"status\":\"PRESENT\"},\"semantic_role\":{\"derivation\":\"source_value\",\"source_field\":null,\"status\":\"NOT_SUPPORTED_BY_SOURCE\"},\"source_node_id\":{\"derivation\":\"source_value\",\"source_field\":\"sourceNodeId\",\"status\":\"ABSENT_IN_SOURCE\"},\"text\":{\"derivation\":\"source_value\",\"source_field\":\"text\",\"status\":\"PRESENT\"}},\"hierarchy_path\":{\"child_indices\":[0],\"window_order\":0},\"lineage_signature\":[{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true}],\"node_local_id\":\"B:0:0\",\"package\":\"com.example.smartthings\",\"parent_identity\":{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true},\"resource_id\":\"com.example.smartthings:id/navigation\",\"semantic_role\":null,\"snapshot_id\":\"B\",\"source_node_id\":null,\"source_node_id_provenance\":\"ABSENT_IN_SOURCE\",\"text\":\"Open\",\"window_id\":7},\"target_identity_schema\":\"talkback.exact-node-descriptor.v1\",\"target_lineage_signature\":[{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true}],\"transaction_id\":\"tx:0\"}",
+      "digest": "167222141ee97ee7f48793b9af359ce98ffc2ddb20def8cae2bbf112767b71de",
+      "hierarchy": {
+        "snapshotId": "helper-C",
+        "success": true,
+        "windows": [
+          {
+            "id": 7,
+            "type": 1,
+            "root": {
+              "packageName": "com.example.smartthings",
+              "viewIdResourceName": "com.example.smartthings:id/root",
+              "className": "android.widget.Button",
+              "text": null,
+              "contentDescription": null,
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "left": 0,
+                "top": 0,
+                "right": 100,
+                "bottom": 100
+              },
+              "clickable": false,
+              "focusable": true,
+              "enabled": true,
+              "visibleToUser": true,
+              "actions": [],
+              "children": [
+                {
+                  "packageName": "com.example.smartthings",
+                  "viewIdResourceName": "com.example.smartthings:id/navigation",
+                  "className": "android.widget.Button",
+                  "text": "Open",
+                  "contentDescription": null,
+                  "sourceNodeId": null,
+                  "boundsInScreen": {
+                    "left": 0,
+                    "top": 0,
+                    "right": 100,
+                    "bottom": 100
+                  },
+                  "clickable": true,
+                  "focusable": true,
+                  "enabled": true,
+                  "visibleToUser": true,
+                  "actions": [
+                    {
+                      "id": 16,
+                      "name": "ACTION_CLICK",
+                      "label": null
+                    }
+                  ],
+                  "children": []
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "expected_resolved": true
+    },
+    {
+      "name": "maximal-valid",
+      "request": {
+        "protocol_version": "talkback.exact-navigation.v1",
+        "command": "RESOLVE_EXACT_NODE",
+        "request_id": "golden:1",
+        "transaction_id": "tx:1",
+        "permit_id": "permit:1",
+        "request_nonce": "nonce:1",
+        "ownership": {
+          "run_id": "run:golden",
+          "scenario_id": "synthetic",
+          "scenario_transaction_id": "scenario:1",
+          "step_action_id": "step:1",
+          "parent_action_id": "parent:golden"
+        },
+        "action_type": "EXACT_READ_ONLY_NAVIGATION",
+        "expected_package": "com.example.smartthings",
+        "expected_window": {
+          "id": 7,
+          "type": 1,
+          "context_epoch": "context:golden"
+        },
+        "authorized_snapshot_id": "A",
+        "reacquire_snapshot_id": "B",
+        "target_identity_schema": "talkback.exact-node-descriptor.v1",
+        "target_identity": {
+          "package": "com.example.smartthings",
+          "window_id": 7,
+          "resource_id": "com.example.smartthings:id/navigation",
+          "class_name": "android.widget.Button",
+          "text": "\ud55c\uae00 English \ud83d\ude00",
+          "content_description": "\ud0d0\uc0c9 \"Navigation\" / \uacbd\ub85c",
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 100,
+            "bottom": 100
+          },
+          "source_node_id": "synthetic:public-unique-id",
+          "source_node_id_provenance": "PRESENT",
+          "node_local_id": "B:0:0.0",
+          "hierarchy_path": {
+            "window_order": 0,
+            "child_indices": [
+              0,
+              0
+            ]
+          },
+          "parent_identity": {
+            "resource_id": "com.example.smartthings:id/wrapper",
+            "class_name": "android.widget.Button",
+            "package": "com.example.smartthings",
+            "text": null,
+            "content_description": null,
+            "clickable": false,
+            "focusable": true,
+            "enabled": true,
+            "visible": true,
+            "child_index": 0,
+            "actions": []
+          },
+          "lineage_signature": [
+            {
+              "resource_id": "com.example.smartthings:id/root",
+              "class_name": "android.widget.Button",
+              "package": "com.example.smartthings",
+              "text": null,
+              "content_description": null,
+              "clickable": false,
+              "focusable": true,
+              "enabled": true,
+              "visible": true,
+              "child_index": 0,
+              "actions": []
+            },
+            {
+              "resource_id": "com.example.smartthings:id/wrapper",
+              "class_name": "android.widget.Button",
+              "package": "com.example.smartthings",
+              "text": null,
+              "content_description": null,
+              "clickable": false,
+              "focusable": true,
+              "enabled": true,
+              "visible": true,
+              "child_index": 0,
+              "actions": []
+            }
+          ],
+          "child_structure_signature": [],
+          "actions": [
+            {
+              "id": 16,
+              "name": "ACTION_CLICK",
+              "label": null
+            },
+            {
+              "id": 64,
+              "name": "ACTION_ACCESSIBILITY_FOCUS",
+              "label": "\ud3ec\ucee4\uc2a4"
+            }
+          ],
+          "semantic_role": null,
+          "snapshot_id": "B",
+          "field_provenance": {
+            "package": {
+              "status": "PRESENT",
+              "source_field": "packageName",
+              "derivation": "source_value"
+            },
+            "resource_id": {
+              "status": "PRESENT",
+              "source_field": "viewIdResourceName",
+              "derivation": "source_value"
+            },
+            "class_name": {
+              "status": "PRESENT",
+              "source_field": "className",
+              "derivation": "source_value"
+            },
+            "text": {
+              "status": "PRESENT",
+              "source_field": "text",
+              "derivation": "source_value"
+            },
+            "content_description": {
+              "status": "PRESENT",
+              "source_field": "contentDescription",
+              "derivation": "source_value"
+            },
+            "bounds": {
+              "status": "PRESENT",
+              "source_field": "boundsInScreen",
+              "derivation": "source_value"
+            },
+            "actions": {
+              "status": "PRESENT",
+              "source_field": "actions",
+              "derivation": "source_value"
+            },
+            "source_node_id": {
+              "status": "PRESENT",
+              "source_field": "sourceNodeId",
+              "derivation": "source_value"
+            },
+            "semantic_role": {
+              "status": "NOT_SUPPORTED_BY_SOURCE",
+              "source_field": null,
+              "derivation": "source_value"
+            }
+          }
+        },
+        "target_action_set": [
+          {
+            "id": 16,
+            "name": "ACTION_CLICK",
+            "label": null
+          },
+          {
+            "id": 64,
+            "name": "ACTION_ACCESSIBILITY_FOCUS",
+            "label": "\ud3ec\ucee4\uc2a4"
+          }
+        ],
+        "target_lineage_signature": [
+          {
+            "resource_id": "com.example.smartthings:id/root",
+            "class_name": "android.widget.Button",
+            "package": "com.example.smartthings",
+            "text": null,
+            "content_description": null,
+            "clickable": false,
+            "focusable": true,
+            "enabled": true,
+            "visible": true,
+            "child_index": 0,
+            "actions": []
+          },
+          {
+            "resource_id": "com.example.smartthings:id/wrapper",
+            "class_name": "android.widget.Button",
+            "package": "com.example.smartthings",
+            "text": null,
+            "content_description": null,
+            "clickable": false,
+            "focusable": true,
+            "enabled": true,
+            "visible": true,
+            "child_index": 0,
+            "actions": []
+          }
+        ],
+        "target_child_structure_signature": [],
+        "created_at": "2026-01-01T00:00:00Z",
+        "expires_at": "2035-01-01T00:00:00Z",
+        "permit_created_at": "2026-01-01T00:00:00Z",
+        "permit_expires_at": "2035-01-01T00:00:00Z",
+        "hard_stop_active": false,
+        "source_request_id": "capture:B",
+        "helper_service_instance_id": "helper:golden",
+        "host_session_id": "host:golden",
+        "stop_epoch": "stop:0",
+        "evidence_refs": [
+          "fixture:maximal",
+          "fixture:independent-lineage"
+        ],
+        "request_digest": "8bbdf87597370f8e63a8a3e21008d3c07af52a2cf9720d9e16e0e5b1c3b4bbfd"
+      },
+      "wire": "{\"action_type\":\"EXACT_READ_ONLY_NAVIGATION\",\"authorized_snapshot_id\":\"A\",\"command\":\"RESOLVE_EXACT_NODE\",\"created_at\":\"2026-01-01T00:00:00Z\",\"evidence_refs\":[\"fixture:maximal\",\"fixture:independent-lineage\"],\"expected_package\":\"com.example.smartthings\",\"expected_window\":{\"context_epoch\":\"context:golden\",\"id\":7,\"type\":1},\"expires_at\":\"2035-01-01T00:00:00Z\",\"hard_stop_active\":false,\"helper_service_instance_id\":\"helper:golden\",\"host_session_id\":\"host:golden\",\"ownership\":{\"parent_action_id\":\"parent:golden\",\"run_id\":\"run:golden\",\"scenario_id\":\"synthetic\",\"scenario_transaction_id\":\"scenario:1\",\"step_action_id\":\"step:1\"},\"permit_created_at\":\"2026-01-01T00:00:00Z\",\"permit_expires_at\":\"2035-01-01T00:00:00Z\",\"permit_id\":\"permit:1\",\"protocol_version\":\"talkback.exact-navigation.v1\",\"reacquire_snapshot_id\":\"B\",\"request_digest\":\"8bbdf87597370f8e63a8a3e21008d3c07af52a2cf9720d9e16e0e5b1c3b4bbfd\",\"request_id\":\"golden:1\",\"request_nonce\":\"nonce:1\",\"source_request_id\":\"capture:B\",\"stop_epoch\":\"stop:0\",\"target_action_set\":[{\"id\":16,\"label\":null,\"name\":\"ACTION_CLICK\"},{\"id\":64,\"label\":\"\\ud3ec\\ucee4\\uc2a4\",\"name\":\"ACTION_ACCESSIBILITY_FOCUS\"}],\"target_child_structure_signature\":[],\"target_identity\":{\"actions\":[{\"id\":16,\"label\":null,\"name\":\"ACTION_CLICK\"},{\"id\":64,\"label\":\"\\ud3ec\\ucee4\\uc2a4\",\"name\":\"ACTION_ACCESSIBILITY_FOCUS\"}],\"bounds\":{\"bottom\":100,\"left\":0,\"right\":100,\"top\":0},\"child_structure_signature\":[],\"class_name\":\"android.widget.Button\",\"content_description\":\"\\ud0d0\\uc0c9 \\\"Navigation\\\" / \\uacbd\\ub85c\",\"field_provenance\":{\"actions\":{\"derivation\":\"source_value\",\"source_field\":\"actions\",\"status\":\"PRESENT\"},\"bounds\":{\"derivation\":\"source_value\",\"source_field\":\"boundsInScreen\",\"status\":\"PRESENT\"},\"class_name\":{\"derivation\":\"source_value\",\"source_field\":\"className\",\"status\":\"PRESENT\"},\"content_description\":{\"derivation\":\"source_value\",\"source_field\":\"contentDescription\",\"status\":\"PRESENT\"},\"package\":{\"derivation\":\"source_value\",\"source_field\":\"packageName\",\"status\":\"PRESENT\"},\"resource_id\":{\"derivation\":\"source_value\",\"source_field\":\"viewIdResourceName\",\"status\":\"PRESENT\"},\"semantic_role\":{\"derivation\":\"source_value\",\"source_field\":null,\"status\":\"NOT_SUPPORTED_BY_SOURCE\"},\"source_node_id\":{\"derivation\":\"source_value\",\"source_field\":\"sourceNodeId\",\"status\":\"PRESENT\"},\"text\":{\"derivation\":\"source_value\",\"source_field\":\"text\",\"status\":\"PRESENT\"}},\"hierarchy_path\":{\"child_indices\":[0,0],\"window_order\":0},\"lineage_signature\":[{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true},{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/wrapper\",\"text\":null,\"visible\":true}],\"node_local_id\":\"B:0:0.0\",\"package\":\"com.example.smartthings\",\"parent_identity\":{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/wrapper\",\"text\":null,\"visible\":true},\"resource_id\":\"com.example.smartthings:id/navigation\",\"semantic_role\":null,\"snapshot_id\":\"B\",\"source_node_id\":\"synthetic:public-unique-id\",\"source_node_id_provenance\":\"PRESENT\",\"text\":\"\\ud55c\\uae00 English \\ud83d\\ude00\",\"window_id\":7},\"target_identity_schema\":\"talkback.exact-node-descriptor.v1\",\"target_lineage_signature\":[{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true},{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/wrapper\",\"text\":null,\"visible\":true}],\"transaction_id\":\"tx:1\"}",
+      "digest": "8bbdf87597370f8e63a8a3e21008d3c07af52a2cf9720d9e16e0e5b1c3b4bbfd",
+      "hierarchy": {
+        "snapshotId": "helper-C",
+        "success": true,
+        "windows": [
+          {
+            "id": 7,
+            "type": 1,
+            "root": {
+              "packageName": "com.example.smartthings",
+              "viewIdResourceName": "com.example.smartthings:id/root",
+              "className": "android.widget.Button",
+              "text": null,
+              "contentDescription": null,
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "left": 0,
+                "top": 0,
+                "right": 100,
+                "bottom": 100
+              },
+              "clickable": false,
+              "focusable": true,
+              "enabled": true,
+              "visibleToUser": true,
+              "actions": [],
+              "children": [
+                {
+                  "packageName": "com.example.smartthings",
+                  "viewIdResourceName": "com.example.smartthings:id/wrapper",
+                  "className": "android.widget.Button",
+                  "text": null,
+                  "contentDescription": null,
+                  "sourceNodeId": null,
+                  "boundsInScreen": {
+                    "left": 0,
+                    "top": 0,
+                    "right": 100,
+                    "bottom": 100
+                  },
+                  "clickable": false,
+                  "focusable": true,
+                  "enabled": true,
+                  "visibleToUser": true,
+                  "actions": [],
+                  "children": [
+                    {
+                      "packageName": "com.example.smartthings",
+                      "viewIdResourceName": "com.example.smartthings:id/navigation",
+                      "className": "android.widget.Button",
+                      "text": "\ud55c\uae00 English \ud83d\ude00",
+                      "contentDescription": "\ud0d0\uc0c9 \"Navigation\" / \uacbd\ub85c",
+                      "sourceNodeId": "synthetic:public-unique-id",
+                      "boundsInScreen": {
+                        "left": 0,
+                        "top": 0,
+                        "right": 100,
+                        "bottom": 100
+                      },
+                      "clickable": true,
+                      "focusable": true,
+                      "enabled": true,
+                      "visibleToUser": true,
+                      "actions": [
+                        {
+                          "id": 16,
+                          "name": "ACTION_CLICK",
+                          "label": null
+                        },
+                        {
+                          "id": 64,
+                          "name": "ACTION_ACCESSIBILITY_FOCUS",
+                          "label": "\ud3ec\ucee4\uc2a4"
+                        }
+                      ],
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "expected_resolved": true
+    },
+    {
+      "name": "request-2",
+      "request": {
+        "protocol_version": "talkback.exact-navigation.v1",
+        "command": "RESOLVE_EXACT_NODE",
+        "request_id": "golden:2",
+        "transaction_id": "tx:2",
+        "permit_id": "permit:2",
+        "request_nonce": "nonce:2",
+        "ownership": {
+          "run_id": "run:golden",
+          "scenario_id": "synthetic",
+          "scenario_transaction_id": "scenario:1",
+          "step_action_id": "step:2",
+          "parent_action_id": null
+        },
+        "action_type": "EXACT_READ_ONLY_NAVIGATION",
+        "expected_package": "com.example.smartthings",
+        "expected_window": {
+          "id": 7,
+          "type": 1
+        },
+        "authorized_snapshot_id": "A",
+        "reacquire_snapshot_id": "B",
+        "target_identity_schema": "talkback.exact-node-descriptor.v1",
+        "target_identity": {
+          "package": "com.example.smartthings",
+          "window_id": 7,
+          "resource_id": "com.example.smartthings:id/navigation",
+          "class_name": "android.widget.Button",
+          "text": "quote \" slash / backslash \\",
+          "content_description": null,
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 100,
+            "bottom": 100
+          },
+          "source_node_id": null,
+          "source_node_id_provenance": "ABSENT_IN_SOURCE",
+          "node_local_id": "B:0:0",
+          "hierarchy_path": {
+            "window_order": 0,
+            "child_indices": [
+              0
+            ]
+          },
+          "parent_identity": {
+            "resource_id": "com.example.smartthings:id/root",
+            "class_name": "android.widget.Button",
+            "package": "com.example.smartthings",
+            "text": null,
+            "content_description": null,
+            "clickable": false,
+            "focusable": true,
+            "enabled": true,
+            "visible": true,
+            "child_index": 0,
+            "actions": []
+          },
+          "lineage_signature": [
+            {
+              "resource_id": "com.example.smartthings:id/root",
+              "class_name": "android.widget.Button",
+              "package": "com.example.smartthings",
+              "text": null,
+              "content_description": null,
+              "clickable": false,
+              "focusable": true,
+              "enabled": true,
+              "visible": true,
+              "child_index": 0,
+              "actions": []
+            }
+          ],
+          "child_structure_signature": [],
+          "actions": [
+            {
+              "id": 16,
+              "name": "ACTION_CLICK",
+              "label": null
+            }
+          ],
+          "semantic_role": null,
+          "snapshot_id": "B",
+          "field_provenance": {
+            "package": {
+              "status": "PRESENT",
+              "source_field": "packageName",
+              "derivation": "source_value"
+            },
+            "resource_id": {
+              "status": "PRESENT",
+              "source_field": "viewIdResourceName",
+              "derivation": "source_value"
+            },
+            "class_name": {
+              "status": "PRESENT",
+              "source_field": "className",
+              "derivation": "source_value"
+            },
+            "text": {
+              "status": "PRESENT",
+              "source_field": "text",
+              "derivation": "source_value"
+            },
+            "content_description": {
+              "status": "ABSENT_IN_SOURCE",
+              "source_field": "contentDescription",
+              "derivation": "source_value"
+            },
+            "bounds": {
+              "status": "PRESENT",
+              "source_field": "boundsInScreen",
+              "derivation": "source_value"
+            },
+            "actions": {
+              "status": "PRESENT",
+              "source_field": "actions",
+              "derivation": "source_value"
+            },
+            "source_node_id": {
+              "status": "ABSENT_IN_SOURCE",
+              "source_field": "sourceNodeId",
+              "derivation": "source_value"
+            },
+            "semantic_role": {
+              "status": "NOT_SUPPORTED_BY_SOURCE",
+              "source_field": null,
+              "derivation": "source_value"
+            }
+          }
+        },
+        "target_action_set": [
+          {
+            "id": 16,
+            "name": "ACTION_CLICK",
+            "label": null
+          }
+        ],
+        "target_lineage_signature": [
+          {
+            "resource_id": "com.example.smartthings:id/root",
+            "class_name": "android.widget.Button",
+            "package": "com.example.smartthings",
+            "text": null,
+            "content_description": null,
+            "clickable": false,
+            "focusable": true,
+            "enabled": true,
+            "visible": true,
+            "child_index": 0,
+            "actions": []
+          }
+        ],
+        "target_child_structure_signature": [],
+        "created_at": "2026-01-01T00:00:00Z",
+        "expires_at": "2035-01-01T00:00:00Z",
+        "permit_created_at": "2026-01-01T00:00:00Z",
+        "permit_expires_at": "2035-01-01T00:00:00Z",
+        "hard_stop_active": false,
+        "source_request_id": "capture:B",
+        "helper_service_instance_id": "helper:golden",
+        "host_session_id": "host:golden",
+        "stop_epoch": "stop:0",
+        "evidence_refs": [],
+        "request_digest": "614c266588d453e3c880255a285478116fae100740b7140cae42f052924f496a"
+      },
+      "wire": "{\"action_type\":\"EXACT_READ_ONLY_NAVIGATION\",\"authorized_snapshot_id\":\"A\",\"command\":\"RESOLVE_EXACT_NODE\",\"created_at\":\"2026-01-01T00:00:00Z\",\"evidence_refs\":[],\"expected_package\":\"com.example.smartthings\",\"expected_window\":{\"id\":7,\"type\":1},\"expires_at\":\"2035-01-01T00:00:00Z\",\"hard_stop_active\":false,\"helper_service_instance_id\":\"helper:golden\",\"host_session_id\":\"host:golden\",\"ownership\":{\"parent_action_id\":null,\"run_id\":\"run:golden\",\"scenario_id\":\"synthetic\",\"scenario_transaction_id\":\"scenario:1\",\"step_action_id\":\"step:2\"},\"permit_created_at\":\"2026-01-01T00:00:00Z\",\"permit_expires_at\":\"2035-01-01T00:00:00Z\",\"permit_id\":\"permit:2\",\"protocol_version\":\"talkback.exact-navigation.v1\",\"reacquire_snapshot_id\":\"B\",\"request_digest\":\"614c266588d453e3c880255a285478116fae100740b7140cae42f052924f496a\",\"request_id\":\"golden:2\",\"request_nonce\":\"nonce:2\",\"source_request_id\":\"capture:B\",\"stop_epoch\":\"stop:0\",\"target_action_set\":[{\"id\":16,\"label\":null,\"name\":\"ACTION_CLICK\"}],\"target_child_structure_signature\":[],\"target_identity\":{\"actions\":[{\"id\":16,\"label\":null,\"name\":\"ACTION_CLICK\"}],\"bounds\":{\"bottom\":100,\"left\":0,\"right\":100,\"top\":0},\"child_structure_signature\":[],\"class_name\":\"android.widget.Button\",\"content_description\":null,\"field_provenance\":{\"actions\":{\"derivation\":\"source_value\",\"source_field\":\"actions\",\"status\":\"PRESENT\"},\"bounds\":{\"derivation\":\"source_value\",\"source_field\":\"boundsInScreen\",\"status\":\"PRESENT\"},\"class_name\":{\"derivation\":\"source_value\",\"source_field\":\"className\",\"status\":\"PRESENT\"},\"content_description\":{\"derivation\":\"source_value\",\"source_field\":\"contentDescription\",\"status\":\"ABSENT_IN_SOURCE\"},\"package\":{\"derivation\":\"source_value\",\"source_field\":\"packageName\",\"status\":\"PRESENT\"},\"resource_id\":{\"derivation\":\"source_value\",\"source_field\":\"viewIdResourceName\",\"status\":\"PRESENT\"},\"semantic_role\":{\"derivation\":\"source_value\",\"source_field\":null,\"status\":\"NOT_SUPPORTED_BY_SOURCE\"},\"source_node_id\":{\"derivation\":\"source_value\",\"source_field\":\"sourceNodeId\",\"status\":\"ABSENT_IN_SOURCE\"},\"text\":{\"derivation\":\"source_value\",\"source_field\":\"text\",\"status\":\"PRESENT\"}},\"hierarchy_path\":{\"child_indices\":[0],\"window_order\":0},\"lineage_signature\":[{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true}],\"node_local_id\":\"B:0:0\",\"package\":\"com.example.smartthings\",\"parent_identity\":{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true},\"resource_id\":\"com.example.smartthings:id/navigation\",\"semantic_role\":null,\"snapshot_id\":\"B\",\"source_node_id\":null,\"source_node_id_provenance\":\"ABSENT_IN_SOURCE\",\"text\":\"quote \\\" slash / backslash \\\\\",\"window_id\":7},\"target_identity_schema\":\"talkback.exact-node-descriptor.v1\",\"target_lineage_signature\":[{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true}],\"transaction_id\":\"tx:2\"}",
+      "digest": "614c266588d453e3c880255a285478116fae100740b7140cae42f052924f496a",
+      "hierarchy": {
+        "snapshotId": "helper-C",
+        "success": true,
+        "windows": [
+          {
+            "id": 7,
+            "type": 1,
+            "root": {
+              "packageName": "com.example.smartthings",
+              "viewIdResourceName": "com.example.smartthings:id/root",
+              "className": "android.widget.Button",
+              "text": null,
+              "contentDescription": null,
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "left": 0,
+                "top": 0,
+                "right": 100,
+                "bottom": 100
+              },
+              "clickable": false,
+              "focusable": true,
+              "enabled": true,
+              "visibleToUser": true,
+              "actions": [],
+              "children": [
+                {
+                  "packageName": "com.example.smartthings",
+                  "viewIdResourceName": "com.example.smartthings:id/navigation",
+                  "className": "android.widget.Button",
+                  "text": "quote \" slash / backslash \\",
+                  "contentDescription": null,
+                  "sourceNodeId": null,
+                  "boundsInScreen": {
+                    "left": 0,
+                    "top": 0,
+                    "right": 100,
+                    "bottom": 100
+                  },
+                  "clickable": true,
+                  "focusable": true,
+                  "enabled": true,
+                  "visibleToUser": true,
+                  "actions": [
+                    {
+                      "id": 16,
+                      "name": "ACTION_CLICK",
+                      "label": null
+                    }
+                  ],
+                  "children": []
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "expected_resolved": true
+    },
+    {
+      "name": "request-3",
+      "request": {
+        "protocol_version": "talkback.exact-navigation.v1",
+        "command": "RESOLVE_EXACT_NODE",
+        "request_id": "golden:3",
+        "transaction_id": "tx:3",
+        "permit_id": "permit:3",
+        "request_nonce": "nonce:3",
+        "ownership": {
+          "run_id": "run:golden",
+          "scenario_id": "synthetic",
+          "scenario_transaction_id": "scenario:1",
+          "step_action_id": "step:3",
+          "parent_action_id": null
+        },
+        "action_type": "EXACT_READ_ONLY_NAVIGATION",
+        "expected_package": "com.example.smartthings",
+        "expected_window": {
+          "id": 7,
+          "type": 1
+        },
+        "authorized_snapshot_id": "A",
+        "reacquire_snapshot_id": "B",
+        "target_identity_schema": "talkback.exact-node-descriptor.v1",
+        "target_identity": {
+          "package": "com.example.smartthings",
+          "window_id": 7,
+          "resource_id": "com.example.smartthings:id/navigation",
+          "class_name": "android.widget.Button",
+          "text": "line\nnext\ttab",
+          "content_description": null,
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 100,
+            "bottom": 100
+          },
+          "source_node_id": null,
+          "source_node_id_provenance": "ABSENT_IN_SOURCE",
+          "node_local_id": "B:0:0",
+          "hierarchy_path": {
+            "window_order": 0,
+            "child_indices": [
+              0
+            ]
+          },
+          "parent_identity": {
+            "resource_id": "com.example.smartthings:id/root",
+            "class_name": "android.widget.Button",
+            "package": "com.example.smartthings",
+            "text": null,
+            "content_description": null,
+            "clickable": false,
+            "focusable": true,
+            "enabled": true,
+            "visible": true,
+            "child_index": 0,
+            "actions": []
+          },
+          "lineage_signature": [
+            {
+              "resource_id": "com.example.smartthings:id/root",
+              "class_name": "android.widget.Button",
+              "package": "com.example.smartthings",
+              "text": null,
+              "content_description": null,
+              "clickable": false,
+              "focusable": true,
+              "enabled": true,
+              "visible": true,
+              "child_index": 0,
+              "actions": []
+            }
+          ],
+          "child_structure_signature": [],
+          "actions": [
+            {
+              "id": 16,
+              "name": "ACTION_CLICK",
+              "label": null
+            }
+          ],
+          "semantic_role": null,
+          "snapshot_id": "B",
+          "field_provenance": {
+            "package": {
+              "status": "PRESENT",
+              "source_field": "packageName",
+              "derivation": "source_value"
+            },
+            "resource_id": {
+              "status": "PRESENT",
+              "source_field": "viewIdResourceName",
+              "derivation": "source_value"
+            },
+            "class_name": {
+              "status": "PRESENT",
+              "source_field": "className",
+              "derivation": "source_value"
+            },
+            "text": {
+              "status": "PRESENT",
+              "source_field": "text",
+              "derivation": "source_value"
+            },
+            "content_description": {
+              "status": "ABSENT_IN_SOURCE",
+              "source_field": "contentDescription",
+              "derivation": "source_value"
+            },
+            "bounds": {
+              "status": "PRESENT",
+              "source_field": "boundsInScreen",
+              "derivation": "source_value"
+            },
+            "actions": {
+              "status": "PRESENT",
+              "source_field": "actions",
+              "derivation": "source_value"
+            },
+            "source_node_id": {
+              "status": "ABSENT_IN_SOURCE",
+              "source_field": "sourceNodeId",
+              "derivation": "source_value"
+            },
+            "semantic_role": {
+              "status": "NOT_SUPPORTED_BY_SOURCE",
+              "source_field": null,
+              "derivation": "source_value"
+            }
+          }
+        },
+        "target_action_set": [
+          {
+            "id": 16,
+            "name": "ACTION_CLICK",
+            "label": null
+          }
+        ],
+        "target_lineage_signature": [
+          {
+            "resource_id": "com.example.smartthings:id/root",
+            "class_name": "android.widget.Button",
+            "package": "com.example.smartthings",
+            "text": null,
+            "content_description": null,
+            "clickable": false,
+            "focusable": true,
+            "enabled": true,
+            "visible": true,
+            "child_index": 0,
+            "actions": []
+          }
+        ],
+        "target_child_structure_signature": [],
+        "created_at": "2026-01-01T00:00:00Z",
+        "expires_at": "2035-01-01T00:00:00Z",
+        "permit_created_at": "2026-01-01T00:00:00Z",
+        "permit_expires_at": "2035-01-01T00:00:00Z",
+        "hard_stop_active": false,
+        "source_request_id": "capture:B",
+        "helper_service_instance_id": "helper:golden",
+        "host_session_id": "host:golden",
+        "stop_epoch": "stop:0",
+        "evidence_refs": [],
+        "request_digest": "b0f773b76c6116ebd46177d9be722b4ca670913485464bdaad38992ac8cf617a"
+      },
+      "wire": "{\"action_type\":\"EXACT_READ_ONLY_NAVIGATION\",\"authorized_snapshot_id\":\"A\",\"command\":\"RESOLVE_EXACT_NODE\",\"created_at\":\"2026-01-01T00:00:00Z\",\"evidence_refs\":[],\"expected_package\":\"com.example.smartthings\",\"expected_window\":{\"id\":7,\"type\":1},\"expires_at\":\"2035-01-01T00:00:00Z\",\"hard_stop_active\":false,\"helper_service_instance_id\":\"helper:golden\",\"host_session_id\":\"host:golden\",\"ownership\":{\"parent_action_id\":null,\"run_id\":\"run:golden\",\"scenario_id\":\"synthetic\",\"scenario_transaction_id\":\"scenario:1\",\"step_action_id\":\"step:3\"},\"permit_created_at\":\"2026-01-01T00:00:00Z\",\"permit_expires_at\":\"2035-01-01T00:00:00Z\",\"permit_id\":\"permit:3\",\"protocol_version\":\"talkback.exact-navigation.v1\",\"reacquire_snapshot_id\":\"B\",\"request_digest\":\"b0f773b76c6116ebd46177d9be722b4ca670913485464bdaad38992ac8cf617a\",\"request_id\":\"golden:3\",\"request_nonce\":\"nonce:3\",\"source_request_id\":\"capture:B\",\"stop_epoch\":\"stop:0\",\"target_action_set\":[{\"id\":16,\"label\":null,\"name\":\"ACTION_CLICK\"}],\"target_child_structure_signature\":[],\"target_identity\":{\"actions\":[{\"id\":16,\"label\":null,\"name\":\"ACTION_CLICK\"}],\"bounds\":{\"bottom\":100,\"left\":0,\"right\":100,\"top\":0},\"child_structure_signature\":[],\"class_name\":\"android.widget.Button\",\"content_description\":null,\"field_provenance\":{\"actions\":{\"derivation\":\"source_value\",\"source_field\":\"actions\",\"status\":\"PRESENT\"},\"bounds\":{\"derivation\":\"source_value\",\"source_field\":\"boundsInScreen\",\"status\":\"PRESENT\"},\"class_name\":{\"derivation\":\"source_value\",\"source_field\":\"className\",\"status\":\"PRESENT\"},\"content_description\":{\"derivation\":\"source_value\",\"source_field\":\"contentDescription\",\"status\":\"ABSENT_IN_SOURCE\"},\"package\":{\"derivation\":\"source_value\",\"source_field\":\"packageName\",\"status\":\"PRESENT\"},\"resource_id\":{\"derivation\":\"source_value\",\"source_field\":\"viewIdResourceName\",\"status\":\"PRESENT\"},\"semantic_role\":{\"derivation\":\"source_value\",\"source_field\":null,\"status\":\"NOT_SUPPORTED_BY_SOURCE\"},\"source_node_id\":{\"derivation\":\"source_value\",\"source_field\":\"sourceNodeId\",\"status\":\"ABSENT_IN_SOURCE\"},\"text\":{\"derivation\":\"source_value\",\"source_field\":\"text\",\"status\":\"PRESENT\"}},\"hierarchy_path\":{\"child_indices\":[0],\"window_order\":0},\"lineage_signature\":[{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true}],\"node_local_id\":\"B:0:0\",\"package\":\"com.example.smartthings\",\"parent_identity\":{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true},\"resource_id\":\"com.example.smartthings:id/navigation\",\"semantic_role\":null,\"snapshot_id\":\"B\",\"source_node_id\":null,\"source_node_id_provenance\":\"ABSENT_IN_SOURCE\",\"text\":\"line\\nnext\\ttab\",\"window_id\":7},\"target_identity_schema\":\"talkback.exact-node-descriptor.v1\",\"target_lineage_signature\":[{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true}],\"transaction_id\":\"tx:3\"}",
+      "digest": "b0f773b76c6116ebd46177d9be722b4ca670913485464bdaad38992ac8cf617a",
+      "hierarchy": {
+        "snapshotId": "helper-C",
+        "success": true,
+        "windows": [
+          {
+            "id": 7,
+            "type": 1,
+            "root": {
+              "packageName": "com.example.smartthings",
+              "viewIdResourceName": "com.example.smartthings:id/root",
+              "className": "android.widget.Button",
+              "text": null,
+              "contentDescription": null,
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "left": 0,
+                "top": 0,
+                "right": 100,
+                "bottom": 100
+              },
+              "clickable": false,
+              "focusable": true,
+              "enabled": true,
+              "visibleToUser": true,
+              "actions": [],
+              "children": [
+                {
+                  "packageName": "com.example.smartthings",
+                  "viewIdResourceName": "com.example.smartthings:id/navigation",
+                  "className": "android.widget.Button",
+                  "text": "line\nnext\ttab",
+                  "contentDescription": null,
+                  "sourceNodeId": null,
+                  "boundsInScreen": {
+                    "left": 0,
+                    "top": 0,
+                    "right": 100,
+                    "bottom": 100
+                  },
+                  "clickable": true,
+                  "focusable": true,
+                  "enabled": true,
+                  "visibleToUser": true,
+                  "actions": [
+                    {
+                      "id": 16,
+                      "name": "ACTION_CLICK",
+                      "label": null
+                    }
+                  ],
+                  "children": []
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "expected_resolved": true
+    },
+    {
+      "name": "request-4",
+      "request": {
+        "protocol_version": "talkback.exact-navigation.v1",
+        "command": "RESOLVE_EXACT_NODE",
+        "request_id": "golden:4",
+        "transaction_id": "tx:4",
+        "permit_id": "permit:4",
+        "request_nonce": "nonce:4",
+        "ownership": {
+          "run_id": "run:golden",
+          "scenario_id": "synthetic",
+          "scenario_transaction_id": "scenario:1",
+          "step_action_id": "step:4",
+          "parent_action_id": null
+        },
+        "action_type": "EXACT_READ_ONLY_NAVIGATION",
+        "expected_package": "com.example.smartthings",
+        "expected_window": {
+          "id": 7,
+          "type": 1
+        },
+        "authorized_snapshot_id": "A",
+        "reacquire_snapshot_id": "B",
+        "target_identity_schema": "talkback.exact-node-descriptor.v1",
+        "target_identity": {
+          "package": "com.example.smartthings",
+          "window_id": 7,
+          "resource_id": "com.example.smartthings:id/navigation",
+          "class_name": "android.widget.Button",
+          "text": "",
+          "content_description": null,
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 100,
+            "bottom": 100
+          },
+          "source_node_id": null,
+          "source_node_id_provenance": "ABSENT_IN_SOURCE",
+          "node_local_id": "B:0:0",
+          "hierarchy_path": {
+            "window_order": 0,
+            "child_indices": [
+              0
+            ]
+          },
+          "parent_identity": {
+            "resource_id": "com.example.smartthings:id/root",
+            "class_name": "android.widget.Button",
+            "package": "com.example.smartthings",
+            "text": null,
+            "content_description": null,
+            "clickable": false,
+            "focusable": true,
+            "enabled": true,
+            "visible": true,
+            "child_index": 0,
+            "actions": []
+          },
+          "lineage_signature": [
+            {
+              "resource_id": "com.example.smartthings:id/root",
+              "class_name": "android.widget.Button",
+              "package": "com.example.smartthings",
+              "text": null,
+              "content_description": null,
+              "clickable": false,
+              "focusable": true,
+              "enabled": true,
+              "visible": true,
+              "child_index": 0,
+              "actions": []
+            }
+          ],
+          "child_structure_signature": [],
+          "actions": [
+            {
+              "id": 16,
+              "name": "ACTION_CLICK",
+              "label": null
+            }
+          ],
+          "semantic_role": null,
+          "snapshot_id": "B",
+          "field_provenance": {
+            "package": {
+              "status": "PRESENT",
+              "source_field": "packageName",
+              "derivation": "source_value"
+            },
+            "resource_id": {
+              "status": "PRESENT",
+              "source_field": "viewIdResourceName",
+              "derivation": "source_value"
+            },
+            "class_name": {
+              "status": "PRESENT",
+              "source_field": "className",
+              "derivation": "source_value"
+            },
+            "text": {
+              "status": "PRESENT",
+              "source_field": "text",
+              "derivation": "source_value"
+            },
+            "content_description": {
+              "status": "ABSENT_IN_SOURCE",
+              "source_field": "contentDescription",
+              "derivation": "source_value"
+            },
+            "bounds": {
+              "status": "PRESENT",
+              "source_field": "boundsInScreen",
+              "derivation": "source_value"
+            },
+            "actions": {
+              "status": "PRESENT",
+              "source_field": "actions",
+              "derivation": "source_value"
+            },
+            "source_node_id": {
+              "status": "ABSENT_IN_SOURCE",
+              "source_field": "sourceNodeId",
+              "derivation": "source_value"
+            },
+            "semantic_role": {
+              "status": "NOT_SUPPORTED_BY_SOURCE",
+              "source_field": null,
+              "derivation": "source_value"
+            }
+          }
+        },
+        "target_action_set": [
+          {
+            "id": 16,
+            "name": "ACTION_CLICK",
+            "label": null
+          }
+        ],
+        "target_lineage_signature": [
+          {
+            "resource_id": "com.example.smartthings:id/root",
+            "class_name": "android.widget.Button",
+            "package": "com.example.smartthings",
+            "text": null,
+            "content_description": null,
+            "clickable": false,
+            "focusable": true,
+            "enabled": true,
+            "visible": true,
+            "child_index": 0,
+            "actions": []
+          }
+        ],
+        "target_child_structure_signature": [],
+        "created_at": "2026-01-01T00:00:00Z",
+        "expires_at": "2035-01-01T00:00:00Z",
+        "permit_created_at": "2026-01-01T00:00:00Z",
+        "permit_expires_at": "2035-01-01T00:00:00Z",
+        "hard_stop_active": false,
+        "source_request_id": "capture:B",
+        "helper_service_instance_id": "helper:golden",
+        "host_session_id": "host:golden",
+        "stop_epoch": "stop:0",
+        "evidence_refs": [],
+        "request_digest": "8d6f84825717b76e67a50d553e15e0c8ecec3c48607a4b7666fc13690626ec30"
+      },
+      "wire": "{\"action_type\":\"EXACT_READ_ONLY_NAVIGATION\",\"authorized_snapshot_id\":\"A\",\"command\":\"RESOLVE_EXACT_NODE\",\"created_at\":\"2026-01-01T00:00:00Z\",\"evidence_refs\":[],\"expected_package\":\"com.example.smartthings\",\"expected_window\":{\"id\":7,\"type\":1},\"expires_at\":\"2035-01-01T00:00:00Z\",\"hard_stop_active\":false,\"helper_service_instance_id\":\"helper:golden\",\"host_session_id\":\"host:golden\",\"ownership\":{\"parent_action_id\":null,\"run_id\":\"run:golden\",\"scenario_id\":\"synthetic\",\"scenario_transaction_id\":\"scenario:1\",\"step_action_id\":\"step:4\"},\"permit_created_at\":\"2026-01-01T00:00:00Z\",\"permit_expires_at\":\"2035-01-01T00:00:00Z\",\"permit_id\":\"permit:4\",\"protocol_version\":\"talkback.exact-navigation.v1\",\"reacquire_snapshot_id\":\"B\",\"request_digest\":\"8d6f84825717b76e67a50d553e15e0c8ecec3c48607a4b7666fc13690626ec30\",\"request_id\":\"golden:4\",\"request_nonce\":\"nonce:4\",\"source_request_id\":\"capture:B\",\"stop_epoch\":\"stop:0\",\"target_action_set\":[{\"id\":16,\"label\":null,\"name\":\"ACTION_CLICK\"}],\"target_child_structure_signature\":[],\"target_identity\":{\"actions\":[{\"id\":16,\"label\":null,\"name\":\"ACTION_CLICK\"}],\"bounds\":{\"bottom\":100,\"left\":0,\"right\":100,\"top\":0},\"child_structure_signature\":[],\"class_name\":\"android.widget.Button\",\"content_description\":null,\"field_provenance\":{\"actions\":{\"derivation\":\"source_value\",\"source_field\":\"actions\",\"status\":\"PRESENT\"},\"bounds\":{\"derivation\":\"source_value\",\"source_field\":\"boundsInScreen\",\"status\":\"PRESENT\"},\"class_name\":{\"derivation\":\"source_value\",\"source_field\":\"className\",\"status\":\"PRESENT\"},\"content_description\":{\"derivation\":\"source_value\",\"source_field\":\"contentDescription\",\"status\":\"ABSENT_IN_SOURCE\"},\"package\":{\"derivation\":\"source_value\",\"source_field\":\"packageName\",\"status\":\"PRESENT\"},\"resource_id\":{\"derivation\":\"source_value\",\"source_field\":\"viewIdResourceName\",\"status\":\"PRESENT\"},\"semantic_role\":{\"derivation\":\"source_value\",\"source_field\":null,\"status\":\"NOT_SUPPORTED_BY_SOURCE\"},\"source_node_id\":{\"derivation\":\"source_value\",\"source_field\":\"sourceNodeId\",\"status\":\"ABSENT_IN_SOURCE\"},\"text\":{\"derivation\":\"source_value\",\"source_field\":\"text\",\"status\":\"PRESENT\"}},\"hierarchy_path\":{\"child_indices\":[0],\"window_order\":0},\"lineage_signature\":[{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true}],\"node_local_id\":\"B:0:0\",\"package\":\"com.example.smartthings\",\"parent_identity\":{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true},\"resource_id\":\"com.example.smartthings:id/navigation\",\"semantic_role\":null,\"snapshot_id\":\"B\",\"source_node_id\":null,\"source_node_id_provenance\":\"ABSENT_IN_SOURCE\",\"text\":\"\",\"window_id\":7},\"target_identity_schema\":\"talkback.exact-node-descriptor.v1\",\"target_lineage_signature\":[{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true}],\"transaction_id\":\"tx:4\"}",
+      "digest": "8d6f84825717b76e67a50d553e15e0c8ecec3c48607a4b7666fc13690626ec30",
+      "hierarchy": {
+        "snapshotId": "helper-C",
+        "success": true,
+        "windows": [
+          {
+            "id": 7,
+            "type": 1,
+            "root": {
+              "packageName": "com.example.smartthings",
+              "viewIdResourceName": "com.example.smartthings:id/root",
+              "className": "android.widget.Button",
+              "text": null,
+              "contentDescription": null,
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "left": 0,
+                "top": 0,
+                "right": 100,
+                "bottom": 100
+              },
+              "clickable": false,
+              "focusable": true,
+              "enabled": true,
+              "visibleToUser": true,
+              "actions": [],
+              "children": [
+                {
+                  "packageName": "com.example.smartthings",
+                  "viewIdResourceName": "com.example.smartthings:id/navigation",
+                  "className": "android.widget.Button",
+                  "text": "",
+                  "contentDescription": null,
+                  "sourceNodeId": null,
+                  "boundsInScreen": {
+                    "left": 0,
+                    "top": 0,
+                    "right": 100,
+                    "bottom": 100
+                  },
+                  "clickable": true,
+                  "focusable": true,
+                  "enabled": true,
+                  "visibleToUser": true,
+                  "actions": [
+                    {
+                      "id": 16,
+                      "name": "ACTION_CLICK",
+                      "label": null
+                    }
+                  ],
+                  "children": []
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "expected_resolved": true
+    },
+    {
+      "name": "request-5",
+      "request": {
+        "protocol_version": "talkback.exact-navigation.v1",
+        "command": "RESOLVE_EXACT_NODE",
+        "request_id": "golden:5",
+        "transaction_id": "tx:5",
+        "permit_id": "permit:5",
+        "request_nonce": "nonce:5",
+        "ownership": {
+          "run_id": "run:golden",
+          "scenario_id": "synthetic",
+          "scenario_transaction_id": "scenario:1",
+          "step_action_id": "step:5",
+          "parent_action_id": null
+        },
+        "action_type": "EXACT_READ_ONLY_NAVIGATION",
+        "expected_package": "com.example.smartthings",
+        "expected_window": {
+          "id": 7,
+          "type": 1
+        },
+        "authorized_snapshot_id": "A",
+        "reacquire_snapshot_id": "B",
+        "target_identity_schema": "talkback.exact-node-descriptor.v1",
+        "target_identity": {
+          "package": "com.example.smartthings",
+          "window_id": 7,
+          "resource_id": "com.example.smartthings:id/navigation",
+          "class_name": "android.widget.Button",
+          "text": null,
+          "content_description": null,
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 100,
+            "bottom": 100
+          },
+          "source_node_id": null,
+          "source_node_id_provenance": "ABSENT_IN_SOURCE",
+          "node_local_id": "B:0:0",
+          "hierarchy_path": {
+            "window_order": 0,
+            "child_indices": [
+              0
+            ]
+          },
+          "parent_identity": {
+            "resource_id": "com.example.smartthings:id/root",
+            "class_name": "android.widget.Button",
+            "package": "com.example.smartthings",
+            "text": null,
+            "content_description": null,
+            "clickable": false,
+            "focusable": true,
+            "enabled": true,
+            "visible": true,
+            "child_index": 0,
+            "actions": []
+          },
+          "lineage_signature": [
+            {
+              "resource_id": "com.example.smartthings:id/root",
+              "class_name": "android.widget.Button",
+              "package": "com.example.smartthings",
+              "text": null,
+              "content_description": null,
+              "clickable": false,
+              "focusable": true,
+              "enabled": true,
+              "visible": true,
+              "child_index": 0,
+              "actions": []
+            }
+          ],
+          "child_structure_signature": [],
+          "actions": [
+            {
+              "id": 16,
+              "name": "ACTION_CLICK",
+              "label": null
+            }
+          ],
+          "semantic_role": null,
+          "snapshot_id": "B",
+          "field_provenance": {
+            "package": {
+              "status": "PRESENT",
+              "source_field": "packageName",
+              "derivation": "source_value"
+            },
+            "resource_id": {
+              "status": "PRESENT",
+              "source_field": "viewIdResourceName",
+              "derivation": "source_value"
+            },
+            "class_name": {
+              "status": "PRESENT",
+              "source_field": "className",
+              "derivation": "source_value"
+            },
+            "text": {
+              "status": "ABSENT_IN_SOURCE",
+              "source_field": "text",
+              "derivation": "source_value"
+            },
+            "content_description": {
+              "status": "ABSENT_IN_SOURCE",
+              "source_field": "contentDescription",
+              "derivation": "source_value"
+            },
+            "bounds": {
+              "status": "PRESENT",
+              "source_field": "boundsInScreen",
+              "derivation": "source_value"
+            },
+            "actions": {
+              "status": "PRESENT",
+              "source_field": "actions",
+              "derivation": "source_value"
+            },
+            "source_node_id": {
+              "status": "ABSENT_IN_SOURCE",
+              "source_field": "sourceNodeId",
+              "derivation": "source_value"
+            },
+            "semantic_role": {
+              "status": "NOT_SUPPORTED_BY_SOURCE",
+              "source_field": null,
+              "derivation": "source_value"
+            }
+          }
+        },
+        "target_action_set": [
+          {
+            "id": 16,
+            "name": "ACTION_CLICK",
+            "label": null
+          }
+        ],
+        "target_lineage_signature": [
+          {
+            "resource_id": "com.example.smartthings:id/root",
+            "class_name": "android.widget.Button",
+            "package": "com.example.smartthings",
+            "text": null,
+            "content_description": null,
+            "clickable": false,
+            "focusable": true,
+            "enabled": true,
+            "visible": true,
+            "child_index": 0,
+            "actions": []
+          }
+        ],
+        "target_child_structure_signature": [],
+        "created_at": "2026-01-01T00:00:00Z",
+        "expires_at": "2035-01-01T00:00:00Z",
+        "permit_created_at": "2026-01-01T00:00:00Z",
+        "permit_expires_at": "2035-01-01T00:00:00Z",
+        "hard_stop_active": false,
+        "source_request_id": "capture:B",
+        "helper_service_instance_id": "helper:golden",
+        "host_session_id": "host:golden",
+        "stop_epoch": "stop:0",
+        "evidence_refs": [],
+        "request_digest": "e5e9ce70da71f099cff60e682554d2f705fbc526346d8b2acf721522944edbce"
+      },
+      "wire": "{\"action_type\":\"EXACT_READ_ONLY_NAVIGATION\",\"authorized_snapshot_id\":\"A\",\"command\":\"RESOLVE_EXACT_NODE\",\"created_at\":\"2026-01-01T00:00:00Z\",\"evidence_refs\":[],\"expected_package\":\"com.example.smartthings\",\"expected_window\":{\"id\":7,\"type\":1},\"expires_at\":\"2035-01-01T00:00:00Z\",\"hard_stop_active\":false,\"helper_service_instance_id\":\"helper:golden\",\"host_session_id\":\"host:golden\",\"ownership\":{\"parent_action_id\":null,\"run_id\":\"run:golden\",\"scenario_id\":\"synthetic\",\"scenario_transaction_id\":\"scenario:1\",\"step_action_id\":\"step:5\"},\"permit_created_at\":\"2026-01-01T00:00:00Z\",\"permit_expires_at\":\"2035-01-01T00:00:00Z\",\"permit_id\":\"permit:5\",\"protocol_version\":\"talkback.exact-navigation.v1\",\"reacquire_snapshot_id\":\"B\",\"request_digest\":\"e5e9ce70da71f099cff60e682554d2f705fbc526346d8b2acf721522944edbce\",\"request_id\":\"golden:5\",\"request_nonce\":\"nonce:5\",\"source_request_id\":\"capture:B\",\"stop_epoch\":\"stop:0\",\"target_action_set\":[{\"id\":16,\"label\":null,\"name\":\"ACTION_CLICK\"}],\"target_child_structure_signature\":[],\"target_identity\":{\"actions\":[{\"id\":16,\"label\":null,\"name\":\"ACTION_CLICK\"}],\"bounds\":{\"bottom\":100,\"left\":0,\"right\":100,\"top\":0},\"child_structure_signature\":[],\"class_name\":\"android.widget.Button\",\"content_description\":null,\"field_provenance\":{\"actions\":{\"derivation\":\"source_value\",\"source_field\":\"actions\",\"status\":\"PRESENT\"},\"bounds\":{\"derivation\":\"source_value\",\"source_field\":\"boundsInScreen\",\"status\":\"PRESENT\"},\"class_name\":{\"derivation\":\"source_value\",\"source_field\":\"className\",\"status\":\"PRESENT\"},\"content_description\":{\"derivation\":\"source_value\",\"source_field\":\"contentDescription\",\"status\":\"ABSENT_IN_SOURCE\"},\"package\":{\"derivation\":\"source_value\",\"source_field\":\"packageName\",\"status\":\"PRESENT\"},\"resource_id\":{\"derivation\":\"source_value\",\"source_field\":\"viewIdResourceName\",\"status\":\"PRESENT\"},\"semantic_role\":{\"derivation\":\"source_value\",\"source_field\":null,\"status\":\"NOT_SUPPORTED_BY_SOURCE\"},\"source_node_id\":{\"derivation\":\"source_value\",\"source_field\":\"sourceNodeId\",\"status\":\"ABSENT_IN_SOURCE\"},\"text\":{\"derivation\":\"source_value\",\"source_field\":\"text\",\"status\":\"ABSENT_IN_SOURCE\"}},\"hierarchy_path\":{\"child_indices\":[0],\"window_order\":0},\"lineage_signature\":[{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true}],\"node_local_id\":\"B:0:0\",\"package\":\"com.example.smartthings\",\"parent_identity\":{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true},\"resource_id\":\"com.example.smartthings:id/navigation\",\"semantic_role\":null,\"snapshot_id\":\"B\",\"source_node_id\":null,\"source_node_id_provenance\":\"ABSENT_IN_SOURCE\",\"text\":null,\"window_id\":7},\"target_identity_schema\":\"talkback.exact-node-descriptor.v1\",\"target_lineage_signature\":[{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true}],\"transaction_id\":\"tx:5\"}",
+      "digest": "e5e9ce70da71f099cff60e682554d2f705fbc526346d8b2acf721522944edbce",
+      "hierarchy": {
+        "snapshotId": "helper-C",
+        "success": true,
+        "windows": [
+          {
+            "id": 7,
+            "type": 1,
+            "root": {
+              "packageName": "com.example.smartthings",
+              "viewIdResourceName": "com.example.smartthings:id/root",
+              "className": "android.widget.Button",
+              "text": null,
+              "contentDescription": null,
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "left": 0,
+                "top": 0,
+                "right": 100,
+                "bottom": 100
+              },
+              "clickable": false,
+              "focusable": true,
+              "enabled": true,
+              "visibleToUser": true,
+              "actions": [],
+              "children": [
+                {
+                  "packageName": "com.example.smartthings",
+                  "viewIdResourceName": "com.example.smartthings:id/navigation",
+                  "className": "android.widget.Button",
+                  "text": null,
+                  "contentDescription": null,
+                  "sourceNodeId": null,
+                  "boundsInScreen": {
+                    "left": 0,
+                    "top": 0,
+                    "right": 100,
+                    "bottom": 100
+                  },
+                  "clickable": true,
+                  "focusable": true,
+                  "enabled": true,
+                  "visibleToUser": true,
+                  "actions": [
+                    {
+                      "id": 16,
+                      "name": "ACTION_CLICK",
+                      "label": null
+                    }
+                  ],
+                  "children": []
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "expected_resolved": true
+    },
+    {
+      "name": "unknown-critical",
+      "request": {
+        "protocol_version": "talkback.exact-navigation.v1",
+        "command": "RESOLVE_EXACT_NODE",
+        "request_id": "golden:0:unknown-critical",
+        "transaction_id": "tx:0:unknown-critical",
+        "permit_id": "permit:0:unknown-critical",
+        "request_nonce": "nonce:0:unknown-critical",
+        "ownership": {
+          "run_id": "run:golden",
+          "scenario_id": "synthetic",
+          "scenario_transaction_id": "scenario:1",
+          "step_action_id": "step:0",
+          "parent_action_id": null
+        },
+        "action_type": "EXACT_READ_ONLY_NAVIGATION",
+        "expected_package": "com.example.smartthings",
+        "expected_window": {
+          "id": 7,
+          "type": 1
+        },
+        "authorized_snapshot_id": "A",
+        "reacquire_snapshot_id": "B",
+        "target_identity_schema": "talkback.exact-node-descriptor.v1",
+        "target_identity": {
+          "package": "com.example.smartthings",
+          "window_id": 7,
+          "resource_id": "com.example.smartthings:id/navigation",
+          "class_name": "android.widget.Button",
+          "text": "Open",
+          "content_description": null,
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 100,
+            "bottom": 100
+          },
+          "source_node_id": null,
+          "source_node_id_provenance": "ABSENT_IN_SOURCE",
+          "node_local_id": "B:0:0",
+          "hierarchy_path": {
+            "window_order": 0,
+            "child_indices": [
+              0
+            ]
+          },
+          "parent_identity": {
+            "resource_id": "com.example.smartthings:id/root",
+            "class_name": "android.widget.Button",
+            "package": "com.example.smartthings",
+            "text": null,
+            "content_description": null,
+            "clickable": false,
+            "focusable": true,
+            "enabled": true,
+            "visible": true,
+            "child_index": 0,
+            "actions": []
+          },
+          "lineage_signature": [
+            {
+              "resource_id": "com.example.smartthings:id/root",
+              "class_name": "android.widget.Button",
+              "package": "com.example.smartthings",
+              "text": null,
+              "content_description": null,
+              "clickable": false,
+              "focusable": true,
+              "enabled": true,
+              "visible": true,
+              "child_index": 0,
+              "actions": []
+            }
+          ],
+          "child_structure_signature": [],
+          "actions": [
+            {
+              "id": 16,
+              "name": "ACTION_CLICK",
+              "label": null
+            }
+          ],
+          "semantic_role": null,
+          "snapshot_id": "B",
+          "field_provenance": {
+            "package": {
+              "status": "PRESENT",
+              "source_field": "packageName",
+              "derivation": "source_value"
+            },
+            "resource_id": {
+              "status": "PRESENT",
+              "source_field": "viewIdResourceName",
+              "derivation": "source_value"
+            },
+            "class_name": {
+              "status": "PRESENT",
+              "source_field": "className",
+              "derivation": "source_value"
+            },
+            "text": {
+              "status": "PRESENT",
+              "source_field": "text",
+              "derivation": "source_value"
+            },
+            "content_description": {
+              "status": "ABSENT_IN_SOURCE",
+              "source_field": "contentDescription",
+              "derivation": "source_value"
+            },
+            "bounds": {
+              "status": "PRESENT",
+              "source_field": "boundsInScreen",
+              "derivation": "source_value"
+            },
+            "actions": {
+              "status": "PRESENT",
+              "source_field": "actions",
+              "derivation": "source_value"
+            },
+            "source_node_id": {
+              "status": "ABSENT_IN_SOURCE",
+              "source_field": "sourceNodeId",
+              "derivation": "source_value"
+            },
+            "semantic_role": {
+              "status": "NOT_SUPPORTED_BY_SOURCE",
+              "source_field": null,
+              "derivation": "source_value"
+            }
+          }
+        },
+        "target_action_set": [
+          {
+            "id": 16,
+            "name": "ACTION_CLICK",
+            "label": null
+          }
+        ],
+        "target_lineage_signature": [
+          {
+            "resource_id": "com.example.smartthings:id/root",
+            "class_name": "android.widget.Button",
+            "package": "com.example.smartthings",
+            "text": null,
+            "content_description": null,
+            "clickable": false,
+            "focusable": true,
+            "enabled": true,
+            "visible": true,
+            "child_index": 0,
+            "actions": []
+          }
+        ],
+        "target_child_structure_signature": [],
+        "created_at": "2026-01-01T00:00:00Z",
+        "expires_at": "2035-01-01T00:00:00Z",
+        "permit_created_at": "2026-01-01T00:00:00Z",
+        "permit_expires_at": "2035-01-01T00:00:00Z",
+        "hard_stop_active": false,
+        "source_request_id": "capture:B",
+        "helper_service_instance_id": "helper:golden",
+        "host_session_id": "host:golden",
+        "stop_epoch": "stop:0",
+        "evidence_refs": [],
+        "request_digest": "098e663d387a228bbe34f24f3fc7d3ca9d3d25e4a612c821f74d34862f3fa835",
+        "unknown_critical": true
+      },
+      "wire": "{\"action_type\":\"EXACT_READ_ONLY_NAVIGATION\",\"authorized_snapshot_id\":\"A\",\"command\":\"RESOLVE_EXACT_NODE\",\"created_at\":\"2026-01-01T00:00:00Z\",\"evidence_refs\":[],\"expected_package\":\"com.example.smartthings\",\"expected_window\":{\"id\":7,\"type\":1},\"expires_at\":\"2035-01-01T00:00:00Z\",\"hard_stop_active\":false,\"helper_service_instance_id\":\"helper:golden\",\"host_session_id\":\"host:golden\",\"ownership\":{\"parent_action_id\":null,\"run_id\":\"run:golden\",\"scenario_id\":\"synthetic\",\"scenario_transaction_id\":\"scenario:1\",\"step_action_id\":\"step:0\"},\"permit_created_at\":\"2026-01-01T00:00:00Z\",\"permit_expires_at\":\"2035-01-01T00:00:00Z\",\"permit_id\":\"permit:0:unknown-critical\",\"protocol_version\":\"talkback.exact-navigation.v1\",\"reacquire_snapshot_id\":\"B\",\"request_digest\":\"098e663d387a228bbe34f24f3fc7d3ca9d3d25e4a612c821f74d34862f3fa835\",\"request_id\":\"golden:0:unknown-critical\",\"request_nonce\":\"nonce:0:unknown-critical\",\"source_request_id\":\"capture:B\",\"stop_epoch\":\"stop:0\",\"target_action_set\":[{\"id\":16,\"label\":null,\"name\":\"ACTION_CLICK\"}],\"target_child_structure_signature\":[],\"target_identity\":{\"actions\":[{\"id\":16,\"label\":null,\"name\":\"ACTION_CLICK\"}],\"bounds\":{\"bottom\":100,\"left\":0,\"right\":100,\"top\":0},\"child_structure_signature\":[],\"class_name\":\"android.widget.Button\",\"content_description\":null,\"field_provenance\":{\"actions\":{\"derivation\":\"source_value\",\"source_field\":\"actions\",\"status\":\"PRESENT\"},\"bounds\":{\"derivation\":\"source_value\",\"source_field\":\"boundsInScreen\",\"status\":\"PRESENT\"},\"class_name\":{\"derivation\":\"source_value\",\"source_field\":\"className\",\"status\":\"PRESENT\"},\"content_description\":{\"derivation\":\"source_value\",\"source_field\":\"contentDescription\",\"status\":\"ABSENT_IN_SOURCE\"},\"package\":{\"derivation\":\"source_value\",\"source_field\":\"packageName\",\"status\":\"PRESENT\"},\"resource_id\":{\"derivation\":\"source_value\",\"source_field\":\"viewIdResourceName\",\"status\":\"PRESENT\"},\"semantic_role\":{\"derivation\":\"source_value\",\"source_field\":null,\"status\":\"NOT_SUPPORTED_BY_SOURCE\"},\"source_node_id\":{\"derivation\":\"source_value\",\"source_field\":\"sourceNodeId\",\"status\":\"ABSENT_IN_SOURCE\"},\"text\":{\"derivation\":\"source_value\",\"source_field\":\"text\",\"status\":\"PRESENT\"}},\"hierarchy_path\":{\"child_indices\":[0],\"window_order\":0},\"lineage_signature\":[{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true}],\"node_local_id\":\"B:0:0\",\"package\":\"com.example.smartthings\",\"parent_identity\":{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true},\"resource_id\":\"com.example.smartthings:id/navigation\",\"semantic_role\":null,\"snapshot_id\":\"B\",\"source_node_id\":null,\"source_node_id_provenance\":\"ABSENT_IN_SOURCE\",\"text\":\"Open\",\"window_id\":7},\"target_identity_schema\":\"talkback.exact-node-descriptor.v1\",\"target_lineage_signature\":[{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true}],\"transaction_id\":\"tx:0:unknown-critical\",\"unknown_critical\":true}",
+      "digest": "098e663d387a228bbe34f24f3fc7d3ca9d3d25e4a612c821f74d34862f3fa835",
+      "hierarchy": {
+        "snapshotId": "helper-C",
+        "success": true,
+        "windows": [
+          {
+            "id": 7,
+            "type": 1,
+            "root": {
+              "packageName": "com.example.smartthings",
+              "viewIdResourceName": "com.example.smartthings:id/root",
+              "className": "android.widget.Button",
+              "text": null,
+              "contentDescription": null,
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "left": 0,
+                "top": 0,
+                "right": 100,
+                "bottom": 100
+              },
+              "clickable": false,
+              "focusable": true,
+              "enabled": true,
+              "visibleToUser": true,
+              "actions": [],
+              "children": [
+                {
+                  "packageName": "com.example.smartthings",
+                  "viewIdResourceName": "com.example.smartthings:id/navigation",
+                  "className": "android.widget.Button",
+                  "text": "Open",
+                  "contentDescription": null,
+                  "sourceNodeId": null,
+                  "boundsInScreen": {
+                    "left": 0,
+                    "top": 0,
+                    "right": 100,
+                    "bottom": 100
+                  },
+                  "clickable": true,
+                  "focusable": true,
+                  "enabled": true,
+                  "visibleToUser": true,
+                  "actions": [
+                    {
+                      "id": 16,
+                      "name": "ACTION_CLICK",
+                      "label": null
+                    }
+                  ],
+                  "children": []
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "expected_resolved": false
+    },
+    {
+      "name": "wrong-id-type",
+      "request": {
+        "protocol_version": "talkback.exact-navigation.v1",
+        "command": "RESOLVE_EXACT_NODE",
+        "request_id": 17,
+        "transaction_id": "tx:0:wrong-id-type",
+        "permit_id": "permit:0:wrong-id-type",
+        "request_nonce": "nonce:0:wrong-id-type",
+        "ownership": {
+          "run_id": "run:golden",
+          "scenario_id": "synthetic",
+          "scenario_transaction_id": "scenario:1",
+          "step_action_id": "step:0",
+          "parent_action_id": null
+        },
+        "action_type": "EXACT_READ_ONLY_NAVIGATION",
+        "expected_package": "com.example.smartthings",
+        "expected_window": {
+          "id": 7,
+          "type": 1
+        },
+        "authorized_snapshot_id": "A",
+        "reacquire_snapshot_id": "B",
+        "target_identity_schema": "talkback.exact-node-descriptor.v1",
+        "target_identity": {
+          "package": "com.example.smartthings",
+          "window_id": 7,
+          "resource_id": "com.example.smartthings:id/navigation",
+          "class_name": "android.widget.Button",
+          "text": "Open",
+          "content_description": null,
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 100,
+            "bottom": 100
+          },
+          "source_node_id": null,
+          "source_node_id_provenance": "ABSENT_IN_SOURCE",
+          "node_local_id": "B:0:0",
+          "hierarchy_path": {
+            "window_order": 0,
+            "child_indices": [
+              0
+            ]
+          },
+          "parent_identity": {
+            "resource_id": "com.example.smartthings:id/root",
+            "class_name": "android.widget.Button",
+            "package": "com.example.smartthings",
+            "text": null,
+            "content_description": null,
+            "clickable": false,
+            "focusable": true,
+            "enabled": true,
+            "visible": true,
+            "child_index": 0,
+            "actions": []
+          },
+          "lineage_signature": [
+            {
+              "resource_id": "com.example.smartthings:id/root",
+              "class_name": "android.widget.Button",
+              "package": "com.example.smartthings",
+              "text": null,
+              "content_description": null,
+              "clickable": false,
+              "focusable": true,
+              "enabled": true,
+              "visible": true,
+              "child_index": 0,
+              "actions": []
+            }
+          ],
+          "child_structure_signature": [],
+          "actions": [
+            {
+              "id": 16,
+              "name": "ACTION_CLICK",
+              "label": null
+            }
+          ],
+          "semantic_role": null,
+          "snapshot_id": "B",
+          "field_provenance": {
+            "package": {
+              "status": "PRESENT",
+              "source_field": "packageName",
+              "derivation": "source_value"
+            },
+            "resource_id": {
+              "status": "PRESENT",
+              "source_field": "viewIdResourceName",
+              "derivation": "source_value"
+            },
+            "class_name": {
+              "status": "PRESENT",
+              "source_field": "className",
+              "derivation": "source_value"
+            },
+            "text": {
+              "status": "PRESENT",
+              "source_field": "text",
+              "derivation": "source_value"
+            },
+            "content_description": {
+              "status": "ABSENT_IN_SOURCE",
+              "source_field": "contentDescription",
+              "derivation": "source_value"
+            },
+            "bounds": {
+              "status": "PRESENT",
+              "source_field": "boundsInScreen",
+              "derivation": "source_value"
+            },
+            "actions": {
+              "status": "PRESENT",
+              "source_field": "actions",
+              "derivation": "source_value"
+            },
+            "source_node_id": {
+              "status": "ABSENT_IN_SOURCE",
+              "source_field": "sourceNodeId",
+              "derivation": "source_value"
+            },
+            "semantic_role": {
+              "status": "NOT_SUPPORTED_BY_SOURCE",
+              "source_field": null,
+              "derivation": "source_value"
+            }
+          }
+        },
+        "target_action_set": [
+          {
+            "id": 16,
+            "name": "ACTION_CLICK",
+            "label": null
+          }
+        ],
+        "target_lineage_signature": [
+          {
+            "resource_id": "com.example.smartthings:id/root",
+            "class_name": "android.widget.Button",
+            "package": "com.example.smartthings",
+            "text": null,
+            "content_description": null,
+            "clickable": false,
+            "focusable": true,
+            "enabled": true,
+            "visible": true,
+            "child_index": 0,
+            "actions": []
+          }
+        ],
+        "target_child_structure_signature": [],
+        "created_at": "2026-01-01T00:00:00Z",
+        "expires_at": "2035-01-01T00:00:00Z",
+        "permit_created_at": "2026-01-01T00:00:00Z",
+        "permit_expires_at": "2035-01-01T00:00:00Z",
+        "hard_stop_active": false,
+        "source_request_id": "capture:B",
+        "helper_service_instance_id": "helper:golden",
+        "host_session_id": "host:golden",
+        "stop_epoch": "stop:0",
+        "evidence_refs": [],
+        "request_digest": "b898eb980d1a418b78d7db5544af748771acd09fbae713810bf88b5290f47e97"
+      },
+      "wire": "{\"action_type\":\"EXACT_READ_ONLY_NAVIGATION\",\"authorized_snapshot_id\":\"A\",\"command\":\"RESOLVE_EXACT_NODE\",\"created_at\":\"2026-01-01T00:00:00Z\",\"evidence_refs\":[],\"expected_package\":\"com.example.smartthings\",\"expected_window\":{\"id\":7,\"type\":1},\"expires_at\":\"2035-01-01T00:00:00Z\",\"hard_stop_active\":false,\"helper_service_instance_id\":\"helper:golden\",\"host_session_id\":\"host:golden\",\"ownership\":{\"parent_action_id\":null,\"run_id\":\"run:golden\",\"scenario_id\":\"synthetic\",\"scenario_transaction_id\":\"scenario:1\",\"step_action_id\":\"step:0\"},\"permit_created_at\":\"2026-01-01T00:00:00Z\",\"permit_expires_at\":\"2035-01-01T00:00:00Z\",\"permit_id\":\"permit:0:wrong-id-type\",\"protocol_version\":\"talkback.exact-navigation.v1\",\"reacquire_snapshot_id\":\"B\",\"request_digest\":\"b898eb980d1a418b78d7db5544af748771acd09fbae713810bf88b5290f47e97\",\"request_id\":17,\"request_nonce\":\"nonce:0:wrong-id-type\",\"source_request_id\":\"capture:B\",\"stop_epoch\":\"stop:0\",\"target_action_set\":[{\"id\":16,\"label\":null,\"name\":\"ACTION_CLICK\"}],\"target_child_structure_signature\":[],\"target_identity\":{\"actions\":[{\"id\":16,\"label\":null,\"name\":\"ACTION_CLICK\"}],\"bounds\":{\"bottom\":100,\"left\":0,\"right\":100,\"top\":0},\"child_structure_signature\":[],\"class_name\":\"android.widget.Button\",\"content_description\":null,\"field_provenance\":{\"actions\":{\"derivation\":\"source_value\",\"source_field\":\"actions\",\"status\":\"PRESENT\"},\"bounds\":{\"derivation\":\"source_value\",\"source_field\":\"boundsInScreen\",\"status\":\"PRESENT\"},\"class_name\":{\"derivation\":\"source_value\",\"source_field\":\"className\",\"status\":\"PRESENT\"},\"content_description\":{\"derivation\":\"source_value\",\"source_field\":\"contentDescription\",\"status\":\"ABSENT_IN_SOURCE\"},\"package\":{\"derivation\":\"source_value\",\"source_field\":\"packageName\",\"status\":\"PRESENT\"},\"resource_id\":{\"derivation\":\"source_value\",\"source_field\":\"viewIdResourceName\",\"status\":\"PRESENT\"},\"semantic_role\":{\"derivation\":\"source_value\",\"source_field\":null,\"status\":\"NOT_SUPPORTED_BY_SOURCE\"},\"source_node_id\":{\"derivation\":\"source_value\",\"source_field\":\"sourceNodeId\",\"status\":\"ABSENT_IN_SOURCE\"},\"text\":{\"derivation\":\"source_value\",\"source_field\":\"text\",\"status\":\"PRESENT\"}},\"hierarchy_path\":{\"child_indices\":[0],\"window_order\":0},\"lineage_signature\":[{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true}],\"node_local_id\":\"B:0:0\",\"package\":\"com.example.smartthings\",\"parent_identity\":{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true},\"resource_id\":\"com.example.smartthings:id/navigation\",\"semantic_role\":null,\"snapshot_id\":\"B\",\"source_node_id\":null,\"source_node_id_provenance\":\"ABSENT_IN_SOURCE\",\"text\":\"Open\",\"window_id\":7},\"target_identity_schema\":\"talkback.exact-node-descriptor.v1\",\"target_lineage_signature\":[{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true}],\"transaction_id\":\"tx:0:wrong-id-type\"}",
+      "digest": "b898eb980d1a418b78d7db5544af748771acd09fbae713810bf88b5290f47e97",
+      "hierarchy": {
+        "snapshotId": "helper-C",
+        "success": true,
+        "windows": [
+          {
+            "id": 7,
+            "type": 1,
+            "root": {
+              "packageName": "com.example.smartthings",
+              "viewIdResourceName": "com.example.smartthings:id/root",
+              "className": "android.widget.Button",
+              "text": null,
+              "contentDescription": null,
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "left": 0,
+                "top": 0,
+                "right": 100,
+                "bottom": 100
+              },
+              "clickable": false,
+              "focusable": true,
+              "enabled": true,
+              "visibleToUser": true,
+              "actions": [],
+              "children": [
+                {
+                  "packageName": "com.example.smartthings",
+                  "viewIdResourceName": "com.example.smartthings:id/navigation",
+                  "className": "android.widget.Button",
+                  "text": "Open",
+                  "contentDescription": null,
+                  "sourceNodeId": null,
+                  "boundsInScreen": {
+                    "left": 0,
+                    "top": 0,
+                    "right": 100,
+                    "bottom": 100
+                  },
+                  "clickable": true,
+                  "focusable": true,
+                  "enabled": true,
+                  "visibleToUser": true,
+                  "actions": [
+                    {
+                      "id": 16,
+                      "name": "ACTION_CLICK",
+                      "label": null
+                    }
+                  ],
+                  "children": []
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "expected_resolved": false
+    },
+    {
+      "name": "failure-ack",
+      "request": {
+        "protocol_version": "talkback.exact-navigation.v1",
+        "command": "RESOLVE_EXACT_NODE",
+        "request_id": "golden:0:failure-ack",
+        "transaction_id": "tx:0:failure-ack",
+        "permit_id": "permit:0:failure-ack",
+        "request_nonce": "nonce:0:failure-ack",
+        "ownership": {
+          "run_id": "run:golden",
+          "scenario_id": "synthetic",
+          "scenario_transaction_id": "scenario:1",
+          "step_action_id": "step:0",
+          "parent_action_id": null
+        },
+        "action_type": "EXACT_READ_ONLY_NAVIGATION",
+        "expected_package": "wrong.package",
+        "expected_window": {
+          "id": 7,
+          "type": 1
+        },
+        "authorized_snapshot_id": "A",
+        "reacquire_snapshot_id": "B",
+        "target_identity_schema": "talkback.exact-node-descriptor.v1",
+        "target_identity": {
+          "package": "com.example.smartthings",
+          "window_id": 7,
+          "resource_id": "com.example.smartthings:id/navigation",
+          "class_name": "android.widget.Button",
+          "text": "Open",
+          "content_description": null,
+          "bounds": {
+            "left": 0,
+            "top": 0,
+            "right": 100,
+            "bottom": 100
+          },
+          "source_node_id": null,
+          "source_node_id_provenance": "ABSENT_IN_SOURCE",
+          "node_local_id": "B:0:0",
+          "hierarchy_path": {
+            "window_order": 0,
+            "child_indices": [
+              0
+            ]
+          },
+          "parent_identity": {
+            "resource_id": "com.example.smartthings:id/root",
+            "class_name": "android.widget.Button",
+            "package": "com.example.smartthings",
+            "text": null,
+            "content_description": null,
+            "clickable": false,
+            "focusable": true,
+            "enabled": true,
+            "visible": true,
+            "child_index": 0,
+            "actions": []
+          },
+          "lineage_signature": [
+            {
+              "resource_id": "com.example.smartthings:id/root",
+              "class_name": "android.widget.Button",
+              "package": "com.example.smartthings",
+              "text": null,
+              "content_description": null,
+              "clickable": false,
+              "focusable": true,
+              "enabled": true,
+              "visible": true,
+              "child_index": 0,
+              "actions": []
+            }
+          ],
+          "child_structure_signature": [],
+          "actions": [
+            {
+              "id": 16,
+              "name": "ACTION_CLICK",
+              "label": null
+            }
+          ],
+          "semantic_role": null,
+          "snapshot_id": "B",
+          "field_provenance": {
+            "package": {
+              "status": "PRESENT",
+              "source_field": "packageName",
+              "derivation": "source_value"
+            },
+            "resource_id": {
+              "status": "PRESENT",
+              "source_field": "viewIdResourceName",
+              "derivation": "source_value"
+            },
+            "class_name": {
+              "status": "PRESENT",
+              "source_field": "className",
+              "derivation": "source_value"
+            },
+            "text": {
+              "status": "PRESENT",
+              "source_field": "text",
+              "derivation": "source_value"
+            },
+            "content_description": {
+              "status": "ABSENT_IN_SOURCE",
+              "source_field": "contentDescription",
+              "derivation": "source_value"
+            },
+            "bounds": {
+              "status": "PRESENT",
+              "source_field": "boundsInScreen",
+              "derivation": "source_value"
+            },
+            "actions": {
+              "status": "PRESENT",
+              "source_field": "actions",
+              "derivation": "source_value"
+            },
+            "source_node_id": {
+              "status": "ABSENT_IN_SOURCE",
+              "source_field": "sourceNodeId",
+              "derivation": "source_value"
+            },
+            "semantic_role": {
+              "status": "NOT_SUPPORTED_BY_SOURCE",
+              "source_field": null,
+              "derivation": "source_value"
+            }
+          }
+        },
+        "target_action_set": [
+          {
+            "id": 16,
+            "name": "ACTION_CLICK",
+            "label": null
+          }
+        ],
+        "target_lineage_signature": [
+          {
+            "resource_id": "com.example.smartthings:id/root",
+            "class_name": "android.widget.Button",
+            "package": "com.example.smartthings",
+            "text": null,
+            "content_description": null,
+            "clickable": false,
+            "focusable": true,
+            "enabled": true,
+            "visible": true,
+            "child_index": 0,
+            "actions": []
+          }
+        ],
+        "target_child_structure_signature": [],
+        "created_at": "2026-01-01T00:00:00Z",
+        "expires_at": "2035-01-01T00:00:00Z",
+        "permit_created_at": "2026-01-01T00:00:00Z",
+        "permit_expires_at": "2035-01-01T00:00:00Z",
+        "hard_stop_active": false,
+        "source_request_id": "capture:B",
+        "helper_service_instance_id": "helper:golden",
+        "host_session_id": "host:golden",
+        "stop_epoch": "stop:0",
+        "evidence_refs": [],
+        "request_digest": "98171fdcb8053ec0672e62275f2488807333a27e484b09699b36981f18271d65"
+      },
+      "wire": "{\"action_type\":\"EXACT_READ_ONLY_NAVIGATION\",\"authorized_snapshot_id\":\"A\",\"command\":\"RESOLVE_EXACT_NODE\",\"created_at\":\"2026-01-01T00:00:00Z\",\"evidence_refs\":[],\"expected_package\":\"wrong.package\",\"expected_window\":{\"id\":7,\"type\":1},\"expires_at\":\"2035-01-01T00:00:00Z\",\"hard_stop_active\":false,\"helper_service_instance_id\":\"helper:golden\",\"host_session_id\":\"host:golden\",\"ownership\":{\"parent_action_id\":null,\"run_id\":\"run:golden\",\"scenario_id\":\"synthetic\",\"scenario_transaction_id\":\"scenario:1\",\"step_action_id\":\"step:0\"},\"permit_created_at\":\"2026-01-01T00:00:00Z\",\"permit_expires_at\":\"2035-01-01T00:00:00Z\",\"permit_id\":\"permit:0:failure-ack\",\"protocol_version\":\"talkback.exact-navigation.v1\",\"reacquire_snapshot_id\":\"B\",\"request_digest\":\"98171fdcb8053ec0672e62275f2488807333a27e484b09699b36981f18271d65\",\"request_id\":\"golden:0:failure-ack\",\"request_nonce\":\"nonce:0:failure-ack\",\"source_request_id\":\"capture:B\",\"stop_epoch\":\"stop:0\",\"target_action_set\":[{\"id\":16,\"label\":null,\"name\":\"ACTION_CLICK\"}],\"target_child_structure_signature\":[],\"target_identity\":{\"actions\":[{\"id\":16,\"label\":null,\"name\":\"ACTION_CLICK\"}],\"bounds\":{\"bottom\":100,\"left\":0,\"right\":100,\"top\":0},\"child_structure_signature\":[],\"class_name\":\"android.widget.Button\",\"content_description\":null,\"field_provenance\":{\"actions\":{\"derivation\":\"source_value\",\"source_field\":\"actions\",\"status\":\"PRESENT\"},\"bounds\":{\"derivation\":\"source_value\",\"source_field\":\"boundsInScreen\",\"status\":\"PRESENT\"},\"class_name\":{\"derivation\":\"source_value\",\"source_field\":\"className\",\"status\":\"PRESENT\"},\"content_description\":{\"derivation\":\"source_value\",\"source_field\":\"contentDescription\",\"status\":\"ABSENT_IN_SOURCE\"},\"package\":{\"derivation\":\"source_value\",\"source_field\":\"packageName\",\"status\":\"PRESENT\"},\"resource_id\":{\"derivation\":\"source_value\",\"source_field\":\"viewIdResourceName\",\"status\":\"PRESENT\"},\"semantic_role\":{\"derivation\":\"source_value\",\"source_field\":null,\"status\":\"NOT_SUPPORTED_BY_SOURCE\"},\"source_node_id\":{\"derivation\":\"source_value\",\"source_field\":\"sourceNodeId\",\"status\":\"ABSENT_IN_SOURCE\"},\"text\":{\"derivation\":\"source_value\",\"source_field\":\"text\",\"status\":\"PRESENT\"}},\"hierarchy_path\":{\"child_indices\":[0],\"window_order\":0},\"lineage_signature\":[{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true}],\"node_local_id\":\"B:0:0\",\"package\":\"com.example.smartthings\",\"parent_identity\":{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true},\"resource_id\":\"com.example.smartthings:id/navigation\",\"semantic_role\":null,\"snapshot_id\":\"B\",\"source_node_id\":null,\"source_node_id_provenance\":\"ABSENT_IN_SOURCE\",\"text\":\"Open\",\"window_id\":7},\"target_identity_schema\":\"talkback.exact-node-descriptor.v1\",\"target_lineage_signature\":[{\"actions\":[],\"child_index\":0,\"class_name\":\"android.widget.Button\",\"clickable\":false,\"content_description\":null,\"enabled\":true,\"focusable\":true,\"package\":\"com.example.smartthings\",\"resource_id\":\"com.example.smartthings:id/root\",\"text\":null,\"visible\":true}],\"transaction_id\":\"tx:0:failure-ack\"}",
+      "digest": "98171fdcb8053ec0672e62275f2488807333a27e484b09699b36981f18271d65",
+      "hierarchy": {
+        "snapshotId": "helper-C",
+        "success": true,
+        "windows": [
+          {
+            "id": 7,
+            "type": 1,
+            "root": {
+              "packageName": "com.example.smartthings",
+              "viewIdResourceName": "com.example.smartthings:id/root",
+              "className": "android.widget.Button",
+              "text": null,
+              "contentDescription": null,
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "left": 0,
+                "top": 0,
+                "right": 100,
+                "bottom": 100
+              },
+              "clickable": false,
+              "focusable": true,
+              "enabled": true,
+              "visibleToUser": true,
+              "actions": [],
+              "children": [
+                {
+                  "packageName": "com.example.smartthings",
+                  "viewIdResourceName": "com.example.smartthings:id/navigation",
+                  "className": "android.widget.Button",
+                  "text": "Open",
+                  "contentDescription": null,
+                  "sourceNodeId": null,
+                  "boundsInScreen": {
+                    "left": 0,
+                    "top": 0,
+                    "right": 100,
+                    "bottom": 100
+                  },
+                  "clickable": true,
+                  "focusable": true,
+                  "enabled": true,
+                  "visibleToUser": true,
+                  "actions": [
+                    {
+                      "id": 16,
+                      "name": "ACTION_CLICK",
+                      "label": null
+                    }
+                  ],
+                  "children": []
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "expected_resolved": false
+    }
+  ],
+  "values": [
+    {
+      "value": {
+        "z": null,
+        "a": [
+          true,
+          false,
+          [],
+          {},
+          "\ud55c\uae00 \ud83d\ude00 \" \\ /\n\t"
+        ]
+      },
+      "canonical": "{\"a\":[true,false,[],{},\"\\ud55c\\uae00 \\ud83d\\ude00 \\\" \\\\ /\\n\\t\"],\"z\":null}",
+      "digest": "e2172604d25ba31798576d66ab78a00be5c85cdb598cca3b6dd3f3f9b5a4b2f5"
+    },
+    {
+      "value": {
+        "a": -9223372036854775808,
+        "b": 9223372036854775807
+      },
+      "canonical": "{\"a\":-9223372036854775808,\"b\":9223372036854775807}",
+      "digest": "97d0521a8c90728615a1f1165fcf9bf3a5ad81afb04eba26be8b267e663a5ee4"
+    }
+  ]
+}

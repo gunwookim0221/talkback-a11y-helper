@@ -241,7 +241,7 @@ object A11yNavigator {
         }
     }
 
-    private fun hierarchyActionName(id: Int): String = when (id) {
+    internal fun hierarchyActionName(id: Int): String = when (id) {
         AccessibilityNodeInfo.AccessibilityAction.ACTION_FOCUS.id -> "ACTION_FOCUS"
         AccessibilityNodeInfo.AccessibilityAction.ACTION_CLEAR_FOCUS.id -> "ACTION_CLEAR_FOCUS"
         AccessibilityNodeInfo.AccessibilityAction.ACTION_CLICK.id -> "ACTION_CLICK"
@@ -264,7 +264,7 @@ object A11yNavigator {
         else -> "ACTION_$id"
     }
 
-    private fun rectToJson(rect: Rect): JSONObject = JSONObject().apply {
+    internal fun rectToJson(rect: Rect): JSONObject = JSONObject().apply {
         put("l", rect.left)
         put("t", rect.top)
         put("r", rect.right)

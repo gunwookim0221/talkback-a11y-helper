@@ -169,16 +169,7 @@ class ExactNodeResolverTest {
             .joinToString("") { "%02x".format(it) }
     }
 
-    private fun canonical(value: Any?): String = when (value) {
-        null, JSONObject.NULL -> "null"
-        is JSONObject -> value.keys().asSequence().toList().sorted().joinToString(prefix = "{", postfix = "}") { key ->
-            JSONObject.quote(key) + ":" + canonical(value.opt(key))
-        }
-        is JSONArray -> (0 until value.length()).joinToString(prefix = "[", postfix = "]") { canonical(value.opt(it)) }
-        is String -> JSONObject.quote(value)
-        is Number, is Boolean -> value.toString()
-        else -> JSONObject.quote(value.toString())
-    }
+    private fun canonical(value: Any?): String = ExactProtocolJson.canonical(value)
 
     private fun nullable(value: Any?): Any = if (value == null || value === JSONObject.NULL) JSONObject.NULL else value
 

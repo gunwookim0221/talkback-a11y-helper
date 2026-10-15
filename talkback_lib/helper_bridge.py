@@ -181,6 +181,8 @@ class HelperBridge:
         root = Path(repo_root) if repo_root is not None else Path(__file__).resolve().parents[1]
         result = precheck_repo_helper_build_identity(root, ping, acceptance_mode=acceptance_mode).to_dict()
         result["helper_service_instance_id"] = ping.get("helper_service_instance_id") if isinstance(ping, dict) else None
+        if isinstance(ping, dict) and isinstance(ping.get("exact_action_state"), dict):
+            result["exact_action_state"] = dict(ping["exact_action_state"])
         return result
 
     def resolve_exact_node_read_only(

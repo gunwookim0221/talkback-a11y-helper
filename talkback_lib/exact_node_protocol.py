@@ -19,7 +19,7 @@ from typing import Any, Iterable
 PROTOCOL_VERSION = "talkback.exact-navigation.v1"
 REQUEST_COMMAND = "RESOLVE_EXACT_NODE"
 ACTION_TYPE = "EXACT_READ_ONLY_NAVIGATION"
-ACK_SCHEMA_VERSION = "1"
+ACK_SCHEMA_VERSION = "1.1"
 
 
 class FailureCode(str, Enum):
@@ -65,7 +65,24 @@ def _pairs_no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def canonical_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    """exact-canonical.v1: ASCII JSON, UTF-16 key order, signed int64, no floats."""
+    def encode(item: Any) -> str:
+        if item is None:
+            return "null"
+        if type(item) is bool:
+            return "true" if item else "false"
+        if type(item) is int and -(2**63) <= item < 2**63:
+            return str(item)
+        if isinstance(item, str):
+            item.encode("utf-16-be")  # reject unpaired surrogates
+            return json.dumps(item, ensure_ascii=True)
+        if isinstance(item, list):
+            return "[" + ",".join(encode(v) for v in item) + "]"
+        if isinstance(item, dict) and all(isinstance(k, str) for k in item):
+            keys = sorted(item, key=lambda k: k.encode("utf-16-be"))
+            return "{" + ",".join(encode(k) + ":" + encode(item[k]) for k in keys) + "}"
+        raise ValueError("CANONICAL_TYPE_UNSUPPORTED")
+    return encode(value)
 
 
 def request_digest(data: dict[str, Any]) -> str:
@@ -339,7 +356,15 @@ class ExactNodeAck:
             raise ProtocolValidationError(FailureCode.REQUEST_INVALID, "malformed_ack_json") from error
         if not isinstance(value, dict):
             raise ProtocolValidationError(FailureCode.REQUEST_INVALID, "ack_object_required")
-        _required_keys(value, ACK_FIELDS, ACK_FIELDS, "ack")
+        extensions = {"ack_schema_version", "validation_detail", "failure_detail"}
+        _required_keys(value, ACK_FIELDS, ACK_FIELDS | extensions, "ack")
+        version = value.get("ack_schema_version", "1")
+        if version not in {"1", ACK_SCHEMA_VERSION}:
+            raise ProtocolValidationError(FailureCode.PROTOCOL_VERSION_UNSUPPORTED, "ack_schema_version")
+        for field in ("validation_detail", "failure_detail"):
+            if field in value and (version != ACK_SCHEMA_VERSION or
+                    (value[field] is not None and not isinstance(value[field], str))):
+                raise ProtocolValidationError(FailureCode.REQUEST_INVALID, "undeclared_error_extension")
         if value["protocol_version"] != PROTOCOL_VERSION:
             raise ProtocolValidationError(FailureCode.PROTOCOL_VERSION_UNSUPPORTED)
         if (value["perform_action_called"] is not False or type(value["perform_action_call_count"]) is not int

@@ -23,7 +23,8 @@ class A11yHelperService : AccessibilityService() {
     internal var smartNextDispatcher = SmartNextDispatcher { reqId -> moveFocusSmart(reqId) }
     internal var focusCommandDispatcher = AccessibilityCommandDispatcher()
     companion object {
-        val serviceInstanceId: String = UUID.randomUUID().toString()
+        @Volatile var serviceInstanceId: String = UUID.randomUUID().toString()
+            private set
         @Volatile
         var instance: A11yHelperService? = null
             private set
@@ -61,14 +62,17 @@ class A11yHelperService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        serviceInstanceId = ExactActionRuntime.connect(this)
         Log.i(TAG, "Service connected")
     }
 
     override fun onInterrupt() {
+        ExactActionRuntime.stop("SERVICE_INTERRUPTED")
         Log.w(TAG, "Service interrupted")
     }
 
     override fun onDestroy() {
+        ExactActionRuntime.stop("SERVICE_DESTROYED")
         smartNextDispatcher.close()
         focusCommandDispatcher.close()
         super.onDestroy()

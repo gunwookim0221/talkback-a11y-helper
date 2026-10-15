@@ -30,6 +30,9 @@ class A11yCommandReceiver : BroadcastReceiver() {
         internal const val HELPER_SERVICE_UNAVAILABLE_STATUS = "HELPER_SERVICE_UNAVAILABLE"
         private const val ACTION_PING = "com.iotpart.sqe.talkbackhelper.PING"
         private const val ACTION_RESOLVE_EXACT_NODE = "com.iotpart.sqe.talkbackhelper.RESOLVE_EXACT_NODE"
+        private const val ACTION_EXACT_ACTION = "com.iotpart.sqe.talkbackhelper.EXACT_ACTION"
+        private const val ACTION_EXACT_ACTION_RECEIPT = "com.iotpart.sqe.talkbackhelper.EXACT_ACTION_RECEIPT"
+        private const val ACTION_EXACT_ACTION_STOP = "com.iotpart.sqe.talkbackhelper.EXACT_ACTION_STOP"
         private const val ACTION_COMMAND = "com.iotpart.sqe.talkbackhelper.ACTION_COMMAND"
         private const val ACTION_EVIDENCE_EVENTS = "com.iotpart.sqe.talkbackhelper.EVIDENCE_EVENTS"
         private const val ACTION_ENTRY_CLICK_CAPTURE = "com.iotpart.sqe.talkbackhelper.ENTRY_CLICK_CAPTURE"
@@ -64,7 +67,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         val action = intent?.action ?: return
         val reqId = parseReqId(intent)
-        if (action != ACTION_RESOLVE_EXACT_NODE) {
+        if (action !in setOf(ACTION_RESOLVE_EXACT_NODE,ACTION_EXACT_ACTION,ACTION_EXACT_ACTION_RECEIPT,ACTION_EXACT_ACTION_STOP)) {
             A11yEvidence.capture(intent, reqId)
             A11yEvidence.emit(
                 "ACTION_EXECUTION_STARTED",
@@ -112,6 +115,9 @@ class A11yCommandReceiver : BroadcastReceiver() {
             ACTION_SET_SYSTEM_LANGUAGE -> handleSetSystemLanguage(intent)
             ACTION_PING -> handlePing(intent)
             ACTION_RESOLVE_EXACT_NODE -> handleResolveExactNode(intent)
+            ACTION_EXACT_ACTION -> handleExactAction(intent)
+            ACTION_EXACT_ACTION_RECEIPT -> handleExactActionReceipt(intent)
+            ACTION_EXACT_ACTION_STOP -> ExactActionRuntime.stop("HOST_HARD_STOP")
             ACTION_COMMAND -> handleExternalCommand(context, intent)
             ACTION_EVIDENCE_EVENTS -> handleEvidenceEvents(intent)
             ACTION_ENTRY_CLICK_CAPTURE -> handleEntryClickCapture(intent)
@@ -624,7 +630,32 @@ class A11yCommandReceiver : BroadcastReceiver() {
             .put("status", "READY")
             .put("helper_build_identity", identity)
             .put("helper_service_instance_id", A11yHelperService.serviceInstanceId)
+            .put("exact_action_state", ExactActionRuntime.status())
             .put("capabilities", org.json.JSONArray().put("read_only_hierarchy_identity").put("resolve_exact_node_read_only"))
+    }
+
+    private fun handleExactAction(intent:Intent) {
+        val reqId=parseReqId(intent)
+        val service=A11yHelperService.instance
+        if(service==null) {
+            val payload=org.json.JSONObject().put("reqId",reqId).put("failure_code","HELPER_REACQUIRE_FAILED").toString()
+            A11yResultTransport.encode("EXACT_ACTION_RESULT",reqId,payload).forEach { Log.i(TAG,it) };return
+        }
+        val pending=goAsync()
+        ExactActionRuntime.dispatch(service,intent.getStringExtra("exactActionRequest").orEmpty(),reqId) { ack ->
+            try {
+                val payload=org.json.JSONObject().put("reqId",reqId).put("ack",ack).toString()
+                A11yResultTransport.encode("EXACT_ACTION_RESULT",reqId,payload).forEach { Log.i(TAG,it) }
+                ExactActionRuntime.markAckEmitted(ack)
+            } finally { pending?.finish() }
+        }
+    }
+
+    private fun handleExactActionReceipt(intent:Intent) {
+        val reqId=parseReqId(intent)
+        val receipt=ExactActionRuntime.readback(intent.getStringExtra("exactActionRequest").orEmpty())
+        val payload=org.json.JSONObject().put("reqId",reqId).put("receipt",receipt).toString()
+        A11yResultTransport.encode("EXACT_ACTION_RECEIPT_RESULT",reqId,payload).forEach { Log.i(TAG,it) }
     }
 
     /** Resolve a structured target against a fresh read-only hierarchy. */

@@ -94,6 +94,8 @@ android {
     buildFeatures { buildConfig = true }
 
     defaultConfig {
+        // C4 foundation is never a production activation switch. No Gradle property overrides it.
+        buildConfigField("boolean", "BUILD_EXACT_ACTION_SUPPORT", "false")
         applicationId = "com.iotpart.sqe.talkbackhelper"
         minSdk = 26
         targetSdk = 34
@@ -126,6 +128,10 @@ android {
     }
     testOptions {
         unitTests.isIncludeAndroidResources = true
+        unitTests.all { test ->
+            // Offline evidence input only; cannot enable the action feature gate.
+            System.getenv("TB_EXACT_C4_REPLAY_INPUT")?.let { test.systemProperty("exactC4ReplayFile", it) }
+        }
     }
 }
 
