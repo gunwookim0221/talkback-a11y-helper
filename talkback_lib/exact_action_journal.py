@@ -56,6 +56,9 @@ class DurableActionJournal:
         b=request['binding']
         with self._exclusive():
             rows=self._read()
+            if event_type in {'C5_HELPER_EXPORT','C5_FINAL_VERDICT'} and any(
+                    row['event_type']==event_type and row['transaction_id']==b['transaction_id'] for row in rows):
+                raise ActionRejected('C5_DUPLICATE_DURABLE_RECORD')
             if event_type=='REQUEST_PREPARED':
                 for row in rows:
                     if row['event_type']=='REQUEST_PREPARED' and any(row[k]==b[k] for k in ('request_id','permit_id','request_nonce','transaction_id')):

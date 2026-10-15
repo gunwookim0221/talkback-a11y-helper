@@ -62,16 +62,19 @@ class A11yHelperService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        ExactPostActionRuntime.connect()
         serviceInstanceId = ExactActionRuntime.connect(this)
         Log.i(TAG, "Service connected")
     }
 
     override fun onInterrupt() {
+        ExactPostActionRuntime.stop("SERVICE_INTERRUPTED")
         ExactActionRuntime.stop("SERVICE_INTERRUPTED")
         Log.w(TAG, "Service interrupted")
     }
 
     override fun onDestroy() {
+        ExactPostActionRuntime.stop("SERVICE_DESTROYED")
         ExactActionRuntime.stop("SERVICE_DESTROYED")
         smartNextDispatcher.close()
         focusCommandDispatcher.close()
@@ -98,6 +101,7 @@ class A11yHelperService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
+        ExactPostActionRuntime.receive(event)
         val type = event.eventType
         if (type == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             A11yEvidence.captureEntryClickEvent(event)

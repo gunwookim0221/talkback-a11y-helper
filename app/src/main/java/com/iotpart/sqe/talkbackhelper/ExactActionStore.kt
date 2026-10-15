@@ -178,6 +178,23 @@ internal class ExactActionStore(context: Context, name: String = "exact-action-v
         readableDatabase.rawQuery("SELECT COALESCE(MAX(sequence),0) FROM journal",null).use { it.moveToFirst();it.getLong(0) }
     }
 
+    /** C5 read-only export of the existing immutable chain; never repairs or resets state. */
+    fun exportJournal():org.json.JSONArray = synchronized(executionLock) {
+        verifyJournal(readableDatabase)
+        org.json.JSONArray().apply {
+            readableDatabase.rawQuery("SELECT payload,hash FROM journal ORDER BY sequence",null).use { c ->
+                while(c.moveToNext())put(JSONObject().put("record",JSONObject(c.getString(0))).put("hash",c.getString(1)))
+            }
+        }
+    }
+
+    fun registeredPacket(requestId:String):String? = synchronized(executionLock) {
+        verifyJournal(readableDatabase)
+        readableDatabase.rawQuery("SELECT payload FROM requests WHERE request_id=?",arrayOf(requestId)).use {
+            if(it.moveToFirst())it.getString(0) else null
+        }
+    }
+
     /** Exact original registered packet only; expiry never authorizes re-execution. */
     fun readback(request:JSONObject):JSONObject = synchronized(executionLock) {
         val id=request.getJSONObject("binding").getString("request_id")

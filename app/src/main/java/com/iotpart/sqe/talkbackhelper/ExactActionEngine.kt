@@ -10,7 +10,8 @@ internal data class ExactActionReadiness(val hostStopInactive:Boolean=false,val 
 /** Only unit tests inject enabled gates/readiness. Runtime C4 supplies neither a session nor C5 readiness. */
 internal class ExactActionEngine(private val store:ExactActionStore,private val session:ExactActionSession?,
     private val resolver:ExactLiveNodeResolver,private val buildGate:Boolean=false,private val runtimeGate:Boolean=false,
-    private val buildId:String,private val appVersion:String,private val readiness:ExactActionReadiness=ExactActionReadiness()) {
+    private val buildId:String,private val appVersion:String,private val readiness:ExactActionReadiness=ExactActionReadiness(),
+    private val postActionPlan:ExactPostActionPlan?=null) {
 
     fun execute(raw:String):JSONObject {
         if(raw.toByteArray(Charsets.UTF_8).size>1024*1024)return unavailable("REQUEST_INVALID")
@@ -42,6 +43,7 @@ internal class ExactActionEngine(private val store:ExactActionStore,private val 
             store.register(request) // Unique IDs are durable even if a later validation fails.
             store.record("VALIDATION_RESULT",id,JSONObject().put("authenticated",true))
             val target=resolver.capture(resolve,trusted.connectionEpoch);resolved=target.ack
+            postActionPlan?.arm(request,target) // Optional observer is armed durably BEFORE any claim/API call.
             transaction.move(ExactActionState.RESOLVED)
             store.record("TARGET_RESOLVED",id,resolved)
             // Explicit proven facts only: a newly added requirement must default to rejection.
@@ -79,6 +81,7 @@ internal class ExactActionEngine(private val store:ExactActionStore,private val 
                 else -> "PRE_DISPATCH_GATE_REJECTED"
             })
             // Recheck the exact retained reference while stop/claim ordering is locked.
+            if(postActionPlan!=null)ExactActionContract.requireThat(postActionPlan.collector.active(),"PRE_DISPATCH_GATE_REJECTED")
             resolved=target.revalidate();trusted.verify(request,System.currentTimeMillis())
             transaction.move(ExactActionState.PRE_DISPATCH_APPROVED)
             store.approve(request,facts)
@@ -88,6 +91,7 @@ internal class ExactActionEngine(private val store:ExactActionStore,private val 
             // A slow durable commit may outlive freshness/expiry. Consumed does not mean we must call.
             resolved=target.revalidate();trusted.verify(request,System.currentTimeMillis())
             ExactActionContract.requireThat(!store.stopped(),"HARD_STOP_ACTIVE")
+            if(postActionPlan!=null)ExactActionContract.requireThat(postActionPlan.collector.active(),"PRE_DISPATCH_GATE_REJECTED")
             val started=Instant.now().toString();val uptime=SystemClock.uptimeMillis()
             var returned:Boolean?=null;var exception:String?=null
             try { returned=target.click() } catch(error:Exception) { exception=error.javaClass.simpleName }
@@ -96,6 +100,7 @@ internal class ExactActionEngine(private val store:ExactActionStore,private val 
             val failure=when(returned){true->null;false->"PERFORM_ACTION_FALSE";null->"UNKNOWN_EXECUTION_STATE"}
             val audit=store.record("PERFORM_ACTION_RESULT",id,JSONObject().put("return",returned ?: JSONObject.NULL).put("exception",exception ?: JSONObject.NULL))
             val ack=ExactActionAck.create(request,failure,true,consumption,resolved,true,returned,state,started,finished,uptime,audit,store.sequence(),exception)
+            if(postActionPlan!=null)ack.put("post_action_probe_id",postActionPlan.probeId)
             store.storeReceipt(id,ack)
             transaction.move(state)
             store.stop("C4_EFFECT_UNVERIFIED") // C4 does not authorize another action after an unverified effect.

@@ -46,10 +46,51 @@ class ExactActionEngineTest {
         r.put("request_digest",ExactActionContract.digestWithoutSelf(r))
     }
     private fun engine(r:Rig,build:Boolean=true,runtime:Boolean=true,ready:Boolean=true,buildId:String="b".repeat(64),
-        provider:(()->List<ExactApplicationWindow>)?=null):ExactActionEngine {
+        provider:(()->List<ExactApplicationWindow>)?=null,postAction:ExactPostActionPlan?=null):ExactActionEngine {
         val resolver=ExactLiveNodeResolver(provider ?: {listOf(ExactApplicationWindow(7,1,true,r.root))})
         return ExactActionEngine(r.store,ExactActionContractTest().session(r.request),resolver,build,runtime,
-            buildId,"synthetic:1",ExactActionReadiness(ready,ready,ready,ready))
+            buildId,"synthetic:1",ExactActionReadiness(ready,ready,ready,ready),postAction)
+    }
+    @Test fun c5ObserverArmsBeforeMockDispatchAndBindsOnlyTheExactRetainedSource() {
+        var rootDir=File(".").canonicalFile
+        while(!File(rootDir,"settings.gradle.kts").exists())rootDir=rootDir.parentFile ?: error("root")
+        val shared=JSONObject(File(rootDir,"tests/fixtures/exact_protocol/post_action.json").readText())
+        val contract=shared.getJSONArray("helper_export").getJSONObject(1).getJSONObject("record").getJSONObject("payload").getJSONObject("destination_contract")
+        val probe=JSONObject().put("windows",JSONArray().put(JSONObject().put("id",7).put("type",1).put("active",true)
+            .put("root",JSONObject().put("packageName","com.example.smartthings").put("viewIdResourceName","destination:root")
+                .put("visibleToUser",true).put("enabled",true)
+                .put("className","android.widget.FrameLayout").put("children",JSONArray().put(JSONObject()
+                    .put("viewIdResourceName","security:status").put("className","android.widget.TextView")
+                    .put("text","unchanged").put("enabled",true).put("visibleToUser",true).put("checked",false).put("selected",false)
+                    .put("children",JSONArray()))))))
+        val structural=ExactStructuralProbe.build(probe,listOf("security:status"))
+        contract.put("required_root_signatures",JSONArray().put(structural.getString("root_signature")))
+            .put("required_structures",structural.getJSONArray("structures")).put("required_markers",JSONArray().put("id:destination:root"))
+        val r=rig();r.request.getJSONObject("binding").getJSONObject("semantic_intent").put("destination_contract_digest",ExactProtocolJson.hash(contract));resign(r.request)
+        var time=android.os.SystemClock.uptimeMillis()
+        val c=ExactPostActionCollector(r.store,{time},{0L})
+        shadowOf(r.target).setOnPerformActionListener{_,_->
+            assertTrue(c.active())
+            assertNotNull(c.sourceIdentity(r.target));assertNull(c.sourceIdentity(r.root))
+            val raw=JSONObject().put("event_type",1).put("event_uptime_ms",time)
+                .put("package","com.example.smartthings").put("window_id",7).put("text",JSONArray().put("Open"))
+                .put("source_provenance","EXACT_RETAINED_NODE_REFERENCE").put("source_identity",c.sourceIdentity(r.target))
+            c.accept(raw);true
+        }
+        val observable=JSONObject().put("status","COMPLETE").put("independent_channel",true).put("continuous_coverage",true)
+            .put("selectors",JSONArray().put("security:status")).put("evidence_refs",JSONArray().put("SYNTHETIC_FULL_STATE_CHANNEL"))
+        val ack=engine(r,postAction=ExactPostActionPlan(c,"probe:synthetic",contract,structural.getJSONObject("security_state"),observable)).execute(r.request.toString())
+        assertEquals(ack.toString(),true,ack.opt("perform_action_return"))
+        assertEquals("probe:synthetic",ack.getString("post_action_probe_id"));assertTrue(r.store.stopped())
+        // Read-only observations persist after C4's durable unverified-effect stop; they never clear it.
+        time+=200;c.probe(probe,"example.Destination","destination","NONE",listOf("security:status"))
+        time+=200;c.probe(probe,"example.Destination","destination","NONE",listOf("security:status"))
+        time=c.closeDeadline()!!;c.close()
+        File(rootDir,"app/build/reports/exact-protocol/c4-c5-integration.json").apply {
+            parentFile.mkdirs();writeText(JSONObject().put("evidence_type","ROBOLECTRIC_MOCK_ONLY")
+                .put("request",r.request).put("helper_export",r.store.exportJournal()).toString(2))
+        }
+        assertEquals(listOf(16),shadowOf(r.target).performedActions);assertFalse(ack.getBoolean("visit_authority"));r.store.close()
     }
     @Test fun bothExplicitTestGatesCallOneValidatedMockNodeExactlyOnceWithoutVisitCredit() {
         val r=rig();shadowOf(r.target).setOnPerformActionListener{_,_->true}
