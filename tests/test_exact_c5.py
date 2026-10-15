@@ -109,7 +109,7 @@ def test_wrong_effects(tmp_path,case):
 
 
 @pytest.mark.parametrize('t,receive,expected,reason',[(99,110,False,'PRE_CURSOR_EVIDENCE'),
-    (100,100,True,'IN_WINDOW'),(101,110,True,'IN_WINDOW'),(5089,5090,True,'IN_WINDOW'),
+    (100,100,False,'EVENT_ORDER_AMBIGUOUS'),(101,110,True,'IN_WINDOW'),(5089,5090,True,'IN_WINDOW'),
     (5090,6090,True,'IN_WINDOW'),(5091,5092,False,'LATE_EVIDENCE'),
     (5090,6091,False,'LATE_EVIDENCE'),(110,109,False,'EVENT_CLOCK_INVALID')])
 def test_window_boundaries(t,receive,expected,reason):
@@ -125,10 +125,12 @@ def test_host_clocks_are_not_compared(tmp_path,host_clock):
     assert result['expected_navigation_confirmed']
 
 
-def test_duplicate_raw_preserved_but_not_a_competing_action(tmp_path):
+def test_duplicate_click_callbacks_are_ambiguous_and_raw_is_preserved(tmp_path):
     def change(r,rows):rows.insert(7,deepcopy(rows[6]))
     v,result=run(tmp_path,change)
-    assert result['expected_navigation_confirmed']
+    assert not result['expected_navigation_confirmed']
+    assert result['result']=='AMBIGUOUS_EFFECT'
+    assert 'ACTION_EFFECT_AMBIGUOUS' in result['failure_codes']
     assert len(result['normalized_events'])==2 and result['normalized_events'][1]['duplicate']
     assert len(v.journal.records()[0]['evidence']['rows'])==12
 

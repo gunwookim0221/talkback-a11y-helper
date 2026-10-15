@@ -30,6 +30,8 @@ Helper는 창 종료 콜백을 예약한다. 생성시각이 창 안이고 수�
 
 복수 클릭/접근성 포커스 액션 후보, 다른 거래 실행, 불일치 소유권 및 부모/자식 소스 불확실성은 모호성으로 남긴다. 첫 번째·가장 가까운·점수가 높은 후보를 선택하지 않는다. 일반 내용 변경이나 입력 포커스는 보조 증거다.
 
+C6의 시간 경계 검증에서 `eventTime == dispatch uptime`은 Android 이벤트 시각의 밀리초 정밀도만으로 API 호출 전/후를 구분할 수 없으므로 `EVENT_ORDER_AMBIGUOUS`로 판정한다. 또한 동일 fingerprint의 클릭 콜백이 여러 개여도 플랫폼 이벤트 ID로 한 이벤트임을 증명할 수 없으므로 후보 수를 합치지 않고 `AMBIGUOUS_EFFECT`로 유지한다. 모든 원시 복사본은 감사에 남긴다.
+
 ## 목적지와 금지 효과
 
 목적지 계약은 C4의 이미 승인된 semantic intent digest에 결합한다. package/허용 activity/루트 구조 서명/필수 가시 마커/구조/context/출발 화면 서명/최소 관찰 수/settle/timeout 및 버전 있는 금지 효과 계약을 포함한다. activity/context가 없으면 승인하지 않는다. 범용 엔진에 앱별 문자열은 없다.
@@ -52,7 +54,7 @@ Helper는 창 종료 콜백을 예약한다. 생성시각이 창 안이고 수�
 
 ## C6로 전달하는 제한
 
-C5 인프라는 오프라인/합성 C6 검증용이다. 서비스 수신·필요 이벤트·커서·sequence·감사 쓰기·현재 epoch·비경쟁 거래·승인 계약·상태 관찰 범위 모두가 readiness 조건이다. 현재 production runtime의 `c5_ready` 및 모든 액션 게이트는 OFF로 유지한다. 실제 이벤트의 source 가용성, 독립 보안 상태 채널 및 Home Monitor 사전 의미/격리 증거는 별도 C6 과제이며 실기기 클릭 승인을 뜻하지 않는다.
+C5 인프라는 오프라인/합성 C6 검증용이다. 서비스 수신·필요 이벤트·커서·sequence·감사 쓰기·현재 epoch·비경쟁 거래·승인 계약·상태 관찰 범위 모두가 readiness 조건이다. 현재 production runtime의 `c5_ready` 및 모든 액션 게이트는 OFF로 유지한다. C6 replay는 실제 기기의 이벤트 source 가용성, 독립 보안 상태 채널 또는 Home Monitor 사전 의미/격리를 입증하지 않았다. 따라서 C6 결과는 실기기 클릭 승인이 아니다.
 
 재현 도구:
 

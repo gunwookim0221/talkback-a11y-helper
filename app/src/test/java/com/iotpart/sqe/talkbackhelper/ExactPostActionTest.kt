@@ -78,6 +78,24 @@ class ExactPostActionTest {
         assertTrue(a.isNull("source_identity"));assertEquals(a.toString(),b.toString())
         assertEquals(1,a.getInt("event_type"));assertEquals("Open",a.getJSONArray("text").getString(0))
     }
+    @Test fun identicalPlatformCallbacksRemainSeparateDurableRawEvidence() {
+        val r=rig();r.time=120
+        val event=raw(110)
+        assertTrue(r.collector.accept(event));assertTrue(r.collector.accept(event))
+        r.time=6090;assertTrue(r.collector.close())
+        val rows=r.store.exportJournal()
+        val rawRows=(0 until rows.length()).map{rows.getJSONObject(it).getJSONObject("record")}
+            .filter{it.getString("event_type")=="C5_RAW_EVENT"}
+        val normalized=(0 until rows.length()).map{rows.getJSONObject(it).getJSONObject("record")}
+            .filter{it.getString("event_type")=="C5_NORMALIZED_EVENT"}
+        assertEquals(2,rawRows.size);assertEquals(2,normalized.size)
+        assertNotEquals(rawRows[0].getInt("producer_sequence"),rawRows[1].getInt("producer_sequence"))
+        assertEquals(normalized[0].getJSONObject("payload").getString("fingerprint"),
+            normalized[1].getJSONObject("payload").getString("fingerprint"))
+        assertTrue((0 until rows.length()).map{rows.getJSONObject(it).getJSONObject("record")}
+            .none{it.getString("event_type")=="DISPATCH_STARTED"})
+        assertFalse(r.collector.status().getBoolean("visit_authority"));r.store.close()
+    }
     @Test fun configuredEventsCoverMinimalRequiredTypes() {
         val context=RuntimeEnvironment.getApplication()
         val info=AccessibilityServiceInfo()

@@ -212,6 +212,10 @@ def event_in_window(raw: dict, cursor: dict, dispatch_uptime: int) -> tuple[bool
     end = min(cursor['deadline_uptime_ms'], dispatch_uptime + cursor['window_ms'])
     if seq <= cursor['producer_sequence_cursor'] or t < dispatch_uptime or t < cursor['start_uptime_ms']:
         return False, 'PRE_CURSOR_EVIDENCE'
+    if t == dispatch_uptime:
+        # Android eventTime is millisecond-granularity; equal ticks cannot order
+        # the event against the API call.
+        return False, 'EVENT_ORDER_AMBIGUOUS'
     if t > end or receive > end + cursor['receive_grace_ms']:
         return False, 'LATE_EVIDENCE'
     if receive < t:
@@ -374,11 +378,11 @@ class PostActionVerifier:
         correlations = [correlate(e, cursor, request, dispatch) for e in raw_events]
         eligible = [e for e in raw_events if event_in_window(e, cursor, dispatch)[0]]
         plausible = [e for e in eligible if e.get('event_type') in ACTION_EVENT_TYPES]
-        unique_actions = {normalize(e)['fingerprint'] for e in plausible}
         competing = any(r['event_type'] == 'DISPATCH_STARTED' and r.get('request_id') != b['request_id'] and
                         arms[0]['producer_sequence'] < r['producer_sequence'] for r in rows)
-        ambiguous = not integrity or competing or len(unique_actions) > 1 or any(c['result'] == Correlation.AMBIGUOUS.value or
-                    c['reason'] == 'EVENT_OWNERSHIP_AMBIGUOUS' for c in correlations)
+        # No stable Android event ID proves identical payloads are one platform event.
+        ambiguous = not integrity or competing or len(plausible) > 1 or any(c['result'] == Correlation.AMBIGUOUS.value or
+                    c['reason'] in ('EVENT_OWNERSHIP_AMBIGUOUS', 'EVENT_ORDER_AMBIGUOUS') for c in correlations)
         effect = any(c['result'] == Correlation.STRONG_MATCH.value and e.get('event_type') == 1
                      for e, c in zip(raw_events, correlations))
 

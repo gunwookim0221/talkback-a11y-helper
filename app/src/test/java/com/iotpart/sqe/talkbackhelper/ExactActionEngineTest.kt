@@ -1,5 +1,6 @@
 package com.iotpart.sqe.talkbackhelper
 
+import android.os.SystemClock
 import android.graphics.Rect
 import android.view.View
 import android.view.accessibility.AccessibilityNodeInfo
@@ -72,6 +73,9 @@ class ExactActionEngineTest {
         shadowOf(r.target).setOnPerformActionListener{_,_->
             assertTrue(c.active())
             assertNotNull(c.sourceIdentity(r.target));assertNull(c.sourceIdentity(r.root))
+            // EventTime is millisecond-granularity. Keep the synthetic positive event
+            // strictly after the dispatch tick so this fixture proves ordering.
+            time=maxOf(time,SystemClock.uptimeMillis())+1
             val raw=JSONObject().put("event_type",1).put("event_uptime_ms",time)
                 .put("package","com.example.smartthings").put("window_id",7).put("text",JSONArray().put("Open"))
                 .put("source_provenance","EXACT_RETAINED_NODE_REFERENCE").put("source_identity",c.sourceIdentity(r.target))
