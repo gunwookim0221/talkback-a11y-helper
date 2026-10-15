@@ -740,6 +740,33 @@ class A11yAdbClient:
     def ping(self, dev: Any = None, wait_: float = 3.0) -> bool:
         return self._helper_bridge._ping_helper(dev=dev, wait_=wait_)
 
+    def precheck_helper_build_identity(
+        self,
+        dev: Any = None,
+        wait_: float = 3.0,
+        *,
+        repo_root: str | Path | None = None,
+        acceptance_mode: bool = True,
+    ) -> dict[str, Any]:
+        """Read-only PING build identity check; it never authorizes an action."""
+        return self._helper_bridge.precheck_helper_build_identity(
+            dev=dev, wait_=wait_, repo_root=repo_root, acceptance_mode=acceptance_mode
+        )
+
+    def resolve_exact_node_read_only(
+        self,
+        dev: Any,
+        request: Any,
+        wait_: float = 30.0,
+        *,
+        repo_root: str | Path | None = None,
+        acceptance_mode: bool = True,
+    ) -> dict[str, Any]:
+        """Run Helper's read-only exact-node reacquire and return its ACK envelope."""
+        return self._helper_bridge.resolve_exact_node_read_only(
+            dev=dev, request=request, wait_=wait_, repo_root=repo_root, acceptance_mode=acceptance_mode
+        )
+
     def _broadcast(self, dev: Any, action: str, extras: list[str] | None = None) -> str:
         hard_stop = getattr(self, "_phase5c_hard_stop_state", None)
         if hard_stop is not None:

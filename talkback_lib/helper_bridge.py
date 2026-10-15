@@ -6,7 +6,9 @@ from __future__ import annotations
 import time
 import uuid
 import threading
+from datetime import datetime, timezone
 from collections import OrderedDict
+from pathlib import Path
 from typing import Any
 
 from talkback_lib.adb_device import AdbCommandFailure
@@ -15,6 +17,7 @@ from talkback_lib.constants import (
     ACTION_GET_FOCUS,
     ACTION_EVIDENCE_EVENTS,
     ACTION_PING,
+    ACTION_RESOLVE_EXACT_NODE,
     ACTION_SMART_NEXT,
     ACTION_FOCUS_IN_BOUNDS,
     ACTION_TARGET_FOCUS_COMMIT,
@@ -24,6 +27,14 @@ from talkback_lib.constants import (
     STATUS_LOOPED,
     STATUS_MOVED,
     STATUS_SCROLLED,
+)
+from talkback_lib.exact_node_protocol import (
+    ExactNodeAck,
+    ExactNodeRequest,
+    OneShotRequestRegistry,
+    ProtocolValidationError,
+    canonical_json,
+    precheck_repo_helper_build_identity,
 )
 
 
@@ -48,6 +59,7 @@ class HelperBridge:
         self._async_in_flight: set[str] = set()
         self._focus_request_ids: OrderedDict[str, str] = OrderedDict()
         self._expired_focus_requests: OrderedDict[str, bool] = OrderedDict()
+        self._exact_request_registry = OneShotRequestRegistry()
 
     def is_focus_request(self, req_id: str) -> bool:
         with self._async_lock:
@@ -150,6 +162,84 @@ class HelperBridge:
         self._client._broadcast(dev, ACTION_PING, ["--es", "reqId", req_id])
         result = self._client._read_log_result(dev, "PING_RESULT", req_id, wait_seconds=wait_)
         return self._parse_broadcast_result(result) and result.get("status") == "READY"
+
+    def precheck_helper_build_identity(
+        self,
+        dev: Any = None,
+        wait_: float = 3.0,
+        *,
+        repo_root: str | Path | None = None,
+        acceptance_mode: bool = True,
+    ) -> dict[str, Any]:
+        """Issue one read-only PING and compare the reported Helper inputs locally."""
+        self._client.clear_logcat(dev=dev)
+        req_id = str(uuid.uuid4())
+        self._client._broadcast(dev, ACTION_PING, ["--es", "reqId", req_id])
+        ping = self._client._read_log_result(dev, "PING_RESULT", req_id, wait_seconds=wait_)
+        if not isinstance(ping, dict) or ping.get("reqId") != req_id or ping.get("success") is not True or ping.get("status") != "READY":
+            ping = None
+        root = Path(repo_root) if repo_root is not None else Path(__file__).resolve().parents[1]
+        result = precheck_repo_helper_build_identity(root, ping, acceptance_mode=acceptance_mode).to_dict()
+        result["helper_service_instance_id"] = ping.get("helper_service_instance_id") if isinstance(ping, dict) else None
+        return result
+
+    def resolve_exact_node_read_only(
+        self,
+        dev: Any,
+        request: ExactNodeRequest | dict[str, Any] | str,
+        wait_: float = 30.0,
+        *,
+        repo_root: str | Path | None = None,
+        acceptance_mode: bool = True,
+    ) -> dict[str, Any]:
+        """Send one exact-node reacquire request; this path can only return a read-only ACK."""
+        try:
+            parsed_request = ExactNodeRequest.parse(request.data if isinstance(request, ExactNodeRequest) else request)
+        except ProtocolValidationError as error:
+            return {"success": False, "status": "protocol_reject", "failure_code": error.code.value}
+
+        identity_check = self.precheck_helper_build_identity(
+            dev=dev, wait_=min(wait_, 5.0), repo_root=repo_root, acceptance_mode=acceptance_mode
+        )
+        if identity_check.get("status") != "MATCH" and acceptance_mode:
+            return {"success": False, "status": "identity_reject", "failure_code": identity_check.get("reason"),
+                    "helper_build_precheck": identity_check}
+        if identity_check.get("status") == "MISMATCH":
+            return {"success": False, "status": "identity_reject", "failure_code": identity_check.get("reason"),
+                    "helper_build_precheck": identity_check}
+        if identity_check.get("helper_service_instance_id") != parsed_request.data["helper_service_instance_id"]:
+            return {"success": False, "status": "identity_reject", "failure_code": "HELPER_SERVICE_INSTANCE_MISMATCH",
+                    "helper_build_precheck": identity_check}
+
+        try:
+            self._exact_request_registry.claim(
+                parsed_request,
+                now=datetime.now(timezone.utc),
+                expected_package=parsed_request.data["expected_package"],
+                expected_window=parsed_request.data["expected_window"],
+                current_snapshot_id=parsed_request.data["reacquire_snapshot_id"],
+            )
+        except ProtocolValidationError as error:
+            return {"success": False, "status": "protocol_reject", "failure_code": error.code.value}
+
+        req_id = parsed_request.request_id
+        try:
+            self._client.clear_logcat(dev=dev)
+            self._client._broadcast(dev, ACTION_RESOLVE_EXACT_NODE, [
+                "--es", "reqId", req_id,
+                "--es", "exactNodeRequest", canonical_json(parsed_request.data),
+            ])
+            result = self._client._read_log_result(dev, "EXACT_NODE_RESOLVE_RESULT", req_id, wait_seconds=wait_)
+        except AdbCommandFailure as error:
+            return {"success": False, "status": "transport_error", "failure_code": error.reason, "reqId": req_id}
+        if not isinstance(result, dict) or result.get("reqId") != req_id or result.get("status") != "ACK":
+            return {"success": False, "status": "transport_error", "failure_code": "EXACT_NODE_ACK_MISSING", "reqId": req_id}
+        try:
+            ack = ExactNodeAck.parse(result.get("ack"), parsed_request)
+        except ProtocolValidationError as error:
+            return {"success": False, "status": "protocol_error", "failure_code": error.code.value, "reqId": req_id}
+        return {"success": ack.data["resolved"], "status": "RESOLVED" if ack.data["resolved"] else "REJECTED",
+                "reqId": req_id, "ack": ack.data, "helper_build_precheck": identity_check}
 
     def _helper_ready_check(self, dev: Any = None) -> bool:
         started = time.monotonic()

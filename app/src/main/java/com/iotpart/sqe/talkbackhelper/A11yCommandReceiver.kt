@@ -29,6 +29,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val ACTION_SET_SYSTEM_LANGUAGE = "com.iotpart.sqe.talkbackhelper.SET_SYSTEM_LANGUAGE"
         internal const val HELPER_SERVICE_UNAVAILABLE_STATUS = "HELPER_SERVICE_UNAVAILABLE"
         private const val ACTION_PING = "com.iotpart.sqe.talkbackhelper.PING"
+        private const val ACTION_RESOLVE_EXACT_NODE = "com.iotpart.sqe.talkbackhelper.RESOLVE_EXACT_NODE"
         private const val ACTION_COMMAND = "com.iotpart.sqe.talkbackhelper.ACTION_COMMAND"
         private const val ACTION_EVIDENCE_EVENTS = "com.iotpart.sqe.talkbackhelper.EVIDENCE_EVENTS"
         private const val ACTION_ENTRY_CLICK_CAPTURE = "com.iotpart.sqe.talkbackhelper.ENTRY_CLICK_CAPTURE"
@@ -63,13 +64,15 @@ class A11yCommandReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         val action = intent?.action ?: return
         val reqId = parseReqId(intent)
-        A11yEvidence.capture(intent, reqId)
-        A11yEvidence.emit(
-            "ACTION_EXECUTION_STARTED",
-            reqId,
-            org.json.JSONObject().put("action", action)
-        )
-        A11yEvidence.emit("TARGET_REQUESTED", reqId, A11yEvidence.requestedTarget(intent))
+        if (action != ACTION_RESOLVE_EXACT_NODE) {
+            A11yEvidence.capture(intent, reqId)
+            A11yEvidence.emit(
+                "ACTION_EXECUTION_STARTED",
+                reqId,
+                org.json.JSONObject().put("action", action)
+            )
+            A11yEvidence.emit("TARGET_REQUESTED", reqId, A11yEvidence.requestedTarget(intent))
+        }
         if (action == ACTION_SMART_NEXT) {
             logSmartNextDiag(reqId, "receiver_onReceive", "action=$action receiver_version=$VERSION")
         }
@@ -108,6 +111,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
             ACTION_SET_TEXT -> handleSetText(intent)
             ACTION_SET_SYSTEM_LANGUAGE -> handleSetSystemLanguage(intent)
             ACTION_PING -> handlePing(intent)
+            ACTION_RESOLVE_EXACT_NODE -> handleResolveExactNode(intent)
             ACTION_COMMAND -> handleExternalCommand(context, intent)
             ACTION_EVIDENCE_EVENTS -> handleEvidenceEvents(intent)
             ACTION_ENTRY_CLICK_CAPTURE -> handleEntryClickCapture(intent)
@@ -597,13 +601,68 @@ class A11yCommandReceiver : BroadcastReceiver() {
             return
         }
 
-        val payload = org.json.JSONObject()
+        val payload = buildPingPayload(reqId).toString()
+        Log.i(TAG, "PING_RESULT $payload")
+    }
+
+    internal fun buildPingPayload(reqId: String): org.json.JSONObject {
+        val identity = org.json.JSONObject()
+            .put("schema_version", "1")
+            .put("helper_protocol_version", BuildConfig.HELPER_PROTOCOL_VERSION)
+            .put("versionName", BuildConfig.VERSION_NAME)
+            .put("versionCode", BuildConfig.VERSION_CODE)
+            .put("build_id", BuildConfig.HELPER_BUILD_ID)
+            .put("git_commit", BuildConfig.HELPER_GIT_COMMIT)
+            .put("helper_input_digest", BuildConfig.HELPER_INPUT_DIGEST)
+            .put("source_state", BuildConfig.HELPER_SOURCE_STATE)
+            .put("build_variant", BuildConfig.HELPER_BUILD_VARIANT)
+            .put("build_timestamp", BuildConfig.HELPER_BUILD_TIMESTAMP.takeIf { it.isNotBlank() } ?: org.json.JSONObject.NULL)
+            .put("metadata_provenance", "GENERATED_AT_BUILD")
+        return org.json.JSONObject()
             .put("reqId", reqId)
             .put("success", true)
             .put("status", "READY")
-            .toString()
-        Log.i(TAG, "PING_RESULT $payload")
+            .put("helper_build_identity", identity)
+            .put("helper_service_instance_id", A11yHelperService.serviceInstanceId)
+            .put("capabilities", org.json.JSONArray().put("read_only_hierarchy_identity").put("resolve_exact_node_read_only"))
     }
+
+    /** Resolve a structured target against a fresh read-only hierarchy. */
+    private fun handleResolveExactNode(intent: Intent) {
+        val reqId = parseReqId(intent)
+        val requestJson = intent.getStringExtra("exactNodeRequest")
+        if (requestJson.isNullOrBlank()) {
+            val payload = exactNodeResolveEnvelope(reqId, ExactNodeResolver.invalidRequestAck(reqId, "REQUEST_INVALID")).toString()
+            A11yResultTransport.encode("EXACT_NODE_RESOLVE_RESULT", reqId, payload).forEach { Log.w(TAG, it) }
+            return
+        }
+        val service = A11yHelperService.instance
+        if (service == null) {
+            val payload = exactNodeResolveEnvelope(reqId, ExactNodeResolver.invalidRequestAck(reqId, "HELPER_REACQUIRE_FAILED")).toString()
+            A11yResultTransport.encode("EXACT_NODE_RESOLVE_RESULT", reqId, payload).forEach { Log.w(TAG, it) }
+            return
+        }
+        val payload = runCatching {
+            val hierarchy = service.dumpHierarchy(reqId).put("snapshotId", java.util.UUID.randomUUID().toString())
+            val ack = ExactNodeResolver.resolve(
+                requestJson,
+                hierarchy,
+                helperServiceInstanceId = A11yHelperService.serviceInstanceId,
+            )
+            exactNodeResolveEnvelope(reqId, ack).toString()
+        }.getOrElse { error ->
+            exactNodeResolveEnvelope(
+                reqId,
+                ExactNodeResolver.invalidRequestAck(reqId, "HELPER_REACQUIRE_FAILED")
+                    .put("failure_detail", error.javaClass.simpleName)
+                    .put("helper_service_instance_id", A11yHelperService.serviceInstanceId),
+            ).toString()
+        }
+        A11yResultTransport.encode("EXACT_NODE_RESOLVE_RESULT", reqId, payload).forEach { Log.i(TAG, it) }
+    }
+
+    private fun exactNodeResolveEnvelope(reqId: String, ack: org.json.JSONObject): org.json.JSONObject =
+        org.json.JSONObject().put("reqId", reqId).put("success", true).put("status", "ACK").put("ack", ack)
 
     private fun logFailure(resultTag: String, reqId: String, reason: String, status: String? = null) {
         val payload = org.json.JSONObject()

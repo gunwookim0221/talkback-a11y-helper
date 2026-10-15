@@ -16,12 +16,14 @@ import org.json.JSONObject
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import java.util.UUID
 import kotlin.math.abs
 
 class A11yHelperService : AccessibilityService() {
     internal var smartNextDispatcher = SmartNextDispatcher { reqId -> moveFocusSmart(reqId) }
     internal var focusCommandDispatcher = AccessibilityCommandDispatcher()
     companion object {
+        val serviceInstanceId: String = UUID.randomUUID().toString()
         @Volatile
         var instance: A11yHelperService? = null
             private set
