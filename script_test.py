@@ -9,6 +9,7 @@ parser.add_argument("--output-dir", type=str, default=None)
 parser.add_argument("--mode", type=str, default="full")
 parser.add_argument("--language-mode", type=str, default="current")
 parser.add_argument("--launch-mode", type=str, default="warm")
+parser.add_argument("--entry-mode", choices=("AUTOMATED", "PREPOSITIONED"), default="AUTOMATED")
 parser.add_argument("--scenario", action="append", default=[])
 args, _ = parser.parse_known_args()
 if args.output_dir:
@@ -62,6 +63,7 @@ from tb_runner.evidence_identity import identity_shadow_enabled
 from tb_runner.traversal_evidence_gate import traversal_identity_v2_enabled
 from tb_runner.traversal_profiler import traversal_profiler_enabled
 from tb_runner.target_attempt_ledger import TargetAttemptLedger
+from tb_runner.entry_mode import PREPOSITIONED, PrepositionedSession, PrepositionedSafetyStop
 
 
 def _force_utf8_stdio():
@@ -141,6 +143,7 @@ def main() -> int:
         scenario_ids=tuple(args.scenario),
         output_dir=args.output_dir,
         runtime_config_path=os.environ.get("TB_RUNTIME_CONFIG_PATH"),
+        entry_mode=args.entry_mode,
     )
     context = RunContext(spec)
     out_dir = context.output_dir
@@ -175,6 +178,17 @@ def main() -> int:
     target_serial = context.serial
     client = A11yAdbClient(dev_serial=target_serial)
     client._target_attempt_ledger = TargetAttemptLedger(output_path)
+    runtime_bundle = None
+    runtime_tab_configs = None
+    if spec.entry_mode == PREPOSITIONED:
+        runtime_bundle = load_runtime_bundle(TAB_CONFIGS)
+        runtime_tab_configs = apply_run_selection(runtime_bundle.get("tab_configs", TAB_CONFIGS),
+                                                spec.scenario_ids, mode=spec.mode)
+        selected = [cfg for cfg in runtime_tab_configs if cfg.get("enabled", True)]
+        if len(selected) != 1:
+            raise ValueError("PREPOSITIONED requires exactly one enabled scenario")
+        selected[0]["entry_mode"] = PREPOSITIONED
+        PrepositionedSession(client, selected[0], Path(output_path).with_suffix(".prepositioned.jsonl"), log).bind()
     environment_capture = None
     try:
         repo_root = Path(__file__).resolve().parent
@@ -247,6 +261,7 @@ def main() -> int:
                     ),
                 )
             manifest["feature_flags"] = dict(feature_flags)
+            manifest["entry_mode"] = spec.entry_mode
             evidence_runtime.write_manifest(manifest)
             log(f"[EVIDENCE] enabled schema='evidence-event-v1' ledger='{evidence_runtime.ledger.path}'")
         except Exception as exc:
@@ -261,7 +276,10 @@ def main() -> int:
         except Exception as exc:
             log(f"[EVIDENCE][warning] early_finalize_failed error='{type(exc).__name__}: {exc}'")
 
-    preflight = run_preflight(client=client, serial=target_serial, log_fn=log)
+    if spec.entry_mode == PREPOSITIONED:
+        preflight = run_preflight(client=client, serial=target_serial, log_fn=log, entry_mode=spec.entry_mode)
+    else:
+        preflight = run_preflight(client=client, serial=target_serial, log_fn=log)
     if not preflight.ok:
         log(f"[PREFLIGHT] abort run reason='{preflight.reason}'")
     if preflight.talkback_status == "disabled":
@@ -295,12 +313,13 @@ def main() -> int:
     log(f"[MAIN] output file: {output_path}")
     log(f"[MAIN] image dir base: {output_base_dir}")
 
-    runtime_bundle = load_runtime_bundle(TAB_CONFIGS)
-    runtime_tab_configs = apply_run_selection(
-        runtime_bundle.get("tab_configs", TAB_CONFIGS),
-        context.spec.scenario_ids,
-        mode=context.spec.mode,
-    )
+    if runtime_bundle is None:
+        runtime_bundle = load_runtime_bundle(TAB_CONFIGS)
+        runtime_tab_configs = apply_run_selection(
+            runtime_bundle.get("tab_configs", TAB_CONFIGS),
+            context.spec.scenario_ids,
+            mode=context.spec.mode,
+        )
     checkpoint_save_every = int(runtime_bundle.get("checkpoint_save_every", 3) or 3)
 
     has_run_scenario = False
@@ -336,7 +355,15 @@ def main() -> int:
                 checkpoint_save_every=checkpoint_save_every,
                 attempt=0,
             )
+            if spec.entry_mode == PREPOSITIONED:
+                client._prepositioned_session.record("INTERNAL_TRAVERSAL_TERMINAL",
+                    summary=dict(getattr(client, "last_main_traversal_summary", {}) or {}),
+                    row_count=len(_rows), crash_detected=signal is not None)
             if signal is not None:
+                if spec.entry_mode == PREPOSITIONED:
+                    client._prepositioned_session.record("CRASH_NO_RECOVERY", reason="prepositioned_no_retry")
+                    crash_policy_abort = True
+                    break
                 if not should_process_crash_recovery(signal, processed_crash_event_ids):
                     log(f"[CRASH_RECOVERY] duplicate_ignored crash_event_id='{signal.crash_event_id}'")
                 else:
@@ -469,6 +496,10 @@ def main() -> int:
                             crash_policy_abort = True
             has_run_scenario = True
 
+    except PrepositionedSafetyStop as exc:
+        log(f"[SAFETY_STOP] PREPOSITIONED reason='{exc}'")
+        client._prepositioned_session.finalize_stop(row_count=len(all_rows))
+        return 3
     except Exception as exc:
         log(f"[FATAL] script interrupted: {exc}")
         run_perf.record_save_excel()
@@ -498,4 +529,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except PrepositionedSafetyStop as exc:
+        print(f"[SAFETY_STOP] PREPOSITIONED reason='{exc}'")
+        raise SystemExit(3)

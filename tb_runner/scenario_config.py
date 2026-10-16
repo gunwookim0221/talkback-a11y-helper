@@ -1412,6 +1412,27 @@ TAB_CONFIGS = [
     },
     {
         "scenario_id": "life_home_monitor_plugin",
+        "prepositioned_destination": {
+            "package": "com.samsung.android.oneconnect",
+            "activity_regex": r"com\.samsung\.android\.oneconnect\.ui\.homemonitor\.main\.view\.HomeMonitorMainActivity",
+            "required_resource_ids": [
+                "com.samsung.android.oneconnect:id/monitor_scroll_view",
+                "com.samsung.android.oneconnect:id/inflatedShmSecurityMonitorButtonLayout",
+            ],
+            "semantic_marker": {
+                "resource_id": "com.samsung.android.oneconnect:id/shmMonitorTitle",
+                "text_regex": r"(?i)(security|보안)",
+            },
+            "excluded_resource_ids": list(BOTTOM_TAB_GLOBAL_NAV["resource_ids"]),
+            "invariant_resource_ids": [
+                "com.samsung.android.oneconnect:id/shmBannerAwayButton",
+                "com.samsung.android.oneconnect:id/shmBannerAwayText",
+                "com.samsung.android.oneconnect:id/shmBannerStayButton",
+                "com.samsung.android.oneconnect:id/shmBannerStayText",
+                "com.samsung.android.oneconnect:id/shmBannerDisarmedButton",
+                "com.samsung.android.oneconnect:id/shmBannerDisarmedText",
+            ],
+        },
         "scenario_type": "content",
         "entry_type": "card",
         "tab_name": "(?i).*life.*",

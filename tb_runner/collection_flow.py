@@ -4123,6 +4123,9 @@ def recover_to_device_start_state(
 
 
 def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, Any]) -> bool:
+    session = getattr(client, "_prepositioned_session", None)
+    if session is not None:
+        session.stop("automated_recovery_forbidden")
     policy = _resolve_recovery_policy(tab_cfg)
     scenario_id = str(tab_cfg.get("scenario_id", "") or "")
     if _is_device_plugin_scenario(scenario_id):
@@ -11203,6 +11206,9 @@ def _get_latched_crash_payload(client: A11yAdbClient, *, scenario_id: str, attem
 
 
 def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict, *, output_base_dir: str | None = None) -> bool:
+    from tb_runner.entry_mode import PREPOSITIONED, normalize_entry_mode, open_prepositioned
+    if normalize_entry_mode(tab_cfg.get("entry_mode", "AUTOMATED")) == PREPOSITIONED:
+        return open_prepositioned(client, dev, tab_cfg, log_fn=log, stabilize_anchor_fn=stabilize_anchor)
     tab_retry_count = _get_retry_count(tab_cfg, "tab_select_retry_count", 2)
     anchor_retry_count = _get_retry_count(tab_cfg, "anchor_retry_count", 2)
     main_step_wait_seconds = _get_wait_seconds(tab_cfg, "main_step_wait_seconds", MAIN_STEP_WAIT_SECONDS)
@@ -19499,6 +19505,10 @@ def _annotate_report_row_context(row: dict[str, Any], tab_cfg: dict[str, Any]) -
         row["scenario_type"] = scenario_type
     if not str(row.get("tab_name", "") or "").strip():
         row["tab_name"] = tab_cfg.get("tab_name", "")
+    if tab_cfg.get("entry_mode") == "PREPOSITIONED":
+        row.update(entry_mode="PREPOSITIONED", entry_action_executed=False,
+                   automated_entry_attempted=False,
+                   destination_precondition="PASS" if tab_cfg.get("_scenario_start_source") == "manual_destination_verified" else "NOT_VERIFIED")
     return row
 
 
@@ -20527,6 +20537,14 @@ def _collect_tab_rows_impl(
         if not reason:
             reason = str(result[-1].get("stop_reason", "") or "aborted_before_collection") if result else "aborted_before_collection"
         return result
+    except BaseException as exc:
+        from tb_runner.entry_mode import PrepositionedSafetyStop
+        if isinstance(exc, PrepositionedSafetyStop):
+            reason = "prepositioned_safety_stop"
+            client.last_main_traversal_summary = dict(scenario_id=scenario_id, stop_reason=reason,
+                main_steps_completed=sum(int(r.get("step_index", 0) or 0) > 0 for r in all_rows[start_index:]),
+                traversal_finished=False, supplemental_terminal="SAFETY_STOP")
+        raise
     finally:
         rows = all_rows[start_index:]
         summary = metrics.summary(rows, reason)

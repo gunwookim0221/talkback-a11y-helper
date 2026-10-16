@@ -303,7 +303,11 @@ def run_preflight(
     adb_path: str = DEFAULT_ADB_PATH,
     adb_runner: Callable[..., tuple[bool, str]] = run_adb_text,
     sleep_fn: Callable[[float], None] = time.sleep,
+    entry_mode: str = "AUTOMATED",
 ) -> CorePreflightResult:
+    from tb_runner.entry_mode import PREPOSITIONED, normalize_entry_mode, readonly_preflight
+    if normalize_entry_mode(entry_mode) == PREPOSITIONED:
+        return readonly_preflight(client, serial, log_fn)
     device_connected = check_device_connected(serial=serial, adb_path=adb_path, adb_runner=adb_runner)
     log_fn(f"[PREFLIGHT] device_connected {device_connected['status']}")
     if device_connected["status"] == "FAIL":

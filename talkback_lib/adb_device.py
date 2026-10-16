@@ -26,6 +26,7 @@ class AdbDevice:
     def __init__(self, adb_path: str, resolve_serial) -> None:
         self.adb_path = adb_path
         self._resolve_serial = resolve_serial
+        self.command_guard = None
 
     @staticmethod
     def _effective_timeout(args: list[str], timeout: float | None) -> float:
@@ -37,6 +38,8 @@ class AdbDevice:
         return DEFAULT_TIMEOUT_SECONDS
 
     def _run_adb_command(self, args: list[str], dev: Any = None, timeout: float | None = DEFAULT_TIMEOUT_SECONDS, *, raise_on_failure: bool = False) -> str:
+        if self.command_guard is not None:
+            self.command_guard(args)
         serial = self._resolve_serial(dev)
         cmd = [self.adb_path]
         if serial:
@@ -143,6 +146,8 @@ class AdbDevice:
         return self._run_adb_command(["push", local_path, remote_path], dev=dev)
 
     def _tap(self, dev: Any, x: int, y: int, timeout: float = 10.0) -> bool:
+        if self.command_guard is not None:
+            self.command_guard(["shell", "input", "tap", str(int(x)), str(int(y))])
         serial = self._resolve_serial(dev)
         cmd = [self.adb_path]
         if serial:

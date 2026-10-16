@@ -1346,6 +1346,9 @@ class A11yAdbClient:
             "captureSequence": capture_sequence,
             "snapshotFingerprint": identity_metadata["snapshot_fingerprint"]["value"],
         }
+        observer = getattr(self, "hierarchy_observer", None)
+        if observer is not None:
+            observer(payload)
         return payload
 
     def dump_scroll_capabilities(

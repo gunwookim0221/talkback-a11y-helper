@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Mapping
 
 from tb_runner.runtime_config import RUNTIME_CONFIG_PATH_ENV
+from tb_runner.entry_mode import AUTOMATED, PREPOSITIONED, normalize_entry_mode
 
 
 def resolve_identity_feature_flags(
@@ -42,6 +43,14 @@ class RunSpec:
     traversal_identity_v2: bool = True
     traversal_profiler: bool = False
     preflight_talkback_pid: str | None = None
+    entry_mode: str = AUTOMATED
+
+    def __post_init__(self) -> None:
+        normalize_entry_mode(self.entry_mode)
+        if self.entry_mode == PREPOSITIONED and len(self.scenario_ids) != 1:
+            raise ValueError("PREPOSITIONED requires exactly one explicitly selected scenario")
+        if self.entry_mode == PREPOSITIONED and self.enable_coverage_probe:
+            raise ValueError("PREPOSITIONED does not permit a second exploratory coverage-probe traversal")
 
     @property
     def feature_flags(self) -> dict[str, bool]:
@@ -61,6 +70,8 @@ class RunSpec:
         command.extend(["--mode", self.mode])
         command.extend(["--language-mode", self.language_mode])
         command.extend(["--launch-mode", self.launch_mode])
+        if self.entry_mode != AUTOMATED:
+            command.extend(["--entry-mode", self.entry_mode])
         for scenario_id in self.scenario_ids:
             command.extend(["--scenario", scenario_id])
         return command
