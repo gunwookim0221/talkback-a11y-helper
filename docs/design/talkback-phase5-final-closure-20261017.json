@@ -1,0 +1,586 @@
+{
+  "schema_version": "talkback-phase5-final-closure-v1",
+  "canonical_record": true,
+  "record_state": "FINALIZED",
+  "source": {
+    "branch": "integration/phase3-current-main",
+    "existing_local_commit": "86ecbc6c384efdd5b3ed1a0a2a99290c59490615",
+    "preserved_prefix": {
+      "path": "out/phase5c_nested_hit_owner_fix_20261014/full32/canonical_scenario_results.jsonl",
+      "sha256": "801e94050b4b263d2c53b1dd687d7a963d892dac781e966c90ebf96b2a326985",
+      "source_rows": 31,
+      "scenarios_1_to_30_records_unchanged": true
+    },
+    "interim_attempt_ledger_reclassified_as_history": "out/phase5c_c8_c9_integrated_20261016/acceptance/scenario_ledger_after_scenario32_retry01.jsonl",
+    "scenario32_retry01_is_historical_only": true,
+    "initial_repository_state": {
+      "branch": "integration/phase3-current-main",
+      "local_head": "86ecbc6c384efdd5b3ed1a0a2a99290c59490615",
+      "origin_integration_head": "9106fdb01d1881ec46573132df1af9b2536be753",
+      "main_head": "6cb2fe21c4006caa1d188a97a69cf2a6409ee9ee",
+      "origin_main_head": "6cb2fe21c4006caa1d188a97a69cf2a6409ee9ee",
+      "ahead_count": 1,
+      "tracked_worktree_clean": true,
+      "staged_files_empty": true,
+      "main_unchanged": true
+    }
+  },
+  "accounting": {
+    "total_scenarios": 32,
+    "accepted_scenario_count": 30,
+    "safety_limit_scenario_count": 2,
+    "fail_scenario_count": 0,
+    "other_status_count": 0,
+    "counts_as_pass_true_count": 30,
+    "counts_as_fail_true_count": 0,
+    "counts_as_safety_limit_true_count": 2,
+    "raw_prior_terminal_status_counts_for_scenarios_1_to_30": {
+      "COMPLETED": 8,
+      "INCOMPLETE_NO_PROGRESS": 4,
+      "INCOMPLETE_SAFETY_LIMIT": 17,
+      "NO_DEDICATED_TERMINAL_STATUS": 1
+    },
+    "aggregation_correct": true,
+    "claim_32_of_32_pass": false
+  },
+  "scenarios": [
+    {
+      "scenario_id": 1,
+      "scenario_name": "global_nav_main",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": null,
+      "prior_terminal_reason": null,
+      "preserved_source_line": 1,
+      "preserved_source_record_sha256": "ed97a5175fd88d4243bd875c17168c3a15952d446ef3f1e87db11588c6b17584"
+    },
+    {
+      "scenario_id": 2,
+      "scenario_name": "home_main",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_NO_PROGRESS",
+      "prior_terminal_reason": "repeat_no_progress",
+      "preserved_source_line": 2,
+      "preserved_source_record_sha256": "19d9982d423d02cdd65d8708b0ab7c8fc89bfd40008aa12b0d2ad9c3969d13d0"
+    },
+    {
+      "scenario_id": 3,
+      "scenario_name": "home_safe_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_SAFETY_LIMIT",
+      "prior_terminal_reason": "safety_limit",
+      "preserved_source_line": 3,
+      "preserved_source_record_sha256": "fd50471277b6d7ef86f2c7c6d845c7cec03dad81dad2e010b856dca971e59497"
+    },
+    {
+      "scenario_id": 4,
+      "scenario_name": "life_food_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_SAFETY_LIMIT",
+      "prior_terminal_reason": "safety_limit",
+      "preserved_source_line": 4,
+      "preserved_source_record_sha256": "59efecf6a8b453e69d764b9a09c20b717a9646662b94a7fcadea84965cd9208d"
+    },
+    {
+      "scenario_id": 5,
+      "scenario_name": "life_air_care_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_SAFETY_LIMIT",
+      "prior_terminal_reason": "safety_limit",
+      "preserved_source_line": 5,
+      "preserved_source_record_sha256": "51b27d10e1d6752d71df01c6735b73380ae8d543d0c0ec9ec1b7047112dc87ef"
+    },
+    {
+      "scenario_id": 6,
+      "scenario_name": "life_home_care_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_NO_PROGRESS",
+      "prior_terminal_reason": "repeat_no_progress",
+      "preserved_source_line": 6,
+      "preserved_source_record_sha256": "0df92a297c7902a21520846ef6cd7568e927b1d46461e8bab52994812fd4a100"
+    },
+    {
+      "scenario_id": 7,
+      "scenario_name": "life_energy_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_SAFETY_LIMIT",
+      "prior_terminal_reason": "safety_limit",
+      "preserved_source_line": 7,
+      "preserved_source_record_sha256": "eb958a1204db3f94672d831b1885be93307a54b0a72223a1300ba3b2bfb54c74"
+    },
+    {
+      "scenario_id": 8,
+      "scenario_name": "devices_main",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_SAFETY_LIMIT",
+      "prior_terminal_reason": "safety_limit",
+      "preserved_source_line": 8,
+      "preserved_source_record_sha256": "8940501d87d159f0584ea684156d61c97206ac0cead7f59b86e95ca003f7156b"
+    },
+    {
+      "scenario_id": 9,
+      "scenario_name": "device_smoke_sensor_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "COMPLETED",
+      "prior_terminal_reason": "plugin_boundary_global_nav",
+      "preserved_source_line": 9,
+      "preserved_source_record_sha256": "9d024768435ded3371d67710beee1c760adba5c7ac5b830c81d0aa2df8a78140"
+    },
+    {
+      "scenario_id": 10,
+      "scenario_name": "device_water_leak_sensor_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "COMPLETED",
+      "prior_terminal_reason": "plugin_boundary_global_nav",
+      "preserved_source_line": 10,
+      "preserved_source_record_sha256": "c6ddc5d526be8bdcdab6b9b1c3aed63b6513f78892cc474a45deb958f693c8c5"
+    },
+    {
+      "scenario_id": 11,
+      "scenario_name": "device_motion_sensor_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "COMPLETED",
+      "prior_terminal_reason": "plugin_boundary_global_nav",
+      "preserved_source_line": 11,
+      "preserved_source_record_sha256": "192f74ef1a2385caf2f40a57ac459a3aa9e0d4c47d42aa3ba1fb73ff22501300"
+    },
+    {
+      "scenario_id": 12,
+      "scenario_name": "device_door_lock_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "COMPLETED",
+      "prior_terminal_reason": "plugin_boundary_global_nav",
+      "preserved_source_line": 12,
+      "preserved_source_record_sha256": "cc87fd4d96fa5af5657c5e39f2791809982315165237455618b6c320d15a4f21"
+    },
+    {
+      "scenario_id": 13,
+      "scenario_name": "device_air_purifier_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "COMPLETED",
+      "prior_terminal_reason": "plugin_boundary_global_nav",
+      "preserved_source_line": 13,
+      "preserved_source_record_sha256": "a9b6664dee8f155c010b0ea1633f6d1d0f29d97e28e74114f0346f89e8fef3a0"
+    },
+    {
+      "scenario_id": 14,
+      "scenario_name": "device_tv_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_SAFETY_LIMIT",
+      "prior_terminal_reason": "safety_limit",
+      "preserved_source_line": 14,
+      "preserved_source_record_sha256": "c0ce94f9e0de53a95b60d218cf65701991300539845a045d01e3f93fe689bf96"
+    },
+    {
+      "scenario_id": 15,
+      "scenario_name": "device_washer_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_SAFETY_LIMIT",
+      "prior_terminal_reason": "safety_limit",
+      "preserved_source_line": 15,
+      "preserved_source_record_sha256": "db6903644f6698387d21a74a566fe198e8b3a128c7f62005bd5d1d7f747f273b"
+    },
+    {
+      "scenario_id": 16,
+      "scenario_name": "device_humidity_sensor_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "COMPLETED",
+      "prior_terminal_reason": "plugin_boundary_global_nav",
+      "preserved_source_line": 16,
+      "preserved_source_record_sha256": "0ac60aed498c6d7599f39889c6c8820d76407aa218592f84b60f1bd5b48874ff"
+    },
+    {
+      "scenario_id": 17,
+      "scenario_name": "device_temperature_humidity_sensor_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "COMPLETED",
+      "prior_terminal_reason": "plugin_boundary_global_nav",
+      "preserved_source_line": 17,
+      "preserved_source_record_sha256": "dc3fd928fbaf4e2f4c6ca2d0ac04ccded8b2ce0238901129457986bb1b73f77e"
+    },
+    {
+      "scenario_id": 18,
+      "scenario_name": "device_camera_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_SAFETY_LIMIT",
+      "prior_terminal_reason": "safety_limit",
+      "preserved_source_line": 18,
+      "preserved_source_record_sha256": "bf391b6bf84f6d8f620e8d13ba1cf0739d9d3ffb7168fb02b6e3039814ac137b"
+    },
+    {
+      "scenario_id": 19,
+      "scenario_name": "device_home_camera_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_SAFETY_LIMIT",
+      "prior_terminal_reason": "safety_limit",
+      "preserved_source_line": 19,
+      "preserved_source_record_sha256": "e3d336a9b0b4b74d34da983f46af88dadba481d562e26a48125a05eabee4b171"
+    },
+    {
+      "scenario_id": 20,
+      "scenario_name": "device_audio_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_SAFETY_LIMIT",
+      "prior_terminal_reason": "safety_limit",
+      "preserved_source_line": 20,
+      "preserved_source_record_sha256": "c1c292ae91a800958f40bcee2c648bce1eab4ac23021d8ca9676c7180653c1bb"
+    },
+    {
+      "scenario_id": 21,
+      "scenario_name": "life_main",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_SAFETY_LIMIT",
+      "prior_terminal_reason": "safety_limit",
+      "preserved_source_line": 21,
+      "preserved_source_record_sha256": "849c02ea36de145fde409c48d75866cf4deee8bba605df2e97682c8230e53c15"
+    },
+    {
+      "scenario_id": 22,
+      "scenario_name": "routines_main",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_SAFETY_LIMIT",
+      "prior_terminal_reason": "safety_limit",
+      "preserved_source_line": 22,
+      "preserved_source_record_sha256": "6563fc919791355c903f961420d488aa1ccc47316998b6519e600bbdda93e3a0"
+    },
+    {
+      "scenario_id": 23,
+      "scenario_name": "menu_main",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_SAFETY_LIMIT",
+      "prior_terminal_reason": "safety_limit",
+      "preserved_source_line": 23,
+      "preserved_source_record_sha256": "876c69ea819726549384d83405062351a3edddd7a88b594569e23ab5d7a9423c"
+    },
+    {
+      "scenario_id": 24,
+      "scenario_name": "settings_entry_example",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_SAFETY_LIMIT",
+      "prior_terminal_reason": "safety_limit",
+      "preserved_source_line": 24,
+      "preserved_source_record_sha256": "d9d76c114b76f29f57d6f73facae9fe92da2ffa79b92add4ad78b1ee5c38482f"
+    },
+    {
+      "scenario_id": 25,
+      "scenario_name": "life_pet_care_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_SAFETY_LIMIT",
+      "prior_terminal_reason": "safety_limit",
+      "preserved_source_line": 25,
+      "preserved_source_record_sha256": "afad583e9cfd3fbfa2e9c5f5c9548cb6c791916fa69b172f6e4dd7e8e97fb848"
+    },
+    {
+      "scenario_id": 26,
+      "scenario_name": "life_family_care_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_SAFETY_LIMIT",
+      "prior_terminal_reason": "safety_limit",
+      "preserved_source_line": 26,
+      "preserved_source_record_sha256": "9a13799798501fa4852e6ec7a8fbd42685fb55e5166206a611a9f358baa29a68"
+    },
+    {
+      "scenario_id": 27,
+      "scenario_name": "life_plant_care_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "COMPLETED",
+      "prior_terminal_reason": "plugin_boundary_global_nav",
+      "preserved_source_line": 27,
+      "preserved_source_record_sha256": "879104246afd1bc0597f9c3b79b50c92a6b3a2f2443ec9498fe8e689b8835401"
+    },
+    {
+      "scenario_id": 28,
+      "scenario_name": "life_clothing_care_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_SAFETY_LIMIT",
+      "prior_terminal_reason": "safety_limit",
+      "preserved_source_line": 28,
+      "preserved_source_record_sha256": "c604928eb1247ae48b2b7325ded6f75a7d1d55c6d27fd6c2d1756558ff39f7dc"
+    },
+    {
+      "scenario_id": 29,
+      "scenario_name": "life_find_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_NO_PROGRESS",
+      "prior_terminal_reason": "repeat_no_progress",
+      "preserved_source_line": 29,
+      "preserved_source_record_sha256": "a33491ba48950526bdfe05b9cdb7417b22930a7bc87ac1aa59d40dad0130e3c3"
+    },
+    {
+      "scenario_id": 30,
+      "scenario_name": "life_video_plugin",
+      "status": "ACCEPTED_PRESERVED",
+      "counts_as_pass": true,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": false,
+      "prior_terminal_status": "INCOMPLETE_NO_PROGRESS",
+      "prior_terminal_reason": "repeat_no_progress",
+      "preserved_source_line": 30,
+      "preserved_source_record_sha256": "0e9ba91ec403d83f86dce072681b5543cf42da56cfca13da805e62534a4add98"
+    },
+    {
+      "scenario_id": 31,
+      "scenario_name": "life_home_monitor_plugin",
+      "status": "INCOMPLETE_SAFETY_LIMIT",
+      "limitation_class": "MANUAL_SAFETY_LIMITATION",
+      "counts_as_pass": false,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": true,
+      "blocker_stage": "AUTOMATED_ENTRY_SAFETY_APPROVAL",
+      "reason": "Home Monitor 진입 대상의 탐색 의미와 exact-node 식별은 확인되었으나, 주변 보안 상태 제어(Away/Stay/Disarmed)와의 효과 격리를 현재 read-only 상태 정보로 충분히 검증할 수 없어 자동 진입을 안전하게 승인할 수 없음. 과거 wrong-target로 Stay가 동작한 이력이 있어 fail-closed 정책에 따라 Scenario 31은 INCOMPLETE_SAFETY_LIMIT로 종료한다. TalkBack 포커스/발화 검증 자체가 원인은 아니다.",
+      "historical_attempt_status": "REJECTED",
+      "historical_attempt_preserved": true,
+      "evidence_references": [
+        "out/phase5d_c7_review_20261016/FINAL_REPORT.md",
+        "out/phase5d_c7r_review_20261016/FINAL_REPORT.md",
+        "out/phase5d_c7r2_evidence_20261016/EVIDENCE_REVIEW.md",
+        "out/phase5d_c7r3_20261016/FINAL_REPORT.md",
+        "out/phase5d_c7r4_observability_20261016/FINAL_REPORT.md",
+        "out/scenario31_safety_closure_review_20261016/FINAL_REPORT.md"
+      ],
+      "future_reopen_conditions": [
+        "authoritative read-only AWAY/STAY/DISARMED state",
+        "product contract proving security invariance for header navigation",
+        "equivalent safe instrumentation proving no security mutation",
+        "UI redesign removing dangerous ambiguity"
+      ]
+    },
+    {
+      "scenario_id": 32,
+      "scenario_name": "life_music_sync_plugin",
+      "status": "INCOMPLETE_SAFETY_LIMIT",
+      "limitation_class": "MANUAL_SAFETY_LIMITATION",
+      "counts_as_pass": false,
+      "counts_as_fail": false,
+      "counts_as_safety_limit": true,
+      "blocker_stage": "EXACT_ACTION_SEMANTIC_AND_APPLICATION_ISOLATION",
+      "reason": "Music Sync 진입 후보 ImageView는 고유 재획득과 ACTION_CLICK 가능 여부까지 확인되었으나, 해당 액션이 실제 open_music_sync 동작이라는 의미와 부모 클릭 경로와의 위임·격리 관계를 읽기 전용 근거만으로 끝내 입증하지 못했다. 현재 host 좌표 탭 경로는 승인된 Helper-native 동일 clock-domain 실행 계약도 만족하지 못한다. 추가 live 클릭으로 의미를 학습하는 것은 fail-closed 정책에 위배되므로 Scenario 32는 INCOMPLETE_SAFETY_LIMIT로 종료한다.",
+      "retry01_historical_result": {
+        "result": "INCOMPLETE_ERROR",
+        "terminal_reason": "tab_or_anchor_failed",
+        "retry_index": 1,
+        "total_attempts_including_original": 2,
+        "first_attempt_preserved": true,
+        "additional_retry_performed": false,
+        "helper_registration_fix_worked": true,
+        "click_capture_armed": true,
+        "host_coordinate_tap_executed": true,
+        "dispatch_cursor_status": "DEVICE_UPTIME_CURSOR_MISSING",
+        "event_correlation": "REJECTED",
+        "attempted_steps": 0,
+        "visits": 0,
+        "historical_rca": "out/phase5c_c8_c9_integrated_20261016/retry01/scenario32_retry01_rca.json",
+        "historical_ledger": "out/phase5c_c8_c9_integrated_20261016/acceptance/scenario_ledger_after_scenario32_retry01.jsonl"
+      },
+      "evidence_references": [
+        "out/phase5c_c8_c9_integrated_20261016/retry01/scenario32_retry01_rca.json",
+        "out/phase5c_clock_domain_architecture_20261016/ARCHITECTURE_REVIEW.md",
+        "out/phase5c_music_sync_exact_feasibility_20261016/FEASIBILITY_REVIEW.md",
+        "out/phase5c_music_sync_semantic_isolation_20261016/SEMANTIC_ISOLATION_REVIEW.md",
+        "out/phase5c_music_sync_action_provenance_final_20261017/ACTION_PROVENANCE_FINAL_REVIEW.md",
+        "out/scenario32_safety_closure_policy_review_20261017/FINAL_REPORT.md"
+      ],
+      "future_reopen_conditions": [
+        "exact Music Sync action/model value is exposed",
+        "source/UI contract proves ImageView to open_music_sync",
+        "parent delegation/isolation becomes authoritative",
+        "accessibility provides a stable navigation target with proven semantics",
+        "product UI redesign exposes an unambiguous exact target",
+        "another safe Helper-owned dispatch target becomes available"
+      ]
+    }
+  ],
+  "phase5a": {
+    "verdict": "PHASE5A_SAFE_ACTION_CLASSIFICATION_PASS_WITH_LIMITATIONS",
+    "complete": true,
+    "production_default": "OFF",
+    "evidence": "docs/design/talkback-phase5a-safe-action-classification-20261011.md"
+  },
+  "phase5b": {
+    "verdict": "PHASE5B_SECONDARY_AUTH_RECOVERY_PASS_WITH_LIMITATIONS",
+    "complete": true,
+    "evidence": "docs/design/talkback-phase5b-secondary-authorization-rca-20261012.md"
+  },
+  "phase5c": {
+    "verdict_candidate": "PASS_WITH_LIMITATIONS",
+    "verdict": "PASS_WITH_LIMITATIONS",
+    "closure_conditions_met": true,
+    "scenario31_canonicalized": true,
+    "scenario32_canonicalized": true,
+    "retry01_history_preserved": true,
+    "unresolved_fail_count": 0
+  },
+  "phase5d": {
+    "status": "SAFETY_FOUNDATION_COMPLETE_WITH_LIMITATIONS",
+    "summary": [
+      "exact-node identity and reacquire contracts",
+      "exact-action safety architecture and durable permit/action/audit foundations",
+      "post-action verification and adversarial C6 validation",
+      "fail-closed decisions for unproven Home Monitor security isolation and Music Sync action ownership"
+    ],
+    "evidence": "out/phase5d_c6_20261016/FINAL_REPORT.md"
+  },
+  "phase5": {
+    "verdict_candidate": "PASS_WITH_LIMITATIONS",
+    "verdict": "PASS_WITH_LIMITATIONS",
+    "closure_conditions_met": true,
+    "production_visit_authority_unchanged": true,
+    "exact_action_build_gate_default": "OFF",
+    "runtime_action_gate_default": "OFF",
+    "phase5d_safety_work_documented": true,
+    "unresolved_cross_scenario_critical_safety_defect": false
+  },
+  "clock_architecture": {
+    "status": "ARCHITECTURE_APPROVED_SEQUENCE_PLUS_CURSOR",
+    "architecture": [
+      "Helper native execution boundary",
+      "SystemClock.uptimeMillis()",
+      "sequence",
+      "connection epoch",
+      "boot identity",
+      "durable receipt"
+    ],
+    "implemented": false,
+    "required_now": false,
+    "required_before_phase5_closure": false
+  },
+  "regression_gates": {
+    "scenario31_metadata": "PASS",
+    "scenario32_metadata_and_retry_history": "PASS",
+    "aggregation_and_accepted_prefix_integrity": "PASS",
+    "phase5_focused_and_c4_c5_c6_safety_regression": "PASS: 670 passed (296 C4/C5/C6 critical subset; 374 Phase 5 closure/focused cases)",
+    "full_python_suite": "PASS: 4647 passed, 1 understood optional-dependency skip, 0 failed",
+    "android_unit_tests": "PASS: 452 passed, 0 failures, 0 errors, 0 skipped",
+    "android_build": "PASS: :app:testDebugUnitTest and :app:assembleDebug; 47 tasks executed",
+    "false_safe_approval_count": 0,
+    "scenario_execution": "NOT_RUN_BY_CLOSURE_TASK",
+    "known_skip": {
+      "test": "tests.test_excel_report.test_save_excel_xlsxwriter_thumbnail_insert_does_not_raise_file_not_found",
+      "reason": "optional xlsxwriter package is not installed; importorskip skips this thumbnail-specific test"
+    }
+  },
+  "phase6": {
+    "started": false,
+    "safe_to_start_review": true,
+    "ready_for_implementation": false
+  },
+  "closure_date": "2026-10-17",
+  "existing_local_commit_review": {
+    "commit": "86ecbc6c384efdd5b3ed1a0a2a99290c59490615",
+    "valid": true,
+    "disposition": "RETAIN_AND_INCLUDE_IN_INTEGRATION_PUBLICATION_AFTER_CLOSURE_GATES",
+    "message": "fix(helper): register entry click capture broadcast",
+    "changed_files": [
+      "app/src/main/AndroidManifest.xml",
+      "tests/test_phase5c_entry_safety.py"
+    ],
+    "review": "Registers the existing ENTRY_CLICK_CAPTURE receiver action; the receiver remains protected by android.permission.DUMP and the handler captures audit events without dispatching a click or focus action.",
+    "associated_evidence": "out/phase5c_c8_c9_integrated_20261016/retry01/precheck/current_build_verified.json"
+  },
+  "helper_build_identity": {
+    "source_head": "86ecbc6c384efdd5b3ed1a0a2a99290c59490615",
+    "java_runtime": "Android Studio JBR 21.0.9",
+    "gradle": "9.0.0",
+    "tasks": [
+      ":app:testDebugUnitTest",
+      ":app:assembleDebug"
+    ],
+    "build_gate_exact_action_support": false,
+    "apk_path": "app/build/outputs/apk/debug/app-debug.apk",
+    "apk_sha256": "4D1F2CD150D5B0693EB1DC873080BDD0973A411A10D107F86EB9E1CE35DE529F",
+    "installed_for_scenario_execution": false
+  },
+  "documentation": {
+    "closure_document": "docs/design/talkback-phase5-final-closure-20261017.md",
+    "canonical_metadata": "docs/design/talkback-phase5-final-closure-20261017.json",
+    "docs_index": "docs/README.md",
+    "docs_index_updated": true
+  },
+  "scenario31_and_32_causes_differ": true
+}

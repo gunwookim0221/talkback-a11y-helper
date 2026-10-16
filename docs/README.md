@@ -101,6 +101,7 @@ current Runner/Traversal Identity V2 경로가 담당합니다. **Controlled Rou
 - [Phase 5B Safe Navigation (2026-10-11)](design/talkback-phase5b-safe-navigation-20261011.md): integration branch의 bounded 안전 실행·반환 계약과 staged live 검증; production 기본값은 OFF
 - [Phase 5B Secondary Authorization RCA (2026-10-12)](design/talkback-phase5b-secondary-authorization-rca-20261012.md): native focus dispatch target binding, fallback invalidation, exact UNKNOWN replay, and staged retry verdict
 - [Phase 5A Safe Action Classification (2026-10-11)](design/talkback-phase5a-safe-action-classification-20261011.md): integration branch의 분류/정책 기반, shadow 검증과 Phase 5B readiness; production 기본값은 OFF
+- [TalkBack Phase 5 최종 closure (2026-10-17)](design/talkback-phase5-final-closure-20261017.md): 정규 32개 시나리오 ledger, Scenario 31/32 안전 제한 기록, 최종 Python/Android 회귀와 `PASS_WITH_LIMITATIONS` 판정
 - [Phase 8 Identity Shadow completion](design/talkback-identity-shadow-phase8-completion.md)
 - [Phase 9.5 Full Acceptance](design/talkback-phase9.5-full-acceptance.md)
 - [Phase 9.5.1 Regression Recovery](design/talkback-phase9.5.1-regression-recovery.md)
