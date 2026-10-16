@@ -1,8 +1,25 @@
 """Portable regressions for the Phase 5C entry safety boundary."""
 from copy import deepcopy
+from pathlib import Path
+import xml.etree.ElementTree as ET
 
 from tb_runner.entry_safety import (authorize_entry, classify_post_open,
     click_events, hierarchy_digest, resolve_navigation_owner, verify_actual_hit)
+
+
+def test_entry_click_capture_helper_action_is_registered_with_permission_gate():
+    project_root = Path(__file__).resolve().parents[1]
+    manifest = ET.parse(project_root / "app/src/main/AndroidManifest.xml").getroot()
+    android = "{http://schemas.android.com/apk/res/android}"
+    receiver = next(node for node in manifest.iter("receiver")
+                    if node.get(android + "name") == ".A11yCommandReceiver")
+    actions = {node.get(android + "name") for node in receiver.findall(".//action")}
+    assert receiver.get(android + "exported") == "true"
+    assert receiver.get(android + "permission") == "android.permission.DUMP"
+    assert "com.iotpart.sqe.talkbackhelper.ENTRY_CLICK_CAPTURE" in actions
+
+    receiver_source = (project_root / "app/src/main/java/com/iotpart/sqe/talkbackhelper/A11yCommandReceiver.kt").read_text(encoding="utf-8")
+    assert "ACTION_ENTRY_CLICK_CAPTURE -> handleEntryClickCapture(intent)" in receiver_source
 
 
 def node(rid, label, bounds, *, clickable=False, children=None, klass="android.view.ViewGroup", checkable=False):

@@ -62,6 +62,7 @@
                 <action android:name="com.iotpart.sqe.talkbackhelper.EXACT_ACTION_STOP" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.ACTION_COMMAND" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.EVIDENCE_EVENTS" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.ENTRY_CLICK_CAPTURE" />
             </intent-filter>
         </receiver>
 
