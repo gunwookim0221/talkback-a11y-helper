@@ -1554,6 +1554,11 @@ class A11yAdbClient:
             )
             if not re.fullmatch(r"\d+", user_text.strip()):
                 raise HierarchyTransportError("ANDROID_USER_UNAVAILABLE", request_id)
+            prepositioned = getattr(self, "_prepositioned_session", None)
+            if prepositioned is not None:
+                prepositioned.authorize_hierarchy_payload_read(
+                    user_id=user_text.strip(), uri=uri, control=ready
+                )
             binary = self._adb_device._run_adb_binary_command(
                 ["shell", "-T", "content", "read", "--user", user_text.strip(), "--uri", uri],
                 dev=dev,

@@ -6,10 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from talkback_lib import (
-    A11yAdbClient,
     DEFAULT_HIERARCHY_TRANSPORT_MODE,
-    HIERARCHY_PAYLOAD_SCHEMA,
-    MAX_HIERARCHY_PAYLOAD_BYTES,
 )
 from tb_runner.entry_mode import PrepositionedSafetyStop, PrepositionedSession
 
@@ -52,77 +49,33 @@ def test_reliable_default_capability_query_is_read_only_control(tmp_path):
 
     event = _audit(session)[-1]
     assert event["event"] == "COMMAND_ALLOWED"
-    assert event["kind"] == "READ_ONLY_CONTROL"
+    assert event["kind"] == "READ_ONLY_QUERY"
     assert event["phase"] == "READ_ONLY"
     assert event["command"][4] == HELPER_ACTION_PREFIX + "HIERARCHY_TRANSFER_CAPABILITIES"
     assert not any(row["event"] in {"SAFETY_STOP", "INTERNAL_TRAVERSAL_TERMINAL"}
                    for row in _audit(session))
 
 
-def test_default_reliable_dump_passes_capability_gate_then_stops_at_unlisted_start(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("action", "expected_kind"),
+    [
+        ("HIERARCHY_TRANSFER_CAPABILITIES", "READ_ONLY_QUERY"),
+        ("HIERARCHY_TRANSFER_START", "READ_ONLY_OBSERVATION_CONTROL"),
+        ("HIERARCHY_TRANSFER_STATUS", "READ_ONLY_OBSERVATION_CONTROL"),
+        ("HIERARCHY_TRANSFER_ACK", "TRANSPORT_CLEANUP_CONTROL"),
+        ("HIERARCHY_TRANSFER_CANCEL", "TRANSPORT_CLEANUP_CONTROL"),
+    ],
+)
+def test_exact_reliable_control_actions_have_approved_classification(tmp_path, action, expected_kind):
     assert DEFAULT_HIERARCHY_TRANSPORT_MODE == "RELIABLE_FILE_PFD"
-    client = A11yAdbClient(dev_serial="SERIAL", start_monitor=False)
-    session = PrepositionedSession(
-        client,
-        {"scenario_id": "life_home_monitor_plugin"},
-        tmp_path / "prepositioned.jsonl",
-        log_fn=lambda *_args, **_kwargs: None,
-    )
-    session.bind()
-    helper_identity = {
-        "build_id": "a" * 64,
-        "git_commit": "b" * 40,
-        "source_state": "CLEAN",
-        "input_digest": "c" * 64,
-        "build_variant": "debug",
-    }
-    expected_identity = {
-        "status": "MATCH",
-        "helper_build_id": helper_identity["build_id"],
-        "helper_git_commit": helper_identity["git_commit"],
-        "helper_service_instance_id": "service-instance-1",
-        "helper_input_digest": helper_identity["input_digest"],
-        "build_variant": "debug",
-    }
-    actions = []
+    _, session = _session(tmp_path)
 
-    def control(_dev, action, extras, *, request_id, remaining_seconds):
-        actions.append(action)
-        session.guard_command(_broadcast(f"HIERARCHY_TRANSFER_{action}", *extras))
-        if action != "CAPABILITIES":
-            pytest.fail(f"unexpected control response after guard: {action}")
-        nonce = extras[extras.index("queryNonce") + 1]
-        return {
-            "schema": "hierarchy-transfer-control.v1",
-            "protocol_version": "hierarchy-payload.v1",
-            "request_id": None,
-            "query_nonce": nonce,
-            "process_epoch": "process-epoch-1",
-            "service_instance_id": "service-instance-1",
-            "generation": 0,
-            "helper_build_identity": helper_identity,
-            "payload_schema_version": HIERARCHY_PAYLOAD_SCHEMA,
-            "max_payload_bytes": MAX_HIERARCHY_PAYLOAD_BYTES,
-            "status": "OK",
-            "completed": True,
-            "payload_complete": True,
-            "capabilities": ["content_provider_pfd"],
-        }
+    session.guard_command(_broadcast(action, "--es", "queryNonce", "a" * 32))
 
-    monkeypatch.setattr(client, "_hierarchy_transfer_control", control)
-
-    with pytest.raises(PrepositionedSafetyStop):
-        client.dump_hierarchy(dev="SERIAL", expected_helper_build_identity=expected_identity)
-
-    assert actions == ["CAPABILITIES", "START"]
-    rows = _audit(session)
-    capability = next(row for row in rows if row.get("kind") == "READ_ONLY_CONTROL")
-    assert capability["phase"] == "READ_ONLY"
-    blocked = next(row for row in rows if row["event"] == "COMMAND_BLOCKED")
-    assert blocked["command"][4] == HELPER_ACTION_PREFIX + "HIERARCHY_TRANSFER_START"
-    terminal = next(row for row in rows if row["event"] == "INTERNAL_TRAVERSAL_TERMINAL")
-    assert terminal["safety_classification"] == "UNALLOWLISTED_HIERARCHY_CONTROL"
-    assert terminal["blocked_operation_dispatched"] is False
+    event = _audit(session)[-1]
+    assert event["event"] == "COMMAND_ALLOWED"
+    assert event["kind"] == expected_kind
+    assert event["phase"] == "READ_ONLY"
 
 
 def test_capability_query_remains_read_only_during_prepositioned_traversal(tmp_path):
@@ -134,7 +87,7 @@ def test_capability_query_remains_read_only_during_prepositioned_traversal(tmp_p
 
     event = _audit(session)[-1]
     assert event["event"] == "COMMAND_ALLOWED"
-    assert event["kind"] == "READ_ONLY_CONTROL"
+    assert event["kind"] == "READ_ONLY_QUERY"
     assert event["phase"] == "TRAVERSAL"
 
 
@@ -170,7 +123,7 @@ def test_unknown_broadcast_still_fails_closed_with_terminal_audit(tmp_path):
         _broadcast("CLICK_TARGET"),
         _broadcast("CLICK_FOCUSED"),
         _broadcast("ACTION_COMMAND", "--es", "command", "activate"),
-        _broadcast("HIERARCHY_TRANSFER_START"),
+        _broadcast("HIERARCHY_TRANSFER_UNRECOGNIZED"),
         _broadcast("NOT_A_HELPER_ACTION"),
         ["shell", "input", "tap", "400", "400"],
     ],

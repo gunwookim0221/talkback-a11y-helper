@@ -97,10 +97,12 @@ def verify_destination(contract: dict[str, Any] | None, *, activity: str,
 
 _READ_BROADCASTS = {"PING", "DUMP_TREE", "DUMP_HIERARCHY", "GET_FOCUS", "CHECK_TARGET",
                     "EVIDENCE_EVENTS", "DUMP_SCROLL_CAPABILITIES", "RESOLVE_EXACT_NODE"}
-_READ_ONLY_CONTROL_BROADCASTS = {"HIERARCHY_TRANSFER_CAPABILITIES"}
-_UNALLOWLISTED_HIERARCHY_CONTROL_BROADCASTS = {
-    "HIERARCHY_TRANSFER_START", "HIERARCHY_TRANSFER_STATUS",
-    "HIERARCHY_TRANSFER_ACK", "HIERARCHY_TRANSFER_CANCEL",
+_HIERARCHY_CONTROL_CLASSIFICATIONS = {
+    "HIERARCHY_TRANSFER_CAPABILITIES": "READ_ONLY_QUERY",
+    "HIERARCHY_TRANSFER_START": "READ_ONLY_OBSERVATION_CONTROL",
+    "HIERARCHY_TRANSFER_STATUS": "READ_ONLY_OBSERVATION_CONTROL",
+    "HIERARCHY_TRANSFER_ACK": "TRANSPORT_CLEANUP_CONTROL",
+    "HIERARCHY_TRANSFER_CANCEL": "TRANSPORT_CLEANUP_CONTROL",
 }
 _FOCUS_SCROLL_BROADCASTS = {"NEXT", "PREV", "SMART_NEXT", "FOCUS_TARGET", "FOCUS_IN_BOUNDS",
                            "TARGET_FOCUS_COMMIT", "SCROLL"}
@@ -153,6 +155,7 @@ class PrepositionedSession:
         self.blocked_safety_classification: str | None = None
         self.stop_stage: str | None = None
         self.terminal_audit_recorded = False
+        self._pending_hierarchy_payload_read: tuple[str, str] | None = None
         self.destination: dict[str, Any] = {}
         self.invariant_signature: str | None = None
         self.sequence = 0
@@ -221,15 +224,21 @@ class PrepositionedSession:
             allowed = True
         elif args[:1] == ["shell"] and len(args) > 1:
             shell = args[1:]
-            if len(shell) == 1:
+            if shell == ["am", "get-current-user"] and self.phase in {"READ_ONLY", "TRAVERSAL"}:
+                allowed, kind = True, "READ_ONLY_QUERY"
+            elif self._consume_hierarchy_payload_read(shell):
+                allowed, kind = True, "READ_ONLY_DATA_READ"
+            elif len(shell) == 1:
                 allowed = _readonly_shell_pipeline(shell[0])
             elif shell[0] == "am" and shell[1:2] == ["broadcast"] and "-a" in shell:
-                action = shell[shell.index("-a") + 1]
+                action_index = shell.index("-a")
+                action = shell[action_index + 1] if action_index + 1 < len(shell) else ""
                 prefix = "com.iotpart.sqe.talkbackhelper."
                 name = action[len(prefix):] if action.startswith(prefix) else ""
                 allowed = name in _READ_BROADCASTS
-                if self.phase in {"READ_ONLY", "TRAVERSAL"} and name in _READ_ONLY_CONTROL_BROADCASTS:
-                    allowed, kind = True, "READ_ONLY_CONTROL"
+                if (self.phase in {"READ_ONLY", "TRAVERSAL"}
+                        and name in _HIERARCHY_CONTROL_CLASSIFICATIONS):
+                    allowed, kind = True, _HIERARCHY_CONTROL_CLASSIFICATIONS[name]
                 if self.phase == "TRAVERSAL" and name in _FOCUS_SCROLL_BROADCASTS:
                     allowed, kind = True, "focus_or_scroll"
                 if self.phase == "TRAVERSAL" and name == "ACTION_COMMAND":
@@ -269,8 +278,6 @@ class PrepositionedSession:
                         classification = "MUTATING_ACTION"
                     elif name in _FOCUS_SCROLL_BROADCASTS:
                         classification = "FOCUS_OR_SCROLL_ACTION"
-                    elif name in _UNALLOWLISTED_HIERARCHY_CONTROL_BROADCASTS:
-                        classification = "UNALLOWLISTED_HIERARCHY_CONTROL"
                     elif name:
                         classification = "UNKNOWN_BROADCAST"
                     else:
@@ -283,6 +290,33 @@ class PrepositionedSession:
                         action_dispatched=False)
             self.stop("non_navigation_contract_violation")
         self.record("COMMAND_ALLOWED", command=args, kind=kind, phase=self.phase)
+
+    def authorize_hierarchy_payload_read(self, *, user_id: str, uri: str,
+                                         control: dict[str, Any]) -> None:
+        """Arm one exact PFD read after the reliable client validates its READY control."""
+        if self.phase not in {"READ_ONLY", "TRAVERSAL"}:
+            raise ValueError("hierarchy payload reads are limited to PREPOSITIONED read-only phases")
+        if not isinstance(user_id, str) or re.fullmatch(r"[0-9]+", user_id) is None:
+            raise ValueError("hierarchy payload read requires the numeric active user")
+        validator = getattr(self.client, "_valid_hierarchy_uri", None)
+        if not callable(validator) or not validator(uri, control):
+            raise ValueError("hierarchy payload URI must match the validated READY request")
+        if self._pending_hierarchy_payload_read is not None:
+            raise ValueError("a hierarchy payload read is already authorized")
+        self._pending_hierarchy_payload_read = (user_id, uri)
+
+    def _consume_hierarchy_payload_read(self, shell: list[str]) -> bool:
+        expected = self._pending_hierarchy_payload_read
+        if self.phase not in {"READ_ONLY", "TRAVERSAL"} or expected is None:
+            return False
+        if (len(shell) != 7 or shell[0:4] != ["-T", "content", "read", "--user"]
+                or shell[5] != "--uri"):
+            return False
+        user_id, uri = expected
+        if shell[4] != user_id or shell[6] != uri:
+            return False
+        self._pending_hierarchy_payload_read = None
+        return True
 
     def finalize_stop(self, *, row_count: int) -> None:
         if not self.latched_reason:
