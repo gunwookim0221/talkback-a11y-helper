@@ -15,6 +15,7 @@ CONTROL_SCHEMA = "hierarchy-transfer-control.v1"
 PROTOCOL_VERSION = "hierarchy-payload.v1"
 PAYLOAD_SCHEMA = "service-hierarchy-v1"
 PROVIDER_AUTHORITY = "com.iotpart.sqe.talkbackhelper.hierarchy"
+DEFAULT_HIERARCHY_TRANSPORT_MODE = "RELIABLE_FILE_PFD"
 MAGIC = b"TBHIER01"
 TRAILER = b"TBHEND01"
 MAX_CONTROL_JSON_BYTES = 8 * 1024

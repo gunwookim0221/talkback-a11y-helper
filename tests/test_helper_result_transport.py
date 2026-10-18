@@ -173,7 +173,7 @@ def test_service_hierarchy_single_line_result_is_request_correlated(monkeypatch)
     ])
     client = _prepare_hierarchy_client(monkeypatch, logs)
 
-    result = client.dump_hierarchy(wait_seconds=0.1)
+    result = client.dump_hierarchy(wait_seconds=0.1, transport_mode="LEGACY_LOGCAT")
 
     assert result["reqId"] == payload["reqId"]
     assert result["nodes"] == payload["nodes"]
@@ -195,7 +195,7 @@ def test_service_hierarchy_chunked_result_reassembles(monkeypatch):
     ])
     client = _prepare_hierarchy_client(monkeypatch, logs)
 
-    result = client.dump_hierarchy(wait_seconds=0.1)
+    result = client.dump_hierarchy(wait_seconds=0.1, transport_mode="LEGACY_LOGCAT")
 
     assert result["reqId"] == "hierarchy-re"
     assert result["nodes"][0]["text"] == "가" * 1800
@@ -222,8 +222,8 @@ def test_two_hierarchy_acquisitions_have_distinct_capture_ids_with_same_timestam
         type("FixedDateTime", (), {"now": staticmethod(lambda *_args, **_kwargs: __import__("datetime").datetime(2026, 10, 15, tzinfo=__import__("datetime").timezone.utc))}),
     )
 
-    first = client.dump_hierarchy(wait_seconds=0.1)["identityMetadata"]["snapshot"]
-    second = client.dump_hierarchy(wait_seconds=0.1)["identityMetadata"]["snapshot"]
+    first = client.dump_hierarchy(wait_seconds=0.1, transport_mode="LEGACY_LOGCAT")["identityMetadata"]["snapshot"]
+    second = client.dump_hierarchy(wait_seconds=0.1, transport_mode="LEGACY_LOGCAT")["identityMetadata"]["snapshot"]
 
     assert first["captured_at"]["value"] == second["captured_at"]["value"]
     assert first["capture_id"] != second["capture_id"]
@@ -238,7 +238,7 @@ def test_service_hierarchy_rejects_a_result_for_another_request(monkeypatch):
         "I/A11Y_HELPER: DUMP_HIERARCHY_END hierarchy-re",
     ]))
     with pytest.raises(RuntimeError, match="request_id_mismatch"):
-        client.dump_hierarchy(wait_seconds=0.1)
+        client.dump_hierarchy(wait_seconds=0.1, transport_mode="LEGACY_LOGCAT")
 
 
 def test_service_hierarchy_failure_and_duplicate_terminal_are_explicit(monkeypatch):
@@ -250,7 +250,7 @@ def test_service_hierarchy_failure_and_duplicate_terminal_are_explicit(monkeypat
         "I/A11Y_HELPER: DUMP_HIERARCHY_END hierarchy-re",
     ]))
     with pytest.raises(RuntimeError, match="HIERARCHY_SNAPSHOT:NO_ROOT"):
-        client.dump_hierarchy(wait_seconds=0.1)
+        client.dump_hierarchy(wait_seconds=0.1, transport_mode="LEGACY_LOGCAT")
 
     client = _prepare_hierarchy_client(monkeypatch, "\n".join([
         f"I/A11Y_HELPER: DUMP_HIERARCHY_RESULT {json.dumps({'reqId': 'hierarchy-re', 'success': True, 'nodes': [], 'windows': []})}",
@@ -258,7 +258,7 @@ def test_service_hierarchy_failure_and_duplicate_terminal_are_explicit(monkeypat
         "I/A11Y_HELPER: DUMP_HIERARCHY_END hierarchy-re",
     ]))
     with pytest.raises(RuntimeError, match="terminal_count=2"):
-        client.dump_hierarchy(wait_seconds=0.1)
+        client.dump_hierarchy(wait_seconds=0.1, transport_mode="LEGACY_LOGCAT")
 
 
 @pytest.mark.parametrize("prefix", ["SMART_NAV_RESULT", "EVIDENCE_EVENTS_RESULT"])

@@ -60,6 +60,7 @@ from talkback_lib.constants import (
 from talkback_lib.helper_bridge import HelperBridge
 from talkback_lib.hierarchy_file_transport import (
     CONTROL_SCHEMA as HIERARCHY_CONTROL_SCHEMA,
+    DEFAULT_HIERARCHY_TRANSPORT_MODE,
     MAX_ARTIFACT_BYTES as MAX_HIERARCHY_ARTIFACT_BYTES,
     MAX_PAYLOAD_BYTES as MAX_HIERARCHY_PAYLOAD_BYTES,
     PAYLOAD_SCHEMA as HIERARCHY_PAYLOAD_SCHEMA,
@@ -1280,16 +1281,19 @@ class A11yAdbClient:
         dev: Any = None,
         wait_seconds: float = 30.0,
         *,
-        transport_mode: str = "LEGACY_LOGCAT",
+        transport_mode: str = DEFAULT_HIERARCHY_TRANSPORT_MODE,
         expected_helper_build_identity: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Capture the service-owned hierarchy without opening UiAutomation."""
         self.last_hierarchy_metadata = {}
-        if transport_mode == "RELIABLE_FILE_PFD":
+        if transport_mode == DEFAULT_HIERARCHY_TRANSPORT_MODE:
+            expected_identity = expected_helper_build_identity
+            if expected_identity is None:
+                expected_identity = self.precheck_helper_build_identity(dev=dev, acceptance_mode=True)
             return self._dump_hierarchy_file_pfd(
                 dev=dev,
                 wait_seconds=wait_seconds,
-                expected_helper_build_identity=expected_helper_build_identity,
+                expected_helper_build_identity=expected_identity,
             )
         if transport_mode != "LEGACY_LOGCAT":
             raise ValueError(f"Unsupported hierarchy transport mode: {transport_mode}")
