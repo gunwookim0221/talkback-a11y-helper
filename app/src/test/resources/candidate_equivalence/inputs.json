@@ -1,0 +1,508 @@
+{
+  "fixture_schema": "talkback-candidate-equivalence-inputs.v1",
+  "fixtures": [
+    {
+      "fixture_id": "simple_button_api27_null_focusable",
+      "source_test": "ReliableHierarchyCandidateSchemaTest.v2ProjectionMatchesLegacyDumpTreeCandidateJsonExactly",
+      "platform_api_level": 27,
+      "root": {
+        "className": "android.widget.FrameLayout",
+        "packageName": "com.example",
+        "bounds": [0, 0, 1080, 2400],
+        "children": [
+          {
+            "className": "android.widget.Button",
+            "resourceId": "com.example:id/action",
+            "description": "Start",
+            "bounds": [80, 100, 420, 180],
+            "clickable": true,
+            "focusable": true,
+            "packageName": "com.example"
+          }
+        ]
+      }
+    },
+    {
+      "fixture_id": "nested_clickable_wrapper",
+      "source_test": "A11yTraversalAnalyzerTest.collectActionableDescendantMetadata_preservesClickableDescendantInfo",
+      "platform_api_level": 34,
+      "root": {
+        "children": [
+          {
+            "className": "android.widget.FrameLayout",
+            "resourceId": "com.example:id/card",
+            "bounds": [80, 300, 1000, 520],
+            "clickable": true,
+            "focusable": true,
+            "children": [
+              {
+                "className": "android.widget.TextView",
+                "text": "Living room",
+                "bounds": [120, 340, 650, 410]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "fixture_id": "screen_reader_focusable_true",
+      "source_test": "ReliableHierarchyCandidateSchemaTest.rawFactsIncludeApiLevelScreenReaderFocusableAndRangePresenceWithoutChangingLegacyCandidateShape",
+      "platform_api_level": 34,
+      "root": {
+        "children": [
+          {
+            "className": "android.widget.TextView",
+            "text": "Focusable heading",
+            "bounds": [40, 100, 900, 180],
+            "screenReaderFocusable": true
+          }
+        ]
+      }
+    },
+    {
+      "fixture_id": "screen_reader_focusable_false",
+      "source_test": "ReliableHierarchyCandidateSchemaTest.rawFactsRepresentFalseAndNullRangeValuesExplicitly",
+      "platform_api_level": 34,
+      "root": {
+        "children": [
+          {
+            "className": "android.widget.TextView",
+            "text": "Ordinary text",
+            "bounds": [40, 200, 900, 280],
+            "screenReaderFocusable": false
+          }
+        ]
+      }
+    },
+    {
+      "fixture_id": "range_info_control",
+      "source_test": "ReliableHierarchyCandidateSchemaTest.rawFactsIncludeApiLevelScreenReaderFocusableAndRangePresenceWithoutChangingLegacyCandidateShape",
+      "platform_api_level": 34,
+      "root": {
+        "children": [
+          {
+            "className": "android.widget.SeekBar",
+            "resourceId": "com.example:id/level",
+            "bounds": [204, 2173, 876, 2224],
+            "focusable": true,
+            "rangeInfo": {"type": 1, "min": 0, "max": 100, "current": 25}
+          }
+        ]
+      }
+    },
+    {
+      "fixture_id": "set_progress_only_unlabeled_control",
+      "source_test": "A11yTraversalAnalyzerTest.shouldRetainUnlabeledAdjustableTarget_acceptsVisibleEnabledFocusableSeekBar",
+      "platform_api_level": 34,
+      "root": {
+        "children": [
+          {
+            "className": "android.widget.SeekBar",
+            "bounds": [204, 2173, 876, 2224],
+            "clickable": true,
+            "focusable": true,
+            "actions": [16908349]
+          }
+        ]
+      }
+    },
+    {
+      "fixture_id": "class_only_unlabeled_control_rejected",
+      "source_test": "A11yTraversalAnalyzerTest.shouldRetainUnlabeledAdjustableTarget_rejectsClassOnlySeekBar",
+      "platform_api_level": 34,
+      "root": {
+        "children": [
+          {
+            "className": "android.widget.SeekBar",
+            "bounds": [204, 2173, 876, 2224]
+          }
+        ]
+      }
+    },
+    {
+      "fixture_id": "same_bounds_duplicate",
+      "source_test": "reliable hierarchy candidate adapter duplicate/order regression fixture",
+      "platform_api_level": 34,
+      "root": {
+        "children": [
+          {
+            "className": "android.widget.Button",
+            "resourceId": "com.example:id/first",
+            "text": "First",
+            "bounds": [20, 400, 500, 500],
+            "clickable": true,
+            "focusable": true
+          },
+          {
+            "className": "android.widget.Button",
+            "resourceId": "com.example:id/second",
+            "text": "Second",
+            "bounds": [20, 400, 500, 500],
+            "clickable": true,
+            "focusable": true
+          }
+        ]
+      }
+    },
+    {
+      "fixture_id": "same_resource_id_different_bounds",
+      "source_test": "A11yNavigatorTest candidate identity same view id with distinct bounds cases",
+      "platform_api_level": 34,
+      "root": {
+        "children": [
+          {
+            "className": "android.widget.Button",
+            "resourceId": "com.example:id/item",
+            "text": "Living Room",
+            "description": "Card A",
+            "bounds": [0, 400, 400, 520],
+            "clickable": true,
+            "focusable": true
+          },
+          {
+            "className": "android.widget.Button",
+            "resourceId": "com.example:id/item",
+            "text": "Living Room",
+            "description": "Card B",
+            "bounds": [0, 580, 400, 700],
+            "clickable": true,
+            "focusable": true
+          }
+        ]
+      }
+    },
+    {
+      "fixture_id": "empty_shell_duplicate_order",
+      "source_test": "A11yNavigatorTest.shouldExcludeAsEmptyShell_returnsTrueForClickableNodeWithoutMergedLabel",
+      "platform_api_level": 34,
+      "root": {
+        "children": [
+          {
+            "className": "android.widget.FrameLayout",
+            "resourceId": "com.example:id/empty_wrapper",
+            "bounds": [20, 700, 500, 820],
+            "clickable": true,
+            "focusable": true
+          },
+          {
+            "className": "android.widget.Button",
+            "resourceId": "com.example:id/labeled_target",
+            "text": "Continue",
+            "bounds": [20, 700, 500, 820],
+            "clickable": true,
+            "focusable": true
+          }
+        ]
+      }
+    },
+    {
+      "fixture_id": "empty_shell",
+      "source_test": "A11yNavigatorTest.shouldExcludeAsEmptyShell_returnsTrueForClickableNodeWithoutMergedLabel",
+      "platform_api_level": 34,
+      "root": {
+        "children": [
+          {
+            "className": "android.widget.FrameLayout",
+            "resourceId": "com.example:id/empty_shell",
+            "bounds": [40, 900, 800, 1040],
+            "clickable": true,
+            "focusable": true
+          }
+        ]
+      }
+    },
+    {
+      "fixture_id": "settings_row_exception",
+      "source_test": "A11yTraversalAnalyzerTest.collectActionableDescendantMetadata_preservesClickableDescendantInfo",
+      "platform_api_level": 34,
+      "root": {
+        "children": [
+          {
+            "className": "android.widget.FrameLayout",
+            "resourceId": "com.samsung.android.oneconnect:id/setting_button_layout",
+            "bounds": [40, 1000, 1040, 1180],
+            "focusable": true,
+            "children": [
+              {
+                "className": "android.widget.ImageButton",
+                "resourceId": "com.samsung.android.oneconnect:id/settings_image",
+                "description": "Settings",
+                "bounds": [900, 1020, 1020, 1140],
+                "clickable": true,
+                "focusable": true
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "fixture_id": "complex_container",
+      "source_test": "A11yTraversalAnalyzerTest actionable descendant and nested container metadata cases",
+      "platform_api_level": 34,
+      "root": {
+        "children": [
+          {
+            "className": "androidx.recyclerview.widget.RecyclerView",
+            "resourceId": "com.example:id/device_list",
+            "bounds": [0, 200, 1080, 2200],
+            "scrollable": true,
+            "actions": [4096],
+            "children": [
+              {
+                "className": "android.widget.LinearLayout",
+                "resourceId": "com.example:id/device_card",
+                "bounds": [30, 300, 1050, 520],
+                "focusable": true,
+                "children": [
+                  {
+                    "className": "android.widget.TextView",
+                    "text": "Living room",
+                    "bounds": [60, 330, 600, 390]
+                  },
+                  {
+                    "className": "android.widget.Switch",
+                    "resourceId": "com.example:id/power",
+                    "description": "Power",
+                    "bounds": [900, 340, 1010, 460],
+                    "clickable": true,
+                    "focusable": true
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "fixture_id": "oneconnect_food_readable_text_exception",
+      "source_test": "A11yTraversalAnalyzerTest.shouldPromoteOneConnectStaticTextCandidate_acceptsReadableTextBlock",
+      "platform_api_level": 34,
+      "root": {
+        "packageName": "com.samsung.android.oneconnect",
+        "children": [
+          {
+            "className": "android.widget.ScrollView",
+            "packageName": "com.samsung.android.oneconnect",
+            "resourceId": "com.samsung.android.oneconnect:id/content",
+            "bounds": [0, 300, 1080, 2200],
+            "scrollable": true,
+            "actions": [4096],
+            "children": [
+              {
+                "className": "android.widget.TextView",
+                "packageName": "com.samsung.android.oneconnect",
+                "text": "Preheat the oven and mix the ingredients.",
+                "bounds": [80, 980, 960, 1120]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "fixture_id": "negative_bounds",
+      "source_test": "reliable hierarchy candidate raw and adapter negative-bounds regression fixture",
+      "platform_api_level": 34,
+      "root": {
+        "children": [
+          {
+            "className": "android.widget.Button",
+            "resourceId": "com.example:id/partially_offscreen",
+            "text": "Previous",
+            "bounds": [-10, -20, 100, 80],
+            "clickable": true,
+            "focusable": true
+          }
+        ]
+      }
+    },
+    {
+      "fixture_id": "ordering_tie",
+      "source_test": "reliable hierarchy candidate ordering and traversal order fixture",
+      "platform_api_level": 34,
+      "root": {
+        "children": [
+          {
+            "className": "android.widget.Button",
+            "resourceId": "com.example:id/left",
+            "text": "Left",
+            "bounds": [40, 1200, 400, 1300],
+            "clickable": true,
+            "focusable": true
+          },
+          {
+            "className": "android.widget.Button",
+            "resourceId": "com.example:id/right",
+            "text": "Right",
+            "bounds": [500, 1200, 900, 1300],
+            "clickable": true,
+            "focusable": true
+          }
+        ]
+      }
+    },
+    {
+      "fixture_id": "duplicate_text_and_description",
+      "source_test": "reliable hierarchy candidate repeated label and contentDescription regression fixture",
+      "platform_api_level": 34,
+      "root": {
+        "children": [
+          {
+            "className": "android.widget.Button",
+            "resourceId": "com.example:id/arm_away",
+            "text": "Arm",
+            "description": "Arm system",
+            "bounds": [30, 1400, 520, 1500],
+            "clickable": true,
+            "focusable": true
+          },
+          {
+            "className": "android.widget.Button",
+            "resourceId": "com.example:id/arm_stay",
+            "text": "Arm",
+            "description": "Arm system",
+            "bounds": [540, 1400, 1030, 1500],
+            "clickable": true,
+            "focusable": true
+          }
+        ]
+      }
+    },
+    {
+      "fixture_id": "actionable_descendant_selection",
+      "source_test": "A11yTraversalAnalyzerTest.collectActionableDescendantMetadata_prefersLabeledButtonLikeClickableChild",
+      "platform_api_level": 34,
+      "root": {
+        "children": [
+          {
+            "className": "android.widget.FrameLayout",
+            "resourceId": "com.samsung.android.oneconnect:id/setting_button_layout",
+            "bounds": [40, 1600, 1040, 1800],
+            "focusable": true,
+            "children": [
+              {
+                "className": "android.widget.ImageButton",
+                "resourceId": "com.samsung.android.oneconnect:id/settings_image",
+                "description": "Settings",
+                "bounds": [900, 1620, 1020, 1740],
+                "clickable": true,
+                "focusable": true
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "fixture_id": "scrollable_container_metadata",
+      "source_test": "A11yNavigatorTest.hasScrollableDownCandidateByAction and hierarchy scroll metadata contract",
+      "platform_api_level": 34,
+      "root": {
+        "children": [
+          {
+            "className": "android.widget.ScrollView",
+            "resourceId": "com.example:id/content",
+            "bounds": [0, 200, 1080, 2200],
+            "scrollable": true,
+            "actions": [4096],
+            "children": [
+              {
+                "className": "android.widget.Button",
+                "resourceId": "com.example:id/continue",
+                "text": "Continue",
+                "bounds": [80, 1900, 920, 2050],
+                "clickable": true,
+                "focusable": true
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "fixture_id": "home_monitor",
+      "source_test": "ReliableHierarchyCandidateSchemaTest.homeMonitorCandidateFixturePreservesHeadingMoreOptionsAndSecurityControlCandidates",
+      "platform_api_level": 34,
+      "root": {
+        "children": [
+          {
+            "className": "android.widget.TextView",
+            "text": "Home Monitor",
+            "bounds": [40, 80, 700, 150]
+          },
+          {
+            "className": "android.widget.ImageButton",
+            "resourceId": "com.samsung.android.oneconnect:id/plugin_more_options",
+            "description": "More options",
+            "bounds": [900, 80, 1040, 180],
+            "clickable": true,
+            "focusable": true
+          },
+          {
+            "className": "android.widget.Button",
+            "resourceId": "com.samsung.android.oneconnect:id/shmBannerAwayButton",
+            "bounds": [60, 400, 1020, 500],
+            "clickable": true,
+            "focusable": true,
+            "children": [
+              {
+                "className": "android.widget.LinearLayout",
+                "bounds": [80, 405, 940, 485],
+                "children": [
+                  {
+                    "className": "android.widget.TextView",
+                    "text": "Arm away",
+                    "bounds": [100, 410, 900, 475]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "className": "android.widget.Button",
+            "resourceId": "com.samsung.android.oneconnect:id/shmBannerStayButton",
+            "bounds": [60, 540, 1020, 640],
+            "clickable": true,
+            "focusable": true,
+            "children": [
+              {
+                "className": "android.widget.LinearLayout",
+                "bounds": [80, 545, 940, 625],
+                "children": [
+                  {
+                    "className": "android.widget.TextView",
+                    "text": "Armed stay",
+                    "bounds": [100, 550, 900, 615]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "className": "android.widget.Button",
+            "resourceId": "com.samsung.android.oneconnect:id/shmBannerDisarmedButton",
+            "bounds": [60, 680, 1020, 780],
+            "clickable": true,
+            "focusable": true,
+            "children": [
+              {
+                "className": "android.widget.LinearLayout",
+                "bounds": [80, 685, 940, 765],
+                "children": [
+                  {
+                    "className": "android.widget.TextView",
+                    "text": "Disarm",
+                    "bounds": [100, 690, 900, 755]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

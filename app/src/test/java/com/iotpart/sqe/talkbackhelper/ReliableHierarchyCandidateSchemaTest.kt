@@ -220,46 +220,9 @@ class ReliableHierarchyCandidateSchemaTest {
 
     @Test
     fun homeMonitorCandidateFixturePreservesHeadingMoreOptionsAndSecurityControlCandidates() {
-        val heading = node(
-            className = "android.widget.TextView",
-            text = "Home Monitor",
-            bounds = Rect(40, 80, 700, 150)
+        val root = CandidateEquivalenceFixtureSupport.root(
+            CandidateEquivalenceFixtureSupport.fixture("home_monitor")
         )
-        val moreOptions = node(
-            className = "android.widget.ImageButton",
-            resourceId = "com.samsung.android.oneconnect:id/plugin_more_options",
-            description = "More options",
-            bounds = Rect(900, 80, 1040, 180),
-            clickable = true,
-            focusable = true
-        )
-        fun securityButton(id: String, label: String, top: Int): AccessibilityNodeInfo {
-            val labelNode = node(
-                className = "android.widget.TextView",
-                text = label,
-                bounds = Rect(100, top + 10, 900, top + 75)
-            )
-            val labelWrapper = node(
-                className = "android.widget.LinearLayout",
-                bounds = Rect(80, top + 5, 940, top + 85),
-                children = listOf(labelNode)
-            )
-            return node(
-                className = "android.widget.Button",
-                resourceId = "com.samsung.android.oneconnect:id/$id",
-                bounds = Rect(60, top, 1020, top + 100),
-                clickable = true,
-                focusable = true,
-                children = listOf(labelWrapper)
-            )
-        }
-        val root = node(children = listOf(
-            heading,
-            moreOptions,
-            securityButton("shmBannerAwayButton", "Arm away", 400),
-            securityButton("shmBannerStayButton", "Armed stay", 540),
-            securityButton("shmBannerDisarmedButton", "Disarm", 680)
-        ))
 
         val projection = ReliableHierarchyCandidateContract.build(root, root, "windows[0].root")
         val candidates = projection.getJSONArray("candidates")
