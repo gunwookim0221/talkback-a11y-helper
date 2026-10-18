@@ -10,10 +10,19 @@ import struct
 from dataclasses import dataclass
 from typing import Any
 
+from talkback_lib.reliable_hierarchy_schema import (
+    LEGACY_RAW_SCHEMA_VERSION,
+    RAW_SCHEMA_VERSION,
+    ReliableHierarchySchemaError,
+    decode_reliable_hierarchy_payload,
+    validate_reliable_hierarchy_payload_body,
+)
+
 CONTROL_PREFIX = "HPT1:"
 CONTROL_SCHEMA = "hierarchy-transfer-control.v1"
 PROTOCOL_VERSION = "hierarchy-payload.v1"
-PAYLOAD_SCHEMA = "service-hierarchy-v1"
+PAYLOAD_SCHEMA = RAW_SCHEMA_VERSION
+LEGACY_DIAGNOSTIC_PAYLOAD_SCHEMA = LEGACY_RAW_SCHEMA_VERSION
 PROVIDER_AUTHORITY = "com.iotpart.sqe.talkbackhelper.hierarchy"
 DEFAULT_HIERARCHY_TRANSPORT_MODE = "RELIABLE_FILE_PFD"
 MAGIC = b"TBHIER01"
@@ -120,6 +129,8 @@ def decode_artifact(
     expected_identity: dict[str, str],
     expected_request_id: str,
     expected_client_nonce: str,
+    capabilities: dict[str, Any] | None = None,
+    transport_metadata: dict[str, Any] | None = None,
 ) -> DecodedArtifact:
     request_id = expected_request_id
     if not isinstance(artifact, bytes) or not (20 + len(TRAILER) <= len(artifact) <= MAX_ARTIFACT_BYTES):
@@ -146,7 +157,12 @@ def decode_artifact(
     if control.get("payload_sha256") != payload_digest or header.get("payload_sha256") != payload_digest:
         raise HierarchyTransportError("PAYLOAD_HASH_MISMATCH", request_id)
     _validate_identity(header, control, expected_identity, request_id, expected_client_nonce)
-    payload = _parse_payload(payload_bytes, request_id)
+    payload = _parse_payload(
+        payload_bytes,
+        request_id,
+        capabilities=capabilities,
+        transport_metadata=transport_metadata or {"header": header, "control": control},
+    )
     return DecodedArtifact(header, payload_bytes, payload, artifact_digest)
 
 
@@ -214,7 +230,13 @@ def _validate_identity(
         raise HierarchyTransportError("CONTROL_CAPTURE_CLOCK_MISMATCH", request_id)
 
 
-def _parse_payload(payload_bytes: bytes, request_id: str) -> dict[str, Any]:
+def _parse_payload(
+    payload_bytes: bytes,
+    request_id: str,
+    *,
+    capabilities: dict[str, Any] | None = None,
+    transport_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     try:
         text = payload_bytes.decode("utf-8", errors="strict")
         payload = json.loads(text, object_pairs_hook=_reject_duplicate_json_keys, parse_constant=_reject_json_constant)
@@ -222,33 +244,17 @@ def _parse_payload(payload_bytes: bytes, request_id: str) -> dict[str, Any]:
         raise HierarchyTransportError("PAYLOAD_JSON_INVALID", request_id) from error
     if not isinstance(payload, dict) or payload.get("reqId") != request_id or payload.get("success") is not True:
         raise HierarchyTransportError("PAYLOAD_IDENTITY_OR_SUCCESS_INVALID", request_id)
-    if payload.get("schemaVersion") != PAYLOAD_SCHEMA:
-        raise HierarchyTransportError("PAYLOAD_SCHEMA_MISMATCH", request_id)
-    roots, windows = payload.get("nodes"), payload.get("windows")
-    if not isinstance(roots, list) or not roots or not isinstance(windows, list) or not windows:
-        raise HierarchyTransportError("EMPTY_HIERARCHY", request_id)
-    window_roots = [window.get("root") for window in windows if isinstance(window, dict)]
-    if len(window_roots) != len(windows) or roots != window_roots:
-        raise HierarchyTransportError("WINDOW_ROOT_MISMATCH", request_id)
-    actual_nodes = 0
-
-    def visit(node: Any, depth: int) -> None:
-        nonlocal actual_nodes
-        if not isinstance(node, dict) or depth > MAX_DEPTH:
-            raise HierarchyTransportError("HIERARCHY_STRUCTURE_INVALID", request_id)
-        actual_nodes += 1
-        if actual_nodes > MAX_NODES:
-            raise HierarchyTransportError("NODE_LIMIT_EXCEEDED", request_id)
-        children = node.get("children")
-        if not isinstance(children, list):
-            raise HierarchyTransportError("CHILDREN_INVALID", request_id)
-        for child in children:
-            visit(child, depth + 1)
-
-    for root in roots:
-        visit(root, 0)
-    if payload.get("nodeCount") != actual_nodes or actual_nodes <= 0:
-        raise HierarchyTransportError("NODE_COUNT_MISMATCH", request_id)
+    try:
+        if capabilities is None:
+            validate_reliable_hierarchy_payload_body(payload, transport_metadata=transport_metadata)
+        else:
+            decode_reliable_hierarchy_payload(
+                payload,
+                capabilities=capabilities,
+                transport_metadata=transport_metadata,
+            )
+    except ReliableHierarchySchemaError as error:
+        raise HierarchyTransportError(error.reason, request_id) from error
     return payload
 
 

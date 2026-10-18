@@ -21,6 +21,10 @@ from talkback_lib.hierarchy_file_transport import (
     encode_control,
     sha256_hex,
 )
+from talkback_lib.reliable_hierarchy_schema import (
+    CANDIDATE_CONTRACT_VERSION,
+    CANDIDATE_SCHEMA_VERSION,
+)
 from tb_runner.entry_mode import PrepositionedSafetyStop, PrepositionedSession
 
 
@@ -92,15 +96,49 @@ class _FakeProcess:
 
 
 def _install_device_responses(monkeypatch, client, *, failure: str | None = None,
-                              malformed_uri: bool = False):
+                              malformed_uri: bool = False,
+                              candidate_capability: bool = True):
     """Replace only external ADB responses; real A11yAdbClient/AdbDevice guards run."""
+    raw_root = {
+        "text": "Home Monitor", "contentDescription": None,
+        "viewIdResourceName": "app:id/home_monitor", "className": "android.widget.TextView",
+        "packageName": "com.samsung.android.oneconnect", "windowId": 1,
+        "boundsInScreen": {"l": 0, "t": 0, "r": 1080, "b": 2400},
+        "clickable": False, "effectiveClickable": False, "enabled": True,
+        "focusable": False, "focused": False, "inputFocused": False,
+        "accessibilityFocused": False, "selected": False, "scrollable": False,
+        "isScrollable": False, "checkable": False, "checked": False,
+        "visibleToUser": True, "isVisibleToUser": True,
+        "screenReaderFocusable": False, "rangeInfoPresent": False,
+        "actions": [], "children": [],
+    }
+    candidate = {
+        "text": "Home Monitor", "contentDescription": None,
+        "className": "android.widget.TextView", "viewIdResourceName": "app:id/home_monitor",
+        "boundsInScreen": {"l": 0, "t": 0, "r": 1080, "b": 2400},
+        "clickable": False, "focusable": False, "isVisibleToUser": True,
+        "focused": False, "accessibilityFocused": False,
+        "isTopAppBar": False, "isBottomNavigationBar": False,
+        "hasClickableDescendant": False, "hasFocusableDescendant": False,
+        "effectiveClickable": False,
+        "actionableDescendantResourceId": None,
+        "actionableDescendantClassName": None,
+        "actionableDescendantContentDescription": None,
+    }
     payload = json.dumps({
-        "reqId": "pending",
-        "success": True,
-        "schemaVersion": PAYLOAD_SCHEMA,
-        "nodeCount": 1,
-        "nodes": [{"text": "Home Monitor", "children": []}],
-        "windows": [{"root": {"text": "Home Monitor", "children": []}}],
+        "reqId": "pending", "success": True, "schemaVersion": PAYLOAD_SCHEMA,
+        "platformApiLevel": 34, "traversalRootRef": "windows[0].root",
+        "traversalRootWindowId": 1, "nodeCount": 1,
+        "nodes": [raw_root], "windows": [{"id": 1, "root": raw_root}],
+        "traversalCandidates": {
+            "schema_version": CANDIDATE_SCHEMA_VERSION,
+            "candidate_contract_version": CANDIDATE_CONTRACT_VERSION,
+            "algorithmVersion": "2.76.3", "analyzerVersion": "1.11.1",
+            "profileId": "oneconnect-traversal-policy", "profileVersion": "1.0.0",
+            "completion": {"status": "COMPLETE", "complete": True, "candidate_count": 1},
+            "traversalRootRef": "windows[0].root", "traversalRootWindowId": 1,
+            "canScrollDown": False, "scrollAxisContract": "axis-v1", "candidates": [candidate],
+        },
     }, separators=(",", ":")).encode("utf-8")
     state: dict[str, object] = {
         "actions": [],
@@ -164,7 +202,7 @@ def _install_device_responses(monkeypatch, client, *, failure: str | None = None
     def message(action: str, values: dict[str, str]) -> dict:
         state["actions"].append(action)
         if action == "CAPABILITIES":
-            return {
+            response = {
                 "schema": CONTROL_SCHEMA,
                 "protocol_version": PROTOCOL_VERSION,
                 "status": "OK",
@@ -173,9 +211,19 @@ def _install_device_responses(monkeypatch, client, *, failure: str | None = None
                 "service_instance_id": SERVICE_ID,
                 "helper_build_identity": helper_identity,
                 "payload_schema_version": PAYLOAD_SCHEMA,
+                "supported_payload_schema_versions": [PAYLOAD_SCHEMA],
+                "candidate_schema_version": CANDIDATE_SCHEMA_VERSION,
+                "supported_candidate_schema_versions": [CANDIDATE_SCHEMA_VERSION],
+                "candidate_contract_version": CANDIDATE_CONTRACT_VERSION,
                 "max_payload_bytes": MAX_PAYLOAD_BYTES,
-                "capabilities": ["content_provider_pfd"],
+                "capabilities": ["content_provider_pfd", "service_hierarchy_v2", CANDIDATE_SCHEMA_VERSION],
             }
+            if not candidate_capability:
+                response.pop("candidate_schema_version")
+                response.pop("supported_candidate_schema_versions")
+                response.pop("candidate_contract_version")
+                response["capabilities"] = ["content_provider_pfd"]
+            return response
         request_id = values["requestId"]
         client_nonce = values.get("clientNonce", "")
         if action == "START":
@@ -412,6 +460,19 @@ def test_normal_default_dump_reaches_ack_through_actual_adb_guard(tmp_path, monk
     assert content_reads[0][6] == "--uri"
     assert not any(row["event"] in {"COMMAND_BLOCKED", "SAFETY_STOP", "INTERNAL_TRAVERSAL_TERMINAL"}
                    for row in rows)
+
+
+def test_missing_candidate_capability_stops_before_start_without_legacy_fallback(tmp_path, monkeypatch):
+    client, _session = _client_and_session(tmp_path)
+    state = _install_device_responses(monkeypatch, client, candidate_capability=False)
+    client._logcat_reader.dump_raw_filtered = lambda **_kwargs: pytest.fail(
+        "missing candidate capability must not fall back to logcat"
+    )
+
+    with pytest.raises(HierarchyTransportError, match="CANDIDATE_CAPABILITY_REQUIRED"):
+        client.dump_hierarchy(expected_helper_build_identity=_expected_identity())
+
+    assert state["actions"] == ["CAPABILITIES"]
 
 
 @pytest.mark.parametrize(

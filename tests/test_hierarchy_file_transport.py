@@ -27,22 +27,94 @@ from talkback_lib.hierarchy_file_transport import (
     sha256_hex,
     validate_expected_build_precheck,
 )
+from talkback_lib.reliable_hierarchy_schema import (
+    CANDIDATE_CONTRACT_VERSION,
+    CANDIDATE_SCHEMA_VERSION,
+    RAW_SCHEMA_VERSION,
+)
 
 
 def _node(text: str = "상태 🌱\n줄") -> dict:
-    return {"text": text, "children": []}
+    return {
+        "text": text,
+        "contentDescription": None,
+        "viewIdResourceName": None,
+        "className": "android.widget.TextView",
+        "packageName": "com.example",
+        "windowId": 1,
+        "boundsInScreen": {"l": -2, "t": 0, "r": 100, "b": 40},
+        "clickable": False,
+        "effectiveClickable": False,
+        "enabled": True,
+        "focusable": False,
+        "focused": False,
+        "inputFocused": False,
+        "accessibilityFocused": False,
+        "selected": False,
+        "scrollable": False,
+        "isScrollable": False,
+        "checkable": False,
+        "checked": False,
+        "visibleToUser": True,
+        "isVisibleToUser": True,
+        "screenReaderFocusable": False,
+        "rangeInfoPresent": False,
+        "actions": [],
+        "children": [],
+    }
+
+
+def _candidate(text: str = "상태 🌱\n줄") -> dict:
+    return {
+        "text": text,
+        "contentDescription": None,
+        "className": "android.widget.TextView",
+        "viewIdResourceName": None,
+        "boundsInScreen": {"l": -2, "t": 0, "r": 100, "b": 40},
+        "clickable": False,
+        "focusable": False,
+        "isVisibleToUser": True,
+        "focused": False,
+        "accessibilityFocused": False,
+        "isTopAppBar": False,
+        "isBottomNavigationBar": False,
+        "hasClickableDescendant": False,
+        "hasFocusableDescendant": False,
+        "effectiveClickable": False,
+        "actionableDescendantResourceId": None,
+        "actionableDescendantClassName": None,
+        "actionableDescendantContentDescription": None,
+    }
 
 
 def _payload(request_id: str, node: dict | None = None) -> bytes:
     root = node or _node()
+    candidate = _candidate()
     return json.dumps(
         {
             "reqId": request_id,
             "success": True,
-            "schemaVersion": PAYLOAD_SCHEMA,
+            "schemaVersion": RAW_SCHEMA_VERSION,
+            "platformApiLevel": 34,
+            "traversalRootRef": "windows[0].root",
+            "traversalRootWindowId": 1,
             "nodeCount": 1,
             "nodes": [root],
-            "windows": [{"root": root}],
+            "windows": [{"id": 1, "root": root}],
+            "traversalCandidates": {
+                "schema_version": CANDIDATE_SCHEMA_VERSION,
+                "candidate_contract_version": CANDIDATE_CONTRACT_VERSION,
+                "algorithmVersion": "2.76.3",
+                "analyzerVersion": "1.11.1",
+                "profileId": "oneconnect-traversal-policy",
+                "profileVersion": "1.0.0",
+                "completion": {"status": "COMPLETE", "complete": True, "candidate_count": 1},
+                "traversalRootRef": "windows[0].root",
+                "traversalRootWindowId": 1,
+                "canScrollDown": False,
+                "scrollAxisContract": "axis-v1",
+                "candidates": [candidate],
+            },
         },
         ensure_ascii=False,
         separators=(",", ":"),
@@ -270,8 +342,12 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
                     "service_instance_id": identity["service_instance_id"],
                     "helper_build_identity": helper_control,
                     "payload_schema_version": PAYLOAD_SCHEMA,
+                    "supported_payload_schema_versions": [PAYLOAD_SCHEMA],
+                    "candidate_schema_version": CANDIDATE_SCHEMA_VERSION,
+                    "supported_candidate_schema_versions": [CANDIDATE_SCHEMA_VERSION],
+                    "candidate_contract_version": CANDIDATE_CONTRACT_VERSION,
                     "max_payload_bytes": MAX_PAYLOAD_BYTES,
-                    "capabilities": ["content_provider_pfd"],
+                    "capabilities": ["content_provider_pfd", "service_hierarchy_v2", CANDIDATE_SCHEMA_VERSION],
                 }
             request_id = pairs["requestId"]
             nonce = pairs.get("clientNonce", "")

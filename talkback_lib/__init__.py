@@ -73,6 +73,15 @@ from talkback_lib.hierarchy_file_transport import (
     validate_control_response as validate_hierarchy_control_response,
     validate_expected_build_precheck as validate_expected_hierarchy_build_precheck,
 )
+from talkback_lib.reliable_hierarchy_schema import (
+    ReliableHierarchyPayload,
+    ReliableHierarchySchemaError,
+    adapt_traversal_candidates_to_legacy,
+    decode_reliable_hierarchy_payload,
+    get_reliable_traversal_candidates,
+    legacy_dump_tree_response,
+    validate_candidate_capabilities,
+)
 from talkback_lib.logcat_reader import LogcatReader
 from talkback_lib.focus_trace_builder import build_initial_get_focus_trace, extract_focus_payload_candidate
 from talkback_lib.focus_service import FocusService
@@ -121,6 +130,8 @@ class A11yAdbClient:
         self._last_log_marker: tuple[tuple[int, int, int, int, int, int], int] | None = None
         self.last_dump_metadata: dict[str, Any] = {}
         self.last_hierarchy_metadata: dict[str, Any] = {}
+        self._last_hierarchy_capabilities: dict[str, Any] | None = None
+        self._last_hierarchy_transport_metadata: dict[str, Any] | None = None
         self._hierarchy_capture_sequence = 0
         self.last_scroll_capabilities: list[dict[str, Any]] = []
         self.last_device_collection: dict[str, Any] = {}
@@ -1286,6 +1297,8 @@ class A11yAdbClient:
     ) -> dict[str, Any]:
         """Capture the service-owned hierarchy without opening UiAutomation."""
         self.last_hierarchy_metadata = {}
+        self._last_hierarchy_capabilities = None
+        self._last_hierarchy_transport_metadata = None
         if transport_mode == DEFAULT_HIERARCHY_TRANSPORT_MODE:
             expected_identity = expected_helper_build_identity
             if expected_identity is None:
@@ -1359,6 +1372,7 @@ class A11yAdbClient:
                 raise RuntimeError(f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:invalid_json req_id={req_id}") from exc
         if not isinstance(payload, dict):
             raise RuntimeError(f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:invalid_payload req_id={req_id}")
+
         if payload.get("reqId") != req_id:
             raise RuntimeError(f"HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:request_id_mismatch req_id={req_id}")
         if payload.get("success") is not True:
@@ -1395,6 +1409,33 @@ class A11yAdbClient:
         if observer is not None:
             observer(payload)
         return payload
+
+    def dump_hierarchy_decoded(
+        self,
+        dev: Any = None,
+        wait_seconds: float = 30.0,
+        *,
+        expected_helper_build_identity: dict[str, Any] | None = None,
+    ) -> ReliableHierarchyPayload:
+        """Return the v2 raw hierarchy and candidate projection as a read-only model.
+
+        This opt-in decoder API does not alter any ``dump_tree()`` caller or
+        traversal authority. A legacy-only capability response fails closed.
+        """
+        payload = self.dump_hierarchy(
+            dev=dev,
+            wait_seconds=wait_seconds,
+            transport_mode=DEFAULT_HIERARCHY_TRANSPORT_MODE,
+            expected_helper_build_identity=expected_helper_build_identity,
+        )
+        if self._last_hierarchy_capabilities is None:
+            raise HierarchyTransportError("CANDIDATE_CAPABILITY_REQUIRED", str(payload.get("reqId") or ""))
+        context = self._last_hierarchy_transport_metadata
+        return decode_reliable_hierarchy_payload(
+            payload,
+            capabilities=self._last_hierarchy_capabilities,
+            transport_metadata=context,
+        )
 
     @staticmethod
     def _hierarchy_nonce() -> str:
@@ -1489,10 +1530,13 @@ class A11yAdbClient:
             )
             if "content_provider_pfd" not in capability.get("capabilities", []):
                 raise HierarchyTransportError("RELIABLE_TRANSPORT_UNSUPPORTED", request_id)
-            if capability.get("payload_schema_version") != HIERARCHY_PAYLOAD_SCHEMA:
-                raise HierarchyTransportError("PAYLOAD_SCHEMA_MISMATCH", request_id)
+            try:
+                validate_candidate_capabilities(capability, request_id=request_id)
+            except ReliableHierarchySchemaError as error:
+                raise HierarchyTransportError(error.reason, request_id) from error
             if capability.get("max_payload_bytes") != MAX_HIERARCHY_PAYLOAD_BYTES:
                 raise HierarchyTransportError("PAYLOAD_LIMIT_MISMATCH", request_id)
+            self._last_hierarchy_capabilities = dict(capability)
             expected_process_epoch = capability.get("process_epoch")
             if not isinstance(expected_process_epoch, str) or not expected_process_epoch:
                 raise HierarchyTransportError("PROCESS_EPOCH_MISSING", request_id)
@@ -1576,6 +1620,7 @@ class A11yAdbClient:
                 expected_identity=expected,
                 expected_request_id=request_id,
                 expected_client_nonce=client_nonce,
+                capabilities=capability,
             )
 
             final_status = send(
@@ -1618,6 +1663,17 @@ class A11yAdbClient:
                 raise HierarchyTransportError("ACK_IDENTITY_MISMATCH", request_id)
             acknowledged = True
 
+            self._last_hierarchy_transport_metadata = {
+                "header": decoded.header,
+                "control": {
+                    key: ready.get(key)
+                    for key in (
+                        "request_id", "client_nonce", "payload_schema_version", "generation", "process_epoch",
+                        "service_instance_id", "helper_build_identity",
+                    )
+                },
+            }
+
             payload = decoded.payload
             with self._state_lock:
                 self._hierarchy_capture_sequence += 1
@@ -1649,6 +1705,9 @@ class A11yAdbClient:
                 "helperBuildId": ready["helper_build_identity"]["build_id"],
                 "helperServiceInstanceId": ready["service_instance_id"],
                 "captureGeneration": ready["generation"],
+                "candidateCapabilityVerified": True,
+                "candidateSchemaVersion": capability.get("candidate_schema_version"),
+                "candidateContractVersion": capability.get("candidate_contract_version"),
             }
             observer = getattr(self, "hierarchy_observer", None)
             if observer is not None:
