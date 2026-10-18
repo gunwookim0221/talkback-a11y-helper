@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 from pathlib import Path
+from dataclasses import dataclass
 from typing import Any
 
 from talkback_lib.constants import DEFAULT_TIMEOUT_SECONDS
@@ -20,6 +22,38 @@ class AdbCommandFailure(RuntimeError):
         self.timeout = timeout
         self.stdout = stdout
         self.stderr = stderr
+
+
+@dataclass(frozen=True)
+class AdbBinaryCommandResult:
+    stdout: bytes
+    stderr: bytes
+    stderr_truncated: bool
+    returncode: int
+
+
+class AdbBinaryCommandFailure(RuntimeError):
+    """Bounded binary ADB transfer failure without text decoding."""
+
+    def __init__(
+        self,
+        reason: str,
+        command: list[str],
+        timeout: float,
+        *,
+        stdout: bytes = b"",
+        stderr: bytes = b"",
+        stderr_truncated: bool = False,
+        returncode: int | None = None,
+    ) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.command = command
+        self.timeout = timeout
+        self.stdout = stdout
+        self.stderr = stderr
+        self.stderr_truncated = stderr_truncated
+        self.returncode = returncode
 
 
 class AdbDevice:
@@ -86,6 +120,115 @@ class AdbDevice:
                 raise AdbCommandFailure("adb_command_failed", cmd, effective_timeout, stdout=proc.stdout or "", stderr=stderr)
             return ""
         return proc.stdout.strip()
+
+    def _run_adb_binary_command(
+        self,
+        args: list[str],
+        dev: Any = None,
+        timeout: float = DEFAULT_TIMEOUT_SECONDS,
+        *,
+        max_stdout_bytes: int,
+        max_stderr_bytes: int = 64 * 1024,
+    ) -> AdbBinaryCommandResult:
+        """Read bounded stdout bytes without newline or character conversion."""
+        if self.command_guard is not None:
+            self.command_guard(args)
+        serial = self._resolve_serial(dev)
+        command = [self.adb_path]
+        if serial:
+            command += ["-s", serial]
+        command += args
+        if max_stdout_bytes < 0 or max_stderr_bytes < 0 or timeout <= 0:
+            raise ValueError("binary ADB limits must be non-negative and timeout positive")
+        try:
+            proc = subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=False,
+                bufsize=0,
+            )
+        except FileNotFoundError as exc:
+            raise AdbBinaryCommandFailure("adb_executable_not_found", command, timeout) from exc
+        except OSError as exc:
+            raise AdbBinaryCommandFailure("adb_execution_failed", command, timeout, stderr=str(exc).encode("utf-8", errors="replace")) from exc
+
+        stdout = bytearray()
+        stderr = bytearray()
+        overflow = threading.Event()
+        stderr_truncated = threading.Event()
+
+        def drain_stdout() -> None:
+            assert proc.stdout is not None
+            while True:
+                chunk = proc.stdout.read(16 * 1024)
+                if not chunk:
+                    return
+                remaining = max_stdout_bytes - len(stdout)
+                if remaining > 0:
+                    stdout.extend(chunk[:remaining])
+                if len(chunk) > max(remaining, 0):
+                    overflow.set()
+                    try:
+                        proc.kill()
+                    except OSError:
+                        pass
+
+        def drain_stderr() -> None:
+            assert proc.stderr is not None
+            while True:
+                chunk = proc.stderr.read(16 * 1024)
+                if not chunk:
+                    return
+                remaining = max_stderr_bytes - len(stderr)
+                if remaining > 0:
+                    stderr.extend(chunk[:remaining])
+                if len(chunk) > max(remaining, 0):
+                    stderr_truncated.set()
+
+        stdout_thread = threading.Thread(target=drain_stdout, name="adb-binary-stdout", daemon=True)
+        stderr_thread = threading.Thread(target=drain_stderr, name="adb-binary-stderr", daemon=True)
+        stdout_thread.start()
+        stderr_thread.start()
+        timed_out = False
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            proc.kill()
+            proc.wait()
+        finally:
+            stdout_thread.join(timeout=2.0)
+            stderr_thread.join(timeout=2.0)
+            if proc.stdout:
+                proc.stdout.close()
+            if proc.stderr:
+                proc.stderr.close()
+        if timed_out:
+            raise AdbBinaryCommandFailure(
+                "adb_command_timeout", command, timeout, stdout=bytes(stdout), stderr=bytes(stderr),
+                stderr_truncated=stderr_truncated.is_set(), returncode=proc.returncode,
+            )
+        if overflow.is_set():
+            raise AdbBinaryCommandFailure(
+                "stdout_limit_exceeded", command, timeout, stdout=bytes(stdout), stderr=bytes(stderr),
+                stderr_truncated=stderr_truncated.is_set(), returncode=proc.returncode,
+            )
+        if stdout_thread.is_alive() or stderr_thread.is_alive():
+            raise AdbBinaryCommandFailure(
+                "pipe_drain_incomplete", command, timeout, stdout=bytes(stdout), stderr=bytes(stderr),
+                stderr_truncated=stderr_truncated.is_set(), returncode=proc.returncode,
+            )
+        if proc.returncode != 0:
+            raise AdbBinaryCommandFailure(
+                "adb_command_failed", command, timeout, stdout=bytes(stdout), stderr=bytes(stderr),
+                stderr_truncated=stderr_truncated.is_set(), returncode=proc.returncode,
+            )
+        return AdbBinaryCommandResult(
+            stdout=bytes(stdout), stderr=bytes(stderr), stderr_truncated=stderr_truncated.is_set(),
+            returncode=proc.returncode,
+        )
 
     def _clear_logcat_best_effort(self, dev: Any = None, timeout: float = 1.5) -> str:
         serial = self._resolve_serial(dev)

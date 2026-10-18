@@ -29,6 +29,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val ACTION_SET_SYSTEM_LANGUAGE = "com.iotpart.sqe.talkbackhelper.SET_SYSTEM_LANGUAGE"
         internal const val HELPER_SERVICE_UNAVAILABLE_STATUS = "HELPER_SERVICE_UNAVAILABLE"
         private const val ACTION_PING = "com.iotpart.sqe.talkbackhelper.PING"
+        private const val ACTION_GET_HIERARCHY_PUBLICATION_REPORT = "com.iotpart.sqe.talkbackhelper.GET_HIERARCHY_PUBLICATION_REPORT"
         private const val ACTION_RESOLVE_EXACT_NODE = "com.iotpart.sqe.talkbackhelper.RESOLVE_EXACT_NODE"
         private const val ACTION_EXACT_ACTION = "com.iotpart.sqe.talkbackhelper.EXACT_ACTION"
         private const val ACTION_EXACT_ACTION_RECEIPT = "com.iotpart.sqe.talkbackhelper.EXACT_ACTION_RECEIPT"
@@ -36,6 +37,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val ACTION_COMMAND = "com.iotpart.sqe.talkbackhelper.ACTION_COMMAND"
         private const val ACTION_EVIDENCE_EVENTS = "com.iotpart.sqe.talkbackhelper.EVIDENCE_EVENTS"
         private const val ACTION_ENTRY_CLICK_CAPTURE = "com.iotpart.sqe.talkbackhelper.ENTRY_CLICK_CAPTURE"
+        internal val hierarchyPublicationLedger = HierarchyPublicationLedger()
         private const val EXTRA_TARGET_NAME = "targetName"
         private const val EXTRA_TARGET_TYPE = "targetType"
         private const val EXTRA_TARGET_INDEX = "targetIndex"
@@ -66,6 +68,14 @@ class A11yCommandReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent?) {
         val action = intent?.action ?: return
+        if (action in HierarchyPayloadActions.ALL) {
+            handleHierarchyTransferControl(context, intent, action)
+            return
+        }
+        if (action == ACTION_GET_HIERARCHY_PUBLICATION_REPORT) {
+            handleHierarchyPublicationReport(intent)
+            return
+        }
         val reqId = parseReqId(intent)
         if (action !in setOf(ACTION_RESOLVE_EXACT_NODE,ACTION_EXACT_ACTION,ACTION_EXACT_ACTION_RECEIPT,ACTION_EXACT_ACTION_STOP)) {
             A11yEvidence.capture(intent, reqId)
@@ -123,6 +133,53 @@ class A11yCommandReceiver : BroadcastReceiver() {
             ACTION_ENTRY_CLICK_CAPTURE -> handleEntryClickCapture(intent)
             else -> Unit
         }
+    }
+
+    private fun handleHierarchyTransferControl(context: Context, intent: Intent, action: String) {
+        if (!isOrderedBroadcast) return
+        val requestId = intent.getStringExtra(HierarchyPayloadActions.EXTRA_REQUEST_ID).orEmpty()
+        val clientNonce = intent.getStringExtra(HierarchyPayloadActions.EXTRA_CLIENT_NONCE).orEmpty()
+        val queryNonce = intent.getStringExtra(HierarchyPayloadActions.EXTRA_QUERY_NONCE).orEmpty()
+        val response = when (action) {
+            HierarchyPayloadActions.CAPABILITIES -> HierarchyPayloadRuntime.capabilities(queryNonce)
+            HierarchyPayloadActions.START -> {
+                val service = A11yHelperService.instance
+                if (service == null) {
+                    HierarchyPayloadRuntime.unavailable(requestId, clientNonce, queryNonce)
+                } else {
+                    HierarchyPayloadRuntime.begin(
+                        requestId = requestId,
+                        clientNonce = clientNonce,
+                        queryNonce = queryNonce,
+                        expectedBuildId = intent.getStringExtra(HierarchyPayloadActions.EXTRA_EXPECTED_BUILD_ID).orEmpty(),
+                        expectedGitCommit = intent.getStringExtra(HierarchyPayloadActions.EXTRA_EXPECTED_GIT_COMMIT).orEmpty(),
+                        expectedServiceInstanceId = intent.getStringExtra(
+                            HierarchyPayloadActions.EXTRA_EXPECTED_SERVICE_INSTANCE_ID,
+                        ).orEmpty(),
+                        service = service,
+                    )
+                }
+            }
+            HierarchyPayloadActions.STATUS -> HierarchyPayloadRuntime.status(requestId, clientNonce, queryNonce)
+            HierarchyPayloadActions.CANCEL -> HierarchyPayloadRuntime.cancel(requestId, clientNonce, queryNonce)
+            HierarchyPayloadActions.ACK -> HierarchyPayloadRuntime.acknowledge(
+                requestId,
+                clientNonce,
+                queryNonce,
+                intent.getStringExtra(HierarchyPayloadActions.EXTRA_PAYLOAD_SHA256).orEmpty(),
+            )
+            else -> org.json.JSONObject().put("status", "FAILED").put("completed", true)
+                .put("payload_complete", false).put("error_code", "ACTION_UNSUPPORTED")
+        }
+        val encoded = HierarchyControlCodec.encode(response)
+        val ok = response.optString("status") in setOf("OK", "ACCEPTED", "COLLECTING", "WRITING", "READY", "ACKED", "CANCELLED")
+        setResultCode(if (encoded != null && ok) HierarchyPayloadActions.RESULT_OK else HierarchyPayloadActions.RESULT_REJECTED)
+        setResultData(encoded)
+        Log.i(
+            TAG,
+            "[HIERARCHY_TRANSFER] action=$action request_id=${requestId.take(32)} status=${response.optString("status")} " +
+                "error=${response.optString("error_code").take(64)}",
+        )
     }
 
     private fun handleEntryClickCapture(intent: Intent) {
@@ -196,41 +253,251 @@ class A11yCommandReceiver : BroadcastReceiver() {
 
     private fun handleDumpHierarchy(intent: Intent) {
         val reqId = parseReqId(intent)
+        val publicationContext = beginHierarchyPublication(reqId, intent)
         val service = A11yHelperService.instance
         if (service == null) {
-            logHierarchyFailure(reqId, "SERVICE_UNAVAILABLE", "Accessibility Service is not running")
-            Log.i(TAG, "DUMP_HIERARCHY_END $reqId")
+            logHierarchyFailure(reqId, "SERVICE_UNAVAILABLE", "Accessibility Service is not running", publicationContext)
+            endHierarchyPublication(reqId, publicationContext)
             return
         }
         try {
             val payload = service.dumpHierarchy(reqId).toString()
-            if (payload.toByteArray(Charsets.UTF_8).size > 750_000) {
-                logHierarchyFailure(reqId, "PAYLOAD_TOO_LARGE", "Hierarchy snapshot exceeds the bounded transport size")
+            val payloadBytes = payload.toByteArray(Charsets.UTF_8).size
+            if (payloadBytes > 750_000) {
+                logHierarchyFailure(
+                    reqId,
+                    "PAYLOAD_TOO_LARGE",
+                    "Hierarchy snapshot exceeds the bounded transport size",
+                    publicationContext,
+                    payloadBytes,
+                )
                 return
             }
-            A11yResultTransport.encode(
+            val frames = A11yResultTransport.encode(
                 "DUMP_HIERARCHY_RESULT",
                 reqId,
                 payload,
                 chunkBytes = A11yResultTransport.HIERARCHY_CHUNK_BYTES,
             )
-                .forEach { Log.i(TAG, it) }
+            val handles = prepareHierarchyFrames(publicationContext, frames, payloadBytes)
+            frames.forEachIndexed { index, frame ->
+                emitHierarchyFrame(handles.getOrNull(index), frame)
+            }
         } catch (error: Exception) {
             Log.e(TAG, "[DUMP_HIERARCHY] failed req_id='$reqId'", error)
-            logHierarchyFailure(reqId, "SERIALIZATION_ERROR", "${error.javaClass.simpleName}: ${error.message.orEmpty()}")
+            logHierarchyFailure(
+                reqId,
+                "SERIALIZATION_ERROR",
+                "${error.javaClass.simpleName}: ${error.message.orEmpty()}",
+                publicationContext,
+            )
         } finally {
-            Log.i(TAG, "DUMP_HIERARCHY_END $reqId")
+            endHierarchyPublication(reqId, publicationContext)
         }
     }
 
-    private fun logHierarchyFailure(reqId: String, reason: String, message: String) {
+    private data class HierarchyPublicationContext(
+        val request: HierarchyPublicationLedger.RequestHandle?,
+        var nextSequence: Int = 0,
+        var planCompleteCandidate: Boolean = true,
+    )
+
+    private fun beginHierarchyPublication(reqId: String, intent: Intent): HierarchyPublicationContext {
+        if (!BuildConfig.DEBUG || !intent.getBooleanExtra("publicationEvidence", false)) {
+            return HierarchyPublicationContext(null)
+        }
+        val serviceId = A11yHelperService.instance?.let { A11yHelperService.serviceInstanceId }
+        val admission = hierarchyPublicationLedger.beginRequest(
+            requestId = reqId,
+            serviceInstanceId = serviceId,
+            buildId = BuildIdentity.buildId,
+            gitCommit = BuildIdentity.gitCommit,
+            inputDigest = BuildIdentity.inputDigest,
+            sourceState = BuildIdentity.sourceState,
+            sdk = android.os.Build.VERSION.SDK_INT,
+            release = android.os.Build.VERSION.RELEASE.orEmpty(),
+        )
+        return HierarchyPublicationContext(request = admission.handle, planCompleteCandidate = admission.handle != null)
+    }
+
+    private fun prepareHierarchyFrames(
+        context: HierarchyPublicationContext,
+        frames: List<String>,
+        responsePayloadBytes: Int,
+    ): List<HierarchyPublicationLedger.FrameHandle?> {
+        if (context.request == null) return emptyList()
+        val handles = ArrayList<HierarchyPublicationLedger.FrameHandle?>(frames.size)
+        frames.forEach { frame ->
+            val sequence = context.nextSequence++
+            val handle = try {
+                val spec = hierarchyFrameSpec(frame, sequence, responsePayloadBytes, Log.INFO)
+                safeHierarchyLedger(context.request) {
+                    hierarchyPublicationLedger.recordConstructed(context.request, spec, frame)
+                }
+            } catch (_: Throwable) {
+                safeHierarchyLedger(context.request) { hierarchyPublicationLedger.markFault(context.request) }
+                null
+            }
+            if (handle == null) context.planCompleteCandidate = false
+            handles.add(handle)
+        }
+        return handles
+    }
+
+    private fun hierarchyFrameSpec(
+        frame: String,
+        sequence: Int,
+        responsePayloadBytes: Int?,
+        priority: Int,
+    ): HierarchyPublicationLedger.FrameSpec {
+        if (frame.startsWith("DUMP_HIERARCHY_RESULT_CHUNK ")) {
+            val index = frame.substringAfter(" index=").substringBefore(' ').toIntOrNull()
+            val count = frame.substringAfter(" count=").substringBefore(' ').toIntOrNull()
+            val responseDigestHex = frame.substringAfter(" sha256=").substringBefore(' ')
+            val payload = frame.substringAfter(" payload=", "")
+            val responseDigest = responseDigestHex.takeIf { it.length == 64 && it.all { ch -> ch in "0123456789abcdef" } }
+                ?.chunked(2)?.map { it.toInt(16).toByte() }?.toByteArray()
+            val chunkBytes = runCatching { android.util.Base64.decode(payload, android.util.Base64.DEFAULT).size }.getOrNull()
+            return HierarchyPublicationLedger.FrameSpec(
+                type = HierarchyPublicationLedger.FrameType.CHUNK,
+                sequence = sequence,
+                chunkIndex = index,
+                chunkCount = count,
+                responsePayloadBytes = responsePayloadBytes,
+                chunkPayloadBytes = chunkBytes,
+                responseSha256 = responseDigest,
+                priority = priority,
+                overload = "Log.i(String,String)",
+            )
+        }
+        return HierarchyPublicationLedger.FrameSpec(
+            type = HierarchyPublicationLedger.FrameType.LEGACY_RESULT,
+            sequence = sequence,
+            responsePayloadBytes = responsePayloadBytes,
+            priority = priority,
+            overload = "Log.i(String,String)",
+        )
+    }
+
+    private fun emitHierarchyFrame(handle: HierarchyPublicationLedger.FrameHandle?, frame: String): Int =
+        if (handle == null) Log.i(TAG, frame)
+        else hierarchyPublicationLedger.emit(handle) { Log.i(TAG, frame) }
+
+    private fun logHierarchyFailure(
+        reqId: String,
+        reason: String,
+        message: String,
+        publicationContext: HierarchyPublicationContext? = null,
+        responsePayloadBytes: Int? = null,
+    ) {
         val payload = org.json.JSONObject()
             .put("reqId", reqId)
             .put("success", false)
             .put("reason", reason)
             .put("message", message)
             .toString()
-        Log.w(TAG, "DUMP_HIERARCHY_RESULT $reqId $payload")
+        val frame = "DUMP_HIERARCHY_RESULT $reqId $payload"
+        val request = publicationContext?.request
+        if (request == null) {
+            Log.w(TAG, frame)
+            return
+        }
+        val bytes = responsePayloadBytes ?: payload.toByteArray(Charsets.UTF_8).size
+        val sequence = publicationContext.nextSequence++
+        val handle = try {
+            val spec = HierarchyPublicationLedger.FrameSpec(
+                type = HierarchyPublicationLedger.FrameType.FAILURE_RESULT,
+                sequence = sequence,
+                responsePayloadBytes = bytes,
+                priority = Log.WARN,
+                overload = "Log.w(String,String)",
+            )
+            safeHierarchyLedger(request) { hierarchyPublicationLedger.recordConstructed(request, spec, frame) }
+        } catch (_: Throwable) {
+            safeHierarchyLedger(request) { hierarchyPublicationLedger.markFault(request) }
+            null
+        }
+        if (handle == null) publicationContext.planCompleteCandidate = false
+        else hierarchyPublicationLedger.emit(handle) { Log.w(TAG, frame) }
+    }
+
+    private fun endHierarchyPublication(reqId: String, context: HierarchyPublicationContext) {
+        val frame = "DUMP_HIERARCHY_END $reqId"
+        val request = context.request
+        if (request == null) {
+            Log.i(TAG, frame)
+            return
+        }
+        val sequence = context.nextSequence++
+        val handle = try {
+            val spec = HierarchyPublicationLedger.FrameSpec(
+                type = HierarchyPublicationLedger.FrameType.END,
+                sequence = sequence,
+                priority = Log.INFO,
+                overload = "Log.i(String,String)",
+            )
+            safeHierarchyLedger(request) { hierarchyPublicationLedger.recordConstructed(request, spec, frame) }
+        } catch (_: Throwable) {
+            safeHierarchyLedger(request) { hierarchyPublicationLedger.markFault(request) }
+            null
+        }
+        if (handle == null) context.planCompleteCandidate = false
+        if (context.planCompleteCandidate) safeHierarchyLedger(request) { hierarchyPublicationLedger.markPlanComplete(request) }
+        try {
+            if (handle == null) Log.i(TAG, frame)
+            else hierarchyPublicationLedger.emit(handle) { Log.i(TAG, frame) }
+        } finally {
+            safeHierarchyLedger(request) { hierarchyPublicationLedger.finishRequest(request) }
+        }
+    }
+
+    private inline fun <T> safeHierarchyLedger(
+        request: HierarchyPublicationLedger.RequestHandle,
+        operation: () -> T,
+    ): T? = try {
+        operation()
+    } catch (_: Throwable) {
+        runCatching { hierarchyPublicationLedger.markFault(request) }
+        null
+    }
+
+    private fun handleHierarchyPublicationReport(intent: Intent) {
+        if (!isOrderedBroadcast) return
+        if (!BuildConfig.DEBUG) {
+            setResultCode(HierarchyPublicationLedger.RESULT_ERROR)
+            setResultData(HierarchyPublicationReportCodec.encode(hierarchyPublicationLedger.queryError("DEBUG_BUILD_REQUIRED", "", "")))
+            return
+        }
+        val mode = intent.getStringExtra("mode")?.take(16).orEmpty()
+        val requestId = intent.getStringExtra("request_id")?.take(HierarchyPublicationLedger.MAX_REQUEST_ID_BYTES).orEmpty()
+        val nonce = intent.getStringExtra("query_nonce")?.take(64).orEmpty()
+        val response = when (mode) {
+            "CAPABILITIES" -> hierarchyPublicationLedger.capabilities(nonce)
+            "SUMMARY" -> hierarchyPublicationLedger.summary(
+                requestId,
+                nonce,
+                intent.getStringExtra("expected_process_epoch").orEmpty(),
+                intent.getStringExtra("expected_service_instance_id")?.takeIf { it.isNotEmpty() },
+            )
+            "PLAN", "ATTEMPTS" -> hierarchyPublicationLedger.page(
+                requestId = requestId,
+                nonce = nonce,
+                expectedProcessEpoch = intent.getStringExtra("expected_process_epoch").orEmpty(),
+                expectedServiceInstanceId = intent.getStringExtra("expected_service_instance_id")?.takeIf { it.isNotEmpty() },
+                expectedGeneration = intent.getLongExtra("capture_generation", -1L),
+                expectedRevision = intent.getIntExtra("report_revision", -1),
+                expectedReportDigest = intent.getStringExtra("report_digest").orEmpty(),
+                pageKind = mode,
+                pageIndex = intent.getIntExtra("page_index", -1),
+            )
+            else -> hierarchyPublicationLedger.queryError("QUERY_MODE_INVALID", requestId, nonce)
+        }
+        val encoded = HierarchyPublicationReportCodec.encode(response)
+        val isSuccess = response.optString("status") == "OK"
+        setResultCode(if (encoded != null && isSuccess) HierarchyPublicationLedger.RESULT_SUCCESS else HierarchyPublicationLedger.RESULT_ERROR)
+        setResultData(encoded ?: HierarchyPublicationReportCodec.encode(
+            hierarchyPublicationLedger.queryError("REPORT_SIZE_LIMIT", requestId, nonce)
+        ))
     }
 
     private fun handleSetSystemLanguage(intent: Intent) {

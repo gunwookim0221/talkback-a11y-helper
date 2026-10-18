@@ -14,6 +14,10 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadFactory
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.SynchronousQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import java.util.UUID
@@ -22,6 +26,16 @@ import kotlin.math.abs
 class A11yHelperService : AccessibilityService() {
     internal var smartNextDispatcher = SmartNextDispatcher { reqId -> moveFocusSmart(reqId) }
     internal var focusCommandDispatcher = AccessibilityCommandDispatcher()
+    private val hierarchyTransferExecutor = ThreadPoolExecutor(
+        1,
+        1,
+        0L,
+        TimeUnit.MILLISECONDS,
+        SynchronousQueue<Runnable>(),
+        ThreadFactory { runnable -> Thread(runnable, "hierarchy-payload-transfer") },
+        ThreadPoolExecutor.AbortPolicy(),
+    )
+
     companion object {
         @Volatile var serviceInstanceId: String = UUID.randomUUID().toString()
             private set
@@ -64,6 +78,8 @@ class A11yHelperService : AccessibilityService() {
         instance = this
         ExactPostActionRuntime.connect()
         serviceInstanceId = ExactActionRuntime.connect(this)
+        A11yCommandReceiver.hierarchyPublicationLedger.serviceConnected(serviceInstanceId)
+        HierarchyPayloadRuntime.serviceConnected(this, serviceInstanceId)
         Log.i(TAG, "Service connected")
     }
 
@@ -74,6 +90,9 @@ class A11yHelperService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        HierarchyPayloadRuntime.serviceDisconnected(serviceInstanceId)
+        hierarchyTransferExecutor.shutdownNow()
+        A11yCommandReceiver.hierarchyPublicationLedger.serviceEnded(serviceInstanceId)
         ExactPostActionRuntime.stop("SERVICE_DESTROYED")
         ExactActionRuntime.stop("SERVICE_DESTROYED")
         smartNextDispatcher.close()
@@ -82,6 +101,11 @@ class A11yHelperService : AccessibilityService() {
         if (instance === this) {
             instance = null
         }
+    }
+
+    internal fun executeHierarchyTransfer(task: () -> Unit) {
+        if (hierarchyTransferExecutor.isShutdown) throw RejectedExecutionException("service_destroyed")
+        hierarchyTransferExecutor.execute { task() }
     }
 
     internal fun sendAccessibilityEvent(eventType: Int) {

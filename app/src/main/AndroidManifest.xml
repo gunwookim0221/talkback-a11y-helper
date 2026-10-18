@@ -56,6 +56,7 @@
                 <action android:name="com.iotpart.sqe.talkbackhelper.SET_TEXT" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.SET_SYSTEM_LANGUAGE" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.PING" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.GET_HIERARCHY_PUBLICATION_REPORT" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.RESOLVE_EXACT_NODE" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.EXACT_ACTION" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.EXACT_ACTION_RECEIPT" />
@@ -63,8 +64,22 @@
                 <action android:name="com.iotpart.sqe.talkbackhelper.ACTION_COMMAND" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.EVIDENCE_EVENTS" />
                 <action android:name="com.iotpart.sqe.talkbackhelper.ENTRY_CLICK_CAPTURE" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.HIERARCHY_TRANSFER_CAPABILITIES" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.HIERARCHY_TRANSFER_START" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.HIERARCHY_TRANSFER_STATUS" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.HIERARCHY_TRANSFER_ACK" />
+                <action android:name="com.iotpart.sqe.talkbackhelper.HIERARCHY_TRANSFER_CANCEL" />
             </intent-filter>
         </receiver>
+
+        <provider
+            android:name=".HierarchyPayloadProvider"
+            android:authorities="com.iotpart.sqe.talkbackhelper.hierarchy"
+            android:enabled="true"
+            android:exported="true"
+            android:grantUriPermissions="false"
+            android:readPermission="android.permission.DUMP"
+            android:writePermission="android.permission.DUMP" />
 
     </application>
 
