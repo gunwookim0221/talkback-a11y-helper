@@ -285,6 +285,9 @@ class A11yHelperService : AccessibilityService() {
 
     fun dumpHierarchy(reqId: String): JSONObject = A11yNavigator.dumpHierarchy(this, reqId)
 
+    internal fun dumpReliableHierarchy(reqId: String): ReliableHierarchyCapture =
+        A11yNavigator.dumpReliableHierarchy(this, reqId)
+
     /**
      * Performs the one bounded Settings locale action.  The adapter owns all
      * Settings-specific validation; this service only supplies the fresh root

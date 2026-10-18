@@ -179,10 +179,120 @@ object A11yNavigator {
         }
     }
 
-    private fun hierarchyNodeToJson(
+    /**
+     * Builds the reliable v2 payload from one captured active root. That same
+     * AccessibilityNodeInfo instance is serialized into the raw windows tree
+     * and passed to the legacy Kotlin candidate generator.
+     */
+    internal fun dumpReliableHierarchy(service: AccessibilityService, reqId: String): ReliableHierarchyCapture {
+        val serviceWindows = service.windows.orEmpty()
+        val traversalRoot = SmartNextPerf.acquireRoot("A11yNavigator.dumpReliableHierarchy") {
+            service.rootInActiveWindow
+        } ?: throw IllegalStateException("NO_ROOT")
+
+        val activeWindowIndex = when {
+            serviceWindows.isEmpty() -> 0
+            else -> ReliableHierarchyCandidateContract.traversalRootIndex(
+                serviceWindows.map { it.id }, traversalRoot.windowId
+            )
+        }
+        val traversalRootRef = "windows[$activeWindowIndex].root"
+        val rawSerializationStarted = System.nanoTime()
+        val totalNodes = intArrayOf(0)
+        val serializedWindows = JSONArray()
+        val rootNodes = JSONArray()
+
+        if (serviceWindows.isNotEmpty()) {
+            serviceWindows.forEachIndexed { index, window ->
+                val rawRoot = if (index == activeWindowIndex) traversalRoot else window.root
+                    ?: throw IllegalStateException("WINDOW_ROOT_UNAVAILABLE:index=$index windowId=${window.id}")
+                val bounds = Rect().also(window::getBoundsInScreen)
+                val rootJson = hierarchyNodeToJson(rawRoot, totalNodes, 0, includeCandidateFacts = true)
+                    .put("windowId", window.id)
+                rootNodes.put(rootJson)
+                serializedWindows.put(JSONObject().apply {
+                    put("order", index)
+                    put("id", window.id)
+                    put("type", window.type)
+                    put("layer", window.layer)
+                    put("title", window.title?.toString() ?: JSONObject.NULL)
+                    put("active", window.isActive)
+                    put("focused", window.isFocused)
+                    put("boundsInScreen", rectToJson(bounds))
+                    put("root", rootJson)
+                })
+            }
+        } else {
+            val rootJson = hierarchyNodeToJson(traversalRoot, totalNodes, 0, includeCandidateFacts = true)
+            rootNodes.put(rootJson)
+            serializedWindows.put(JSONObject().apply {
+                put("order", 0)
+                put("id", traversalRoot.windowId)
+                put("type", JSONObject.NULL)
+                put("layer", JSONObject.NULL)
+                put("title", JSONObject.NULL)
+                put("active", true)
+                put("focused", false)
+                put("boundsInScreen", rectToJson(Rect().also(traversalRoot::getBoundsInScreen)))
+                put("root", rootJson)
+            })
+        }
+
+        val payload = JSONObject().apply {
+            put("reqId", reqId)
+            put("success", true)
+            ReliableHierarchySchemaV2.addRawMetadata(this, Build.VERSION.SDK_INT)
+            put("source", "accessibility_service_windows")
+            put("windowCoverage", if (serviceWindows.isNotEmpty()) "all_service_visible_windows" else "active_root_fallback")
+            put("nodeCount", totalNodes[0])
+            put("traversalRootRef", traversalRootRef)
+            put("traversalRootWindowId", traversalRoot.windowId)
+            put("windows", serializedWindows)
+            put("nodes", rootNodes)
+        }
+        val rawSerializationElapsedNanos = System.nanoTime() - rawSerializationStarted
+        val rawHierarchyBytes = HierarchyPayloadEnvelope.estimatedJsonUtf8Bytes(payload)
+        if (rawHierarchyBytes > HierarchyPayloadEnvelope.MAX_PAYLOAD_BYTES) {
+            throw IllegalStateException("PAYLOAD_TOO_LARGE")
+        }
+
+        val candidateStarted = System.nanoTime()
+        val candidates = ReliableHierarchyCandidateContract.build(
+            candidateRoot = traversalRoot,
+            serializedRawRoot = traversalRoot,
+            traversalRootRef = traversalRootRef
+        )
+        val candidateGenerationElapsedNanos = System.nanoTime() - candidateStarted
+        val candidateSerializationStarted = System.nanoTime()
+        val candidateProjectionBytes = HierarchyPayloadEnvelope.estimatedJsonUtf8Bytes(candidates)
+        val candidateSerializationElapsedNanos = System.nanoTime() - candidateSerializationStarted
+        payload.put("traversalCandidates", candidates)
+        val totalPayloadBytes = HierarchyPayloadEnvelope.estimatedJsonUtf8Bytes(payload)
+        if (totalPayloadBytes > HierarchyPayloadEnvelope.MAX_PAYLOAD_BYTES) {
+            throw IllegalStateException("PAYLOAD_TOO_LARGE")
+        }
+        if (!ReliableHierarchyCandidateContract.hasValidRootBinding(payload)) {
+            throw IllegalStateException("TRAVERSAL_CANDIDATE_ROOT_BINDING_FAILED")
+        }
+
+        return ReliableHierarchyCapture(
+            payload = payload,
+            rawHierarchyBytesEstimate = rawHierarchyBytes,
+            candidateProjectionBytesEstimate = candidateProjectionBytes,
+            totalPayloadBytesEstimate = totalPayloadBytes,
+            candidateCount = candidates.getJSONArray("candidates").length(),
+            rawNodeCount = totalNodes[0],
+            rawSerializationElapsedNanos = rawSerializationElapsedNanos,
+            candidateGenerationElapsedNanos = candidateGenerationElapsedNanos,
+            candidateSerializationElapsedNanos = candidateSerializationElapsedNanos
+        )
+    }
+
+    internal fun hierarchyNodeToJson(
         node: AccessibilityNodeInfo,
         totalNodes: IntArray,
-        depth: Int
+        depth: Int,
+        includeCandidateFacts: Boolean = false
     ): JSONObject {
         if (depth > HIERARCHY_SNAPSHOT_MAX_DEPTH) {
             throw IllegalStateException("SERIALIZATION_LIMIT_EXCEEDED:depth>$HIERARCHY_SNAPSHOT_MAX_DEPTH")
@@ -201,7 +311,7 @@ object A11yNavigator {
         for (index in 0 until node.childCount) {
             val child = SmartNextPerf.getChild(node, index, "A11yNavigator.hierarchyNodeToJson")
                 ?: throw IllegalStateException("SERIALIZATION_ERROR:child_unavailable index=$index")
-            children.put(hierarchyNodeToJson(child, totalNodes, depth + 1).put("childIndex", index))
+            children.put(hierarchyNodeToJson(child, totalNodes, depth + 1, includeCandidateFacts).put("childIndex", index))
         }
         return JSONObject().apply {
             put("text", node.text?.toString() ?: JSONObject.NULL)
@@ -228,6 +338,14 @@ object A11yNavigator {
             put("checked", node.isChecked)
             put("visibleToUser", node.isVisibleToUser)
             put("isVisibleToUser", node.isVisibleToUser)
+            if (includeCandidateFacts) {
+                put("screenReaderFocusable", if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    node.isScreenReaderFocusable
+                } else {
+                    JSONObject.NULL
+                })
+                put("rangeInfoPresent", node.rangeInfo != null)
+            }
             put("actions", JSONArray().apply {
                 node.actionList.forEach { action ->
                     put(JSONObject().apply {

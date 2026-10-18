@@ -12,6 +12,7 @@ import android.os.Process
 import android.os.SystemClock
 import android.util.AtomicFile
 import android.util.Base64
+import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
@@ -34,7 +35,8 @@ internal object HierarchyPayloadActions {
     const val ACK = "com.iotpart.sqe.talkbackhelper.HIERARCHY_TRANSFER_ACK"
     const val CANCEL = "com.iotpart.sqe.talkbackhelper.HIERARCHY_TRANSFER_CANCEL"
     const val CONTROL_SCHEMA = "hierarchy-transfer-control.v1"
-    const val PAYLOAD_SCHEMA = "service-hierarchy-v1"
+    const val LEGACY_DIAGNOSTIC_SCHEMA = "service-hierarchy-v1"
+    const val PAYLOAD_SCHEMA = "service-hierarchy-v2"
     const val MIME_TYPE = "application/vnd.talkback.hierarchy"
     const val CONTROL_PREFIX = "HPT1:"
     const val RESULT_OK = 1
@@ -268,12 +270,23 @@ internal class HierarchyPayloadStore(
             .put("generation", generation)
             .put("helper_build_identity", JSONObject(helperIdentity.toString()))
             .put("payload_schema_version", HierarchyPayloadActions.PAYLOAD_SCHEMA)
+            .put("supported_payload_schema_versions", JSONArray().put(HierarchyPayloadActions.PAYLOAD_SCHEMA))
+            .put("candidate_schema_version", ReliableHierarchyCandidateContract.SCHEMA_VERSION)
+            .put("supported_candidate_schema_versions", JSONArray().put(ReliableHierarchyCandidateContract.SCHEMA_VERSION))
+            .put("candidate_contract_version", ReliableHierarchyCandidateContract.CONTRACT_VERSION)
+            .put("diagnostic_schema_version", HierarchyPayloadActions.LEGACY_DIAGNOSTIC_SCHEMA)
+            .put("diagnostic_payload_schema_versions", JSONArray().put(HierarchyPayloadActions.LEGACY_DIAGNOSTIC_SCHEMA))
             .put("max_payload_bytes", HierarchyPayloadEnvelope.MAX_PAYLOAD_BYTES)
             .put("max_artifact_bytes", HierarchyPayloadEnvelope.MAX_ARTIFACT_BYTES)
             .put("status", "OK")
             .put("completed", true)
             .put("payload_complete", true)
-            .put("capabilities", JSONArray().put("ordered_control").put("atomic_file").put("content_provider_pfd"))
+            .put("capabilities", JSONArray()
+                .put("ordered_control")
+                .put("atomic_file")
+                .put("content_provider_pfd")
+                .put("service_hierarchy_v2")
+                .put(ReliableHierarchyCandidateContract.SCHEMA_VERSION))
     }
 
     @Synchronized
@@ -315,6 +328,8 @@ internal class HierarchyPayloadStore(
                 .put("service_instance_id", record.serviceInstanceId)
                 .put("helper_build_identity", record.helperIdentity)
                 .put("payload_schema_version", HierarchyPayloadActions.PAYLOAD_SCHEMA)
+                .put("candidate_schema_version", ReliableHierarchyCandidateContract.SCHEMA_VERSION)
+                .put("candidate_contract_version", ReliableHierarchyCandidateContract.CONTRACT_VERSION)
                 .put("payload_bytes", payload.size)
                 .put("payload_sha256", record.payloadSha256)
                 .put("created_elapsed_realtime_ns", record.createdElapsedNs)
@@ -483,6 +498,8 @@ internal class HierarchyPayloadStore(
         .put("service_instance_id", record.serviceInstanceId)
         .put("helper_build_identity", record.helperIdentity)
         .put("payload_schema_version", HierarchyPayloadActions.PAYLOAD_SCHEMA)
+        .put("candidate_schema_version", ReliableHierarchyCandidateContract.SCHEMA_VERSION)
+        .put("candidate_contract_version", ReliableHierarchyCandidateContract.CONTRACT_VERSION)
         .put("status", record.state)
         .put("completed", completed)
         .put("payload_complete", record.state == "READY")
@@ -506,6 +523,8 @@ internal class HierarchyPayloadStore(
         .put("generation", JSONObject.NULL)
         .put("helper_build_identity", currentIdentity())
         .put("payload_schema_version", HierarchyPayloadActions.PAYLOAD_SCHEMA)
+        .put("candidate_schema_version", ReliableHierarchyCandidateContract.SCHEMA_VERSION)
+        .put("candidate_contract_version", ReliableHierarchyCandidateContract.CONTRACT_VERSION)
         .put("status", "FAILED")
         .put("completed", true)
         .put("payload_complete", false)
@@ -647,16 +666,40 @@ internal object HierarchyPayloadRuntime {
                         activeStore.fail(handle, "SERVICE_INSTANCE_CHANGED")
                         return@executeHierarchyTransfer
                     }
-                    val payloadObject = service.dumpHierarchy(requestId)
+                    val capture = service.dumpReliableHierarchy(requestId)
+                    val payloadObject = capture.payload
                     if (!payloadObject.optBoolean("success", false)) {
                         activeStore.fail(handle, payloadObject.optString("reason", "HIERARCHY_ACQUISITION_FAILED"))
+                        return@executeHierarchyTransfer
+                    }
+                    if (!ReliableHierarchyCandidateContract.hasValidRootBinding(payloadObject)) {
+                        activeStore.fail(handle, "TRAVERSAL_CANDIDATE_ROOT_BINDING_FAILED")
                         return@executeHierarchyTransfer
                     }
                     if (HierarchyPayloadEnvelope.estimatedJsonUtf8Bytes(payloadObject) > HierarchyPayloadEnvelope.MAX_PAYLOAD_BYTES) {
                         activeStore.fail(handle, "PAYLOAD_TOO_LARGE")
                         return@executeHierarchyTransfer
                     }
+                    val totalSerializationStarted = System.nanoTime()
                     val bytes = payloadObject.toString().toByteArray(StandardCharsets.UTF_8)
+                    val totalSerializationElapsedNanos = System.nanoTime() - totalSerializationStarted
+                    if (bytes.size > HierarchyPayloadEnvelope.MAX_PAYLOAD_BYTES) {
+                        activeStore.fail(handle, "PAYLOAD_TOO_LARGE")
+                        return@executeHierarchyTransfer
+                    }
+                    Log.i(
+                        "A11Y_HELPER",
+                        "[HIERARCHY_CANDIDATE_METRICS] requestId=$requestId " +
+                            "rawHierarchyBytesEstimate=${capture.rawHierarchyBytesEstimate} " +
+                            "candidateProjectionBytesEstimate=${capture.candidateProjectionBytesEstimate} " +
+                            "totalPayloadBytesEstimate=${capture.totalPayloadBytesEstimate} " +
+                            "totalSerializedPayloadBytes=${bytes.size} rawNodeCount=${capture.rawNodeCount} " +
+                            "candidateCount=${capture.candidateCount} " +
+                            "rawSerializationElapsedMs=${capture.rawSerializationElapsedNanos / 1_000_000.0} " +
+                            "candidateGenerationElapsedMs=${capture.candidateGenerationElapsedNanos / 1_000_000.0} " +
+                            "candidateSerializationElapsedMs=${capture.candidateSerializationElapsedNanos / 1_000_000.0} " +
+                            "totalSerializationElapsedMs=${totalSerializationElapsedNanos / 1_000_000.0}"
+                    )
                     activeStore.publish(handle, bytes)
                 } catch (error: Throwable) {
                     activeStore.fail(handle, if (error.message == "PAYLOAD_TOO_LARGE") "PAYLOAD_TOO_LARGE" else "COLLECTION_FAILED")
@@ -703,6 +746,8 @@ internal object HierarchyPayloadRuntime {
             .put("source_state", BuildIdentity.sourceState)
             .put("build_variant", BuildConfig.HELPER_BUILD_VARIANT))
         .put("payload_schema_version", HierarchyPayloadActions.PAYLOAD_SCHEMA)
+        .put("candidate_schema_version", ReliableHierarchyCandidateContract.SCHEMA_VERSION)
+        .put("candidate_contract_version", ReliableHierarchyCandidateContract.CONTRACT_VERSION)
         .put("status", "FAILED")
         .put("completed", true)
         .put("payload_complete", false)
