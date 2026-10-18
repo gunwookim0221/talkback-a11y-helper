@@ -97,8 +97,15 @@ def verify_destination(contract: dict[str, Any] | None, *, activity: str,
 
 _READ_BROADCASTS = {"PING", "DUMP_TREE", "DUMP_HIERARCHY", "GET_FOCUS", "CHECK_TARGET",
                     "EVIDENCE_EVENTS", "DUMP_SCROLL_CAPABILITIES", "RESOLVE_EXACT_NODE"}
+_READ_ONLY_CONTROL_BROADCASTS = {"HIERARCHY_TRANSFER_CAPABILITIES"}
+_UNALLOWLISTED_HIERARCHY_CONTROL_BROADCASTS = {
+    "HIERARCHY_TRANSFER_START", "HIERARCHY_TRANSFER_STATUS",
+    "HIERARCHY_TRANSFER_ACK", "HIERARCHY_TRANSFER_CANCEL",
+}
 _FOCUS_SCROLL_BROADCASTS = {"NEXT", "PREV", "SMART_NEXT", "FOCUS_TARGET", "FOCUS_IN_BOUNDS",
                            "TARGET_FOCUS_COMMIT", "SCROLL"}
+_MUTATING_BROADCASTS = {"CLICK_TARGET", "CLICK_FOCUSED", "TOUCH_BOUNDS_CENTER_TARGET",
+                        "ENTRY_CLICK_CAPTURE", "SET_TEXT", "SET_SYSTEM_LANGUAGE", "ACTION_COMMAND"}
 _DIAGNOSTIC_DUMPS = {"window", "activity", "accessibility", "power", "package", "input", "display"}
 
 
@@ -142,6 +149,10 @@ class PrepositionedSession:
         self.phase = "READ_ONLY"
         self.latched_reason: str | None = None
         self.blocked_command: list[str] | None = None
+        self.blocked_stage: str | None = None
+        self.blocked_safety_classification: str | None = None
+        self.stop_stage: str | None = None
+        self.terminal_audit_recorded = False
         self.destination: dict[str, Any] = {}
         self.invariant_signature: str | None = None
         self.sequence = 0
@@ -167,9 +178,39 @@ class PrepositionedSession:
     def stop(self, reason: str) -> None:
         if self.latched_reason is None:
             self.latched_reason = reason
+            self.stop_stage = self.phase
             self.record("SAFETY_STOP", reason=reason)
         self.phase = "STOPPED"
+        self._record_terminal_audit(row_count=None)
         raise PrepositionedSafetyStop(self.latched_reason)
+
+    def _record_terminal_audit(self, *, row_count: int | None) -> None:
+        if self.terminal_audit_recorded or not self.latched_reason:
+            return
+        command = list(self.blocked_command) if self.blocked_command else None
+        request_context: dict[str, str] = {}
+        if command:
+            for key in ("reqId", "requestId", "clientNonce", "queryNonce"):
+                if key in command:
+                    index = command.index(key)
+                    if index + 1 < len(command):
+                        request_context[key] = command[index + 1]
+        stage = self.blocked_stage or self.stop_stage or self.phase
+        self.record(
+            "INTERNAL_TRAVERSAL_TERMINAL",
+            terminal="SAFETY_STOP",
+            reason=self.latched_reason,
+            terminal_reason=self.latched_reason,
+            blocked_operation=command,
+            safety_classification=self.blocked_safety_classification or "PREPOSITIONED_POLICY_STOP",
+            stage=stage,
+            no_action_dispatched=command is not None,
+            blocked_operation_dispatched=False if command is not None else None,
+            request_context=request_context,
+            traversal_started=stage == "TRAVERSAL",
+            row_count=row_count,
+        )
+        self.terminal_audit_recorded = True
 
     def guard_command(self, args: list[str]) -> None:
         # A stop forbids every later action. Passive evidence draining remains
@@ -187,6 +228,8 @@ class PrepositionedSession:
                 prefix = "com.iotpart.sqe.talkbackhelper."
                 name = action[len(prefix):] if action.startswith(prefix) else ""
                 allowed = name in _READ_BROADCASTS
+                if self.phase in {"READ_ONLY", "TRAVERSAL"} and name in _READ_ONLY_CONTROL_BROADCASTS:
+                    allowed, kind = True, "READ_ONLY_CONTROL"
                 if self.phase == "TRAVERSAL" and name in _FOCUS_SCROLL_BROADCASTS:
                     allowed, kind = True, "focus_or_scroll"
                 if self.phase == "TRAVERSAL" and name == "ACTION_COMMAND":
@@ -216,7 +259,28 @@ class PrepositionedSession:
         if not allowed:
             if self.blocked_command is None:
                 self.blocked_command = list(args)
-            self.record("COMMAND_BLOCKED", command=args, phase=self.phase)
+                self.blocked_stage = self.phase
+                if args[:1] == ["shell"] and len(args) > 1 and args[1:2] == ["am"]:
+                    shell = args[1:]
+                    action = shell[shell.index("-a") + 1] if "-a" in shell else ""
+                    prefix = "com.iotpart.sqe.talkbackhelper."
+                    name = action[len(prefix):] if action.startswith(prefix) else ""
+                    if name in _MUTATING_BROADCASTS:
+                        classification = "MUTATING_ACTION"
+                    elif name in _FOCUS_SCROLL_BROADCASTS:
+                        classification = "FOCUS_OR_SCROLL_ACTION"
+                    elif name in _UNALLOWLISTED_HIERARCHY_CONTROL_BROADCASTS:
+                        classification = "UNALLOWLISTED_HIERARCHY_CONTROL"
+                    elif name:
+                        classification = "UNKNOWN_BROADCAST"
+                    else:
+                        classification = "UNCLASSIFIED_BROADCAST"
+                else:
+                    classification = "UNLISTED_COMMAND"
+                self.blocked_safety_classification = classification
+            self.record("COMMAND_BLOCKED", command=args, phase=self.phase,
+                        safety_classification=self.blocked_safety_classification,
+                        action_dispatched=False)
             self.stop("non_navigation_contract_violation")
         self.record("COMMAND_ALLOWED", command=args, kind=kind, phase=self.phase)
 
@@ -250,9 +314,7 @@ class PrepositionedSession:
                 entry_action_executed=False))
         self.client._evidence_active_transaction = None
         self.client._evidence_active_request_id = ""
-        self.record("INTERNAL_TRAVERSAL_TERMINAL", terminal="SAFETY_STOP", reason=self.latched_reason,
-                    row_count=row_count, blocked_dispatch_record_closed=bool(self.blocked_command),
-                    prior_transaction_closed=bool(transaction))
+        self._record_terminal_audit(row_count=row_count)
 
     def observe_hierarchy(self, snapshot: dict[str, Any]) -> None:
         if not isinstance(self.contract, dict):
