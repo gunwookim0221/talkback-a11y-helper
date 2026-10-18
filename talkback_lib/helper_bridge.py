@@ -34,6 +34,7 @@ from talkback_lib.exact_node_protocol import (
     OneShotRequestRegistry,
     ProtocolValidationError,
     canonical_json,
+    helper_compatibility_allows_execution,
     precheck_repo_helper_build_identity,
 )
 
@@ -178,9 +179,36 @@ class HelperBridge:
         ping = self._client._read_log_result(dev, "PING_RESULT", req_id, wait_seconds=wait_)
         if not isinstance(ping, dict) or ping.get("reqId") != req_id or ping.get("success") is not True or ping.get("status") != "READY":
             ping = None
+        capabilities = None
+        capability_error = None
+        if isinstance(ping, dict):
+            query_nonce = uuid.uuid4().hex
+            try:
+                capabilities = self._client._hierarchy_transfer_control(
+                    dev,
+                    "CAPABILITIES",
+                    ["--es", "queryNonce", query_nonce],
+                    request_id="",
+                    remaining_seconds=max(0.1, min(float(wait_), 2.0)),
+                )
+                if capabilities.get("query_nonce") != query_nonce:
+                    capabilities = None
+                    capability_error = "CAPABILITY_QUERY_NONCE_MISMATCH"
+            except Exception as error:
+                capabilities = None
+                capability_error = f"CAPABILITY_QUERY_FAILED:{type(error).__name__}"
         root = Path(repo_root) if repo_root is not None else Path(__file__).resolve().parents[1]
-        result = precheck_repo_helper_build_identity(root, ping, acceptance_mode=acceptance_mode).to_dict()
+        result = precheck_repo_helper_build_identity(
+            root,
+            ping,
+            capabilities=capabilities,
+            capability_error=capability_error,
+            acceptance_mode=acceptance_mode,
+        ).to_dict()
         result["helper_service_instance_id"] = ping.get("helper_service_instance_id") if isinstance(ping, dict) else None
+        result["capability_service_instance_id"] = capabilities.get("service_instance_id") if isinstance(capabilities, dict) else None
+        result["capability_process_epoch"] = capabilities.get("process_epoch") if isinstance(capabilities, dict) else None
+        result["capability_generation"] = capabilities.get("generation") if isinstance(capabilities, dict) else None
         if isinstance(ping, dict) and isinstance(ping.get("exact_action_state"), dict):
             result["exact_action_state"] = dict(ping["exact_action_state"])
         return result
@@ -203,10 +231,7 @@ class HelperBridge:
         identity_check = self.precheck_helper_build_identity(
             dev=dev, wait_=min(wait_, 5.0), repo_root=repo_root, acceptance_mode=acceptance_mode
         )
-        if identity_check.get("status") != "MATCH" and acceptance_mode:
-            return {"success": False, "status": "identity_reject", "failure_code": identity_check.get("reason"),
-                    "helper_build_precheck": identity_check}
-        if identity_check.get("status") == "MISMATCH":
+        if not helper_compatibility_allows_execution(identity_check):
             return {"success": False, "status": "identity_reject", "failure_code": identity_check.get("reason"),
                     "helper_build_precheck": identity_check}
         if identity_check.get("helper_service_instance_id") != parsed_request.data["helper_service_instance_id"]:

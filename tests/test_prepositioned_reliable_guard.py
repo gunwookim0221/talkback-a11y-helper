@@ -61,7 +61,8 @@ def _audit(session):
 
 def _expected_identity():
     return {
-        "status": "MATCH",
+        "status": "EXACT_MATCH",
+        "execution_allowed": True,
         "helper_build_id": BUILD_ID,
         "helper_git_commit": GIT_COMMIT,
         "helper_service_instance_id": SERVICE_ID,

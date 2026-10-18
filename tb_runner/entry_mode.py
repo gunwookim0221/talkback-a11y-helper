@@ -13,6 +13,7 @@ import re
 import shlex
 from typing import Any
 
+from talkback_lib.exact_node_protocol import helper_compatibility_allows_execution
 from talkback_lib.hierarchy_snapshot import flatten_service_hierarchy
 
 AUTOMATED = "AUTOMATED"
@@ -460,7 +461,9 @@ def readonly_preflight(client: Any, serial: str | None, log_fn) -> Any:
     helper_enabled = "com.iotpart.sqe.talkbackhelper/." in helper_services or "com.iotpart.sqe.talkbackhelper/com.iotpart.sqe.talkbackhelper." in helper_services
     destination = session.verify(serial, stage="read_only_preflight")
     ok = (all(x["status"] == "PASS" for x in (connected, awake, unlocked)) and enabled and bool(pid)
-          and helper_enabled and identity.get("status") == "MATCH" and idle and destination["verdict"] == "PASS")
+          and helper_enabled and helper_compatibility_allows_execution(identity)
+          and identity.get("helper_service_instance_id") == identity.get("capability_service_instance_id")
+          and idle and destination["verdict"] == "PASS")
     session.record("READ_ONLY_PREFLIGHT", ok=ok, helper_identity=identity, idle=idle,
                    device_connected=connected, screen_awake=awake, screen_unlocked=unlocked,
                    talkback_enabled=enabled, talkback_pid=pid, helper_enabled=helper_enabled)

@@ -305,8 +305,9 @@ def test_audit_is_append_only_correlated_and_never_visit_authority():
     assert child.to_dict()["parent_event_id"] == source.event_id
 
 
-def test_helper_build_identity_match_mismatch_unknown_and_legacy_compatibility():
+def test_helper_build_identity_unknown_when_identity_is_incomplete():
     identity = {
+        "schema_version": "1",
         "helper_protocol_version": PROTOCOL_VERSION,
         "versionName": "1.0",
         "versionCode": 1,
@@ -317,15 +318,11 @@ def test_helper_build_identity_match_mismatch_unknown_and_legacy_compatibility()
         "build_variant": "debug",
         "metadata_provenance": "GENERATED_AT_BUILD",
     }
-    ping = {"reqId": "ping:1", "success": True, "status": "READY", "helper_build_identity": identity}
-    match = precheck_helper_build_identity("b" * 40, ping, expected_build_id="a" * 64,
-                                           expected_input_digest="c" * 64)
-    assert match.status == HelperIdentityStatus.MATCH
-    mismatch = precheck_helper_build_identity("d" * 40, ping, expected_build_id="a" * 64,
-                                               expected_input_digest="c" * 64)
-    assert mismatch.status == HelperIdentityStatus.MISMATCH
+    ping = {"reqId": "ping:1", "success": True, "status": "READY",
+            "helper_service_instance_id": "service-1", "helper_build_identity": identity}
     unknown = precheck_helper_build_identity("b" * 40, ping)
     assert unknown.status == HelperIdentityStatus.UNKNOWN
+    assert unknown.reason == "TRUSTED_LOCAL_MANIFEST_REQUIRED"
     old = precheck_helper_build_identity("b" * 40, {"reqId": "old", "success": True, "status": "READY"})
     assert old.status == HelperIdentityStatus.UNKNOWN
     assert old.reason == "HELPER_BUILD_IDENTITY_UNAVAILABLE"
@@ -365,7 +362,8 @@ def test_helper_bridge_sends_one_read_only_request_after_identity_precheck():
     client = FakeClient()
     bridge = HelperBridge(client)
     bridge.precheck_helper_build_identity = lambda **_: {
-        "status": "MATCH", "helper_service_instance_id": request.data["helper_service_instance_id"]
+        "status": "EXACT_MATCH", "compatibility_status": "EXACT_MATCH", "execution_allowed": True,
+        "helper_service_instance_id": request.data["helper_service_instance_id"]
     }
     result = bridge.resolve_exact_node_read_only("synthetic-device", request)
     assert result["success"] is True

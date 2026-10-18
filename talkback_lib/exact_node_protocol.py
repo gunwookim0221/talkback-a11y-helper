@@ -945,9 +945,44 @@ class AppendOnlyProtocolAudit:
 
 
 class HelperIdentityStatus(str, Enum):
-    MATCH = "MATCH"
-    MISMATCH = "MISMATCH"
+    EXACT_MATCH = "EXACT_MATCH"
+    COMPATIBLE_SAME_HELPER_INPUT = "COMPATIBLE_SAME_HELPER_INPUT"
+    REBUILD_REQUIRED = "REBUILD_REQUIRED"
+    PROTOCOL_INCOMPATIBLE = "PROTOCOL_INCOMPATIBLE"
     UNKNOWN = "UNKNOWN"
+
+
+_HELPER_COMPATIBLE_STATUSES = frozenset({
+    HelperIdentityStatus.EXACT_MATCH.value,
+    HelperIdentityStatus.COMPATIBLE_SAME_HELPER_INPUT.value,
+})
+_REQUIRED_HELPER_SCHEMAS = {
+    "control_schema": "hierarchy-transfer-control.v1",
+    "transport_protocol": "hierarchy-payload.v1",
+    "raw_hierarchy_schema": "service-hierarchy-v2",
+    "candidate_schema": "legacy-traversal-candidates.v1",
+    "candidate_contract": "legacy-traversal-candidate-contract.v1",
+}
+_REQUIRED_HELPER_CAPABILITIES = frozenset({
+    "content_provider_pfd",
+    "service_hierarchy_v2",
+    "legacy-traversal-candidates.v1",
+})
+
+
+def helper_compatibility_allows_execution(value: Any) -> bool:
+    """Use the shared compatibility policy at every Helper execution gate."""
+    if isinstance(value, HelperIdentityPrecheck):
+        return value.status.value in _HELPER_COMPATIBLE_STATUSES
+    if not isinstance(value, dict):
+        return False
+    status = value.get("status")
+    compatibility_status = value.get("compatibility_status", status)
+    return (
+        status in _HELPER_COMPATIBLE_STATUSES
+        and compatibility_status == status
+        and value.get("execution_allowed") is True
+    )
 
 
 @dataclass(frozen=True)
@@ -957,13 +992,31 @@ class HelperIdentityPrecheck:
     helper_build_id: str | None
     helper_git_commit: str | None
     policy: str
+    expected_git_commit: str | None = None
+    expected_helper_input_digest: str | None = None
+    installed_helper_input_digest: str | None = None
+    required_schemas: dict[str, str] | None = None
+    installed_schemas: dict[str, Any] | None = None
+    installed_metadata: dict[str, Any] | None = None
+    expected_build_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        execution_allowed = self.status.value in _HELPER_COMPATIBLE_STATUSES
         return {
-            "status": self.status.value, "reason": self.reason,
+            "status": self.status.value, "compatibility_status": self.status.value,
+            "execution_allowed": execution_allowed, "reason": self.reason,
             "helper_build_id": self.helper_build_id, "helper_git_commit": self.helper_git_commit,
+            "expected_git_commit": self.expected_git_commit,
+            "expected_helper_build_id": self.expected_build_id,
+            "expected_helper_input_digest": self.expected_helper_input_digest,
+            "helper_input_digest": self.installed_helper_input_digest,
+            "installed_helper_input_digest": self.installed_helper_input_digest,
+            "required_schemas": dict(self.required_schemas or _REQUIRED_HELPER_SCHEMAS),
+            "installed_schemas": dict(self.installed_schemas or {}),
+            "installed_metadata": dict(self.installed_metadata or {}),
+            "helper_input_digest_scope": list(_HELPER_BUILD_INPUTS),
             "policy": self.policy,
-            "acceptance_hard_stop": self.status != HelperIdentityStatus.MATCH and self.policy == "ACCEPTANCE_HARD_STOP",
+            "acceptance_hard_stop": not execution_allowed and self.policy == "ACCEPTANCE_HARD_STOP",
         }
 
 
@@ -987,34 +1040,210 @@ def precheck_helper_build_identity(
     *,
     expected_build_id: str | None = None,
     expected_input_digest: str | None = None,
+    expected_gradle_version: str | None = None,
+    expected_version_name: str = "1.0",
+    expected_version_code: int = 1,
+    expected_variant: str = "debug",
+    capabilities: dict[str, Any] | None = None,
+    capability_error: str | None = None,
     acceptance_mode: bool = True,
 ) -> HelperIdentityPrecheck:
+    ping_payload = ping
+    if isinstance(ping_payload, str):
+        try:
+            ping_payload = json.loads(ping_payload)
+        except json.JSONDecodeError:
+            ping_payload = None
     identity = parse_helper_build_identity(ping)
     policy = "ACCEPTANCE_HARD_STOP" if acceptance_mode else "DIAGNOSTIC_WARNING_ONLY"
+    expected_commit = repo_head.lower() if isinstance(repo_head, str) else None
+
+    def result(status: HelperIdentityStatus, reason: str, *, build_id: Any = None,
+               installed_commit: Any = None, installed_digest: Any = None,
+               installed_schemas: dict[str, Any] | None = None) -> HelperIdentityPrecheck:
+        metadata = {}
+        if isinstance(identity, dict):
+            metadata = {
+                key: identity.get(key) for key in (
+                    "schema_version", "helper_protocol_version", "versionName", "versionCode",
+                    "build_id", "git_commit", "helper_input_digest", "source_state",
+                    "build_variant", "metadata_provenance",
+                )
+            }
+        return HelperIdentityPrecheck(
+            status, reason,
+            build_id if isinstance(build_id, str) else None,
+            installed_commit if isinstance(installed_commit, str) else None,
+            policy,
+            expected_git_commit=expected_commit,
+            expected_helper_input_digest=expected_input_digest,
+            installed_helper_input_digest=installed_digest if isinstance(installed_digest, str) else None,
+            required_schemas=dict(_REQUIRED_HELPER_SCHEMAS),
+            installed_schemas=installed_schemas,
+            installed_metadata=metadata,
+            expected_build_id=expected_build_id,
+        )
+
     if identity is None:
-        return HelperIdentityPrecheck(HelperIdentityStatus.UNKNOWN, "HELPER_BUILD_IDENTITY_UNAVAILABLE", None, None, policy)
-    required = ("helper_protocol_version", "versionName", "versionCode", "build_id", "git_commit",
+        return result(HelperIdentityStatus.UNKNOWN, "HELPER_BUILD_IDENTITY_UNAVAILABLE")
+    if (not isinstance(ping_payload, dict) or ping_payload.get("success") is not True
+            or ping_payload.get("status") != "READY"
+            or not isinstance(ping_payload.get("reqId"), str) or not ping_payload.get("reqId")
+            or not isinstance(ping_payload.get("helper_service_instance_id"), str)
+            or not ping_payload.get("helper_service_instance_id")):
+        return result(HelperIdentityStatus.UNKNOWN, "PING_ENVELOPE_INVALID", build_id=identity.get("build_id"),
+                      installed_commit=identity.get("git_commit"), installed_digest=identity.get("helper_input_digest"))
+    required = ("schema_version", "helper_protocol_version", "versionName", "versionCode", "build_id", "git_commit",
                 "helper_input_digest", "source_state", "build_variant", "metadata_provenance")
     if any(identity.get(key) in (None, "", "UNKNOWN") for key in required):
-        return HelperIdentityPrecheck(HelperIdentityStatus.UNKNOWN, "IDENTITY_FIELDS_INCOMPLETE", identity.get("build_id"), identity.get("git_commit"), policy)
-    mismatch = None
-    if identity["git_commit"].lower() != repo_head.lower():
-        mismatch = "GIT_COMMIT_MISMATCH"
-    elif identity["source_state"] != "CLEAN":
-        mismatch = "HELPER_SOURCE_NOT_CLEAN"
-    elif expected_build_id is not None and identity["build_id"] != expected_build_id:
-        mismatch = "BUILD_ID_MISMATCH"
-    elif expected_input_digest is not None and identity["helper_input_digest"] != expected_input_digest:
-        mismatch = "HELPER_INPUT_DIGEST_MISMATCH"
-    elif not re.fullmatch(r"[0-9a-f]{64}", str(identity["build_id"])):
-        return HelperIdentityPrecheck(HelperIdentityStatus.UNKNOWN, "BUILD_ID_MALFORMED", identity.get("build_id"), identity.get("git_commit"), policy)
-    if mismatch:
-        return HelperIdentityPrecheck(HelperIdentityStatus.MISMATCH, mismatch, identity.get("build_id"), identity.get("git_commit"), policy)
+        return result(HelperIdentityStatus.UNKNOWN, "IDENTITY_FIELDS_INCOMPLETE", build_id=identity.get("build_id"),
+                      installed_commit=identity.get("git_commit"), installed_digest=identity.get("helper_input_digest"))
+    installed_commit = identity.get("git_commit")
+    installed_digest = identity.get("helper_input_digest")
+    build_id = identity.get("build_id")
+    installed_schemas: dict[str, Any] = {
+        "helper_protocol": identity.get("helper_protocol_version"),
+    }
+    if identity.get("schema_version") != "1":
+        return result(HelperIdentityStatus.UNKNOWN, "IDENTITY_SCHEMA_UNSUPPORTED", build_id=build_id,
+                      installed_commit=installed_commit, installed_digest=installed_digest,
+                      installed_schemas=installed_schemas)
+    if (not isinstance(identity.get("versionName"), str)
+            or type(identity.get("versionCode")) is not int
+            or not isinstance(identity.get("build_variant"), str)):
+        return result(HelperIdentityStatus.UNKNOWN, "BUILD_METADATA_MALFORMED", build_id=identity.get("build_id"),
+                      installed_commit=identity.get("git_commit"), installed_digest=identity.get("helper_input_digest"),
+                      installed_schemas=installed_schemas)
     if identity.get("helper_protocol_version") != PROTOCOL_VERSION:
-        return HelperIdentityPrecheck(HelperIdentityStatus.MISMATCH, "HELPER_PROTOCOL_VERSION_MISMATCH", identity.get("build_id"), identity.get("git_commit"), policy)
-    if expected_build_id is None or expected_input_digest is None:
-        return HelperIdentityPrecheck(HelperIdentityStatus.UNKNOWN, "TRUSTED_LOCAL_MANIFEST_REQUIRED", identity.get("build_id"), identity.get("git_commit"), policy)
-    return HelperIdentityPrecheck(HelperIdentityStatus.MATCH, "IDENTITY_MATCH", identity.get("build_id"), identity.get("git_commit"), policy)
+        return result(HelperIdentityStatus.PROTOCOL_INCOMPATIBLE, "HELPER_PROTOCOL_VERSION_MISMATCH", build_id=build_id,
+                      installed_commit=installed_commit, installed_digest=installed_digest,
+                      installed_schemas=installed_schemas)
+    if (not isinstance(installed_commit, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", installed_commit)
+            or not isinstance(installed_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", installed_digest)
+            or not isinstance(build_id, str) or not re.fullmatch(r"[0-9a-f]{64}", build_id)):
+        return result(HelperIdentityStatus.UNKNOWN, "IDENTITY_DIGEST_OR_PROVENANCE_MALFORMED", build_id=build_id,
+                      installed_commit=installed_commit, installed_digest=installed_digest,
+                      installed_schemas=installed_schemas)
+    if expected_build_id is None or expected_input_digest is None or expected_gradle_version is None:
+        return result(HelperIdentityStatus.UNKNOWN, "TRUSTED_LOCAL_MANIFEST_REQUIRED", build_id=build_id,
+                      installed_commit=installed_commit, installed_digest=installed_digest,
+                      installed_schemas=installed_schemas)
+    if (expected_commit is None or not re.fullmatch(r"[0-9a-f]{40}", expected_commit)
+            or not re.fullmatch(r"[0-9a-f]{64}", str(expected_input_digest))
+            or not re.fullmatch(r"[0-9a-f]{64}", str(expected_build_id))):
+        return result(HelperIdentityStatus.UNKNOWN, "LOCAL_HELPER_MANIFEST_MALFORMED", build_id=build_id,
+                      installed_commit=installed_commit, installed_digest=installed_digest,
+                      installed_schemas=installed_schemas)
+    if identity.get("metadata_provenance") != "GENERATED_AT_BUILD":
+        return result(HelperIdentityStatus.UNKNOWN, "BUILD_METADATA_PROVENANCE_UNTRUSTED", build_id=build_id,
+                      installed_commit=installed_commit, installed_digest=installed_digest,
+                      installed_schemas=installed_schemas)
+    if identity.get("versionName") != expected_version_name or identity.get("versionCode") != expected_version_code:
+        return result(HelperIdentityStatus.REBUILD_REQUIRED, "HELPER_VERSION_MISMATCH", build_id=build_id,
+                      installed_commit=installed_commit, installed_digest=installed_digest,
+                      installed_schemas=installed_schemas)
+    if identity.get("build_variant") != expected_variant:
+        return result(HelperIdentityStatus.REBUILD_REQUIRED, "HELPER_BUILD_VARIANT_MISMATCH", build_id=build_id,
+                      installed_commit=installed_commit, installed_digest=installed_digest,
+                      installed_schemas=installed_schemas)
+    if identity.get("source_state") != "CLEAN":
+        return result(HelperIdentityStatus.REBUILD_REQUIRED, "HELPER_SOURCE_NOT_CLEAN", build_id=build_id,
+                      installed_commit=installed_commit, installed_digest=installed_digest,
+                      installed_schemas=installed_schemas)
+
+    # Build ID is provenance: recompute it for the installed commit so Python-only
+    # commits remain compatible without accepting inconsistent APK metadata.
+    installed_manifest = "\n".join((
+        "schema=helper-build-manifest.v1", f"git_commit={installed_commit}", f"input_digest={installed_digest}",
+        "source_state=CLEAN", f"build_variant={identity['build_variant']}",
+        f"version_name={identity['versionName']}", f"version_code={identity['versionCode']}",
+        f"gradle_version={expected_gradle_version}",
+    ))
+    if hashlib.sha256(installed_manifest.encode("utf-8")).hexdigest() != build_id:
+        return result(HelperIdentityStatus.UNKNOWN, "BUILD_ID_PROVENANCE_INCONSISTENT", build_id=build_id,
+                      installed_commit=installed_commit, installed_digest=installed_digest,
+                      installed_schemas=installed_schemas)
+
+    if installed_digest != expected_input_digest:
+        return result(HelperIdentityStatus.REBUILD_REQUIRED, "HELPER_INPUT_DIGEST_MISMATCH", build_id=build_id,
+                      installed_commit=installed_commit, installed_digest=installed_digest,
+                      installed_schemas=installed_schemas)
+
+    if not isinstance(capabilities, dict):
+        return result(HelperIdentityStatus.UNKNOWN, capability_error or "HELPER_CAPABILITY_EVIDENCE_UNAVAILABLE",
+                      build_id=build_id, installed_commit=installed_commit, installed_digest=installed_digest,
+                      installed_schemas=installed_schemas)
+    cap_identity = capabilities.get("helper_build_identity")
+    capability_build = cap_identity.get("build_id") if isinstance(cap_identity, dict) else None
+    capability_commit = cap_identity.get("git_commit") if isinstance(cap_identity, dict) else None
+    capability_digest = cap_identity.get("input_digest") if isinstance(cap_identity, dict) else None
+    capability_variant = cap_identity.get("build_variant") if isinstance(cap_identity, dict) else None
+    capability_source = cap_identity.get("source_state") if isinstance(cap_identity, dict) else None
+    installed_schemas.update({
+        "control_schema": capabilities.get("schema"),
+        "transport_protocol": capabilities.get("protocol_version"),
+        "raw_hierarchy_schema": capabilities.get("payload_schema_version"),
+        "supported_raw_hierarchy_schemas": capabilities.get("supported_payload_schema_versions"),
+        "candidate_schema": capabilities.get("candidate_schema_version"),
+        "supported_candidate_schemas": capabilities.get("supported_candidate_schema_versions"),
+        "candidate_contract": capabilities.get("candidate_contract_version"),
+        "capabilities": capabilities.get("capabilities"),
+    })
+    if (capabilities.get("schema") != _REQUIRED_HELPER_SCHEMAS["control_schema"]
+            or capabilities.get("request_id") is not None
+            or capabilities.get("status") != "OK" or capabilities.get("completed") is not True
+            or type(capabilities.get("generation")) is not int or capabilities.get("generation", 0) < 1
+            or not isinstance(capabilities.get("process_epoch"), str) or not capabilities.get("process_epoch")
+            or not isinstance(capabilities.get("service_instance_id"), str) or not capabilities.get("service_instance_id")
+            or not isinstance(cap_identity, dict)
+            or capability_build != build_id or capability_commit != installed_commit
+            or capability_digest != installed_digest or capability_source != "CLEAN"
+            or capability_variant != identity.get("build_variant")):
+        return result(HelperIdentityStatus.UNKNOWN, "CAPABILITY_IDENTITY_INCONSISTENT", build_id=build_id,
+                      installed_commit=installed_commit, installed_digest=installed_digest,
+                      installed_schemas=installed_schemas)
+    if not isinstance(ping, dict) or capabilities.get("service_instance_id") != ping.get("helper_service_instance_id"):
+        return result(HelperIdentityStatus.UNKNOWN, "SERVICE_INSTANCE_IDENTITY_INCONSISTENT", build_id=build_id,
+                      installed_commit=installed_commit, installed_digest=installed_digest,
+                      installed_schemas=installed_schemas)
+    if capabilities.get("protocol_version") != _REQUIRED_HELPER_SCHEMAS["transport_protocol"]:
+        return result(HelperIdentityStatus.PROTOCOL_INCOMPATIBLE, "TRANSPORT_PROTOCOL_INCOMPATIBLE", build_id=build_id,
+                      installed_commit=installed_commit, installed_digest=installed_digest,
+                      installed_schemas=installed_schemas)
+    raw_versions = capabilities.get("supported_payload_schema_versions")
+    candidate_versions = capabilities.get("supported_candidate_schema_versions")
+    declared_capabilities = capabilities.get("capabilities")
+    schema_compatible = (
+        capabilities.get("payload_schema_version") == _REQUIRED_HELPER_SCHEMAS["raw_hierarchy_schema"]
+        and isinstance(raw_versions, list) and _REQUIRED_HELPER_SCHEMAS["raw_hierarchy_schema"] in raw_versions
+        and capabilities.get("candidate_schema_version") == _REQUIRED_HELPER_SCHEMAS["candidate_schema"]
+        and isinstance(candidate_versions, list) and _REQUIRED_HELPER_SCHEMAS["candidate_schema"] in candidate_versions
+        and capabilities.get("candidate_contract_version") == _REQUIRED_HELPER_SCHEMAS["candidate_contract"]
+        and isinstance(declared_capabilities, list)
+        and all(isinstance(item, str) for item in declared_capabilities)
+        and _REQUIRED_HELPER_CAPABILITIES.issubset(set(declared_capabilities))
+    )
+    if not schema_compatible:
+        return result(HelperIdentityStatus.PROTOCOL_INCOMPATIBLE, "HIERARCHY_SCHEMA_OR_CAPABILITY_INCOMPATIBLE",
+                      build_id=build_id, installed_commit=installed_commit, installed_digest=installed_digest,
+                      installed_schemas=installed_schemas)
+    if installed_commit.lower() == expected_commit:
+        if build_id != expected_build_id:
+            return result(HelperIdentityStatus.UNKNOWN, "LOCAL_BUILD_MANIFEST_INCONSISTENT", build_id=build_id,
+                          installed_commit=installed_commit, installed_digest=installed_digest,
+                          installed_schemas=installed_schemas)
+        return result(HelperIdentityStatus.EXACT_MATCH, "EXACT_BUILD_PROVENANCE_MATCH", build_id=build_id,
+                      installed_commit=installed_commit, installed_digest=installed_digest,
+                      installed_schemas=installed_schemas)
+    return result(HelperIdentityStatus.COMPATIBLE_SAME_HELPER_INPUT,
+                  "GIT_COMMIT_DIFFERENT_BUT_HELPER_INPUT_COMPATIBLE", build_id=build_id,
+                  installed_commit=installed_commit, installed_digest=installed_digest,
+                  installed_schemas=installed_schemas)
+
+
+def check_helper_compatibility(*args: Any, **kwargs: Any) -> HelperIdentityPrecheck:
+    """Structured, fail-closed Helper compatibility decision shared by callers."""
+    return precheck_helper_build_identity(*args, **kwargs)
 
 
 _HELPER_BUILD_INPUTS = (
@@ -1078,6 +1307,9 @@ def compute_repo_helper_build_identity(repo_root: str | Path, *, variant: str = 
         "build_variant": variant,
         "gradle_version": gradle_version,
         "java_version": java_version,
+        "helper_input_files": list(_HELPER_BUILD_INPUTS),
+        "version_name": "1.0",
+        "version_code": 1,
     }
 
 
@@ -1086,15 +1318,27 @@ def precheck_repo_helper_build_identity(
     ping: dict[str, Any] | str | None,
     *,
     variant: str = "debug",
+    capabilities: dict[str, Any] | None = None,
+    capability_error: str | None = None,
     acceptance_mode: bool = True,
 ) -> HelperIdentityPrecheck:
     expected = compute_repo_helper_build_identity(repo_root, variant=variant)
     if expected["source_state"] != "CLEAN":
-        return HelperIdentityPrecheck(HelperIdentityStatus.MISMATCH, "REPOSITORY_SOURCE_NOT_CLEAN", None, expected["git_commit"],
-                                      "ACCEPTANCE_HARD_STOP" if acceptance_mode else "DIAGNOSTIC_WARNING_ONLY")
-    return precheck_helper_build_identity(
+        return HelperIdentityPrecheck(
+            HelperIdentityStatus.UNKNOWN, "REPOSITORY_HELPER_INPUTS_NOT_CLEAN", None, None,
+            "ACCEPTANCE_HARD_STOP" if acceptance_mode else "DIAGNOSTIC_WARNING_ONLY",
+            expected_git_commit=str(expected["git_commit"]),
+            expected_helper_input_digest=str(expected["helper_input_digest"]),
+        )
+    return check_helper_compatibility(
         str(expected["git_commit"]), ping,
         expected_build_id=str(expected["build_id"]),
         expected_input_digest=str(expected["helper_input_digest"]),
+        expected_gradle_version=str(expected["gradle_version"]),
+        expected_version_name=str(expected["version_name"]),
+        expected_version_code=int(expected["version_code"]),
+        expected_variant=variant,
+        capabilities=capabilities,
+        capability_error=capability_error,
         acceptance_mode=acceptance_mode,
     )

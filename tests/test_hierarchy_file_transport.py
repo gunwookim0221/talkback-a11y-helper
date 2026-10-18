@@ -300,16 +300,19 @@ class HierarchyControlTests(unittest.TestCase):
         with self.assertRaises(HierarchyTransportError):
             decode_control_reply(f'Broadcast completed: result=1, data="{CONTROL_PREFIX}{duplicate}"')
 
-    def test_existing_build_identity_match_is_mandatory(self):
+    def test_existing_build_compatibility_precheck_is_mandatory(self):
         expected = validate_expected_build_precheck({
-            "status": "MATCH",
+            "status": "EXACT_MATCH",
+            "execution_allowed": True,
             "helper_build_id": "c" * 64,
             "helper_git_commit": "d" * 40,
             "helper_service_instance_id": "service-id",
+            "helper_input_digest": "f" * 64,
         })
         self.assertEqual("c" * 64, expected["build_id"])
+        self.assertEqual("f" * 64, expected["input_digest"])
         with self.assertRaises(HierarchyTransportError):
-            validate_expected_build_precheck({"status": "MISMATCH"})
+            validate_expected_build_precheck({"status": "REBUILD_REQUIRED", "execution_allowed": False})
 
 
 class HierarchyClientIntegrationTests(unittest.TestCase):
@@ -398,10 +401,12 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
         result = client.dump_hierarchy(
             transport_mode="RELIABLE_FILE_PFD",
             expected_helper_build_identity={
-                "status": "MATCH",
+                "status": "COMPATIBLE_SAME_HELPER_INPUT",
+                "execution_allowed": True,
                 "helper_build_id": identity["build_id"],
                 "helper_git_commit": identity["git_commit"],
                 "helper_service_instance_id": identity["service_instance_id"],
+                "helper_input_digest": identity["input_digest"],
             },
         )
         self.assertEqual(request_id, result["reqId"])
@@ -443,10 +448,12 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
     def test_default_mode_is_reliable_and_auto_prechecks_build_identity(self):
         client = self._client()
         identity = {
-            "status": "MATCH",
+            "status": "EXACT_MATCH",
+            "execution_allowed": True,
             "helper_build_id": "a" * 64,
             "helper_git_commit": "b" * 40,
             "helper_service_instance_id": "service-instance",
+            "helper_input_digest": "c" * 64,
         }
         observed: dict[str, object] = {}
 
@@ -474,10 +481,12 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
     def test_default_reliable_failure_does_not_fallback_to_legacy_payload(self):
         client = self._client()
         client.precheck_helper_build_identity = lambda **_kwargs: {
-            "status": "MATCH",
+            "status": "EXACT_MATCH",
+            "execution_allowed": True,
             "helper_build_id": "a" * 64,
             "helper_git_commit": "b" * 40,
             "helper_service_instance_id": "service-instance",
+            "helper_input_digest": "c" * 64,
         }
 
         def reliable_failure(**_kwargs):

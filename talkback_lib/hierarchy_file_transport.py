@@ -10,6 +10,7 @@ import struct
 from dataclasses import dataclass
 from typing import Any
 
+from talkback_lib.exact_node_protocol import helper_compatibility_allows_execution
 from talkback_lib.reliable_hierarchy_schema import (
     LEGACY_RAW_SCHEMA_VERSION,
     RAW_SCHEMA_VERSION,
@@ -263,8 +264,8 @@ def _reject_json_constant(value: str) -> None:
 
 
 def validate_expected_build_precheck(value: Any) -> dict[str, str]:
-    if not isinstance(value, dict) or value.get("status") != "MATCH":
-        raise HierarchyTransportError("BUILD_IDENTITY_MATCH_REQUIRED")
+    if not isinstance(value, dict) or not helper_compatibility_allows_execution(value):
+        raise HierarchyTransportError("BUILD_IDENTITY_COMPATIBILITY_REQUIRED")
     build_id = value.get("helper_build_id")
     git_commit = value.get("helper_git_commit")
     service_id = value.get("helper_service_instance_id")
@@ -274,7 +275,11 @@ def validate_expected_build_precheck(value: Any) -> dict[str, str]:
         raise HierarchyTransportError("BUILD_IDENTITY_PRECHECK_INVALID")
     if not isinstance(service_id, str) or not service_id:
         raise HierarchyTransportError("SERVICE_INSTANCE_PRECHECK_INVALID")
+    input_digest = value.get("helper_input_digest")
+    if not isinstance(input_digest, str) or not _SHA256.fullmatch(input_digest):
+        raise HierarchyTransportError("BUILD_IDENTITY_PRECHECK_INVALID")
     expected = {"build_id": build_id, "git_commit": git_commit, "service_instance_id": service_id}
+    expected["input_digest"] = input_digest
     for source_key, target_key in (("helper_input_digest", "input_digest"), ("build_variant", "build_variant")):
         extra = value.get(source_key)
         if extra is not None:

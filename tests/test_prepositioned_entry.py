@@ -42,7 +42,9 @@ class Client:
         self.power = "mWakefulness=Awake"
         self.policy = "showing=false"
         self.enabled = True
-        self.identity = dict(status="MATCH", exact_action_state=dict(
+        self.identity = dict(status="EXACT_MATCH", compatibility_status="EXACT_MATCH", execution_allowed=True,
+                             helper_service_instance_id="helper-service",
+                             capability_service_instance_id="helper-service", exact_action_state=dict(
             build_gate=False, runtime_gate=False, c5_ready=False, helper_stopped=True))
         self.services = "com.iotpart.sqe.talkbackhelper/com.iotpart.sqe.talkbackhelper.A11yHelperService"
 
@@ -159,7 +161,8 @@ def test_preflight_failures_never_fall_back_or_move_focus(setup, failure):
     elif failure == 'unknown_lock': client.policy = ''
     elif failure == 'asleep': client.power = 'mWakefulness=Asleep'
     elif failure == 'talkback_off': client.enabled = False
-    elif failure == 'helper_mismatch': client.identity['status'] = 'MISMATCH'
+    elif failure == 'helper_mismatch':
+        client.identity.update(status='REBUILD_REQUIRED', compatibility_status='REBUILD_REQUIRED', execution_allowed=False)
     elif failure == 'active_transaction': client._evidence_active_transaction = {'id': 'stale'}
     elif failure == 'exact_gate_on': client.identity['exact_action_state']['runtime_gate'] = True
     elif failure == 'helper_disabled': client.services = ''
