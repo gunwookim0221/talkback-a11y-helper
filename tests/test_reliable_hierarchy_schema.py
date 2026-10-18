@@ -461,18 +461,25 @@ def test_candidate_api_returns_legacy_nodes_only_after_capability_and_contract_v
     assert all(node.get("text") != "nested raw wrapper" for node in nodes)
 
 
-def test_client_decoded_api_exposes_read_only_raw_and_legacy_candidates_without_switching_dump_tree():
+def test_client_decoded_api_and_default_candidate_api_share_validated_v2_payload():
     client = A11yAdbClient(start_monitor=False)
     body = _payload()
     client.dump_hierarchy = lambda **_kwargs: body
     client._last_hierarchy_capabilities = _capabilities()
     client._last_hierarchy_transport_metadata = _transport_metadata()
-    client.dump_tree = lambda **_kwargs: pytest.fail("C3 must not switch dump_tree authority")
+    client.check_helper_status = lambda **_kwargs: True
+    legacy_broadcasts = []
+    client._broadcast = lambda *args, **kwargs: legacy_broadcasts.append((args, kwargs))
 
     decoded = client.dump_hierarchy_decoded()
+    snapshot = client.get_traversal_candidate_snapshot()
 
     assert decoded.raw_hierarchy["schemaVersion"] == RAW_SCHEMA_VERSION
     assert adapt_traversal_candidates_to_legacy(decoded) == body["traversalCandidates"]["candidates"]
+    assert snapshot.candidates == body["traversalCandidates"]["candidates"]
+    assert snapshot.response["algorithmVersion"] == body["traversalCandidates"]["algorithmVersion"]
+    assert snapshot.raw_hierarchy["schemaVersion"] == RAW_SCHEMA_VERSION
+    assert legacy_broadcasts == []
 
 
 def test_client_decoded_api_rejects_absent_helper_candidate_capability():

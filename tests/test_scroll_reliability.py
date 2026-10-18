@@ -168,3 +168,105 @@ def test_reappeared_instance_not_counted_as_newly_observed(monkeypatch):
     assert first["newly_observed_count"] == 1
     assert second["new_count"] == 1 and second["newly_observed_count"] == 0
     assert len(second["reappeared"]) == 1
+
+
+def _reliable_snapshot(step):
+    candidate = node(
+        "same-card",
+        f"10,{step * 100},310,{step * 100 + 80}",
+        f"Item {step}",
+        cls="android.widget.Button",
+    )
+    scroll_container = {
+        "className": "android.widget.ScrollView",
+        "viewIdResourceName": "app:id/list",
+        "boundsInScreen": {"l": 0, "t": 0, "r": 400, "b": 1000},
+        "scrollable": True,
+        "enabled": True,
+        "visibleToUser": True,
+        "actions": [16908346],
+        "children": [],
+    }
+    root = {
+        "className": "android.widget.FrameLayout",
+        "viewIdResourceName": "app:id/root",
+        "boundsInScreen": {"l": 0, "t": 0, "r": 400, "b": 1000},
+        "children": [scroll_container],
+    }
+    raw = {
+        "success": True,
+        "windows": [{"focused": True, "active": True, "root": root}],
+    }
+    return type("ReliableSnapshot", (), {"candidates": [candidate], "raw_hierarchy": raw})()
+
+
+def test_multistep_scroll_uses_three_same_snapshot_reliable_candidate_reads(monkeypatch):
+    from tb_runner import scroll_reliability as sr
+
+    class Client:
+        last_dump_metadata = {"canScrollDown": True, "transportMode": "RELIABLE_FILE_PFD"}
+        last_scroll_capabilities = []
+
+        def __init__(self):
+            self.reads = 0
+            self.legacy_reads = 0
+
+        def get_traversal_candidate_snapshot(self, **_kwargs):
+            self.reads += 1
+            return _reliable_snapshot(self.reads)
+
+        def dump_tree(self, **_kwargs):
+            self.legacy_reads += 1
+            raise AssertionError("authoritative legacy hierarchy read")
+
+        def scroll(self, **_kwargs):
+            return True
+
+    monkeypatch.setattr(sr.time, "sleep", lambda _seconds: None)
+    client = Client()
+    before = sr.capture(client, "device", "scenario", step_index=0)
+    first, after_first = sr.verified_scroll(client, "device", "scenario", 1, before=before)
+    second, after_second = sr.verified_scroll(client, "device", "scenario", 2, before=after_first)
+
+    assert first["status"] == second["status"] == "SCROLL_MOVED"
+    assert client.reads == 3
+    assert client.legacy_reads == 0
+    assert after_second["nodes"][0]["text"] == "Item 3"
+
+
+def test_reliable_scroll_failure_after_success_stays_incomplete_without_legacy_rescue(monkeypatch):
+    from tb_runner import scroll_reliability as sr
+
+    class Client:
+        last_dump_metadata = {"canScrollDown": True, "transportMode": "RELIABLE_FILE_PFD"}
+        last_scroll_capabilities = []
+
+        def __init__(self):
+            self.reads = 0
+            self.legacy_reads = 0
+
+        def get_traversal_candidate_snapshot(self, **_kwargs):
+            self.reads += 1
+            if self.reads == 3:
+                raise RuntimeError("PFD_READ_FAILED")
+            return _reliable_snapshot(self.reads)
+
+        def dump_tree(self, **_kwargs):
+            self.legacy_reads += 1
+            raise AssertionError("legacy rescue must remain unused")
+
+        def scroll(self, **_kwargs):
+            return True
+
+    monkeypatch.setattr(sr.time, "sleep", lambda _seconds: None)
+    client = Client()
+    before = sr.capture(client, "device", "scenario", step_index=0)
+    success, after_success = sr.verified_scroll(client, "device", "scenario", 1, before=before)
+    failed, after_failure = sr.verified_scroll(client, "device", "scenario", 2, before=after_success)
+
+    assert success["status"] == "SCROLL_MOVED"
+    assert failed["termination_reason"] == "scroll_unverified"
+    assert after_failure["nodes"] == []
+    assert after_failure["viewport"]["valid"] is False
+    assert client.reads == 3
+    assert client.legacy_reads == 0

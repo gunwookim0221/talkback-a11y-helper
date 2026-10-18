@@ -164,22 +164,47 @@ def transition(before,after,action_success,after_capability):
                 persisted_count=len(a&b),new_count=len(a-b),disappeared_count=len(b-a),termination_reason=reason)
 
 
-def dump_with_capabilities(client,dev):
+def _dump_with_capability_context(client,dev):
+    snapshot_fn=getattr(client,"get_traversal_candidate_snapshot",None)
+    if callable(snapshot_fn):
+        snapshot=snapshot_fn(dev=dev)
+        nodes=snapshot.candidates
+        raw_scroll_tree=[]
+        raw=snapshot.raw_hierarchy
+        try:
+            from talkback_lib.hierarchy_snapshot import legacy_scroll_nodes
+            raw_scroll_tree=legacy_scroll_nodes(raw)
+        except Exception as exc:
+            raise RuntimeError("reliable_scroll_snapshot_invalid") from exc
+        tokens=("scroll","recycler","gridview","listview","viewpager","pager")
+        containers=[
+            node for node in flat_nodes(raw_scroll_tree)
+            if node.get("scrollable") is True
+            or any(token in str(node.get(key) or "").lower()
+                   for key in ("className","viewIdResourceName") for token in tokens)
+        ]
+        metadata_containers=deepcopy(getattr(client,"last_scroll_capabilities",[]) or [])
+        return nodes,metadata_containers or containers
     fn=client.dump_tree
     try:
-        return fn(dev=dev,include_scroll_capabilities=True)
+        return fn(dev=dev,include_scroll_capabilities=True),None
     except TypeError as exc:
         if "include_scroll_capabilities" not in str(exc):
             raise
-        return fn(dev=dev)  # Compatibility for older transports/test adapters.
+        return fn(dev=dev),None  # Compatibility for older transports/test adapters.
+
+
+def dump_with_capabilities(client,dev):
+    return _dump_with_capability_context(client,dev)[0]
 
 
 def capture(client,dev,scenario_id,nodes=None,step_index=0,evidence="helper_capture"):
+    containers=None
     if nodes is None:
-        nodes=dump_with_capabilities(client,dev)
+        nodes,containers=_dump_with_capability_context(client,dev)
     meta=deepcopy(getattr(client,"last_dump_metadata",{}) or {})
     caps=deepcopy(getattr(client,"last_scroll_capabilities",[]) or [])
-    c=capability(nodes,meta,caps)
+    c=capability(nodes,meta,containers=containers or caps or None)
     if c["source"] == "unknown" and callable(getattr(client,"dump_hierarchy",None)):
         try:
             from talkback_lib.hierarchy_snapshot import service_hierarchy_to_xml

@@ -37,7 +37,10 @@ def test_dump_tree_scroll_capabilities_is_opt_in_and_preserves_existing_nodes(mo
         ),
     )
 
-    nodes = client.dump_tree(dev="SERIAL", wait_seconds=0.1, include_scroll_capabilities=True)
+    nodes = client.dump_tree(
+        dev="SERIAL", wait_seconds=0.1, include_scroll_capabilities=True,
+        transport_mode="LEGACY_LOGCAT",
+    )
 
     assert broadcast["action"] == ACTION_DUMP_TREE
     assert broadcast["extras"][0:2] == ["--es", "reqId"]
@@ -91,7 +94,10 @@ def test_device_collection_bridge_is_explicit_and_separate_from_diagnostics(monk
         ),
     )
 
-    nodes = client.dump_tree(dev="SERIAL", wait_seconds=0.1, include_device_collection=True)
+    nodes = client.dump_tree(
+        dev="SERIAL", wait_seconds=0.1, include_device_collection=True,
+        transport_mode="LEGACY_LOGCAT",
+    )
 
     assert nodes == [{"text": "Existing node"}]
     assert broadcast["extras"][3:] == ["--ez", "includeDeviceCollection", "true"]

@@ -11,6 +11,7 @@ import subprocess
 import threading
 import time
 import uuid
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
@@ -100,6 +101,26 @@ from talkback_lib.utils import (
     parse_bounds_tuple,
     safe_parse_json_payload,
 )
+
+
+def _plain_json_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _plain_json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain_json_value(item) for item in value]
+    return value
+
+
+@dataclass(frozen=True)
+class TraversalCandidateSnapshot:
+    response: dict[str, Any]
+    raw_hierarchy: dict[str, Any]
+    decoded: ReliableHierarchyPayload
+
+    @property
+    def candidates(self) -> list[dict[str, Any]]:
+        return self.response["nodes"]
+
 
 RETRY_TIMEOUT_REFACTOR_VERSION = "PR11.0"
 PR12_REFACTOR_CLEANUP_VERSION = "PR12.0"
@@ -1195,7 +1216,143 @@ class A11yAdbClient:
 
         return "talkback" in enabled_services.lower()
 
+    def get_traversal_candidate_snapshot(
+        self,
+        dev: Any = None,
+        wait_seconds: float = 30.0,
+        *,
+        include_device_collection: bool = False,
+        expected_helper_build_identity: dict[str, Any] | None = None,
+    ) -> "TraversalCandidateSnapshot":
+        """Acquire one validated reliable v2 snapshot and its C3 candidate view."""
+        self.last_scroll_capabilities = []
+        self.last_dump_metadata = {}
+        self.last_device_collection = {}
+        decoded = self.dump_hierarchy_decoded(
+            dev=dev,
+            wait_seconds=wait_seconds,
+            expected_helper_build_identity=expected_helper_build_identity,
+        )
+        response = legacy_dump_tree_response(decoded)
+        self.last_dump_metadata = {
+            "algorithmVersion": response.get("algorithmVersion"),
+            "canScrollDown": response.get("canScrollDown"),
+            "scrollAxisContract": decoded.scroll_metadata.get("scrollAxisContract"),
+            "candidateSchemaVersion": decoded.traversal_candidates.schema_version,
+            "candidateContractVersion": decoded.traversal_candidates.contract_version,
+            "transportMode": "RELIABLE_FILE_PFD",
+            "requestId": decoded.request_id,
+        }
+        scroll_capabilities = decoded.scroll_metadata.get("scrollCapabilities", ())
+        self.last_scroll_capabilities = (
+            _plain_json_value(scroll_capabilities)
+            if isinstance(scroll_capabilities, (list, tuple))
+            else []
+        )
+        self.last_device_collection = (
+            _plain_json_value(decoded.device_collection)
+            if isinstance(decoded.device_collection, Mapping)
+            else {}
+        )
+
+        if include_device_collection and not self.last_device_collection:
+            # C2's current v2 payload does not carry deviceCollection. Keep this
+            # explicitly requested supplemental metadata read isolated from the
+            # candidate authority, and bind it to an equivalent candidate view.
+            reliable_metadata = dict(self.last_dump_metadata)
+            reliable_scroll_capabilities = list(self.last_scroll_capabilities)
+            legacy_nodes = self._dump_tree_legacy(
+                dev=dev,
+                wait_seconds=min(8.0, max(0.1, float(wait_seconds))),
+                include_device_collection=True,
+            )
+            legacy_metadata = dict(self.last_dump_metadata)
+            supplemental_collection = dict(self.last_device_collection or {})
+            legacy_response = {
+                "algorithmVersion": legacy_metadata.get("algorithmVersion"),
+                "canScrollDown": legacy_metadata.get("canScrollDown"),
+                "nodes": legacy_nodes,
+            }
+            from talkback_lib.candidate_equivalence import compare_candidate_responses
+
+            differences = compare_candidate_responses(legacy_response, response)
+            if differences:
+                self.last_dump_metadata = reliable_metadata
+                self.last_scroll_capabilities = reliable_scroll_capabilities
+                self.last_device_collection = {}
+                raise HierarchyTransportError("SUPPLEMENTAL_METADATA_CANDIDATE_MISMATCH", decoded.request_id)
+            self.last_device_collection = supplemental_collection
+            self.last_dump_metadata = reliable_metadata
+            self.last_scroll_capabilities = reliable_scroll_capabilities
+
+        try:
+            from tb_runner.traversal_profiler import active_profiler
+
+            profiler = active_profiler()
+            if profiler is not None:
+                profiler.increment_counter("reliable_candidate_snapshot_read_count")
+        except Exception:
+            pass
+
+        return TraversalCandidateSnapshot(
+            response=response,
+            raw_hierarchy=_plain_json_value(decoded.raw_hierarchy),
+            decoded=decoded,
+        )
+
+    def get_traversal_candidates(
+        self,
+        dev: Any = None,
+        wait_seconds: float = 30.0,
+        *,
+        expected_helper_build_identity: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return the canonical reliable candidate list in legacy-compatible shape."""
+        return self.get_traversal_candidate_snapshot(
+            dev=dev,
+            wait_seconds=wait_seconds,
+            expected_helper_build_identity=expected_helper_build_identity,
+        ).candidates
+
     def dump_tree(
+        self,
+        dev: Any = None,
+        wait_seconds: float = 5.0,
+        *,
+        include_scroll_capabilities: bool = False,
+        include_device_collection: bool = False,
+        transport_mode: str = DEFAULT_HIERARCHY_TRANSPORT_MODE,
+    ) -> list[dict[str, Any]]:
+        """Compatibility surface; normal callers receive reliable v2 candidates.
+
+        The legacy logcat implementation is available only by explicitly
+        selecting ``transport_mode="LEGACY_LOGCAT"``. A reliable acquisition
+        failure never invokes it as rescue.
+        """
+        if transport_mode == "LEGACY_LOGCAT":
+            return self._dump_tree_legacy(
+                dev=dev,
+                wait_seconds=wait_seconds,
+                include_scroll_capabilities=include_scroll_capabilities,
+                include_device_collection=include_device_collection,
+            )
+        if transport_mode != DEFAULT_HIERARCHY_TRANSPORT_MODE:
+            raise ValueError(f"Unsupported hierarchy transport mode: {transport_mode}")
+        self.last_scroll_capabilities = []
+        self.last_dump_metadata = {}
+        self.last_device_collection = {}
+        if not self.check_helper_status(dev=dev):
+            return []
+        self.last_announcements = []
+        self.last_merged_announcement = ""
+        snapshot = self.get_traversal_candidate_snapshot(
+            dev=dev,
+            wait_seconds=max(0.1, float(wait_seconds)),
+            include_device_collection=include_device_collection,
+        )
+        return snapshot.candidates
+
+    def _dump_tree_legacy(
         self,
         dev: Any = None,
         wait_seconds: float = 5.0,
@@ -1419,8 +1576,8 @@ class A11yAdbClient:
     ) -> ReliableHierarchyPayload:
         """Return the v2 raw hierarchy and candidate projection as a read-only model.
 
-        This opt-in decoder API does not alter any ``dump_tree()`` caller or
-        traversal authority. A legacy-only capability response fails closed.
+        This is the canonical reliable input for traversal candidates. A
+        legacy-only capability response fails closed.
         """
         payload = self.dump_hierarchy(
             dev=dev,
@@ -1780,6 +1937,7 @@ class A11yAdbClient:
             dev=dev,
             wait_seconds=wait_seconds,
             include_scroll_capabilities=True,
+            transport_mode="LEGACY_LOGCAT",
         )
         return list(self.last_scroll_capabilities)
 

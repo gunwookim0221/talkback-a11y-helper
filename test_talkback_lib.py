@@ -1400,7 +1400,10 @@ class ClientInterfaceCompatTest(unittest.TestCase):
             "_run",
             return_value=log_payload,
         ):
-            result = client.dump_tree(dev="R3CX40QFDBP", wait_seconds=0.1)
+            result = client.dump_tree(
+                dev="R3CX40QFDBP", wait_seconds=0.1,
+                transport_mode="LEGACY_LOGCAT",
+            )
 
         broadcast_mock.assert_called_once_with("R3CX40QFDBP", "com.iotpart.sqe.talkbackhelper.DUMP_TREE", ["--es", "reqId", "REQID801"])
         self.assertEqual(result, [{"id": 1}, {"id": 2}])
@@ -1415,7 +1418,10 @@ class ClientInterfaceCompatTest(unittest.TestCase):
             "_run",
             return_value=log_payload,
         ):
-            result = client.dump_tree(dev="SER", wait_seconds=0.1)
+            result = client.dump_tree(
+                dev="SER", wait_seconds=0.1,
+                transport_mode="LEGACY_LOGCAT",
+            )
 
         self.assertEqual(result, [{"id": 3}])
 
@@ -1432,7 +1438,10 @@ class ClientInterfaceCompatTest(unittest.TestCase):
             return_value=log_payload,
         ), patch("talkback_lib.time.sleep") as sleep_mock:
             with self.assertRaisesRegex(RuntimeError, "DUMP_TREE failed: comparator failure"):
-                client.dump_tree(dev="SER", wait_seconds=5.0)
+                client.dump_tree(
+                    dev="SER", wait_seconds=5.0,
+                    transport_mode="LEGACY_LOGCAT",
+                )
 
         sleep_mock.assert_not_called()
 

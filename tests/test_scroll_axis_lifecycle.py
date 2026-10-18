@@ -40,7 +40,8 @@ def test_axis_payload_survives_helper_transport(monkeypatch):
                  scrollCapabilities=[dict(container('android.view.View',True,[16908345,16908347]),axis='HORIZONTAL',axis_source='directional_actions',vertical_can_scroll_forward=False)])
     monkeypatch.setattr(client._logcat_reader,'dump_raw_filtered',lambda dev=None:
         f'DUMP_TREE_RESULT {broadcast["extras"][2]} '+json.dumps(payload))
-    assert client.dump_tree(dev='SERIAL',wait_seconds=.1,include_scroll_capabilities=True)==[{'text':'node'}]
+    assert client.dump_tree(dev='SERIAL',wait_seconds=.1,include_scroll_capabilities=True,
+                            transport_mode='LEGACY_LOGCAT')==[{'text':'node'}]
     assert client.last_dump_metadata['scrollAxisContract']=='axis-v1'
     assert client.last_scroll_capabilities[0]['axis']=='HORIZONTAL'
     assert capability([],client.last_dump_metadata,client.last_scroll_capabilities)['vertical_can_scroll_forward'] is False
