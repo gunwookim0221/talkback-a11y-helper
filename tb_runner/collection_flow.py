@@ -20597,6 +20597,28 @@ def _collect_tab_rows_inner(
     _save_focusable_coverage(client, output_path, all_rows)
     if hard_stop is None or not hard_stop.latched:
         _maybe_execute_coverage_probe_engine(client, dev, output_path, str(tab_cfg.get("scenario_id", "") or ""))
+    # Phase 6B is a read-only projection over rows already collected by the
+    # normal traversal. Its artifact is optional and failures are isolated from
+    # production completion, reconciliation, and safety decisions.
+    try:
+        from tb_runner.state_graph import maybe_write_shadow_graph_from_rows
+
+        graph_scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+        graph_run_id = next((str(item.get("scenario_run_id")) for item in phase_ctx.rows
+                             if isinstance(item, dict) and item.get("scenario_run_id")), "")
+        if not graph_run_id:
+            graph_run_id = graph_scenario_id + ":" + Path(output_path).stem
+        graph_path = maybe_write_shadow_graph_from_rows(
+            rows=phase_ctx.rows,
+            output_path=output_path,
+            run_id=graph_run_id,
+            scenario_id=graph_scenario_id,
+            terminal={"status": str(state.stop_reason or ""), "step": int(state.stop_step or 0)},
+        )
+        if graph_path is not None:
+            log(f"[STATE_GRAPH][shadow_artifact] path='{graph_path}' decision_authority='none'")
+    except Exception as exc:
+        log(f"[STATE_GRAPH][shadow_error] reason='{type(exc).__name__}' action='continue_production'")
     main_steps_completed = sum(1 for row in rows if int(row.get("step_index", -1) or -1) > 0)
     setattr(
         client,
