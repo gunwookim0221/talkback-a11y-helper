@@ -10,6 +10,7 @@ parser.add_argument("--mode", type=str, default="full")
 parser.add_argument("--language-mode", type=str, default="current")
 parser.add_argument("--launch-mode", type=str, default="warm")
 parser.add_argument("--entry-mode", choices=("AUTOMATED", "PREPOSITIONED"), default="AUTOMATED")
+parser.add_argument("--optional-expansions", choices=("ENABLED", "DISABLED"), default=None)
 parser.add_argument("--scenario", action="append", default=[])
 args, _ = parser.parse_known_args()
 if args.output_dir:
@@ -144,6 +145,7 @@ def main() -> int:
         output_dir=args.output_dir,
         runtime_config_path=os.environ.get("TB_RUNTIME_CONFIG_PATH"),
         entry_mode=args.entry_mode,
+        optional_expansions=args.optional_expansions,
     )
     context = RunContext(spec)
     out_dir = context.output_dir
@@ -188,6 +190,7 @@ def main() -> int:
         if len(selected) != 1:
             raise ValueError("PREPOSITIONED requires exactly one enabled scenario")
         selected[0]["entry_mode"] = PREPOSITIONED
+        selected[0]["optional_expansions"] = spec.optional_expansions
         PrepositionedSession(client, selected[0], Path(output_path).with_suffix(".prepositioned.jsonl"), log).bind()
     environment_capture = None
     try:
@@ -262,6 +265,7 @@ def main() -> int:
                 )
             manifest["feature_flags"] = dict(feature_flags)
             manifest["entry_mode"] = spec.entry_mode
+            manifest["optional_expansions"] = spec.optional_expansions
             evidence_runtime.write_manifest(manifest)
             log(f"[EVIDENCE] enabled schema='evidence-event-v1' ledger='{evidence_runtime.ledger.path}'")
         except Exception as exc:

@@ -44,9 +44,18 @@ class RunSpec:
     traversal_profiler: bool = False
     preflight_talkback_pid: str | None = None
     entry_mode: str = AUTOMATED
+    optional_expansions: str | None = None
 
     def __post_init__(self) -> None:
         normalize_entry_mode(self.entry_mode)
+        expansion_mode = self.optional_expansions
+        if expansion_mode is None:
+            expansion_mode = "DISABLED" if self.entry_mode == PREPOSITIONED else "ENABLED"
+            object.__setattr__(self, "optional_expansions", expansion_mode)
+        if expansion_mode not in {"ENABLED", "DISABLED"}:
+            raise ValueError("optional_expansions must be ENABLED or DISABLED")
+        if self.entry_mode == AUTOMATED and expansion_mode != "ENABLED":
+            raise ValueError("optional_expansions can only be disabled in PREPOSITIONED mode")
         if self.entry_mode == PREPOSITIONED and len(self.scenario_ids) != 1:
             raise ValueError("PREPOSITIONED requires exactly one explicitly selected scenario")
         if self.entry_mode == PREPOSITIONED and self.enable_coverage_probe:
@@ -72,6 +81,7 @@ class RunSpec:
         command.extend(["--launch-mode", self.launch_mode])
         if self.entry_mode != AUTOMATED:
             command.extend(["--entry-mode", self.entry_mode])
+            command.extend(["--optional-expansions", str(self.optional_expansions)])
         for scenario_id in self.scenario_ids:
             command.extend(["--scenario", scenario_id])
         return command

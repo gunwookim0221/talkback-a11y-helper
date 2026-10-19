@@ -89,8 +89,139 @@ def test_default_mode_ignores_environment_and_existing_cli_is_unchanged(monkeypa
     assert RunSpec().entry_mode == AUTOMATED
     assert '--entry-mode' not in RunSpec().build_script_command('script_test.py')
     spec = RunSpec(entry_mode=PREPOSITIONED, scenario_ids=('any_plugin',))
+    assert spec.optional_expansions == 'DISABLED'
     command = spec.build_script_command('script_test.py')
     assert command[command.index('--entry-mode')+1] == PREPOSITIONED
+    assert command[command.index('--optional-expansions')+1] == 'DISABLED'
+
+
+def test_optional_expansion_policy_is_scoped_to_prepositioned_mode():
+    assert RunSpec().optional_expansions == 'ENABLED'
+    assert RunSpec(entry_mode=PREPOSITIONED, scenario_ids=('one',),
+                   optional_expansions='ENABLED').optional_expansions == 'ENABLED'
+    with pytest.raises(ValueError, match='only be disabled'):
+        RunSpec(optional_expansions='DISABLED')
+
+
+def test_prepositioned_optional_expansion_enabled_keeps_existing_overlay_path(setup, monkeypatch):
+    from tb_runner import collection_flow as flow
+
+    client, config, session = setup
+    session.destination = dict(component=(PKG, 'example.app.DetailActivity'))
+    config.update(scenario_id='life_home_monitor_plugin', tab_name='Life',
+                  plugin_more_options_enabled=True, entry_mode=PREPOSITIONED,
+                  optional_expansions='ENABLED')
+    node = dict(packageName=PKG, className='android.widget.ImageView',
+                contentDescription='More options', clickable=True, focusable=True,
+                enabled=True, visibleToUser=True, boundsInScreen='900,20,1040,150',
+                children=[])
+    root = dict(packageName=PKG, className='android.widget.FrameLayout',
+                viewIdResourceName='screen_root', visibleToUser=True,
+                boundsInScreen='0,0,1080,2400', children=[node])
+    row = dict(step_index=1, visible_label='Home Monitor', focus_view_id='body',
+               dump_tree_nodes=[root])
+    calls = []
+    expected = flow.OverlayPhaseResult(True, 'existing_overlay_path', 'plugin_more_options', 0)
+
+    def existing_path(**kwargs):
+        calls.append(kwargs)
+        return expected
+
+    monkeypatch.setattr(flow, '_execute_overlay_for_candidate', existing_path)
+    result = flow._overlay_phase(
+        client=client, dev='SERIAL', tab_cfg=config, row=row, rows=[], all_rows=[],
+        output_path='unused.xlsx', output_base_dir='.', scenario_perf=None,
+        main_step_index_by_fingerprint={}, expanded_overlay_entries=set(),
+        skipped_optional_expansion_scopes=set())
+
+    assert result is expected
+    assert len(calls) == 1
+    assert not any('CLICK_TARGET' in call for call in client.calls)
+
+
+def test_prepositioned_more_options_skip_is_audited_before_any_action_and_scoped(setup, monkeypatch):
+    from tb_runner import collection_flow as flow
+
+    client, config, session = setup
+    session.destination = dict(component=(PKG, 'example.app.DetailActivity'))
+    config.update(scenario_id='life_home_monitor_plugin', tab_name='Life',
+                  plugin_more_options_enabled=True, entry_mode=PREPOSITIONED,
+                  optional_expansions='DISABLED')
+    monkeypatch.setattr(flow, 'log', lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(flow, '_execute_overlay_for_candidate',
+                        lambda **_kwargs: pytest.fail('optional skip entered dispatch preparation'))
+
+    def traversal_row(extra_id=''):
+        root = dict(packageName=PKG, className='android.widget.FrameLayout',
+            viewIdResourceName='screen_root', visibleToUser=True,
+            boundsInScreen='0,0,1080,2400', children=[
+                dict(packageName=PKG, className='android.widget.TextView',
+                    viewIdResourceName='screen_title', text='Home Monitor',
+                    visibleToUser=True, boundsInScreen='20,20,500,120', children=[]),
+                dict(packageName=PKG, className='android.widget.Button',
+                    viewIdResourceName='shmBannerAwayButton', text='Arm away',
+                    clickable=True, focusable=True, visibleToUser=True,
+                    boundsInScreen='20,400,500,600', children=[]),
+                dict(packageName=PKG, className='android.widget.ImageView',
+                    contentDescription='More options', clickable=True, focusable=True,
+                    enabled=True, visibleToUser=True, boundsInScreen='900,20,1040,150',
+                    children=[]),
+            ])
+        if extra_id:
+            root['children'].append(dict(packageName=PKG, className='android.widget.TextView',
+                viewIdResourceName=extra_id, text='Additional section', visibleToUser=True,
+                boundsInScreen='20,700,500,800', children=[]))
+        return dict(step_index=1, visible_label='Arm away', focus_view_id='shmBannerAwayButton',
+            focus_class_name='android.widget.Button', focus_bounds='20,400,500,600',
+            focus_node=root['children'][1], dump_tree_nodes=[root])
+
+    row = traversal_row()
+    skipped = set()
+    kwargs = dict(client=client, dev='SERIAL', tab_cfg=config, row=row, rows=[], all_rows=[],
+        output_path='unused.xlsx', output_base_dir='.', scenario_perf=None,
+        main_step_index_by_fingerprint={}, expanded_overlay_entries=set(),
+        skipped_optional_expansion_scopes=skipped)
+    first = flow._overlay_phase(**kwargs)
+    second = flow._overlay_phase(**kwargs)
+    assert first.classification == 'optional_expansion_skipped'
+    assert first.optional_expansion_skip['dispatch_attempted'] is False
+    assert first.optional_expansion_skip['visit_credit'] is False
+    assert first.optional_expansion_skip['transition_credit'] is False
+    assert first.optional_expansion_skip['execution_credit'] is False
+    assert second.classification == 'optional_expansion_already_skipped'
+    assert len(skipped) == 1
+    assert not any('CLICK_TARGET' in call for call in client.calls)
+
+    other_screen = traversal_row(extra_id='other_screen_section')
+    other_kwargs = {**kwargs, 'row': other_screen}
+    other = flow._overlay_phase(**other_kwargs)
+    assert other.classification == 'optional_expansion_skipped'
+    assert len(skipped) == 2
+
+    events = [json.loads(line) for line in session.audit_path.read_text(encoding='utf-8').splitlines()]
+    skip_events = [event for event in events if event['event'] == 'OPTIONAL_ACTION_SKIPPED']
+    assert len(skip_events) == 2
+    for event in skip_events:
+        assert event['action_requirement'] == 'OPTIONAL_EXPANSION'
+        assert event['decision'] == 'SKIPPED'
+        assert event['skip_reason'] == 'PREPOSITIONED_EXPANSIONS_DISABLED'
+        assert event['dispatch_attempted'] is False
+        assert event['visit_credit'] is False
+        assert event['transition_credit'] is False
+        assert event['execution_credit'] is False
+        assert event['coverage_impact'] is True
+
+
+def test_optional_expansion_continuation_audit_is_explicit(setup):
+    _, _, session = setup
+    skip = dict(skip_id='skip-1', scope_id='scope-1')
+    session.record_optional_expansion_continued(skip=skip, continued=True,
+                                                step_index=2, reason='next_traversal_step_started')
+    event = json.loads(session.audit_path.read_text(encoding='utf-8').splitlines()[-1])
+    assert event['event'] == 'OPTIONAL_ACTION_SKIP_CONTINUATION'
+    assert event['traversal_continued'] is True
+    assert event['continuation_step'] == 2
+    assert event['dispatch_attempted'] is False
 
 
 @pytest.mark.parametrize('ids', [(), ('a', 'b')])

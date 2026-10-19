@@ -5,6 +5,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
+import hashlib
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Callable
@@ -995,6 +996,8 @@ class MainLoopState:
     cta_cluster_nodes_by_signature: dict[str, list[dict[str, Any]]]
     cta_cluster_visited_rids: dict[str, set[str]]
     cta_cluster_committed_rid: dict[str, str]
+    skipped_optional_expansion_scopes: set[str] = field(default_factory=set)
+    pending_optional_expansion_skips: list[dict[str, Any]] = field(default_factory=list)
     dismissed_popup_signatures: dict[str, int] = field(default_factory=dict)
     scroll_state: ScrollState = field(default_factory=ScrollState)
     focus_realign_state: FocusRealignState = field(default_factory=FocusRealignState)
@@ -1075,6 +1078,7 @@ class OverlayPhaseResult:
     candidate_reason: str
     classification: str
     post_realign_pending_steps_delta: int
+    optional_expansion_skip: dict[str, Any] | None = None
 
 
 def _is_plugin_anchor_only_new_screen(tab_cfg: dict[str, Any], *, screen_context_mode: str, stabilization_mode: str) -> bool:
@@ -17873,7 +17877,8 @@ def _plugin_more_node_to_row_from_nodes(
         iterable_nodes = nodes
     elif isinstance(nodes, dict):
         iterable_nodes = [nodes]
-    for node, _parent in _iter_tree_nodes_with_parent(iterable_nodes):
+    screen_fingerprint = _optional_expansion_screen_fingerprint(iterable_nodes, tab_cfg)
+    for node, parent in _iter_tree_nodes_with_parent(iterable_nodes):
         node_label = str(
             node.get("mergedLabel", "")
             or node.get("text", "")
@@ -17891,6 +17896,8 @@ def _plugin_more_node_to_row_from_nodes(
             "focus_bounds": str(node.get("boundsInScreen", "") or node.get("bounds", "") or "").strip(),
             "focus_class_name": str(node.get("className", "") or node.get("class", "") or "").strip(),
             "focus_node": node,
+            "_optional_expansion_screen_fingerprint": screen_fingerprint,
+            "_optional_expansion_parent_identity": _optional_expansion_node_identity(parent) if parent else {},
         }
         if _is_plugin_screen_top_bar_more_options(node_row, tab_cfg):
             return node_row
@@ -17900,6 +17907,64 @@ def _plugin_more_node_to_row_from_nodes(
 def _plugin_more_node_to_row(row: dict[str, Any], tab_cfg: dict[str, Any]) -> dict[str, Any] | None:
     row_nodes = list(_iter_row_nodes(row))
     return _plugin_more_node_to_row_from_nodes(row_nodes, row=row, tab_cfg=tab_cfg)
+
+
+def _optional_expansion_node_identity(node: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(node, dict):
+        return {}
+    bounds = node.get("boundsInScreen", node.get("bounds", ""))
+    if isinstance(bounds, dict):
+        bounds = tuple(bounds.get(key, 0) for key in ("left", "top", "right", "bottom"))
+    label = " ".join(str(node.get(key) or "") for key in ("text", "contentDescription", "talkbackLabel", "mergedLabel"))
+    return dict(package=str(node.get("packageName") or node.get("package") or ""),
+        resource_id=str(node.get("viewIdResourceName") or node.get("resourceId") or ""),
+        class_name=str(node.get("className") or node.get("class") or ""),
+        label=re.sub(r"\s+", " ", label).strip().casefold(), bounds=str(bounds or ""))
+
+
+def _optional_expansion_screen_fingerprint(nodes: Any, tab_cfg: dict[str, Any]) -> str:
+    """Stable current-screen scope, excluding focus/attempt/time attributes."""
+    iterable = nodes if isinstance(nodes, list) else [nodes] if isinstance(nodes, dict) else []
+    records = set()
+    for node in _iter_row_nodes({"dump_tree_nodes": iterable}):
+        if node.get("visibleToUser", node.get("isVisibleToUser", True)) is False:
+            continue
+        identity = _optional_expansion_node_identity(node)
+        if not (identity["resource_id"] or identity["label"]):
+            continue
+        records.add((identity["package"], identity["resource_id"], identity["class_name"],
+                     identity["label"] if not identity["resource_id"] else "", identity["bounds"]))
+    if len(records) < 2:
+        return ""
+    expected = tab_cfg.get("prepositioned_destination") or {}
+    context = dict(scenario_id=str(tab_cfg.get("scenario_id") or ""),
+        package=str(expected.get("package") or ""),
+        visible_structure=sorted(records))
+    return hashlib.sha256(json.dumps(context, ensure_ascii=False, sort_keys=True,
+                                    separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _optional_expansion_skip_scope(row: dict[str, Any], tab_cfg: dict[str, Any],
+                                   session: Any) -> tuple[str, dict[str, Any]]:
+    node = row.get("focus_node") if isinstance(row.get("focus_node"), dict) else {}
+    target = _optional_expansion_node_identity(node)
+    target.update(class_name=str(row.get("focus_class_name") or target.get("class_name") or ""),
+                  label=re.sub(r"\s+", " ", str(row.get("normalized_visible_label") or
+                      row.get("visible_label") or target.get("label") or "")).strip().casefold(),
+                  bounds=str(row.get("focus_bounds") or target.get("bounds") or ""),
+                  parent=row.get("_optional_expansion_parent_identity") or {})
+    destination = getattr(session, "destination", {}) if session is not None else {}
+    component = destination.get("component") if isinstance(destination, dict) else None
+    screen = str(row.get("_optional_expansion_screen_fingerprint") or "")
+    if not screen:
+        screen = _optional_expansion_screen_fingerprint(row.get("dump_tree_nodes", []), tab_cfg)
+    if not screen:
+        return "", target
+    scope = dict(scenario_id=str(tab_cfg.get("scenario_id") or ""),
+                 destination_component=component, screen_fingerprint=screen,
+                 target=target, action="plugin_more_options")
+    return hashlib.sha256(json.dumps(scope, ensure_ascii=False, sort_keys=True,
+                                     separators=(",", ":")).encode("utf-8")).hexdigest(), target
 
 
 def _overlay_phase(
@@ -17915,6 +17980,7 @@ def _overlay_phase(
     scenario_perf: ScenarioPerfStats | None,
     main_step_index_by_fingerprint: dict[tuple[str, str, str], int],
     expanded_overlay_entries: set[str],
+    skipped_optional_expansion_scopes: set[str] | None = None,
 ) -> OverlayPhaseResult:
     is_global_nav_only_scenario = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower() == "global_nav"
     plugin_more_done_marker = f"plugin_more_done::{tab_cfg.get('scenario_id', '')}"
@@ -17933,6 +17999,11 @@ def _overlay_phase(
             f"step={plugin_more_row.get('step_index')} view_id='{plugin_more_row.get('focus_view_id', '')}' "
             f"label='{plugin_more_row.get('visible_label', '')}' fingerprint='{fingerprint}'"
         )
+        if (tab_cfg.get("entry_mode") == "PREPOSITIONED"
+                and tab_cfg.get("optional_expansions", "DISABLED") == "DISABLED"):
+            return _skip_prepositioned_optional_expansion(
+                client, tab_cfg, plugin_more_row, fingerprint,
+                skipped_optional_expansion_scopes if skipped_optional_expansion_scopes is not None else set())
         if fingerprint not in expanded_overlay_entries:
             return _execute_overlay_for_candidate(
                 client=client,
@@ -17970,6 +18041,11 @@ def _overlay_phase(
                     f"step={plugin_more_row.get('step_index')} view_id='{plugin_more_row.get('focus_view_id', '')}' "
                     f"label='{plugin_more_row.get('visible_label', '')}' fingerprint='{fingerprint}' source='dump_tree'"
                 )
+                if (tab_cfg.get("entry_mode") == "PREPOSITIONED"
+                        and tab_cfg.get("optional_expansions", "DISABLED") == "DISABLED"):
+                    return _skip_prepositioned_optional_expansion(
+                        client, tab_cfg, plugin_more_row, fingerprint,
+                        skipped_optional_expansion_scopes if skipped_optional_expansion_scopes is not None else set())
                 if fingerprint not in expanded_overlay_entries:
                     return _execute_overlay_for_candidate(
                         client=client,
@@ -18058,6 +18134,41 @@ def _overlay_phase(
         classification="unchanged",
         post_realign_pending_steps_delta=0,
     )
+
+
+def _skip_prepositioned_optional_expansion(client: A11yAdbClient, tab_cfg: dict[str, Any],
+        row: dict[str, Any], candidate_fingerprint: str,
+        skipped_scopes: set[str]) -> OverlayPhaseResult:
+    session = getattr(client, "_prepositioned_session", None)
+    scope_id, target = _optional_expansion_skip_scope(row, tab_cfg, session)
+    if not scope_id:
+        # Without stable screen context no target-scoped suppression can be
+        # established. Fail closed before any action request is prepared.
+        if session is not None:
+            session.stop("optional_expansion_context_unresolved")
+        from tb_runner.entry_mode import PrepositionedSafetyStop
+        raise PrepositionedSafetyStop("optional_expansion_context_unresolved")
+    if scope_id in skipped_scopes:
+        return OverlayPhaseResult(True, "plugin_more_options_already_skipped",
+                                  "optional_expansion_already_skipped", 0)
+    skipped_scopes.add(scope_id)
+    skip = dict(skip_id="optional_skip_" + scope_id[:20], scope_id=scope_id,
+                action="plugin_more_options", action_requirement="OPTIONAL_EXPANSION",
+                decision="SKIPPED", skip_reason="PREPOSITIONED_EXPANSIONS_DISABLED",
+                dispatch_attempted=False, visit_credit=False, transition_credit=False,
+                execution_credit=False, coverage_impact=True, traversal_continued=None,
+                candidate_fingerprint=candidate_fingerprint, target_identity=target,
+                step_index=row.get("step_index"))
+    destination = getattr(session, "destination", {}) if session is not None else {}
+    skip["destination_component"] = destination.get("component") if isinstance(destination, dict) else None
+    if session is not None:
+        session.record_optional_expansion_skip(skip_id=skip["skip_id"], scope_id=scope_id,
+            target_identity=target, step_index=row.get("step_index"))
+    log(f"[OPTIONAL_ACTION][skipped] action='plugin_more_options' requirement='OPTIONAL_EXPANSION' "
+        f"reason='PREPOSITIONED_EXPANSIONS_DISABLED' scope='{scope_id}' dispatch_attempted=false "
+        "visit_credit=false transition_credit=false execution_credit=false coverage_impact=true")
+    return OverlayPhaseResult(True, "plugin_more_options_optional_expansion_skipped",
+                              "optional_expansion_skipped", 0, skip)
 
 
 def _apply_step_collection_phase_impl(
@@ -18611,6 +18722,8 @@ def _main_loop_phase(
             step_idx=step_idx,
         ):
             break
+        _flush_optional_expansion_skips(client, state, continued=True,
+                                        step_index=step_idx, reason="next_traversal_step_started")
         state.reliability_metrics.begin_step(step_idx)
         revisit_guard_state = _local_tab_revisit_guard_state(state)
         revisit_guard_state.current_representative_signatures = set()
@@ -19410,7 +19523,11 @@ def _main_loop_phase(
             scenario_perf=scenario_perf,
             main_step_index_by_fingerprint=state.main_step_index_by_fingerprint,
             expanded_overlay_entries=state.expanded_overlay_entries,
+            skipped_optional_expansion_scopes=getattr(state, "skipped_optional_expansion_scopes", None),
         )
+        optional_skip = getattr(overlay_result, "optional_expansion_skip", None)
+        if optional_skip:
+            state.pending_optional_expansion_skips.append(optional_skip)
         if _abort_main_loop_for_talkback_restart(
             client=client,
             state=state,
@@ -19434,7 +19551,22 @@ def _main_loop_phase(
             )
             break
         state.previous_step_row = row
+    _flush_optional_expansion_skips(client, state, continued=False,
+                                    step_index=None, reason="terminal_before_next_traversal_step")
     return state
+
+
+def _flush_optional_expansion_skips(client: Any, state: MainLoopState, *, continued: bool,
+                                    step_index: int | None, reason: str) -> None:
+    pending = list(getattr(state, "pending_optional_expansion_skips", []) or [])
+    if not pending:
+        return
+    session = getattr(client, "_prepositioned_session", None)
+    if session is not None:
+        for skip in pending:
+            session.record_optional_expansion_continued(skip=skip, continued=continued,
+                                                        step_index=step_index, reason=reason)
+    state.pending_optional_expansion_skips.clear()
 
 
 @profiled("persistence")
@@ -19585,6 +19717,8 @@ def _build_main_loop_state_from_anchor(
         fail_count=0,
         same_count=0,
         expanded_overlay_entries=set(),
+        skipped_optional_expansion_scopes=set(),
+        pending_optional_expansion_skips=[],
         post_realign_pending_steps=0,
         main_step_index_by_fingerprint={make_main_fingerprint(anchor_row): int(step_index)},
         recent_fingerprint_history=deque([(int(step_index), anchor_fingerprint)], maxlen=_RECENT_DUPLICATE_WINDOW),

@@ -403,6 +403,33 @@ class PrepositionedSession:
                     automated_entry_attempted=False, entry_click_executed=False)
         self.phase = "TRAVERSAL"
 
+    def record_optional_expansion_skip(self, *, skip_id: str, scope_id: str,
+                                       target_identity: dict[str, Any], step_index: Any) -> None:
+        payload = dict(action="plugin_more_options", action_requirement="OPTIONAL_EXPANSION",
+            decision="SKIPPED", skip_reason="PREPOSITIONED_EXPANSIONS_DISABLED",
+            dispatch_attempted=False, visit_credit=False, transition_credit=False,
+            execution_credit=False, coverage_impact=True, traversal_continued=None,
+            skip_id=skip_id, scope_id=scope_id, target_identity=target_identity,
+            step_index=step_index)
+        self.record("OPTIONAL_ACTION_SKIPPED", **payload)
+        runtime = getattr(self.client, "evidence_runtime", None)
+        if runtime is not None and getattr(runtime, "is_enabled", False):
+            runtime.emit("OPTIONAL_ACTION_SKIPPED", producer="runner", phase="traversal",
+                         payload=payload)
+
+    def record_optional_expansion_continued(self, *, skip: dict[str, Any], continued: bool,
+                                            step_index: int | None, reason: str) -> None:
+        payload = dict(action="plugin_more_options", decision="SKIP_CONTINUED" if continued else "SKIP_NOT_CONTINUED",
+            skip_id=skip.get("skip_id"), scope_id=skip.get("scope_id"),
+            traversal_continued=continued, continuation_step=step_index,
+            reason=reason, dispatch_attempted=False, visit_credit=False,
+            transition_credit=False, execution_credit=False)
+        self.record("OPTIONAL_ACTION_SKIP_CONTINUATION", **payload)
+        runtime = getattr(self.client, "evidence_runtime", None)
+        if runtime is not None and getattr(runtime, "is_enabled", False):
+            runtime.emit("OPTIONAL_ACTION_SKIP_CONTINUATION", producer="runner", phase="traversal",
+                         payload=payload)
+
 
 def open_prepositioned(client: Any, dev: Any, config: dict[str, Any], *, log_fn,
                       stabilize_anchor_fn) -> bool:
