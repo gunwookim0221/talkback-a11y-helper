@@ -436,6 +436,31 @@ def _record_focus_reconciliation(client: Any, row: dict[str, Any], result: dict[
     )
 
 
+def _capture_frontier_shadow_inventory(
+    *, client: Any, row: dict[str, Any], candidates: list[dict[str, Any]],
+    scenario_id: str, raw_nodes: list[dict[str, Any]] | None = None,
+    projection_complete: bool = True,
+) -> None:
+    runtime = getattr(client, "_phase6c2_frontier_shadow_runtime", None)
+    if runtime is None:
+        return
+    try:
+        from tb_runner.frontier_shadow import capture_reconciled_inventory
+
+        capture_reconciled_inventory(
+            runtime, row=row, candidates=candidates, scenario_id=scenario_id,
+            raw_nodes=raw_nodes, projection_complete=projection_complete,
+        )
+    except Exception as exc:
+        # Frontier shadow is diagnostic and must not affect reconciliation.
+        try:
+            runtime._fail("production_inventory_hook", exc,
+                          step=int(row.get("step_index", 0) or 0))
+        except Exception:
+            pass
+        log(f"[FRONTIER_SHADOW][inventory_error] reason='{type(exc).__name__}' action='continue_production'")
+
+
 def _apply_focus_reconciliation(
     *,
     client: Any,
@@ -496,6 +521,11 @@ def _apply_focus_reconciliation(
         focus_reconciliation.apply_reconciliation_to_row(row, result)
         _record_focus_reconciliation(client, row, result)
         _emit_move_outcome(client, row, result, ack)
+        _capture_frontier_shadow_inventory(
+            client=client, row=row, candidates=[], scenario_id=scenario_id,
+            raw_nodes=row.get("dump_tree_nodes") if isinstance(row.get("dump_tree_nodes"), list) else [],
+            projection_complete=False,
+        )
         return result
 
     nodes = row.get("dump_tree_nodes")
@@ -525,8 +555,18 @@ def _apply_focus_reconciliation(
                 consumed_cluster_signatures=set(),
                 consumed_cluster_logical_signatures=set(),
             )
+            candidate_projection_complete = True
         except Exception as exc:
             log(f"[FOCUS_RECONCILIATION][inventory_fallback] reason='{type(exc).__name__}'")
+            candidate_projection_complete = False
+    else:
+        candidate_projection_complete = False
+
+    _capture_frontier_shadow_inventory(
+        client=client, row=row, candidates=[*content_candidates, *bottom_candidates],
+        scenario_id=scenario_id, raw_nodes=nodes,
+        projection_complete=candidate_projection_complete,
+    )
 
     tracking = VisitTracker.resolve(
         progress=progress_decision,
@@ -18481,6 +18521,154 @@ def _attempt_identity_recovery(
 
 
 
+def _frontier_shadow_state_id(row: dict[str, Any] | None) -> tuple[str | None, str]:
+    if not isinstance(row, dict):
+        return None, "UNRESOLVED"
+    try:
+        from tb_runner.state_graph import _raw_observation_from_row, build_graph_state_identity
+
+        identity = build_graph_state_identity(_raw_observation_from_row(row))
+        return identity.state_id, identity.status
+    except Exception:
+        return None, "UNRESOLVED"
+
+
+def _frontier_shadow_pre_decision(
+    *, client: Any, state: MainLoopState, step_idx: int, tab_cfg: dict[str, Any],
+) -> str | None:
+    runtime = getattr(client, "_phase6c2_frontier_shadow_runtime", None)
+    if runtime is None:
+        return None
+    try:
+        previous = state.previous_step_row if isinstance(state.previous_step_row, dict) else {}
+        previous_step = int(previous.get("step_index", step_idx - 1) or 0)
+        cached = getattr(runtime, "_latest_inventory", None)
+        cache_current = isinstance(cached, dict) and cached.get("source_step") == previous_step
+        state_id = cached.get("state_id") if cache_current else None
+        identity_status = "RESOLVED" if state_id else "UNRESOLVED"
+        if not state_id:
+            state_id, identity_status = _frontier_shadow_state_id(previous)
+        strict_cursor = focus_instance(previous) if previous else None
+        cursor_id = instance_id(strict_cursor) if strict_cursor else ""
+        focus_cursor = {"instance_id": cursor_id, "confirmed": bool(cursor_id)}
+        scenario_type = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower()
+        forced_target = _local_tab_state_display(
+            rid=str(getattr(state, "forced_local_tab_target_rid", "") or ""),
+            label=str(getattr(state, "forced_local_tab_target_action_label", "")
+                      or getattr(state, "forced_local_tab_target_label", "") or ""),
+        )
+        if scenario_type == "global_nav":
+            production_choice = {"action_type": "OTHER", "targeted": False}
+        elif forced_target:
+            # This branch can tap/select and can degrade to SMART_NEXT. It is
+            # not comparable to a candidate-focus frontier choice.
+            production_choice = {"action_type": "TAB_CHANGE_TARGETED", "targeted": True}
+        else:
+            production_choice = {"action_type": "FOCUS_NEXT_UNTARGETED", "targeted": False}
+        return runtime.pre_decision(
+            step=step_idx,
+            production_choice=production_choice,
+            focus_cursor=focus_cursor,
+            current_inventory=(cached.get("candidates", []) if cache_current else []),
+            state_id=state_id,
+            inventory_complete=bool(cache_current and cached.get("inventory_complete")),
+            observation_ref={"source_step": previous_step, "state_id": state_id,
+                             "state_resolution": identity_status},
+        )
+    except Exception as exc:
+        try:
+            runtime._fail("collection_pre_decision_hook", exc, step=step_idx)
+        except Exception:
+            pass
+        log(f"[FRONTIER_SHADOW][pre_error] step={step_idx} reason='{type(exc).__name__}' action='continue_production'")
+        return None
+
+
+def _run_main_step_with_frontier_shadow(
+    *, client: Any, state: MainLoopState, step_idx: int, tab_cfg: dict[str, Any],
+    collect_step_fn: Callable[[], dict[str, Any]],
+) -> tuple[dict[str, Any], str | None]:
+    """Wrap the unchanged production action call with an isolated PRE hook."""
+    decision_id = _frontier_shadow_pre_decision(
+        client=client, state=state, step_idx=step_idx, tab_cfg=tab_cfg,
+    )
+    row = collect_step_fn()
+    return row, decision_id
+
+
+def _frontier_shadow_post_result(
+    *, client: Any, decision_id: str | None, step_idx: int,
+    previous_row: dict[str, Any] | None, row: dict[str, Any],
+) -> None:
+    runtime = getattr(client, "_phase6c2_frontier_shadow_runtime", None)
+    if runtime is None or decision_id is None:
+        return
+    try:
+        row = row if isinstance(row, dict) else {}
+        previous = previous_row if isinstance(previous_row, dict) else {}
+        forced_local = row.get("forced_local_tab_navigation") is True
+        target_attempt = row.get("target_focus_attempted") is True
+        has_later_target_action = bool(row.get("cta_focus_align_requested") or row.get("target_focus_fallback_used"))
+        owner, ownership_status, action_type, target_id = "UNKNOWN", "UNKNOWN", "UNKNOWN", ""
+        request_id = str(row.get("smart_nav_req_id") or "").strip()
+        if target_attempt and not forced_local and not has_later_target_action:
+            descriptor = row.get("target_focus_descriptor")
+            descriptor = descriptor if isinstance(descriptor, dict) else {}
+            if row.get("target_focus_fallback_used") is False and row.get("target_focus_attempt_id"):
+                target_id = instance_id({
+                    "scenario_id": str(row.get("scenario_id", "") or ""),
+                    "view_id": descriptor.get("resource_id", ""),
+                    "bounds": descriptor.get("bounds", ""),
+                    "class_name": descriptor.get("class_name", ""),
+                }) if normalized_bounds(str(descriptor.get("bounds", "") or "")) else ""
+                if target_id:
+                    owner, ownership_status, action_type = "TARGETED", "EXACT_MATCH", "TARGETED_FOCUS"
+                    request_id = str(row.get("target_focus_attempt_id") or request_id)
+        elif request_id and not forced_local and not has_later_target_action:
+            owner, ownership_status, action_type = "SEQUENTIAL", "EXACT_MATCH", "FOCUS_NEXT"
+        elif forced_local:
+            owner, ownership_status, action_type = "UNKNOWN", "UNKNOWN", "TAB_CHANGE"
+
+        before_identity = focus_instance(previous) if previous else None
+        after_identity = focus_instance(row)
+        before_valid = bool(before_identity and previous.get("actual_focus_accessibility_focused") is True)
+        after_valid = bool(after_identity and row.get("actual_focus_accessibility_focused") is True
+                           and str(row.get("actual_focus_instance_id", "") or "").strip())
+        before_state_id, _ = _frontier_shadow_state_id(previous)
+        after_state_id, _ = _frontier_shadow_state_id(row)
+        state_changed = (before_state_id != after_state_id
+                         if before_state_id and after_state_id else None)
+        transition = str(row.get("focus_transition_status", "") or "").strip().upper()
+        complete = bool(before_valid and after_valid and transition in {"CONFIRMED_MOVED", "CONFIRMED_UNCHANGED"})
+        runtime.post_result(
+            decision_id=decision_id, step=step_idx, result=row,
+            owner=owner, ownership_status=ownership_status,
+            result_id=request_id or decision_id,
+            action_type=action_type,
+            target_instance_id=target_id,
+            before_observation_valid=before_valid,
+            after_observation_valid=after_valid,
+            outcome_observation_complete=complete,
+            state_changed=state_changed,
+        )
+    except Exception as exc:
+        try:
+            runtime._fail("collection_post_result_hook", exc, step=step_idx)
+        except Exception:
+            pass
+        log(f"[FRONTIER_SHADOW][post_error] step={step_idx} reason='{type(exc).__name__}' action='continue_production'")
+
+
+def _frontier_shadow_recovery_owner(
+    *, recovered: bool, result: dict[str, Any], step_idx: int,
+) -> tuple[str, str, str]:
+    """Require an explicitly recovery-scoped request ID before claiming ownership."""
+    request_id = str(result.get("recovery_action_request_id") or "").strip()
+    if recovered and request_id:
+        return "RECOVERY", "EXACT_MATCH", request_id
+    return "UNKNOWN", "UNKNOWN", request_id or f"frontier-decision:{step_idx}:recovery-unknown"
+
+
 def _maybe_dismiss_runtime_popup(
     *,
     client: A11yAdbClient,
@@ -18702,6 +18890,29 @@ def _main_loop_phase(
     scenario_perf = phase_ctx.scenario_perf
     state = phase_ctx.state
     start_step_index = max(1, int(getattr(phase_ctx, "start_step_index", 1) or 1))
+    try:
+        # Phase 6C2 shares the Phase 6B environment gate and remains absent in
+        # OFF mode. Import/initialization failures are diagnostic only.
+        if str(os.environ.get("TB_STATE_GRAPH_MODE", "OFF") or "OFF").strip().upper() == "SHADOW":
+            from tb_runner.frontier_shadow import FrontierShadowRuntime
+
+            shadow_scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+            shadow_run_id = next((str(item.get("scenario_run_id")) for item in phase_ctx.rows
+                                  if isinstance(item, dict) and item.get("scenario_run_id")), "")
+            if not shadow_run_id:
+                shadow_run_id = shadow_scenario_id + ":" + Path(phase_ctx.output_path).stem
+            client._phase6c2_frontier_shadow_runtime = FrontierShadowRuntime.for_run(
+                run_id=shadow_run_id, scenario_id=shadow_scenario_id,
+                output_path=phase_ctx.output_path,
+            )
+        else:
+            client._phase6c2_frontier_shadow_runtime = None
+    except Exception as exc:
+        try:
+            client._phase6c2_frontier_shadow_runtime = None
+        except Exception:
+            pass
+        log(f"[FRONTIER_SHADOW][init_error] reason='{type(exc).__name__}' action='continue_production'")
     if not hasattr(state, "reliability_metrics"):
         state.reliability_metrics = TraversalMetrics()
     state.local_tab_revisit_guard_state = LocalTabRevisitGuardState()
@@ -18731,14 +18942,17 @@ def _main_loop_phase(
         log(f"[STEP] START tab='{tab_cfg['tab_name']}' step={step_idx}")
 
         with measure_runtime("traversal_loop"):
-            row = _apply_step_collection_phase(
-                state=state,
-                client=client,
-                dev=dev,
-                phase_ctx=phase_ctx,
-                step_idx=step_idx,
-                tab_cfg=tab_cfg,
-                scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+            row, frontier_shadow_decision_id = _run_main_step_with_frontier_shadow(
+                client=client, state=state, step_idx=step_idx, tab_cfg=tab_cfg,
+                collect_step_fn=lambda: _apply_step_collection_phase(
+                    state=state,
+                    client=client,
+                    dev=dev,
+                    phase_ctx=phase_ctx,
+                    step_idx=step_idx,
+                    tab_cfg=tab_cfg,
+                    scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
+                ),
             )
         if _abort_main_loop_for_talkback_restart(
             client=client,
@@ -18930,6 +19144,10 @@ def _main_loop_phase(
                 progress_decision=progress_decision,
                 visit_decision=visit_decision,
             )
+        _frontier_shadow_post_result(
+            client=client, decision_id=frontier_shadow_decision_id,
+            step_idx=step_idx, previous_row=state.previous_step_row, row=row,
+        )
         mismatch_reasons, low_confidence_reasons = _apply_row_quality_phase(
             row=row,
             state=state,
@@ -19220,6 +19438,25 @@ def _main_loop_phase(
                 result="recovered" if recovery_outcome.recovered else "not_recovered",
             )
         if recovery_outcome is not None:
+            shadow_runtime = getattr(client, "_phase6c2_frontier_shadow_runtime", None)
+            if shadow_runtime is not None and frontier_shadow_decision_id:
+                recovery_row = recovery_outcome.row if isinstance(recovery_outcome.row, dict) else {}
+                recovery_owner, recovery_ownership_status, recovery_request_id = _frontier_shadow_recovery_owner(
+                    recovered=recovery_outcome.recovered, result=recovery_row, step_idx=step_idx,
+                )
+                try:
+                    shadow_runtime.bind_followup(
+                        decision_id=frontier_shadow_decision_id, step=step_idx,
+                        result=recovery_row,
+                        owner=recovery_owner,
+                        ownership_status=recovery_ownership_status,
+                        result_id=recovery_request_id,
+                    )
+                except Exception as exc:
+                    try:
+                        shadow_runtime._fail("recovery_result_hook", exc, step=step_idx)
+                    except Exception:
+                        pass
             if recovery_outcome.recovered:
                 row = recovery_outcome.row
                 progress_decision = recovery_outcome.progress
@@ -20619,6 +20856,18 @@ def _collect_tab_rows_inner(
             log(f"[STATE_GRAPH][shadow_artifact] path='{graph_path}' decision_authority='none'")
     except Exception as exc:
         log(f"[STATE_GRAPH][shadow_error] reason='{type(exc).__name__}' action='continue_production'")
+    frontier_shadow_runtime = getattr(client, "_phase6c2_frontier_shadow_runtime", None)
+    if frontier_shadow_runtime is not None:
+        try:
+            frontier_path = frontier_shadow_runtime.write(output_path)
+            log(f"[FRONTIER_SHADOW][artifact] path='{frontier_path}' authority='SHADOW_ONLY'")
+        except Exception as exc:
+            log(f"[FRONTIER_SHADOW][artifact_error] reason='{type(exc).__name__}' action='continue_production'")
+        finally:
+            try:
+                client._phase6c2_frontier_shadow_runtime = None
+            except Exception:
+                pass
     main_steps_completed = sum(1 for row in rows if int(row.get("step_index", -1) or -1) > 0)
     setattr(
         client,
