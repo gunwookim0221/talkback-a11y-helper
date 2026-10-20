@@ -451,3 +451,84 @@ def test_exact_revisit_with_never_attempted_p0_is_counted_only_when_comparable()
     assert runtime.metrics["REVISIT_SELECTION_COUNT"] == 1
     assert runtime.metrics["COMPARABLE_REVISIT_SELECTION_COUNT"] == 1
     assert runtime.metrics["NEVER_ATTEMPTED_AVAILABLE_WHEN_REVISIT_SELECTED"] == 1
+
+
+def test_post_action_frontier_reuses_only_same_step_state_and_action_request(monkeypatch):
+    runtime = fs.FrontierShadowRuntime("run-shadow", "scenario-shadow")
+    runtime.capture_inventory(
+        step=7, state_id=STATE_ID,
+        candidates=[candidate("a", "target-a")], inventory_complete=True,
+        observation_ref={"request_id": "action-7", "source_step": 7},
+    )
+    calls = []
+
+    class Evaluation:
+        def to_dict(self):
+            return {
+                "decision_authority": "NONE", "state_id": STATE_ID,
+                "frontier_exhausted": "NO", "evidence_complete": False,
+                "history_complete": True, "inventory_complete": True,
+                "truncated": False, "counts": {"eligible_count": 1},
+                "frontier_items": [candidate("a", "target-a")],
+            }
+
+    def evaluate(state, candidates, history, planners, safeties, *, focus_cursor):
+        calls.append((state, candidates, planners, safeties, focus_cursor))
+        return Evaluation()
+
+    monkeypatch.setattr("tb_runner.frontier_scheduler.evaluate_frontier", evaluate)
+    result = runtime.evaluate_post_action(
+        step=7, decision_id="closed-7", decision_watermark=7,
+        state_id=STATE_ID, focus_cursor={"instance_id": "focus-7", "confirmed": True},
+        result_request_id="action-7",
+    )
+    assert result["alignment_status"] == "ALIGNED"
+    assert result["evidence_stage"] == "POST_ACTION"
+    assert result["source_step"] == 7
+    assert result["decision_id"] == "closed-7"
+    assert result["evidence_watermark"] == 7
+    assert result["frontier_exhausted"] == "NO"
+    assert len(calls) == 1
+    assert calls[0][2:4] == ({}, {})  # No planner/safety proof is manufactured.
+    assert runtime.history["complete"] is True
+
+
+def test_post_action_frontier_fails_closed_for_old_snapshot_or_mismatched_request(monkeypatch):
+    runtime = fs.FrontierShadowRuntime("run-shadow", "scenario-shadow")
+    runtime.capture_inventory(
+        step=7, state_id=STATE_ID,
+        candidates=[candidate("a", "target-a")], inventory_complete=True,
+        observation_ref={"request_id": "action-7"},
+    )
+    monkeypatch.setattr("tb_runner.frontier_scheduler.evaluate_frontier",
+                        lambda *args, **kwargs: pytest.fail("stale inventory must not be evaluated"))
+    old_step = runtime.evaluate_post_action(
+        step=8, decision_id="closed-8", decision_watermark=8,
+        state_id=STATE_ID, result_request_id="action-8",
+    )
+    wrong_request = runtime.evaluate_post_action(
+        step=7, decision_id="closed-7", decision_watermark=7,
+        state_id=STATE_ID, result_request_id="other-request",
+    )
+    assert old_step["frontier_exhausted"] == "UNKNOWN"
+    assert old_step["alignment_status"] == "INCOMPLETE"
+    assert "POST_ACTION_INVENTORY_UNAVAILABLE" in old_step["alignment_reasons"]
+    assert wrong_request["frontier_exhausted"] == "UNKNOWN"
+    assert wrong_request["alignment_status"] == "INCOMPLETE"
+    assert "POST_ACTION_REQUEST_ID_MISMATCH" in wrong_request["alignment_reasons"]
+
+
+def test_post_action_snapshot_invalidation_is_stale_and_does_not_call_scheduler(monkeypatch):
+    runtime = fs.FrontierShadowRuntime("run-shadow", "scenario-shadow")
+    runtime.capture_inventory(step=2, state_id=STATE_ID,
+        candidates=[candidate("a", "target-a")], inventory_complete=True)
+    monkeypatch.setattr("tb_runner.frontier_scheduler.evaluate_frontier",
+                        lambda *args, **kwargs: pytest.fail("invalidated snapshot must not be evaluated"))
+    result = runtime.evaluate_post_action(
+        step=2, decision_id="closed-2", decision_watermark=2,
+        state_id=STATE_ID, snapshot_valid=False,
+    )
+    assert result["alignment_status"] == "STALE"
+    assert result["evidence_stage"] == "STALE"
+    assert result["frontier_exhausted"] == "UNKNOWN"
+    assert result["evidence_complete"] is False

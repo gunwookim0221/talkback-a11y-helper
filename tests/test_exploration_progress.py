@@ -727,5 +727,3 @@ def test_safety_denial_with_safe_alternative_is_not_safety_limit():
         "safe_alternative_available": True,
     })
     assert _evaluate(args).decision != Decision.TERMINATE_SAFETY_LIMIT
-
-\n

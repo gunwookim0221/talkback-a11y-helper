@@ -8,7 +8,7 @@ import json
 import hashlib
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from talkback_lib import A11yAdbClient
 from tb_runner.anchor_logic import build_landing_surface_signature, stabilize_anchor
@@ -18659,6 +18659,212 @@ def _frontier_shadow_post_result(
         log(f"[FRONTIER_SHADOW][post_error] step={step_idx} reason='{type(exc).__name__}' action='continue_production'")
 
 
+def _prepare_phase6d_exploration_decision(
+    *, client: Any, row: dict[str, Any], step_idx: int, tab_cfg: dict[str, Any],
+    stop_candidate: bool, stop_reason: str, stop_eval_inputs: Mapping[str, Any] | None,
+    pre_decision_ref: str | None, recovery_occurred: bool = False,
+    additional_stale_reasons: list[str] | None = None,
+) -> str | None:
+    """Stage one post-result 6D evaluation without changing production state."""
+    runtime = getattr(client, "_phase6d_exploration_shadow_runtime", None)
+    frontier_runtime = getattr(client, "_phase6c2_frontier_shadow_runtime", None)
+    if runtime is None or frontier_runtime is None:
+        return None
+    scenario_type = str(tab_cfg.get("scenario_type", "content") or "content").strip().lower()
+    if scenario_type == "global_nav":
+        return None
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    decision_id = f"{scenario_id}:closed:{int(step_idx)}"
+    watermark = int(step_idx)
+    stale_reasons = list(additional_stale_reasons or [])
+    try:
+        from tb_runner.exploration_shadow import normalize_production_decision
+        from tb_runner.state_graph import _raw_observation_from_row, build_graph_state_identity
+
+        identity = build_graph_state_identity(_raw_observation_from_row(row))
+        state_id = identity.state_id
+        current_state = {
+            "state_id": state_id,
+            "state_resolution": identity.status,
+            "resolution_reasons": list(identity.reasons),
+            "decision_id": decision_id,
+            "evidence_watermark": watermark,
+            "evidence_stage": "POST_ACTION",
+        }
+        actual_focus = row.get("actual_focus_node") if isinstance(row.get("actual_focus_node"), dict) else {}
+        focus_id = str(row.get("actual_focus_instance_id", "") or "").strip()
+        focus_cursor = {
+            "instance_id": focus_id,
+            "confirmed": bool(focus_id and row.get("actual_focus_accessibility_focused") is True
+                              and actual_focus.get("accessibilityFocused") is True),
+        }
+        request_id = str(row.get("phase5c_primary_action_request_id") or row.get("smart_nav_req_id")
+                         or row.get("target_focus_attempt_id") or "").strip()
+        frontier = frontier_runtime.evaluate_post_action(
+            step=step_idx, decision_id=decision_id, decision_watermark=watermark,
+            state_id=state_id, focus_cursor=focus_cursor,
+            snapshot_valid=not stale_reasons, result_request_id=request_id,
+        )
+        if str(frontier.get("alignment_status", "") or "").upper() == "STALE":
+            stale_reasons.extend(frontier.get("alignment_reasons") or ["FRONTIER_SNAPSHOT_STALE"])
+        frontier_alignment_reasons = set(frontier.get("alignment_reasons") or [])
+        if frontier_alignment_reasons & {
+            "POST_ACTION_STATE_MISMATCH", "POST_ACTION_REQUEST_ID_MISMATCH",
+        }:
+            stale_reasons.extend(sorted(frontier_alignment_reasons & {
+                "POST_ACTION_STATE_MISMATCH", "POST_ACTION_REQUEST_ID_MISMATCH",
+            }))
+
+        production = normalize_production_decision(
+            row=row, stop_candidate=stop_candidate, stop_reason=stop_reason,
+            final_terminal=False, recovery_occurred=recovery_occurred,
+        )
+        production.update({
+            "decision_id": decision_id,
+            "decision_step": int(step_idx),
+            "decision_watermark": watermark,
+            "decision_closed": True,
+            "decision_stage": "CLOSED_DECISION",
+            "pre_decision_ref": pre_decision_ref,
+            "focus_transition_status": str(row.get("focus_transition_status", "") or "").upper(),
+            "actual_accessibility_focus_moved": bool(
+                row.get("actual_focus_accessibility_focused") is True
+                and str(row.get("focus_transition_status", "") or "").upper() == "CONFIRMED_MOVED"),
+            "accessibility_focus_authoritative": row.get("actual_focus_accessibility_focused") is True,
+            "focus_authority": "ACCESSIBILITY" if row.get("actual_focus_accessibility_focused") is True else "UNKNOWN",
+            "visit_record_status": str(row.get("visit_record_status", "") or "").upper(),
+            "reconciled_visit_instance_id": str(row.get("reconciled_visit_instance_id", "") or ""),
+            "visit_authority": "PRODUCTION" if (
+                str(row.get("visit_record_status", "") or "").upper() in {"RECORDED", "ALREADY_VISITED"}
+                and str(row.get("reconciled_visit_instance_id", "") or "").strip()
+                and str(row.get("focus_transition_status", "") or "").upper() == "CONFIRMED_MOVED") else "UNKNOWN",
+            "visit_outcome": (
+                "NEW_VISIT" if str(row.get("visit_record_status", "") or "").upper() == "RECORDED"
+                else "REVISIT" if str(row.get("visit_record_status", "") or "").upper() == "ALREADY_VISITED"
+                else "NO_VISIT"),
+            "new_visit_authoritative": bool(
+                str(row.get("visit_record_status", "") or "").upper() == "RECORDED"
+                and str(row.get("reconciled_visit_instance_id", "") or "").strip()
+                and str(row.get("focus_transition_status", "") or "").upper() == "CONFIRMED_MOVED"),
+            "visit_instance_id": str(row.get("reconciled_visit_instance_id", "") or ""),
+        })
+        if isinstance(row.get("verified_edge"), Mapping):
+            production["verified_edge"] = dict(row["verified_edge"])
+        stop_inputs = stop_eval_inputs if isinstance(stop_eval_inputs, Mapping) else {}
+        repeat = {
+            "decision_id": decision_id, "evidence_watermark": watermark,
+            "evidence_stage": "POST_ACTION",
+            "strict_duplicate": bool(stop_inputs.get("strict_duplicate", row.get("is_duplicate_step", False))),
+            "hard_no_progress": bool(stop_inputs.get("hard_no_progress", row.get("hard_no_progress", False))),
+            "soft_no_progress": bool(stop_inputs.get("soft_no_progress", row.get("soft_no_progress", False))),
+            "repeat_no_progress": bool(stop_inputs.get("repeat_stop_hit", row.get("repeat_no_progress", False))),
+            "same_count": stop_inputs.get("same_like_count", row.get("same_count")),
+            "fail_count": row.get("fail_count"),
+            "bounded_two_card_loop": bool(stop_inputs.get("bounded_two_card_loop", row.get("bounded_two_card_loop", False))),
+            "repeat_semantic_stall": str(stop_reason or "") in {
+                "repeat_semantic_stall", "repeat_semantic_stall_after_escape"},
+            "stop_reason": str(stop_reason or ""),
+        }
+        scroll = row.get("phase6d_scroll_evidence")
+        if not isinstance(scroll, Mapping):
+            scroll_status = "SCROLL_UNKNOWN"
+            if str(row.get("scroll_capability", "") or "").upper() == "SCROLL_NOT_CAPABLE":
+                scroll_status = "SCROLL_NOT_CAPABLE"
+            elif isinstance(row.get("scroll_transition"), Mapping):
+                transition = row.get("scroll_transition") or {}
+                scroll_status = "SCROLL_MOVED" if transition.get("action_success") is True else "SCROLL_UNVERIFIED"
+            scroll = {
+                "status": scroll_status,
+                "scope": "CURRENT_STATE_CANDIDATE_FOCUS",
+                "scope_state_id": state_id,
+                "absence_proven": row.get("scroll_absence_proven_for_scope") is True,
+            }
+            if scroll["absence_proven"]:
+                scroll["status"] = "SCROLL_ABSENT_PROVEN_FOR_SCOPE"
+        else:
+            scroll = dict(scroll)
+        scroll.setdefault("decision_id", decision_id)
+        scroll.setdefault("evidence_watermark", watermark)
+        scroll.setdefault("evidence_stage", "POST_ACTION")
+
+        safety = row.get("phase6d_safety_evidence")
+        safety = dict(safety) if isinstance(safety, Mapping) else {}
+        if safety:
+            safety.setdefault("decision_id", decision_id)
+            safety.setdefault("evidence_watermark", watermark)
+            safety.setdefault("evidence_stage", "POST_ACTION")
+        hard_bounds: dict[str, Any] = {}
+        try:
+            max_steps = int(tab_cfg.get("max_steps", 0) or 0)
+        except (TypeError, ValueError):
+            max_steps = 0
+        if max_steps > 0:
+            hard_bounds = {
+                "kind": "MAX_STEPS", "limit_kind": "MAX_STEPS",
+                "usage": int(step_idx), "limit_value": max_steps,
+                "reached": int(step_idx) >= max_steps,
+                "absolute": True, "hard": True, "authoritative": True,
+                "decision_id": decision_id, "evidence_watermark": watermark,
+                "evidence_stage": "POST_ACTION",
+            }
+        else:
+            hard_bounds = dict(row.get("phase6d_hard_bounds") or {}) if isinstance(
+                row.get("phase6d_hard_bounds"), Mapping) else {}
+        error_status = bool(stop_candidate and stop_reason
+                            and termination_status(str(stop_reason)) == "INCOMPLETE_ERROR")
+        if error_status:
+            production.update(authoritative_error=True, error_stop=True,
+                              error_code=str(stop_reason))
+        candidate = {
+            "candidate": bool(stop_candidate),
+            "reason": str(stop_reason or ""),
+            "stage": "PRE_FINAL_TERMINAL_COMMIT",
+            "decision_id": decision_id,
+            "decision_watermark": watermark,
+        }
+        recovery_budget = row.get("phase6d_recovery_budget")
+        recovery_budget = dict(recovery_budget) if isinstance(recovery_budget, Mapping) else {}
+        return runtime.prepare_decision(
+            decision_id=decision_id, step=step_idx, watermark=watermark,
+            current_state=current_state, frontier_evaluation=frontier,
+            production_result=production, repetition_state=repeat,
+            scroll_evidence=scroll, safety_state=safety, hard_bounds=hard_bounds,
+            recovery_budget=recovery_budget, production_stop_candidate=candidate,
+            stale_reasons=stale_reasons,
+        )
+    except Exception as exc:
+        try:
+            runtime._fail("collection_prepare_hook", exc, step=step_idx)
+        except Exception:
+            pass
+        log(f"[EXPLORATION_SHADOW][prepare_error] step={step_idx} reason='{type(exc).__name__}' action='continue_production'")
+        return None
+
+
+def _finalize_phase6d_exploration_decision(
+    *, client: Any, token: str | None, final_terminal: bool,
+    final_terminal_reason: str, final_error: bool = False, snapshot_invalidated: bool = False,
+    invalidation_reason: str = "",
+) -> None:
+    runtime = getattr(client, "_phase6d_exploration_shadow_runtime", None)
+    if runtime is None or token is None:
+        return
+    try:
+        runtime.finalize_decision(
+            token=token, final_terminal=final_terminal,
+            final_terminal_reason=final_terminal_reason,
+            final_error=final_error,
+            snapshot_invalidated=snapshot_invalidated,
+            invalidation_reason=invalidation_reason,
+        )
+    except Exception as exc:
+        try:
+            runtime._fail("collection_finalize_hook", exc)
+        except Exception:
+            pass
+        log(f"[EXPLORATION_SHADOW][finalize_error] reason='{type(exc).__name__}' action='continue_production'")
+
+
 def _frontier_shadow_recovery_owner(
     *, recovered: bool, result: dict[str, Any], step_idx: int,
 ) -> tuple[str, str, str]:
@@ -18895,6 +19101,7 @@ def _main_loop_phase(
         # OFF mode. Import/initialization failures are diagnostic only.
         if str(os.environ.get("TB_STATE_GRAPH_MODE", "OFF") or "OFF").strip().upper() == "SHADOW":
             from tb_runner.frontier_shadow import FrontierShadowRuntime
+            from tb_runner.exploration_shadow import ExplorationShadowRuntime
 
             shadow_scenario_id = str(tab_cfg.get("scenario_id", "") or "")
             shadow_run_id = next((str(item.get("scenario_run_id")) for item in phase_ctx.rows
@@ -18905,11 +19112,16 @@ def _main_loop_phase(
                 run_id=shadow_run_id, scenario_id=shadow_scenario_id,
                 output_path=phase_ctx.output_path,
             )
+            client._phase6d_exploration_shadow_runtime = ExplorationShadowRuntime.for_run(
+                run_id=shadow_run_id, scenario_id=shadow_scenario_id,
+            )
         else:
             client._phase6c2_frontier_shadow_runtime = None
+            client._phase6d_exploration_shadow_runtime = None
     except Exception as exc:
         try:
             client._phase6c2_frontier_shadow_runtime = None
+            client._phase6d_exploration_shadow_runtime = None
         except Exception:
             pass
         log(f"[FRONTIER_SHADOW][init_error] reason='{type(exc).__name__}' action='continue_production'")
@@ -19203,6 +19415,15 @@ def _main_loop_phase(
                 f"[CRASH_TERMINAL] scenario_exit scenario='{scenario_id}' step={step_idx} "
                 f"reason='{reason}' crash_event_id='{crash_event_id}'"
             )
+            phase6d_token = _prepare_phase6d_exploration_decision(
+                client=client, row=row, step_idx=step_idx, tab_cfg=tab_cfg,
+                stop_candidate=True, stop_reason=reason, stop_eval_inputs={},
+                pre_decision_ref=frontier_shadow_decision_id,
+            )
+            _finalize_phase6d_exploration_decision(
+                client=client, token=phase6d_token, final_terminal=True,
+                final_terminal_reason=reason,
+            )
             _apply_row_persistence_phase(
                 row=row,
                 tab_cfg=tab_cfg,
@@ -19272,14 +19493,15 @@ def _main_loop_phase(
             if stop:
                 stop = False
                 reason = ""
-        if _maybe_recover_food_scan_screen(
+        food_scan_recovery_occurred = bool(_maybe_recover_food_scan_screen(
             client,
             dev,
             row=row,
             state=state,
             tab_cfg=tab_cfg,
             wait_seconds=phase_ctx.main_step_wait_seconds,
-        ):
+        ))
+        if food_scan_recovery_occurred:
             stop = False
             reason = ""
         local_tab_transition_applied = False
@@ -19629,6 +19851,21 @@ def _main_loop_phase(
             scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
             step_idx=step_idx,
         ):
+            restart_reason = str(state.stop_reason or "talkback_restarted")
+            phase6d_token = _prepare_phase6d_exploration_decision(
+                client=client, row=row, step_idx=step_idx, tab_cfg=tab_cfg,
+                stop_candidate=True, stop_reason=restart_reason,
+                stop_eval_inputs=stop_eval_inputs,
+                pre_decision_ref=frontier_shadow_decision_id,
+                additional_stale_reasons=["TALKBACK_RESTART_AFTER_POST_ACTION"],
+            )
+            _finalize_phase6d_exploration_decision(
+                client=client, token=phase6d_token, final_terminal=True,
+                final_terminal_reason=restart_reason,
+                final_error=True,
+                snapshot_invalidated=True,
+                invalidation_reason="TALKBACK_RESTART_AFTER_POST_ACTION",
+            )
             break
 
         _annotate_food_onboarding_complete(
@@ -19667,6 +19904,31 @@ def _main_loop_phase(
             if state.post_realign_pending_steps > 0:
                 state.post_realign_pending_steps -= 1
             continue
+
+        phase6d_stale_reasons: list[str] = []
+        if recovery_outcome is not None and bool(getattr(recovery_outcome, "attempted", False)):
+            phase6d_stale_reasons.append("RECOVERY_ACTION_AFTER_PRIMARY_RESULT")
+        if food_scan_recovery_occurred:
+            phase6d_stale_reasons.append("FOOD_SCAN_RECOVERY_ACTION")
+        if row.get("stall_escape_attempted") is True:
+            phase6d_stale_reasons.append("STALL_ESCAPE_ACTION")
+        if row.get("popup_dismissed") is True:
+            phase6d_stale_reasons.append("POPUP_DISMISS_ACTION")
+        if local_tab_transition_applied:
+            phase6d_stale_reasons.append("LOCAL_TAB_TRANSITION_ACTION")
+        if isinstance(row.get("scroll_transition"), Mapping):
+            phase6d_stale_reasons.append("SCROLL_ACTION_AFTER_PRIMARY_RESULT")
+        if row.get("cta_focus_align_requested") is True:
+            phase6d_stale_reasons.append("FOCUS_REALIGN_ACTION_AFTER_CAPTURE")
+        phase6d_token = _prepare_phase6d_exploration_decision(
+            client=client, row=row, step_idx=step_idx, tab_cfg=tab_cfg,
+            stop_candidate=bool(stop), stop_reason=str(reason or ""),
+            stop_eval_inputs=stop_eval_inputs,
+            pre_decision_ref=frontier_shadow_decision_id,
+            recovery_occurred=bool(recovery_outcome is not None
+                                   and getattr(recovery_outcome, "attempted", False)),
+            additional_stale_reasons=phase6d_stale_reasons,
+        )
 
         if stop:
             if reason in {"repeat_no_progress", "bounded_two_card_loop", "repeat_semantic_stall", "repeat_semantic_stall_after_escape"}:
@@ -19746,6 +20008,11 @@ def _main_loop_phase(
             record = hard_stop.snapshot() or {}
             log(f"[PHASE5C_HARD_STOP][committed] scenario='{tab_cfg.get('scenario_id', '')}' "
                 f"step={step_idx} reason='{record.get('terminal_reason')}' action='stop_before_overlay'")
+            _finalize_phase6d_exploration_decision(
+                client=client, token=phase6d_token, final_terminal=True,
+                final_terminal_reason=str(record.get("terminal_reason") or state.stop_reason or ""),
+                final_error=True,
+            )
             break
 
         overlay_result = _overlay_phase(
@@ -19771,12 +20038,35 @@ def _main_loop_phase(
             scenario_id=str(tab_cfg.get("scenario_id", "") or ""),
             step_idx=step_idx,
         ):
+            _finalize_phase6d_exploration_decision(
+                client=client, token=phase6d_token, final_terminal=bool(stop),
+                final_terminal_reason=str(reason or ""),
+                final_error=True,
+                snapshot_invalidated=True,
+                invalidation_reason="TALKBACK_RESTART_AFTER_DECISION",
+            )
             break
         if overlay_result.post_realign_pending_steps_delta > 0:
             state.post_realign_pending_steps = max(
                 state.post_realign_pending_steps,
                 overlay_result.post_realign_pending_steps_delta,
             )
+
+        overlay_reason = str(getattr(overlay_result, "candidate_reason", "") or "").strip().lower()
+        overlay_changed = (
+            getattr(overlay_result, "classification", "") in {"overlay", "navigation"}
+            or overlay_result.post_realign_pending_steps_delta > 0
+            or overlay_reason == "plugin_more_options"
+            or overlay_reason.startswith("matched_")
+        )
+        _finalize_phase6d_exploration_decision(
+            client=client, token=phase6d_token,
+            final_terminal=bool(stop or int(step_idx) >= int(tab_cfg.get("max_steps", step_idx + 1))),
+            final_terminal_reason=str(reason or ("safety_limit" if int(step_idx) >= int(
+                tab_cfg.get("max_steps", step_idx + 1)) and not stop else "")),
+            snapshot_invalidated=overlay_changed,
+            invalidation_reason="OVERLAY_ACTION_AFTER_DECISION" if overlay_changed else "",
+        )
 
         if state.post_realign_pending_steps > 0:
             state.post_realign_pending_steps -= 1
@@ -20866,6 +21156,18 @@ def _collect_tab_rows_inner(
         finally:
             try:
                 client._phase6c2_frontier_shadow_runtime = None
+            except Exception:
+                pass
+    exploration_shadow_runtime = getattr(client, "_phase6d_exploration_shadow_runtime", None)
+    if exploration_shadow_runtime is not None:
+        try:
+            exploration_path = exploration_shadow_runtime.write(output_path)
+            log(f"[EXPLORATION_SHADOW][artifact] path='{exploration_path}' authority='SHADOW_ONLY'")
+        except Exception as exc:
+            log(f"[EXPLORATION_SHADOW][artifact_error] reason='{type(exc).__name__}' action='continue_production'")
+        finally:
+            try:
+                client._phase6d_exploration_shadow_runtime = None
             except Exception:
                 pass
     main_steps_completed = sum(1 for row in rows if int(row.get("step_index", -1) or -1) > 0)

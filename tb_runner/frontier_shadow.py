@@ -166,6 +166,7 @@ class FrontierShadowRuntime:
                      observation_ref: Mapping[str, Any] | None = None) -> str | None:
         if not self.enabled:
             return None
+
         try:
             if len(self.evaluations) >= MAX_EVALUATIONS:
                 self.truncation_reasons.add("MAX_EVALUATIONS")
@@ -248,6 +249,104 @@ class FrontierShadowRuntime:
         except Exception as exc:  # shadow-only isolation
             self._fail("pre_decision", exc, step=step)
             return None
+
+    def evaluate_post_action(self, *, step: int, decision_id: str,
+                             decision_watermark: int, state_id: str | None,
+                             focus_cursor: Mapping[str, Any] | None = None,
+                             snapshot_valid: bool = True,
+                             result_request_id: str = "") -> dict[str, Any]:
+        """Re-evaluate the current captured inventory after its production result.
+
+        This is separate from ``pre_decision``: a pre-action evaluation is never
+        completion evidence for the action that follows it. The method performs
+        no I/O and only reuses the inventory already captured by reconciliation.
+        """
+        step = int(step)
+        decision_watermark = int(decision_watermark)
+        cached = getattr(self, "_latest_inventory", None)
+        source_step = cached.get("source_step") if isinstance(cached, Mapping) else None
+        cached_state = cached.get("state_id") if isinstance(cached, Mapping) else None
+        source_request_id = _text((_mapping(cached.get("observation_ref"))
+                                   if isinstance(cached, Mapping) else {}).get("request_id"))
+        request_id_mismatch = bool(_text(result_request_id)
+                                   and _text(result_request_id) != source_request_id)
+        aligned = bool(self.enabled and snapshot_valid and isinstance(cached, Mapping)
+                       and source_step == step and cached_state == state_id and state_id
+                       and not request_id_mismatch)
+        if not aligned:
+            reasons = []
+            if not snapshot_valid:
+                reasons.append("POST_ACTION_SNAPSHOT_INVALIDATED")
+            if not isinstance(cached, Mapping) or source_step != step:
+                reasons.append("POST_ACTION_INVENTORY_UNAVAILABLE")
+            if isinstance(cached, Mapping) and cached_state != state_id:
+                reasons.append("POST_ACTION_STATE_MISMATCH")
+            if request_id_mismatch:
+                reasons.append("POST_ACTION_REQUEST_ID_MISMATCH")
+            if not reasons:
+                reasons.append("POST_ACTION_STATE_UNRESOLVED")
+            return {
+                "schema_version": FRONTIER_SCHEMA_VERSION,
+                "mode": "SHADOW_ONLY", "decision_authority": "NONE",
+                "state_id": state_id, "exhaustion_scope": "CURRENT_STATE_CANDIDATE_FOCUS",
+                "frontier_exhausted": "UNKNOWN", "evidence_complete": False,
+                "exhaustion_reason_codes": sorted(reasons), "frontier_items": [],
+                "shadow_next_frontier": None, "shadow_next_candidate_id": None,
+                "shadow_next_action_type": None, "shadow_next_reason_codes": [],
+                "focus_next_destination_guaranteed": False,
+                "counts": {"eligible_count": 0, "never_attempted_count": 0,
+                           "unvisited_count": 0, "unknown_count": 0,
+                           "retryable_count": 0, "revisit_only_count": 0,
+                           "blocked_count": 0, "unsafe_count": 0,
+                           "exhausted_count": 0, "policy_limited_count": 0,
+                           "deferred_scroll_count": 0, "invalid_or_unidentified_count": 0,
+                           "truncated_count": 0},
+                "blocked_reason_summary": {},
+                "history_complete": False, "inventory_complete": False,
+                "truncated": True,
+                "decision_id": decision_id, "decision_watermark": decision_watermark,
+                "evidence_watermark": decision_watermark,
+                "evidence_stage": "STALE" if not snapshot_valid else "POST_ACTION",
+                "source_step": source_step, "source_state_id": cached_state,
+                "source_observation_ref": deepcopy(dict(cached.get("observation_ref") or {}))
+                    if isinstance(cached, Mapping) else {},
+                "source_request_id": source_request_id or None,
+                "alignment_status": "STALE" if not snapshot_valid else "INCOMPLETE",
+                "alignment_reasons": sorted(reasons),
+                "policy_limit_summary": {"policy_limited_count": 0, "reasons": []},
+                "truncation_summary": {"truncated": True, "reasons": sorted(reasons)},
+            }
+
+        from tb_runner.frontier_scheduler import evaluate_frontier
+
+        result = evaluate_frontier(
+            {"state_id": state_id, "resolved": True, "identity_status": "RESOLVED",
+             "inventory_complete": cached.get("inventory_complete") is True},
+            cached.get("candidates") or [], deepcopy(self.history), {}, {},
+            focus_cursor=deepcopy(dict(focus_cursor or {})),
+        ).to_dict()
+        result.update({
+            "decision_id": decision_id,
+            "decision_watermark": decision_watermark,
+            "evidence_watermark": decision_watermark,
+            "evidence_stage": "POST_ACTION",
+            "source_step": source_step,
+            "source_state_id": cached_state,
+            "source_observation_ref": deepcopy(dict(cached.get("observation_ref") or {})),
+            "source_request_id": source_request_id or None,
+            "alignment_status": "ALIGNED",
+            "alignment_reasons": [],
+            "policy_limit_summary": {
+                "policy_limited_count": int((result.get("counts") or {}).get("policy_limited_count", 0) or 0),
+                "reasons": ["POLICY_LIMIT_IS_NOT_COMPLETION_PROOF"]
+                    if int((result.get("counts") or {}).get("policy_limited_count", 0) or 0) else [],
+            },
+            "truncation_summary": {
+                "truncated": result.get("truncated") is True,
+                "reasons": ["FRONTIER_OR_HISTORY_TRUNCATED"] if result.get("truncated") is True else [],
+            },
+        })
+        return result
 
     def post_result(self, *, decision_id: str | None, step: int,
                     result: Mapping[str, Any], owner: str,
@@ -546,7 +645,11 @@ def capture_reconciled_inventory(runtime: FrontierShadowRuntime | None, *,
         step=step, state_id=state_id, candidates=normalized,
         inventory_complete=complete,
         observation_ref={"source_step": step, "state_id": state_id,
-                         "state_resolution": identity.status},
+                         "state_resolution": identity.status,
+                         "request_id": _text(row.get("phase5c_primary_action_request_id")
+                                              or row.get("smart_nav_req_id")
+                                              or row.get("target_focus_attempt_id")),
+                         "focus_observation_id": _text(row.get("actual_focus_observation_id"))},
     )
 
 
