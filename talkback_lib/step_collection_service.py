@@ -287,6 +287,9 @@ class StepCollectionService:
             step["post_move_verdict_source"] = "smart_nav_result"
         step["t_after_move"] = round(time.monotonic() - step_started, 3)
 
+        from talkback_lib.exploration_evidence_clock import clock_for
+        evidence_clock = clock_for(self.client)
+        observation_token = evidence_clock.begin_observation() if evidence_clock else None
         ann_wait = wait_seconds if announcement_wait_seconds is None else announcement_wait_seconds
 
         ann_started = time.monotonic()
@@ -783,4 +786,6 @@ class StepCollectionService:
             f"t_ann_done={step.get('t_after_ann', 0)} "
             f"t_focus_done={step.get('t_after_get_focus', 0)}"
         )
+        if evidence_clock is not None and observation_token is not None:
+            step["_exploration_observation"] = evidence_clock.finish_observation(observation_token)
         return step

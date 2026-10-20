@@ -19683,3 +19683,85 @@ def test_xml_entry_defers_target_under_bottom_navigation_until_next_scroll(monke
     assert client.scroll_calls == ["down"]
     assert client.tap_calls == [("SERIAL", 540, 1356)]
     assert any("target_obstructed_by_bottom_overlay" in line for line in logs)
+
+
+# Phase 6D2R: these tests traverse real production recovery/popup helpers,
+# with only native IO mocked. An outer False must not preserve old evidence.
+def _epoch_test_native_device(monkeypatch, returncode=0):
+    from talkback_lib.adb_device import AdbDevice
+    from talkback_lib.exploration_evidence_clock import EvidenceClock
+    monkeypatch.setattr("talkback_lib.adb_device.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=returncode, stdout="", stderr="offline"))
+    adb = AdbDevice("offline-adb", lambda dev: "offline")
+    adb.shadow_evidence_clock = EvidenceClock()
+    return adb
+
+
+def test_food_failed_verification_invalidates_primary_snapshot_at_dispatch(monkeypatch):
+    from tb_runner.exploration_shadow import ExplorationShadowRuntime
+    from test_exploration_shadow import _inputs
+    adb = _epoch_test_native_device(monkeypatch)
+    clock = adb.shadow_evidence_clock
+    captured = clock.finish_observation(clock.begin_observation())
+    shadow = ExplorationShadowRuntime("run", "life_food_plugin", evidence_clock=clock)
+    token = shadow.prepare_decision(**_inputs(1), observation_evidence=captured)
+    client = DummyClient([])
+    client._adb_device = adb
+    client.tap_xy_adb = lambda **kwargs: adb._tap(kwargs["dev"], kwargs["x"], kwargs["y"])
+    client.dump_tree_sequence = [_food_scan_screen_nodes()] * 4
+    client.focus_sequence = [{"text": "QR Scan", "viewIdResourceName": "scan_title"}] * 4
+    state = SimpleNamespace(food_scan_recovery_pending=True)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    row = {"visible_label": "QR Scan", "focus_view_id": "scan_title"}
+    recovered = collection_flow._maybe_recover_food_scan_screen(client, "offline", row=row,
+        state=state, tab_cfg=_scenario_config("life_food_plugin"), wait_seconds=0)
+    assert recovered is False
+    assert row["food_scan_recovery_attempted"] is True
+    assert row["food_scan_recovery_success"] is False
+    assert clock.action_epoch == 1
+    assert clock.receipts[-1]["owner"] == "RECOVERY"
+    assert not clock.current(captured)
+    # No success-derived flag is passed to the finalizer.
+    assert not shadow.finalize_decision(token=token, final_terminal=False)
+    assert shadow.decisions[-1]["stale_status"] == "YES"
+    assert not shadow.decisions[-1]["completion_evidence_complete"]
+    # The same old row is also rejected if preparation happens after recovery.
+    assert shadow.prepare_decision(**_inputs(2), observation_evidence=captured)
+    assert not shadow.finalize_decision(token=next(iter(shadow._pending)), final_terminal=False)
+
+
+def test_popup_failed_click_invalidates_snapshot_despite_handled_false(monkeypatch):
+    from tb_runner.exploration_shadow import ExplorationShadowRuntime
+    from test_exploration_shadow import _inputs
+    adb = _epoch_test_native_device(monkeypatch, returncode=1)
+    clock = adb.shadow_evidence_clock
+    captured = clock.finish_observation(clock.begin_observation())
+    shadow = ExplorationShadowRuntime("run", "scenario", evidence_clock=clock)
+    token = shadow.prepare_decision(**_inputs(1), observation_evidence=captured)
+    client = DummyClient([])
+    client._adb_device = adb
+    client.tap_xy_adb = lambda **kwargs: adb._tap(kwargs["dev"], kwargs["x"], kwargs["y"])
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    result = collection_flow._maybe_dismiss_runtime_popup(client=client, dev="offline",
+        tab_cfg=_base_tab_cfg(), row=_popup_dialog_row(), state=_phase_ordering_state(),
+        stop_reason="repeat_no_progress")
+    assert result["handled"] is False
+    assert result["reason"] == "click_failed"
+    assert clock.action_epoch == 1
+    assert clock.receipts[-1]["owner"] == "POPUP"
+    assert not shadow.finalize_decision(token=token, final_terminal=False)
+    assert shadow.decisions[-1]["stale_status"] == "YES"
+
+
+def test_popup_safety_rejection_preserves_snapshot_epoch(monkeypatch):
+    adb = _epoch_test_native_device(monkeypatch)
+    client = DummyClient([])
+    client._adb_device = adb
+    client.tap_xy_adb = lambda **kwargs: adb._tap(kwargs["dev"], kwargs["x"], kwargs["y"])
+    clock = adb.shadow_evidence_clock
+    captured = clock.finish_observation(clock.begin_observation())
+    result = collection_flow._maybe_dismiss_runtime_popup(client=client, dev="offline",
+        tab_cfg=_base_tab_cfg(), row=_popup_dialog_row(title="Delete device", button="Delete"),
+        state=_phase_ordering_state(), stop_reason="repeat_no_progress")
+    assert result["handled"] is False
+    assert clock.action_epoch == 0 and clock.current(captured)

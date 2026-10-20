@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from talkback_lib import A11yAdbClient
+from talkback_lib.exploration_evidence_clock import clock_for, owned_dispatch
 from tb_runner.anchor_logic import build_landing_surface_signature, stabilize_anchor
 from tb_runner.bottom_nav import annotate_bottom_nav_candidates, is_annotated_bottom_nav_candidate
 from tb_runner.constants import (
@@ -535,7 +536,16 @@ def _apply_focus_reconciliation(
         dump_tree_fn = getattr(client, "dump_tree", None)
         if callable(dump_tree_fn):
             try:
+                evidence_clock = clock_for(client)
+                old_observation = row.get("_exploration_observation")
+                focus_current = evidence_clock.current(old_observation) if evidence_clock else False
+                capture_token = evidence_clock.begin_observation() if evidence_clock else None
                 fresh_nodes = dump_tree_fn(dev=dev)
+                if evidence_clock is not None:
+                    combined = evidence_clock.finish_observation(capture_token)
+                    combined["capture_complete"] = combined["capture_complete"] and focus_current
+                    combined["focus_source_observation_id"] = (old_observation or {}).get("observation_id")
+                    row["_exploration_observation"] = combined
                 if isinstance(fresh_nodes, list):
                     nodes = fresh_nodes
                     inventory_source = "current_viewport_dump"
@@ -3697,6 +3707,7 @@ def _ensure_global_nav_start_focus(
     return False, retry_focus if isinstance(retry_focus, dict) else {}
 
 
+@owned_dispatch("RECOVERY")
 def _send_back(client: A11yAdbClient, dev: str) -> bool:
     run_fn = getattr(client, "_run", None)
     if callable(run_fn):
@@ -4049,6 +4060,7 @@ def _device_recovery_context_verified(result: Any) -> bool:
     return any(canonicalize_label(value, domain="bottom_tab") == "devices" for value in actual_values)
 
 
+@owned_dispatch("RECOVERY")
 def recover_to_device_start_state(
     client: A11yAdbClient,
     dev: str,
@@ -4166,6 +4178,7 @@ def recover_to_device_start_state(
     return False, last_reason
 
 
+@owned_dispatch("RECOVERY")
 def recover_to_start_state(client: A11yAdbClient, dev: str, tab_cfg: dict[str, Any]) -> bool:
     session = getattr(client, "_prepositioned_session", None)
     if session is not None:
@@ -15215,6 +15228,7 @@ def _collect_local_tab_viewport_bounds(client: A11yAdbClient, dev: str, target_b
     return local_tab_logic._collect_local_tab_viewport_bounds(client, dev, target_bounds)
 
 
+@owned_dispatch("TAB")
 def _tap_local_tab_bounds_center(
     *,
     client: A11yAdbClient,
@@ -15253,6 +15267,7 @@ def _commit_forced_local_tab_target_success(state: MainLoopState) -> None:
     return local_tab_logic._commit_forced_local_tab_target_success(state)
 
 
+@owned_dispatch("TAB")
 def _activate_forced_local_tab_target(
     *,
     client: A11yAdbClient,
@@ -15755,6 +15770,7 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
     return local_tab_logic._maybe_reprioritize_persistent_bottom_strip_row(row=row, client=client, dev=dev, tab_cfg=tab_cfg, state=state, step_idx=step_idx, scenario_perf=scenario_perf)
 
 
+@owned_dispatch("TAB")
 def _maybe_select_next_local_tab(
     *,
     client: A11yAdbClient,
@@ -15948,6 +15964,7 @@ def _apply_focus_snapshot_to_row(
     return row
 
 
+@owned_dispatch("RECOVERY")
 def _maybe_recover_family_care_onboarding(
     *,
     row: dict[str, Any],
@@ -17558,6 +17575,7 @@ def open_tab_and_anchor(client: A11yAdbClient, dev: str, tab_cfg: dict) -> bool:
     return open_scenario(client, dev, tab_cfg)
 
 
+@owned_dispatch("OPTIONAL_EXPANSION")
 def _execute_overlay_for_candidate(
     client: A11yAdbClient,
     dev: str,
@@ -18007,6 +18025,7 @@ def _optional_expansion_skip_scope(row: dict[str, Any], tab_cfg: dict[str, Any],
                                      separators=(",", ":")).encode("utf-8")).hexdigest(), target
 
 
+@owned_dispatch("OPTIONAL_EXPANSION")
 def _overlay_phase(
     client: A11yAdbClient,
     dev: str,
@@ -18464,6 +18483,7 @@ def _select_identity_recovery_candidate(
     )
 
 
+@owned_dispatch("RECOVERY")
 def _attempt_identity_recovery(
     *,
     client: A11yAdbClient,
@@ -18662,7 +18682,7 @@ def _frontier_shadow_post_result(
 def _prepare_phase6d_exploration_decision(
     *, client: Any, row: dict[str, Any], step_idx: int, tab_cfg: dict[str, Any],
     stop_candidate: bool, stop_reason: str, stop_eval_inputs: Mapping[str, Any] | None,
-    pre_decision_ref: str | None, recovery_occurred: bool = False,
+    pre_decision_ref: str | None, recovery_occurred: bool = False, production_state: Any = None,
     additional_stale_reasons: list[str] | None = None,
 ) -> str | None:
     """Stage one post-result 6D evaluation without changing production state."""
@@ -18681,8 +18701,15 @@ def _prepare_phase6d_exploration_decision(
         from tb_runner.exploration_shadow import normalize_production_decision
         from tb_runner.state_graph import _raw_observation_from_row, build_graph_state_identity
 
+        evidence_clock = clock_for(client)
+        observation_evidence = row.get("_exploration_observation") or {}
+        if evidence_clock is None or not evidence_clock.current(observation_evidence):
+            stale_reasons.append("ACTION_OBSERVATION_EPOCH_OR_CAPTURE_MISMATCH")
         identity = build_graph_state_identity(_raw_observation_from_row(row))
         state_id = identity.state_id
+        from tb_runner.redirect_evidence import current_execution_context
+        execution_context = current_execution_context(client, observation_evidence,
+                                                       state_id=state_id, watermark=watermark, production_state=production_state)
         current_state = {
             "state_id": state_id,
             "state_resolution": identity.status,
@@ -18704,6 +18731,8 @@ def _prepare_phase6d_exploration_decision(
             step=step_idx, decision_id=decision_id, decision_watermark=watermark,
             state_id=state_id, focus_cursor=focus_cursor,
             snapshot_valid=not stale_reasons, result_request_id=request_id,
+            execution_sources=getattr(client, "_phase6_redirect_proofs", {}),
+            execution_context=execution_context,
         )
         if str(frontier.get("alignment_status", "") or "").upper() == "STALE":
             stale_reasons.extend(frontier.get("alignment_reasons") or ["FRONTIER_SNAPSHOT_STALE"])
@@ -18831,6 +18860,9 @@ def _prepare_phase6d_exploration_decision(
             scroll_evidence=scroll, safety_state=safety, hard_bounds=hard_bounds,
             recovery_budget=recovery_budget, production_stop_candidate=candidate,
             stale_reasons=stale_reasons,
+            observation_evidence=observation_evidence,
+            selected_execution_sources=getattr(client, "_phase6_redirect_proofs", {}),
+            execution_context=execution_context,
         )
     except Exception as exc:
         try:
@@ -18844,18 +18876,25 @@ def _prepare_phase6d_exploration_decision(
 def _finalize_phase6d_exploration_decision(
     *, client: Any, token: str | None, final_terminal: bool,
     final_terminal_reason: str, final_error: bool = False, snapshot_invalidated: bool = False,
-    invalidation_reason: str = "",
+    invalidation_reason: str = "", production_state: Any = None,
 ) -> None:
     runtime = getattr(client, "_phase6d_exploration_shadow_runtime", None)
     if runtime is None or token is None:
         return
     try:
+        from tb_runner.redirect_evidence import current_execution_context
+        pending = runtime._pending.get(token)
+        context = current_execution_context(client, pending.record["observation_alignment"],
+            state_id=pending.record["state"]["state_id"], watermark=pending.watermark,
+            production_state=production_state) if pending else {}
         runtime.finalize_decision(
             token=token, final_terminal=final_terminal,
             final_terminal_reason=final_terminal_reason,
             final_error=final_error,
             snapshot_invalidated=snapshot_invalidated,
             invalidation_reason=invalidation_reason,
+            current_execution_sources=getattr(client, "_phase6_redirect_proofs", {}),
+            current_execution_context=context,
         )
     except Exception as exc:
         try:
@@ -18875,6 +18914,7 @@ def _frontier_shadow_recovery_owner(
     return "UNKNOWN", "UNKNOWN", request_id or f"frontier-decision:{step_idx}:recovery-unknown"
 
 
+@owned_dispatch("POPUP")
 def _maybe_dismiss_runtime_popup(
     *,
     client: A11yAdbClient,
@@ -19115,6 +19155,17 @@ def _main_loop_phase(
             client._phase6d_exploration_shadow_runtime = ExplorationShadowRuntime.for_run(
                 run_id=shadow_run_id, scenario_id=shadow_scenario_id,
             )
+            # The mode may have been enabled after the client was constructed.
+            from talkback_lib.adb_device import AdbDevice
+            from talkback_lib.exploration_evidence_clock import EvidenceClock
+            device = getattr(client, "_adb_device", None)
+            if isinstance(device, AdbDevice) and clock_for(client) is None:
+                device.shadow_evidence_clock = EvidenceClock()
+            if clock_for(client) is not None:
+                client._phase6_redirect_proofs = {}
+                client._phase6_redirect_context = {}
+            client._phase6c2_frontier_shadow_runtime.evidence_clock = clock_for(client)
+            client._phase6d_exploration_shadow_runtime.evidence_clock = clock_for(client)
         else:
             client._phase6c2_frontier_shadow_runtime = None
             client._phase6d_exploration_shadow_runtime = None
@@ -19416,12 +19467,12 @@ def _main_loop_phase(
                 f"reason='{reason}' crash_event_id='{crash_event_id}'"
             )
             phase6d_token = _prepare_phase6d_exploration_decision(
-                client=client, row=row, step_idx=step_idx, tab_cfg=tab_cfg,
+                production_state=state, client=client, row=row, step_idx=step_idx, tab_cfg=tab_cfg,
                 stop_candidate=True, stop_reason=reason, stop_eval_inputs={},
                 pre_decision_ref=frontier_shadow_decision_id,
             )
             _finalize_phase6d_exploration_decision(
-                client=client, token=phase6d_token, final_terminal=True,
+                production_state=state, client=client, token=phase6d_token, final_terminal=True,
                 final_terminal_reason=reason,
             )
             _apply_row_persistence_phase(
@@ -19853,14 +19904,14 @@ def _main_loop_phase(
         ):
             restart_reason = str(state.stop_reason or "talkback_restarted")
             phase6d_token = _prepare_phase6d_exploration_decision(
-                client=client, row=row, step_idx=step_idx, tab_cfg=tab_cfg,
+                production_state=state, client=client, row=row, step_idx=step_idx, tab_cfg=tab_cfg,
                 stop_candidate=True, stop_reason=restart_reason,
                 stop_eval_inputs=stop_eval_inputs,
                 pre_decision_ref=frontier_shadow_decision_id,
                 additional_stale_reasons=["TALKBACK_RESTART_AFTER_POST_ACTION"],
             )
             _finalize_phase6d_exploration_decision(
-                client=client, token=phase6d_token, final_terminal=True,
+                production_state=state, client=client, token=phase6d_token, final_terminal=True,
                 final_terminal_reason=restart_reason,
                 final_error=True,
                 snapshot_invalidated=True,
@@ -19921,7 +19972,7 @@ def _main_loop_phase(
         if row.get("cta_focus_align_requested") is True:
             phase6d_stale_reasons.append("FOCUS_REALIGN_ACTION_AFTER_CAPTURE")
         phase6d_token = _prepare_phase6d_exploration_decision(
-            client=client, row=row, step_idx=step_idx, tab_cfg=tab_cfg,
+            production_state=state, client=client, row=row, step_idx=step_idx, tab_cfg=tab_cfg,
             stop_candidate=bool(stop), stop_reason=str(reason or ""),
             stop_eval_inputs=stop_eval_inputs,
             pre_decision_ref=frontier_shadow_decision_id,
@@ -20009,7 +20060,7 @@ def _main_loop_phase(
             log(f"[PHASE5C_HARD_STOP][committed] scenario='{tab_cfg.get('scenario_id', '')}' "
                 f"step={step_idx} reason='{record.get('terminal_reason')}' action='stop_before_overlay'")
             _finalize_phase6d_exploration_decision(
-                client=client, token=phase6d_token, final_terminal=True,
+                production_state=state, client=client, token=phase6d_token, final_terminal=True,
                 final_terminal_reason=str(record.get("terminal_reason") or state.stop_reason or ""),
                 final_error=True,
             )
@@ -20039,7 +20090,7 @@ def _main_loop_phase(
             step_idx=step_idx,
         ):
             _finalize_phase6d_exploration_decision(
-                client=client, token=phase6d_token, final_terminal=bool(stop),
+                production_state=state, client=client, token=phase6d_token, final_terminal=bool(stop),
                 final_terminal_reason=str(reason or ""),
                 final_error=True,
                 snapshot_invalidated=True,
@@ -20060,7 +20111,7 @@ def _main_loop_phase(
             or overlay_reason.startswith("matched_")
         )
         _finalize_phase6d_exploration_decision(
-            client=client, token=phase6d_token,
+            production_state=state, client=client, token=phase6d_token,
             final_terminal=bool(stop or int(step_idx) >= int(tab_cfg.get("max_steps", step_idx + 1))),
             final_terminal_reason=str(reason or ("safety_limit" if int(step_idx) >= int(
                 tab_cfg.get("max_steps", step_idx + 1)) and not stop else "")),
@@ -20359,6 +20410,7 @@ def _set_food_scan_recovery_pending(
     setattr(state, "food_scan_recovery_label", str(label or "").strip())
 
 
+@owned_dispatch("RECOVERY")
 def _maybe_recover_food_scan_screen(
     client: A11yAdbClient,
     dev: str,

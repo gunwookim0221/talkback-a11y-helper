@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
+from talkback_lib.exploration_evidence_clock import owned_dispatch
 
 from tb_runner.traversal_evidence_gate import (
     ProgressDecision,
@@ -350,6 +351,7 @@ class TraversalCoordinator:
         )
         return TraversalDecision(progress=progress, visit=visit)
 
+    @owned_dispatch("RECOVERY")
     def recover(
         self,
         *,

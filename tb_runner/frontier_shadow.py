@@ -54,10 +54,11 @@ def _stable_candidates(value: Sequence[Mapping[str, Any]], state_id: str) -> lis
         row = deepcopy(dict(candidate))
         row["candidate_id"] = candidate_id
         row["state_id"] = state_id or None
-        row["target_identity"] = {"instance_id": instance}
+        row["target_identity"] = deepcopy(dict(target)) or {"instance_id": instance}
         row["edge_type"] = "TARGETED_FOCUS"
         row["currently_present"] = True
-        row["target_binding_status"] = "RESOLVED" if state_id else "UNKNOWN"
+        # Presence in an inventory is not an exact execution resolver proof.
+        row["target_binding_status"] = candidate.get("target_binding_status", "UNKNOWN")
         rows.append(row)
     rows.sort(key=lambda item: (item["candidate_id"], canonical_json(item)))
     return rows
@@ -94,6 +95,7 @@ class FrontierShadowRuntime:
     run_id: str
     scenario_id: str
     enabled: bool = True
+    evidence_clock: Any = field(default=None, repr=False)
     source_graph_path: str = ""
     evaluations: list[dict[str, Any]] = field(default_factory=list)
     history: dict[str, Any] = field(default_factory=lambda: {
@@ -254,7 +256,9 @@ class FrontierShadowRuntime:
                              decision_watermark: int, state_id: str | None,
                              focus_cursor: Mapping[str, Any] | None = None,
                              snapshot_valid: bool = True,
-                             result_request_id: str = "") -> dict[str, Any]:
+                             result_request_id: str = "",
+                             execution_sources: Mapping[str, Any] | None = None,
+                             execution_context: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """Re-evaluate the current captured inventory after its production result.
 
         This is separate from ``pre_decision``: a pre-action evaluation is never
@@ -270,6 +274,9 @@ class FrontierShadowRuntime:
                                    if isinstance(cached, Mapping) else {}).get("request_id"))
         request_id_mismatch = bool(_text(result_request_id)
                                    and _text(result_request_id) != source_request_id)
+        if self.evidence_clock is not None:
+            observation = _mapping(cached.get("observation_ref")) if isinstance(cached, Mapping) else {}
+            snapshot_valid = bool(snapshot_valid and self.evidence_clock.current(dict(observation.get("capture") or {})))
         aligned = bool(self.enabled and snapshot_valid and isinstance(cached, Mapping)
                        and source_step == step and cached_state == state_id and state_id
                        and not request_id_mismatch)
@@ -318,11 +325,27 @@ class FrontierShadowRuntime:
             }
 
         from tb_runner.frontier_scheduler import evaluate_frontier
+        from tb_runner.redirect_evidence import evaluate_redirect_evidence
+
+        candidates = deepcopy(cached.get("candidates") or [])
+        planner_evidence, safety_evidence = {}, {}
+        context = dict(execution_context or {})
+        context.update(state_id=state_id, decision_watermark=decision_watermark)
+        for candidate in candidates:
+            selected = {**candidate, "frontier_id": build_frontier_id(
+                state_id, candidate["edge_type"], candidate["target_identity"])}
+            proof = evaluate_redirect_evidence(selected=selected, sources=execution_sources, context=context)
+            if proof["selected_frontier_execution_ready"]:
+                candidate["target_binding_status"] = "RESOLVED"
+                scope = {"state_id": state_id, "edge_type": candidate["edge_type"],
+                         "target_instance_id": candidate["target_identity"]["instance_id"]}
+                planner_evidence[candidate["candidate_id"]] = {**scope, "status": "ELIGIBLE"}
+                safety_evidence[candidate["candidate_id"]] = {**scope, "status": "ALLOWED"}
 
         result = evaluate_frontier(
             {"state_id": state_id, "resolved": True, "identity_status": "RESOLVED",
              "inventory_complete": cached.get("inventory_complete") is True},
-            cached.get("candidates") or [], deepcopy(self.history), {}, {},
+            candidates, deepcopy(self.history), planner_evidence, safety_evidence,
             focus_cursor=deepcopy(dict(focus_cursor or {})),
         ).to_dict()
         result.update({
@@ -337,11 +360,13 @@ class FrontierShadowRuntime:
             "alignment_status": "ALIGNED",
             "alignment_reasons": [],
             "policy_limit_summary": {
+                "reason_precision": "AGGREGATE_ONLY",
                 "policy_limited_count": int((result.get("counts") or {}).get("policy_limited_count", 0) or 0),
                 "reasons": ["POLICY_LIMIT_IS_NOT_COMPLETION_PROOF"]
                     if int((result.get("counts") or {}).get("policy_limited_count", 0) or 0) else [],
             },
             "truncation_summary": {
+                "reason_precision": "AGGREGATE_ONLY",
                 "truncated": result.get("truncated") is True,
                 "reasons": ["FRONTIER_OR_HISTORY_TRUNCATED"] if result.get("truncated") is True else [],
             },
@@ -606,7 +631,7 @@ def production_candidate(*, state_id: str, scenario_id: str, candidate: Mapping[
         "state_id": state_id,
         "target_identity": {"instance_id": instance},
         "currently_present": True,
-        "target_binding_status": "RESOLVED" if state_id else "UNKNOWN",
+        "target_binding_status": "UNKNOWN",
     }
 
 
@@ -645,6 +670,7 @@ def capture_reconciled_inventory(runtime: FrontierShadowRuntime | None, *,
         step=step, state_id=state_id, candidates=normalized,
         inventory_complete=complete,
         observation_ref={"source_step": step, "state_id": state_id,
+                         "capture": deepcopy(dict(row.get("_exploration_observation") or {})),
                          "state_resolution": identity.status,
                          "request_id": _text(row.get("phase5c_primary_action_request_id")
                                               or row.get("smart_nav_req_id")

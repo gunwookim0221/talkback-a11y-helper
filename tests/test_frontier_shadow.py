@@ -186,7 +186,7 @@ def test_reconciliation_inventory_adapter_uses_existing_candidates_without_io(mo
     assert runtime._latest_inventory["state_id"]
     assert runtime._latest_inventory["inventory_complete"] is True
     assert len(runtime._latest_inventory["candidates"]) == 1
-    assert runtime._latest_inventory["candidates"][0]["target_binding_status"] == "RESOLVED"
+    assert runtime._latest_inventory["candidates"][0]["target_binding_status"] == "UNKNOWN"
 
 
 def test_off_runtime_does_not_evaluate_or_write_artifact(tmp_path):

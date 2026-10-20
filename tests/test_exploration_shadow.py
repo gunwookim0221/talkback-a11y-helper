@@ -476,16 +476,21 @@ def test_collection_hook_uses_closed_step_evidence_without_mutating_production_r
     from tb_runner import collection_flow, state_graph
     from tb_runner.frontier_shadow import FrontierShadowRuntime
 
-    exploration = ExplorationShadowRuntime("run", "scenario")
+    from talkback_lib.exploration_evidence_clock import EvidenceClock
+    clock = EvidenceClock()
+    observation = clock.finish_observation(clock.begin_observation())
+    exploration = ExplorationShadowRuntime("run", "scenario", evidence_clock=clock)
     frontier = FrontierShadowRuntime("run", "scenario")
     frontier.capture_inventory(step=1, state_id=STATE, candidates=[],
         inventory_complete=True, observation_ref={"request_id": "request-1"})
     client = SimpleNamespace(_phase6d_exploration_shadow_runtime=exploration,
                              _phase6c2_frontier_shadow_runtime=frontier)
+    client._adb_device = SimpleNamespace(shadow_evidence_clock=clock)
     identity = SimpleNamespace(state_id=STATE, status="RESOLVED", reasons=())
     monkeypatch.setattr(state_graph, "_raw_observation_from_row", lambda row: {})
     monkeypatch.setattr(state_graph, "build_graph_state_identity", lambda raw: identity)
     row = {
+        "_exploration_observation": observation,
         "step_index": 1,
         "scenario_id": "scenario",
         "smart_nav_req_id": "request-1",

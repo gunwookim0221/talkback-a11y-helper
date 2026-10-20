@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import subprocess
 import threading
+import os
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Any
@@ -61,6 +62,13 @@ class AdbDevice:
         self.adb_path = adb_path
         self._resolve_serial = resolve_serial
         self.command_guard = None
+        from talkback_lib.exploration_evidence_clock import EvidenceClock
+        self.shadow_evidence_clock = (EvidenceClock() if os.environ.get("TB_STATE_GRAPH_MODE", "").strip().upper() == "SHADOW" else None)
+
+    def _observe_native_dispatch(self, args: list[str]) -> None:
+        clock = getattr(self, "shadow_evidence_clock", None)
+        if clock is not None:
+            clock.dispatch(args)
 
     @staticmethod
     def _effective_timeout(args: list[str], timeout: float | None) -> float:
@@ -81,6 +89,7 @@ class AdbDevice:
         cmd += args
         effective_timeout = self._effective_timeout(args, timeout)
         try:
+            self._observe_native_dispatch(args)
             proc = subprocess.run(
                 cmd,
                 check=False,
@@ -141,6 +150,7 @@ class AdbDevice:
         if max_stdout_bytes < 0 or max_stderr_bytes < 0 or timeout <= 0:
             raise ValueError("binary ADB limits must be non-negative and timeout positive")
         try:
+            self._observe_native_dispatch(args)
             proc = subprocess.Popen(
                 command,
                 stdin=subprocess.DEVNULL,
@@ -297,6 +307,7 @@ class AdbDevice:
             cmd += ["-s", serial]
         cmd += ["shell", "input", "tap", str(int(x)), str(int(y))]
         try:
+            self._observe_native_dispatch(["shell", "input", "tap", str(int(x)), str(int(y))])
             proc = subprocess.run(
                 cmd,
                 check=False,

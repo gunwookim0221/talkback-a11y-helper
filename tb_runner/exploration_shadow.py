@@ -139,6 +139,7 @@ class ExplorationShadowRuntime:
     run_id: str
     scenario_id: str
     enabled: bool = True
+    evidence_clock: Any = field(default=None, repr=False)
     policy: ExplorationPolicy = field(default_factory=ExplorationPolicy)
     history: ExplorationHistory = field(default_factory=ExplorationHistory)
     decisions: list[dict[str, Any]] = field(default_factory=list)
@@ -189,7 +190,10 @@ class ExplorationShadowRuntime:
                          hard_bounds: Mapping[str, Any] | None = None,
                          recovery_budget: Mapping[str, Any] | None = None,
                          production_stop_candidate: Mapping[str, Any] | None = None,
-                         stale_reasons: list[str] | tuple[str, ...] = ()) -> str | None:
+                         stale_reasons: list[str] | tuple[str, ...] = (),
+                         observation_evidence: Mapping[str, Any] | None = None,
+                         selected_execution_sources: Mapping[str, Any] | None = None,
+                         execution_context: Mapping[str, Any] | None = None) -> str | None:
         """Stage one result before terminal commit; history commits at finalize."""
         if not self.enabled:
             return None
@@ -200,6 +204,9 @@ class ExplorationShadowRuntime:
                 self.truncation_reasons.add("MAX_DECISIONS")
                 return None
             stale = list(sorted(set(_text(item) for item in stale_reasons if _text(item))))
+            observation = _dict(observation_evidence)
+            if self.evidence_clock is not None and not self.evidence_clock.current(observation):
+                stale.append("ACTION_OBSERVATION_EPOCH_OR_CAPTURE_MISMATCH")
             if decision_id in self._seen_decision_ids or watermark in self._seen_watermarks:
                 stale.append("DUPLICATE_DECISION_OR_WATERMARK")
             if watermark <= self.history.last_decision_watermark:
@@ -277,6 +284,12 @@ class ExplorationShadowRuntime:
             record = {
                 "decision_id": decision_id,
                 "decision_watermark": watermark,
+                "observation_alignment": observation,
+                "action_epoch": self.evidence_clock.action_epoch if self.evidence_clock is not None else None,
+                "observation_epoch": observation.get("action_epoch"),
+                "action_ownership": _dict(observation.get("action_ownership")),
+                "recommendation_owner": "SHADOW_ONLY",
+                "completion_evidence_complete": evaluation.evidence_complete,
                 "step": step,
                 "decision_stage": "POST_RESULT_N",
                 "pre_decision_ref": _text(production.get("pre_decision_ref")) or None,
@@ -299,6 +312,7 @@ class ExplorationShadowRuntime:
                     "frontier_exhausted": evaluation.frontier_exhausted,
                     "exhaustion_scope": frontier.get("exhaustion_scope"),
                     "evidence_complete": evaluation.evidence_complete,
+                    "completion_evidence_complete": evaluation.evidence_complete,
                     "counts": {
                         "eligible_count": evaluation.eligible_count,
                         "unknown_count": evaluation.unknown_count,
@@ -311,6 +325,10 @@ class ExplorationShadowRuntime:
                     },
                     "exhaustion_reason_codes": deepcopy(frontier.get("exhaustion_reason_codes") or []),
                     "blocked_reason_summary": _dict(frontier.get("blocked_reason_summary")),
+                    "original_reason_refs": [
+                        {key: deepcopy(item.get(key)) for key in (
+                            "frontier_id", "candidate_id", "reason_codes", "blocked_reason", "exhaustion_basis")}
+                        for item in (frontier.get("frontier_items") or [])],
                     "policy_limit_summary": _dict(frontier.get("policy_limit_summary")),
                     "truncation_summary": _dict(frontier.get("truncation_summary")),
                     "truncated": frontier.get("truncated") is True,
@@ -347,6 +365,16 @@ class ExplorationShadowRuntime:
                 "metrics_delta": dict(evaluation.metrics_delta),
                 "evaluation": evaluation_doc,
             }
+            from tb_runner.redirect_evidence import evaluate_redirect_evidence
+            selected = next((item for item in frontier.get("frontier_items", [])
+                             if item.get("frontier_id") == frontier.get("shadow_next_frontier")), {})
+            context = _dict(execution_context)
+            context.update(decision_watermark=watermark,
+                           state_id=current.get("state_id"),
+                           evidence_current=not stale and context.get("evidence_current") is True)
+            record["selected_frontier_execution_evidence"] = evaluate_redirect_evidence(
+                selected=selected, sources=selected_execution_sources, context=context)
+            record["selected_frontier_execution_ready"] = record["selected_frontier_execution_evidence"]["selected_frontier_execution_ready"]
             self._pending[token] = _PendingDecision(
                 token=token, decision_id=decision_id, watermark=watermark, step=step,
                 evaluation=evaluation, record=record, production=production,
@@ -364,7 +392,9 @@ class ExplorationShadowRuntime:
                           final_terminal_reason: str = "",
                           final_error: bool = False,
                           snapshot_invalidated: bool = False,
-                          invalidation_reason: str = "") -> bool:
+                          invalidation_reason: str = "",
+                          current_execution_sources: Mapping[str, Any] | None = None,
+                          current_execution_context: Mapping[str, Any] | None = None) -> bool:
         """Commit shadow history only if no later action invalidated its evidence."""
         if not self.enabled or not token:
             return False
@@ -373,6 +403,25 @@ class ExplorationShadowRuntime:
             return False
         try:
             record = pending.record
+            if current_execution_sources is not None or current_execution_context is not None:
+                from tb_runner.redirect_evidence import evaluate_redirect_evidence
+                selected = next((item for item in pending.frontier.get("frontier_items", [])
+                                 if item.get("frontier_id") == pending.frontier.get("shadow_next_frontier")), {})
+                checked = evaluate_redirect_evidence(selected=selected,
+                    sources=current_execution_sources, context=current_execution_context)
+                before = record["selected_frontier_execution_evidence"]
+                if any(checked.get(key) != before.get(key) for key in (
+                    "state_id", "substate_ref", "decision_watermark", "observation_id", "observation_sequence", "action_epoch")):
+                    checked.update(status="STALE", evidence_current=False, selected_frontier_execution_ready=False,
+                                   reason_codes=["PENDING_REDIRECT_SCOPE_CHANGED"])
+                if any((checked.get("proofs", {}).get(kind) or {}).get(key) !=
+                       (before.get("proofs", {}).get(kind) or {}).get(key)
+                       for kind in ("planner", "safety", "binding", "presence")
+                       for key in ("proof_ref", "policy_ref", "resolver_ref")):
+                    checked.update(status="STALE", evidence_current=False, selected_frontier_execution_ready=False,
+                                   reason_codes=["PRODUCTION_PROOF_CHANGED_SINCE_DECISION"])
+                record["selected_frontier_execution_evidence"] = checked
+                record["selected_frontier_execution_ready"] = checked["selected_frontier_execution_ready"]
             production = dict(pending.production)
             production["final_terminal"] = bool(final_terminal)
             production["final_terminal_reason"] = _text(final_terminal_reason)
@@ -382,6 +431,18 @@ class ExplorationShadowRuntime:
                 production.update(authoritative_error=True, error_stop=True,
                                   error_code=_text(final_terminal_reason) or "AUTHORITATIVE_PRODUCTION_ERROR")
             stale_reasons = list(pending.stale_reasons)
+            if self.evidence_clock is not None:
+                capture_epoch = record["observation_alignment"].get("action_epoch")
+                receipts = self.evidence_clock.receipts
+                record["current_action_ownership"] = deepcopy(receipts[-1]) if receipts else {}
+                record["current_action_epoch"] = self.evidence_clock.action_epoch
+                later = [deepcopy(item) for item in receipts
+                         if type(capture_epoch) is int and item["action_epoch"] > capture_epoch]
+                record["post_capture_dispatches"] = later[-64:]
+                record["post_capture_dispatches_truncated"] = len(later) > 64
+            if self.evidence_clock is not None and not self.evidence_clock.current(record["observation_alignment"]):
+                stale_reasons.append("ACTION_OBSERVATION_EPOCH_OR_CAPTURE_MISMATCH")
+                record["final_action_epoch"] = self.evidence_clock.action_epoch
             if snapshot_invalidated:
                 stale_reasons.append(_text(invalidation_reason) or "POST_ACTION_SNAPSHOT_INVALIDATED")
             stale_reasons = sorted(set(stale_reasons))
@@ -402,6 +463,13 @@ class ExplorationShadowRuntime:
                 record["original_shadow_decision"] = shadow_decision
                 record["shadow_decision"] = "UNKNOWN"
                 record["decision_evidence_usable"] = False
+                record["completion_evidence_complete"] = False
+                record["frontier"]["completion_evidence_complete"] = False
+                record["frontier"]["evidence_complete"] = False
+                record["selected_frontier_execution_ready"] = False
+                record["selected_frontier_execution_evidence"].update(
+                    status="STALE", evidence_current=False, selected_frontier_execution_ready=False,
+                    reason_codes=record["stale_reasons"])
             record["production"]["final_terminal"] = bool(final_terminal)
             record["production"]["final_terminal_reason"] = _text(final_terminal_reason)
             if final_terminal:

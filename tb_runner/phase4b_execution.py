@@ -147,7 +147,9 @@ def controlled_collect(*, client, dev, scenario, step, raw, recommendation, deci
         audit.update(fallback_used=True, fallback_reason=reason,
                      production_fallback_action="FOCUS_NEXT")
         emit("BEFORE_PRODUCTION_FALLBACK")
-        row = collect(**collect_kwargs)
+        from talkback_lib.exploration_evidence_clock import dispatch_owner
+        with dispatch_owner("FALLBACK"):
+            row = collect(**collect_kwargs)
         ack = deepcopy(getattr(client, "last_smart_nav_result", {}) or {})
         audit.update(fallback_helper_request_id=ack.get("reqId"), fallback_helper_ack_result=ack,
                      fallback_result_correlated=correlated_result(client, ack))
@@ -157,12 +159,21 @@ def controlled_collect(*, client, dev, scenario, step, raw, recommendation, deci
         return attach_reconciliation_lineage(row)
 
     if not decision.allowed:
+        from talkback_lib.exploration_evidence_clock import clock_for
+        if clock_for(client) is not None:
+            client._phase6_redirect_proofs = {}
         audit["classification"] = ("PRODUCTION_ONLY" if decision.mode == "SHADOW_ONLY" else
                                     "PLANNER_NO_SAFE_ACTION" if decision.reason == "NO_SAFE_PLANNER_ACTION" else
                                     "PLANNER_BLOCKED_BY_GATE")
         audit["actual_execution_mode"] = decision.mode
         return fallback(decision.reason)
     chosen = recommendation.to_dict()
+    from tb_runner.redirect_evidence import record_existing_proof
+    from tb_runner.canonical_json import canonical_sha256
+    gate_proof = dict(allowed=decision.allowed, mode=decision.mode, reason=decision.reason,
+                      selected_instance_id=chosen["recommended_instance_id"])
+    record_existing_proof(client, kind="planner", status="ELIGIBLE" if decision.mode == "CONTROLLED_TARGET_FOCUS" else "UNSUPPORTED", instance=chosen["recommended_instance_id"],
+                          raw=raw, step=step, proof=gate_proof, policy_ref=canonical_sha256(gate_proof))
     budget.reserve(decision.mode, chosen["recommended_instance_id"],
                    raw["snapshot_hash"], (chosen["planner_state_id"], chosen["semantic_substates"]))
     audit.update(actual_execution_mode=decision.mode, planner_executed=False,
@@ -213,6 +224,11 @@ def controlled_collect(*, client, dev, scenario, step, raw, recommendation, deci
     # Select exactly the freshly gated node, never a label/scenario guess.
     node, binding = resolve_focus_target(raw, chosen, scenario)
     audit["target_binding"] = binding
+    for kind in ("binding", "presence"):
+        record_existing_proof(client, kind=kind,
+            status=("RESOLVED" if kind == "binding" else "PRESENT") if node is not None else "UNRESOLVED",
+            instance=chosen["recommended_instance_id"], raw=raw, step=step, proof=binding,
+            policy_ref="phase4b-target-binding-v1")
     if node is None:
         budget.outcome("TARGET_DISAPPEARED_OR_AMBIGUOUS", False)
         audit.update(planner_failed=True, classification="PLANNER_FAILED_FALLBACK_USED")
@@ -228,7 +244,23 @@ def controlled_collect(*, client, dev, scenario, step, raw, recommendation, deci
     try:
         authorization = (focus_authorization(target, node) if focus_authorization is not None
                         else nullcontext())
-        with authorization:
+        from talkback_lib.exploration_evidence_clock import dispatch_owner
+        from talkback_lib.exploration_evidence_clock import clock_for
+        if clock_for(client) is not None:
+            sources = getattr(client, "_phase6_redirect_proofs", {})
+            client._phase6_redirect_proofs = {key: value for key, value in sources.items() if key != "safety"}
+        with authorization as permit, dispatch_owner("TARGETED"):
+            # Observe the real Phase5 FOCUS permit yielded by the existing
+            # authorization path. Never classify, authorize, or consume it here.
+            from tb_runner.phase4a_planner import production_instance
+            if (isinstance(permit, dict) and permit.get("kind") == "FOCUS"
+                    and permit.get("action_type") == "FOCUS"
+                    and production_instance(permit.get("target_identity") or {}, scenario) == chosen["recommended_instance_id"]
+                    and (permit.get("policy") or {}).get("eligible") is True):
+                safety_proof = {key: permit.get(key) for key in ("classification", "policy", "conditions", "authorization_epoch")}
+                record_existing_proof(client, kind="safety", status="ALLOWED",
+                    instance=chosen["recommended_instance_id"], raw=raw, step=step, proof=safety_proof,
+                    policy_ref=canonical_sha256(safety_proof))
             _, status, observed_focus = collection_flow._maybe_realign_focus_to_representative(
                 row=target_meta, client=client, dev=dev, selected_node=node,
                 selected_rid=target["resource_id"], selected_label="", selected_bounds=target["bounds"],
