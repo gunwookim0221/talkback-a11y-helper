@@ -18704,7 +18704,11 @@ def _prepare_phase6d_exploration_decision(
         evidence_clock = clock_for(client)
         observation_evidence = row.get("_exploration_observation") or {}
         if evidence_clock is None or not evidence_clock.current(observation_evidence):
-            stale_reasons.append("ACTION_OBSERVATION_EPOCH_OR_CAPTURE_MISMATCH")
+            if (evidence_clock is not None
+                    and observation_evidence.get("scope_id") != evidence_clock.scope_id):
+                stale_reasons.append("OBSERVATION_SCOPE_MISMATCH")
+            else:
+                stale_reasons.append("ACTION_OBSERVATION_EPOCH_OR_CAPTURE_MISMATCH")
         identity = build_graph_state_identity(_raw_observation_from_row(row))
         state_id = identity.state_id
         from tb_runner.redirect_evidence import current_execution_context
@@ -19686,6 +19690,8 @@ def _main_loop_phase(
               and row.get("local_tab_block_reason") == "no_unvisited_local_tab"):
             stop, reason = True, "scroll_exhausted"
         recovery_started = time.perf_counter()
+        recovery_clock = clock_for(client)
+        recovery_epoch_before = recovery_clock.action_epoch if recovery_clock is not None else None
         with measure_runtime("recovery_executor"):
             recovery_outcome = TRAVERSAL_COORDINATOR.recover(
                 stop=stop,
@@ -19699,6 +19705,15 @@ def _main_loop_phase(
                         step_idx=step_idx,
                     ),
             )
+        recovery_epoch_after = recovery_clock.action_epoch if recovery_clock is not None else None
+        # `attempted` records planning/entry for diagnostics. Only a native
+        # dispatch receipt (the action epoch advancing across this recovery
+        # window) can invalidate the post-primary observation.
+        recovery_dispatch_occurred = bool(
+            type(recovery_epoch_before) is int
+            and type(recovery_epoch_after) is int
+            and recovery_epoch_after > recovery_epoch_before
+        )
         profiler = active_profiler()
         if profiler is not None and recovery_outcome is not None:
             recovery_duration_ms = max(0.0, (time.perf_counter() - recovery_started) * 1000.0)
@@ -19957,7 +19972,7 @@ def _main_loop_phase(
             continue
 
         phase6d_stale_reasons: list[str] = []
-        if recovery_outcome is not None and bool(getattr(recovery_outcome, "attempted", False)):
+        if recovery_dispatch_occurred:
             phase6d_stale_reasons.append("RECOVERY_ACTION_AFTER_PRIMARY_RESULT")
         if food_scan_recovery_occurred:
             phase6d_stale_reasons.append("FOOD_SCAN_RECOVERY_ACTION")
@@ -19976,8 +19991,7 @@ def _main_loop_phase(
             stop_candidate=bool(stop), stop_reason=str(reason or ""),
             stop_eval_inputs=stop_eval_inputs,
             pre_decision_ref=frontier_shadow_decision_id,
-            recovery_occurred=bool(recovery_outcome is not None
-                                   and getattr(recovery_outcome, "attempted", False)),
+            recovery_occurred=recovery_dispatch_occurred,
             additional_stale_reasons=phase6d_stale_reasons,
         )
 

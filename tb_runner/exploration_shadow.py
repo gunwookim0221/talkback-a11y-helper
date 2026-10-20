@@ -206,7 +206,10 @@ class ExplorationShadowRuntime:
             stale = list(sorted(set(_text(item) for item in stale_reasons if _text(item))))
             observation = _dict(observation_evidence)
             if self.evidence_clock is not None and not self.evidence_clock.current(observation):
-                stale.append("ACTION_OBSERVATION_EPOCH_OR_CAPTURE_MISMATCH")
+                if observation.get("scope_id") != self.evidence_clock.scope_id:
+                    stale.append("OBSERVATION_SCOPE_MISMATCH")
+                else:
+                    stale.append("ACTION_OBSERVATION_EPOCH_OR_CAPTURE_MISMATCH")
             if decision_id in self._seen_decision_ids or watermark in self._seen_watermarks:
                 stale.append("DUPLICATE_DECISION_OR_WATERMARK")
             if watermark <= self.history.last_decision_watermark:
@@ -284,6 +287,7 @@ class ExplorationShadowRuntime:
             record = {
                 "decision_id": decision_id,
                 "decision_watermark": watermark,
+                "evidence_scope_id": observation.get("scope_id"),
                 "observation_alignment": observation,
                 "action_epoch": self.evidence_clock.action_epoch if self.evidence_clock is not None else None,
                 "observation_epoch": observation.get("action_epoch"),
@@ -411,7 +415,8 @@ class ExplorationShadowRuntime:
                     sources=current_execution_sources, context=current_execution_context)
                 before = record["selected_frontier_execution_evidence"]
                 if any(checked.get(key) != before.get(key) for key in (
-                    "state_id", "substate_ref", "decision_watermark", "observation_id", "observation_sequence", "action_epoch")):
+                    "state_id", "substate_ref", "decision_watermark", "observation_id",
+                    "observation_sequence", "action_epoch", "scope_id", "active_scope_id")):
                     checked.update(status="STALE", evidence_current=False, selected_frontier_execution_ready=False,
                                    reason_codes=["PENDING_REDIRECT_SCOPE_CHANGED"])
                 if any((checked.get("proofs", {}).get(kind) or {}).get(key) !=
@@ -441,7 +446,10 @@ class ExplorationShadowRuntime:
                 record["post_capture_dispatches"] = later[-64:]
                 record["post_capture_dispatches_truncated"] = len(later) > 64
             if self.evidence_clock is not None and not self.evidence_clock.current(record["observation_alignment"]):
-                stale_reasons.append("ACTION_OBSERVATION_EPOCH_OR_CAPTURE_MISMATCH")
+                if record["observation_alignment"].get("scope_id") != self.evidence_clock.scope_id:
+                    stale_reasons.append("OBSERVATION_SCOPE_MISMATCH")
+                else:
+                    stale_reasons.append("ACTION_OBSERVATION_EPOCH_OR_CAPTURE_MISMATCH")
                 record["final_action_epoch"] = self.evidence_clock.action_epoch
             if snapshot_invalidated:
                 stale_reasons.append(_text(invalidation_reason) or "POST_ACTION_SNAPSHOT_INVALIDATED")

@@ -247,6 +247,43 @@ def test_recovery_action_after_capture_marks_decision_stale_and_never_grants_com
     assert runtime.metrics["VALID_CLOSED_DECISION_COUNT"] == 0
 
 
+def test_foreign_scope_observation_cannot_complete_exploration_scope():
+    from talkback_lib.exploration_evidence_clock import EvidenceClock
+
+    active_clock = EvidenceClock(scope_id="active-scope")
+    foreign_clock = EvidenceClock(scope_id="foreign-scope")
+    foreign_observation = foreign_clock.finish_observation(foreign_clock.begin_observation())
+    runtime = ExplorationShadowRuntime("r", "s", evidence_clock=active_clock)
+    args = _inputs(1, frontier_status="YES", evidence_complete=True,
+                   scroll_status="SCROLL_ABSENT_PROVEN_FOR_SCOPE")
+    token = runtime.prepare_decision(**args, observation_evidence=foreign_observation)
+    assert token
+    assert not runtime.finalize_decision(token=token, final_terminal=False)
+    record = runtime.decisions[-1]
+    assert record["evidence_scope_id"] == "foreign-scope"
+    assert record["stale_status"] == "YES"
+    assert "OBSERVATION_SCOPE_MISMATCH" in record["stale_reasons"]
+    assert record["completion_evidence_complete"] is False
+    assert record["frontier"]["completion_evidence_complete"] is False
+    assert record["shadow_decision"] == "UNKNOWN"
+
+
+def test_same_scope_observation_remains_current_for_completion():
+    from talkback_lib.exploration_evidence_clock import EvidenceClock
+
+    clock = EvidenceClock(scope_id="current-scope")
+    captured = clock.finish_observation(clock.begin_observation())
+    runtime = ExplorationShadowRuntime("r", "s", evidence_clock=clock)
+    args = _inputs(1, frontier_status="YES", evidence_complete=True,
+                   scroll_status="SCROLL_ABSENT_PROVEN_FOR_SCOPE")
+    token = runtime.prepare_decision(**args, observation_evidence=captured)
+    assert token
+    assert runtime.finalize_decision(token=token, final_terminal=False)
+    record = runtime.decisions[-1]
+    assert record["evidence_scope_id"] == "current-scope"
+    assert record["completion_evidence_complete"] is True
+
+
 def test_cursor_only_accessibility_focus_is_not_meaningful_progress_or_visit_credit():
     runtime = ExplorationShadowRuntime("r", "s")
     runtime.history = ExplorationHistory(known_state_ids=(STATE,),

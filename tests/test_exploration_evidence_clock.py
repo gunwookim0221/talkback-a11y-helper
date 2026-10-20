@@ -88,6 +88,38 @@ def test_dispatch_during_capture_and_new_observation_invalidate_old_evidence():
     assert clock.action_epoch == 1
 
 
+def test_observation_scope_is_required_for_currentness_and_restart_never_revives_it():
+    clock_a = EvidenceClock(scope_id="clock-a", action_epoch=5, observation_sequence=10, context_revision=3)
+    clock_b = EvidenceClock(scope_id="clock-b", action_epoch=5, observation_sequence=9, context_revision=3)
+    observation_b = observation(clock_b)
+    assert observation_b["observation_sequence"] == 10
+    assert not clock_a.current(observation_b)
+    assert clock_b.current(observation_b)
+    assert not clock_b.current({**observation_b, "scope_id": "clock-a"})
+    assert not clock_b.current({key: value for key, value in observation_b.items() if key != "scope_id"})
+
+
+def test_new_clock_scope_restart_cannot_revive_old_observation_with_matching_counters():
+    old_clock = EvidenceClock(scope_id="before-restart", action_epoch=0)
+    old_observation = observation(old_clock)
+    restarted_clock = EvidenceClock(scope_id="after-restart", action_epoch=0,
+                                    observation_sequence=old_observation["observation_sequence"],
+                                    context_revision=old_observation["context_revision"])
+    assert old_observation["action_epoch"] == restarted_clock.action_epoch
+    assert old_observation["observation_sequence"] == restarted_clock.observation_sequence
+    assert old_observation["context_revision"] == restarted_clock.context_revision
+    assert not restarted_clock.current(old_observation)
+
+
+def test_observation_token_cannot_be_finished_in_a_different_clock_scope():
+    clock_a = EvidenceClock(scope_id="clock-a")
+    clock_b = EvidenceClock(scope_id="clock-b")
+    foreign_capture = clock_b.finish_observation(clock_a.begin_observation())
+    assert foreign_capture["scope_id"] == "clock-a"
+    assert foreign_capture["capture_complete"] is False
+    assert not clock_b.current(foreign_capture)
+
+
 def test_io_exception_advances_but_off_mode_remains_off(monkeypatch):
     adb, native = device(monkeypatch)
     native.side_effect = OSError("offline failure")

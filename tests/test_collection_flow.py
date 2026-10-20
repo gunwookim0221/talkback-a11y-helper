@@ -15534,10 +15534,10 @@ def _phase_ordering_stop_inputs(**overrides):
     return values
 
 
-def _run_phase_ordering_main_loop(monkeypatch, *, row, stop=False, reason=""):
+def _run_phase_ordering_main_loop(monkeypatch, *, row, stop=False, reason="", client=None, state=None):
     events = []
-    state = _phase_ordering_state()
-    client = DummyClient([row])
+    state = state or _phase_ordering_state()
+    client = client or DummyClient([row])
     phase_ctx = SimpleNamespace(
         tab_cfg=_base_tab_cfg(max_steps=1),
         rows=[],
@@ -15636,6 +15636,118 @@ def test_main_loop_invalidates_step_when_talkback_restarts_during_navigation(mon
     assert state.stop_step == 1
     assert any("[TALKBACK_RESTART_ABORT]" in message for message in logs)
     assert client._target_attempt_ledger.entries[attempt]["state"] == "INTERRUPTED_TALKBACK_RESTART"
+
+
+@pytest.mark.parametrize("recovery_result", ["blocked", "exception", "dispatched_failure"])
+def test_main_loop_recovery_invalidation_uses_dispatch_epoch_not_attempted(
+    monkeypatch, recovery_result,
+):
+    from tb_runner.traversal_evidence_gate import RecoveryCandidate, TraversalDiagnostics
+
+    monkeypatch.setenv("TB_STATE_GRAPH_MODE", "SHADOW")
+    state = _phase_ordering_state()
+    state.recovery_attempted_candidate_ids = set()
+    state.recovery_hard_failed_candidate_ids = set()
+    state.recovery_visited_candidate_ids = set()
+    state.traversal_diagnostics = TraversalDiagnostics()
+    adb = _epoch_test_native_device(monkeypatch)
+    clock = adb.shadow_evidence_clock
+    primary = _main_row(41)
+    primary["_exploration_observation"] = clock.finish_observation(clock.begin_observation())
+    candidate = RecoveryCandidate(
+        candidate_id="candidate-1", canonical_key="candidate-key-1", scenario_id="s1",
+        surface_id="", label="Next item", resource_id="item_next", class_name="Button",
+        bounds=(20, 300, 200, 360), clickable=True, focusable=True, enabled=True,
+        taxonomy="REQUIRED", priority=1, source_index=0,
+    )
+    selected = [candidate, None]
+    monkeypatch.setattr(collection_flow, "_select_identity_recovery_candidate",
+                        lambda **_kwargs: selected.pop(0) if selected else None)
+    monkeypatch.setattr(collection_flow, "traversal_identity_v2_enabled", lambda: True)
+    actual_recovery_results = []
+    execute_recovery = collection_flow._attempt_identity_recovery
+
+    def observe_actual_recovery(**kwargs):
+        result = execute_recovery(**kwargs)
+        actual_recovery_results.append(dict(result))
+        return result
+
+    monkeypatch.setattr(collection_flow, "_attempt_identity_recovery", observe_actual_recovery)
+
+    recovery_row = _main_row(42)
+    client = DummyClient([recovery_row])
+    client._adb_device = adb
+    client._evidence_begin_target_action = lambda *_args, **_kwargs: "recovery-transaction"
+    if recovery_result == "blocked":
+        client.focus_in_bounds = lambda **_kwargs: {
+            "success": False, "dispatch_status": "BLOCKED_BEFORE_DISPATCH",
+        }
+    elif recovery_result == "exception":
+        def fail_before_dispatch(**_kwargs):
+            raise RuntimeError("blocked during preflight")
+        client.focus_in_bounds = fail_before_dispatch
+    else:
+        def dispatched_failure(**_kwargs):
+            adb._run_adb_command([
+                "shell", "am", "broadcast", "-a",
+                "com.iotpart.sqe.talkbackhelper.FOCUS_IN_BOUNDS",
+            ])
+            return {"success": False, "detail": "helper rejected focus"}
+        client.focus_in_bounds = dispatched_failure
+
+    stage_evidence = []
+
+    def stage_using_shadow_runtime(**kwargs):
+        from test_exploration_shadow import _inputs
+
+        stale = list(kwargs.get("additional_stale_reasons") or [])
+        observation = kwargs["row"].get("_exploration_observation") or {}
+        stage_evidence.append({
+            "attempted": bool(actual_recovery_results and actual_recovery_results[-1].get("attempted")),
+            "stale_reasons": stale,
+            "observation_current": clock.current(observation),
+            "epoch": clock.action_epoch,
+        })
+        runtime = client._phase6d_exploration_shadow_runtime
+        values = _inputs(kwargs["step_idx"], frontier_status="NO", evidence_complete=False)
+        return runtime.prepare_decision(
+            decision_id=values["decision_id"], step=values["step"], watermark=values["watermark"],
+            current_state=values["current_state"], frontier_evaluation=values["frontier_evaluation"],
+            production_result=values["production_result"], repetition_state=values["repetition_state"],
+            scroll_evidence=values["scroll_evidence"], safety_state=values["safety_state"],
+            hard_bounds=values["hard_bounds"], recovery_budget=values["recovery_budget"],
+            stale_reasons=stale, observation_evidence=observation,
+        )
+
+    monkeypatch.setattr(collection_flow, "_prepare_phase6d_exploration_decision", stage_using_shadow_runtime)
+    monkeypatch.setattr(collection_flow, "_apply_step_collection_phase",
+                        lambda **_kwargs: dict(primary))
+    monkeypatch.setattr(collection_flow, "maybe_capture_focus_crop", lambda _client, _dev, row, _base: row)
+    monkeypatch.setattr(collection_flow, "_apply_content_terminal_phase",
+                        lambda client, dev, state, row, ctx, step, stop, reason, **_kw: (stop, reason))
+
+    _events, phase_ctx = _run_phase_ordering_main_loop(
+        monkeypatch, row=primary, stop=True, reason="repeat_no_progress", client=client, state=state,
+    )
+
+    assert phase_ctx.state.traversal_diagnostics.recovered_candidate_attempts == 1
+    assert actual_recovery_results[-1]["attempted"] is True
+    assert stage_evidence
+    evidence = stage_evidence[-1]
+    if recovery_result in {"blocked", "exception"}:
+        assert evidence["observation_current"] is True
+        assert "RECOVERY_ACTION_AFTER_PRIMARY_RESULT" not in evidence["stale_reasons"]
+        assert evidence["epoch"] == 0
+        record = client._phase6d_exploration_shadow_runtime.decisions[-1]
+        assert record["stale_status"] == "NO"
+        assert client._phase6d_exploration_shadow_runtime.metrics["VALID_CLOSED_DECISION_COUNT"] == 1
+    else:
+        assert evidence["observation_current"] is False
+        assert "RECOVERY_ACTION_AFTER_PRIMARY_RESULT" in evidence["stale_reasons"]
+        assert evidence["epoch"] == 1
+        record = client._phase6d_exploration_shadow_runtime.decisions[-1]
+        assert record["stale_status"] == "YES"
+        assert "RECOVERY_ACTION_AFTER_PRIMARY_RESULT" in record["stale_reasons"]
 
 
 def test_stop_then_cta_grace_allows_continue_then_stops_after_exhaust():

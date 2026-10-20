@@ -11,9 +11,10 @@ def ready():
     selected = dict(frontier_id="frontier-1", candidate_id="candidate-1", state_id="state-1",
                     edge_type="TARGETED_FOCUS", action_type="TARGETED_FOCUS",
                     target_identity={"instance_id": "instance-1"}, status="ELIGIBLE")
-    context = dict(state_id="state-1", substate_ref="substate-1", action_epoch=1, observation_epoch=1,
-                   observation_id="observation:1", observation_sequence=1, decision_watermark=3,
-                   ownership_ref="dispatch:1", action_ownership={"owner": "PRIMARY", "ownership_status": "KNOWN", "action_id": "dispatch:1", "action_epoch": 1},
+    context = dict(scope_id="scope-a", active_scope_id="scope-a",
+                   state_id="state-1", substate_ref="substate-1", action_epoch=1, observation_epoch=1,
+                   observation_id="observation:scope-a:1", observation_sequence=1, decision_watermark=3,
+                   ownership_ref="dispatch:scope-a:1", action_ownership={"owner": "PRIMARY", "ownership_status": "KNOWN", "action_id": "dispatch:scope-a:1", "action_epoch": 1},
                    evidence_current=True, pending_action=False,
                    planner_policy_ref="planner-v1", safety_policy_ref="safety-v1", binding_policy_ref="binding-v1")
     sources = {}
@@ -85,6 +86,47 @@ def test_no_ownership_pending_action_and_missing_epoch_cannot_be_ready():
         inputs = ready()
         inputs["context"].update(patch)
         assert not evaluate_redirect_evidence(**inputs)["selected_frontier_execution_ready"]
+
+
+def test_foreign_observation_scope_blocks_redirect_even_when_other_proofs_match():
+    inputs = ready()
+    inputs["context"]["scope_id"] = "scope-b"
+    inputs["context"]["observation_id"] = "observation:scope-b:1"
+    result = evaluate_redirect_evidence(**inputs)
+    assert result["selected_frontier_execution_ready"] is False
+    assert result["status"] == "STALE"
+    assert "OBSERVATION_SCOPE_MISMATCH" in result["reason_codes"]
+
+
+def test_missing_scope_is_unknown_and_same_scope_remains_ready():
+    inputs = ready()
+    del inputs["context"]["scope_id"]
+    result = evaluate_redirect_evidence(**inputs)
+    assert result["selected_frontier_execution_ready"] is False
+    assert result["reason_codes"] == ["OBSERVATION_SCOPE_UNAVAILABLE"]
+
+    inputs = ready()
+    result = evaluate_redirect_evidence(**inputs)
+    assert result["selected_frontier_execution_ready"] is True
+
+
+def test_live_context_projects_active_scope_and_rejects_foreign_observation():
+    from tb_runner.redirect_evidence import current_execution_context
+
+    active = EvidenceClock(scope_id="active-scope")
+    foreign = EvidenceClock(scope_id="foreign-scope")
+    observation = foreign.finish_observation(foreign.begin_observation())
+    client = SimpleNamespace(_adb_device=SimpleNamespace(shadow_evidence_clock=active))
+    context = current_execution_context(client, observation, state_id="state-1", watermark=3)
+    assert context["scope_id"] == "foreign-scope"
+    assert context["active_scope_id"] == "active-scope"
+    assert context["evidence_current"] is False
+
+    inputs = ready()
+    inputs["context"].update(context)
+    result = evaluate_redirect_evidence(**inputs)
+    assert result["selected_frontier_execution_ready"] is False
+    assert "OBSERVATION_SCOPE_MISMATCH" in result["reason_codes"]
 
 
 def test_frontier_planner_target_disagreement_is_explicit():

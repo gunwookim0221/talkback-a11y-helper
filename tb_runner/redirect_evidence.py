@@ -14,7 +14,7 @@ _KINDS = {"planner": ("ELIGIBLE", "PLANNER_BLOCKED"),
           "binding": ("RESOLVED", "TARGET_UNRESOLVED"),
           "presence": ("PRESENT", "TARGET_NOT_PRESENT")}
 _BLOCKED = {"BLOCKED", "DENIED", "INELIGIBLE", "UNSUPPORTED", "UNSAFE", "RISKY", "FORBIDDEN", "MISSING", "ABSENT", "AMBIGUOUS", "UNRESOLVED"}
-_SCOPE = ("state_id", "substate_ref", "observation_id", "observation_sequence",
+_SCOPE = ("scope_id", "state_id", "substate_ref", "observation_id", "observation_sequence",
           "action_epoch", "decision_watermark", "ownership_ref")
 SOURCES = {"planner": "phase4b.execution_gate", "safety": "phase5b.authorize_focus_target",
            "binding": "phase4b.resolve_focus_target", "presence": "phase4b.resolve_focus_target"}
@@ -30,6 +30,8 @@ def evaluate_redirect_evidence(*, selected, sources=None, context=None):
         "state_id": selected.get("state_id"), "edge_type": selected.get("edge_type", selected.get("action_type")),
         "target_identity": deepcopy(selected.get("target_identity") or {}),
         "decision_watermark": context.get("decision_watermark"),
+        "scope_id": context.get("scope_id"),
+        "active_scope_id": context.get("active_scope_id"),
         "action_epoch": context.get("action_epoch"), "observation_epoch": context.get("observation_epoch"),
         "observation_id": context.get("observation_id"), "observation_sequence": context.get("observation_sequence"),
         "substate_ref": context.get("substate_ref"),
@@ -60,6 +62,16 @@ def evaluate_redirect_evidence(*, selected, sources=None, context=None):
     if (not selected.get("frontier_id") or not isinstance(selected.get("target_identity"), Mapping)
             or not selected["target_identity"].get("instance_id")):
         return fail("UNKNOWN", "SELECTED_FRONTIER_UNAVAILABLE")
+    scope_id = context.get("scope_id")
+    active_scope_id = context.get("active_scope_id")
+    if (not isinstance(scope_id, str) or not scope_id
+            or not isinstance(active_scope_id, str) or not active_scope_id):
+        return fail("STALE", "OBSERVATION_SCOPE_UNAVAILABLE")
+    if scope_id != active_scope_id:
+        return fail("STALE", "OBSERVATION_SCOPE_MISMATCH")
+    sequence = context.get("observation_sequence")
+    if type(sequence) is not int or context.get("observation_id") != f"observation:{scope_id}:{sequence}":
+        return fail("STALE", "OBSERVATION_SCOPE_MISMATCH")
     if context.get("evidence_current") is not True:
         return fail("STALE", "OBSERVATION_NOT_CURRENT")
     if (type(context.get("action_epoch")) is not int or type(context.get("observation_epoch")) is not int
@@ -69,10 +81,14 @@ def evaluate_redirect_evidence(*, selected, sources=None, context=None):
         return fail("UNKNOWN", "DECISION_OR_OBSERVATION_SEQUENCE_UNAVAILABLE")
     if not context.get("state_id") or selected.get("state_id") != context.get("state_id"):
         return fail("STATE_MISMATCH", "SELECTED_STATE_MISMATCH")
+    expected_action_id = f"dispatch:{active_scope_id}:{context.get('action_epoch')}"
     if (context.get("pending_action") is not False or not context.get("ownership_ref")
             or (context.get("action_ownership") or {}).get("ownership_status") != "KNOWN"
             or (context.get("action_ownership") or {}).get("action_id") != context.get("ownership_ref")
-            or (context.get("action_ownership") or {}).get("action_epoch") != context.get("action_epoch")):
+            or (context.get("action_ownership") or {}).get("action_epoch") != context.get("action_epoch")
+            or context.get("ownership_ref") != expected_action_id
+            or (context.get("action_ownership") or {}).get("action_id")
+               != expected_action_id):
         return fail("OWNERSHIP_UNRESOLVED", "ACTION_OWNERSHIP_UNRESOLVED")
     if result["edge_type"] != "TARGETED_FOCUS":
         return fail("UNKNOWN", "ONLY_FOCUS_EVIDENCE_CONTRACT_SUPPORTED")
@@ -113,13 +129,15 @@ def record_existing_proof(client, *, kind, status, instance, raw, step, proof, p
     from talkback_lib.exploration_evidence_clock import clock_for
     from tb_runner.canonical_json import canonical_sha256
     from tb_runner.state_graph import build_graph_state_identity
-    if clock_for(client) is None:
+    clock = clock_for(client)
+    if clock is None:
         return
     try:
         capture = raw.get("_exploration_observation") or {}
         state = build_graph_state_identity(raw)
         owner = capture.get("action_ownership") or {}
-        context = dict(state_id=state.state_id, substate_ref=state.state_id,
+        context = dict(scope_id=capture.get("scope_id"), active_scope_id=clock.scope_id,
+                       state_id=state.state_id, substate_ref=state.state_id,
                        observation_id=capture.get("observation_id"), observation_sequence=capture.get("observation_sequence"),
                        observation_epoch=capture.get("action_epoch"), action_epoch=capture.get("action_epoch"),
                        decision_watermark=step, ownership_ref=owner.get("action_id"),
@@ -149,7 +167,9 @@ def current_execution_context(client, observation, *, state_id, watermark, produ
     clock = clock_for(client)
     context = dict(getattr(client, "_phase6_redirect_context", {}) or {})
     owner = observation.get("action_ownership") or {}
-    context.update(state_id=state_id, substate_ref=state_id, decision_watermark=watermark,
+    context.update(scope_id=observation.get("scope_id"),
+                   active_scope_id=clock.scope_id if clock else None,
+                   state_id=state_id, substate_ref=state_id, decision_watermark=watermark,
                    action_epoch=clock.action_epoch if clock else None,
                    observation_epoch=observation.get("action_epoch"), observation_id=observation.get("observation_id"),
                    observation_sequence=observation.get("observation_sequence"), action_ownership=owner,

@@ -132,31 +132,50 @@ class EvidenceClock:
             except Exception:
                 self.healthy = False
 
-    def begin_observation(self) -> tuple[int, int, int]:
+    def begin_observation(self) -> tuple[str, int, int, int]:
         with self._lock:
             self.observation_sequence += 1
-            return self.action_epoch, self.observation_sequence, self.context_revision
+            return self.scope_id, self.action_epoch, self.observation_sequence, self.context_revision
 
-    def finish_observation(self, token: tuple[int, int, int]) -> dict[str, Any]:
+    def finish_observation(self, token: tuple[str, int, int, int]) -> dict[str, Any]:
         with self._lock:
-            epoch, sequence, revision = token
-            return {"action_epoch": epoch, "observation_epoch": epoch,
-                    "observation_id": f"observation:{self.scope_id}:{sequence}", "observation_sequence": sequence,
+            if not isinstance(token, tuple) or len(token) != 4:
+                return {"scope_id": "", "action_epoch": None, "observation_epoch": None,
+                        "observation_id": "", "observation_sequence": None,
+                        "capture_end_action_epoch": self.action_epoch,
+                        "context_revision": None, "capture_complete": False,
+                        "action_ownership": deepcopy(self.receipts[-1]) if self.receipts else {
+                            "owner": "OTHER", "ownership_status": "UNRESOLVED"}}
+            token_scope_id, epoch, sequence, revision = token
+            scope_matches = (isinstance(token_scope_id, str) and bool(token_scope_id)
+                             and token_scope_id == self.scope_id)
+            return {"scope_id": token_scope_id if isinstance(token_scope_id, str) else "",
+                    "action_epoch": epoch, "observation_epoch": epoch,
+                    "observation_id": f"observation:{token_scope_id}:{sequence}", "observation_sequence": sequence,
                     "capture_end_action_epoch": self.action_epoch,
                     "context_revision": revision,
-                    "capture_complete": self.healthy and epoch == self.action_epoch and revision == self.context_revision,
+                    "capture_complete": (self.healthy and scope_matches and epoch == self.action_epoch
+                                         and revision == self.context_revision),
                     "action_ownership": deepcopy(self.receipts[-1]) if self.receipts else {
                         "owner": "OTHER", "ownership_status": "UNRESOLVED"}}
 
     def current(self, observation: Any) -> bool:
         with self._lock:
-            return bool(self.healthy and isinstance(observation, dict)
-                        and observation.get("capture_complete") is True
-                        and type(observation.get("action_epoch")) is int
-                        and observation["action_epoch"] == self.action_epoch
-                        and observation.get("context_revision") == self.context_revision
-                        and type(observation.get("observation_sequence")) is int
-                        and observation.get("observation_sequence") == self.observation_sequence)
+            if not self.healthy or not isinstance(observation, dict):
+                return False
+            scope_id = observation.get("scope_id")
+            sequence = observation.get("observation_sequence")
+            epoch = observation.get("action_epoch")
+            return bool(
+                isinstance(scope_id, str) and scope_id and scope_id == self.scope_id
+                and type(sequence) is int and sequence == self.observation_sequence
+                and type(epoch) is int and epoch == self.action_epoch
+                and observation.get("observation_epoch") == epoch
+                and observation.get("observation_id") == f"observation:{scope_id}:{sequence}"
+                and observation.get("capture_end_action_epoch") == epoch
+                and observation.get("context_revision") == self.context_revision
+                and observation.get("capture_complete") is True
+            )
 
 
 def clock_for(client: Any) -> EvidenceClock | None:
