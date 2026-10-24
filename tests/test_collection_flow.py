@@ -2969,6 +2969,38 @@ def _global_nav_nodes(selected_label="Devices"):
     ]
 
 
+def _device_plugin_detail_nodes(label="Navigate up"):
+    return [
+        {
+            "className": "android.widget.Button",
+            "viewIdResourceName": "back",
+            "text": label,
+            "clickable": True,
+            "focusable": True,
+            "visibleToUser": True,
+        }
+    ]
+
+
+def _stub_device_start_observations(monkeypatch, client, states):
+    pending = iter(states)
+
+    def _capture(_client, _dev):
+        try:
+            nodes = next(pending)
+        except StopIteration:
+            nodes = []
+        return {
+            "nodes": nodes,
+            "screen_package": "com.samsung.android.oneconnect",
+            "foreground_package": "com.samsung.android.oneconnect",
+            "request_id": "test-current-request",
+            "capture_id": "test-current-capture",
+        }, "current_snapshot_verified"
+
+    monkeypatch.setattr(collection_flow, "_capture_device_plugin_start_observation", _capture)
+
+
 def test_recover_to_start_state_routes_device_plugins_to_devices_recovery(monkeypatch):
     calls = []
 
@@ -2991,7 +3023,15 @@ def test_recover_to_start_state_routes_device_plugins_to_devices_recovery(monkey
 
 def test_device_recovery_sends_back_until_global_nav_then_verifies_devices(monkeypatch):
     client = DummyClient([])
-    client.dump_tree_sequence = [[], _global_nav_nodes()]
+    monkeypatch.setattr(
+        collection_flow,
+        "_read_smartthings_foreground_package",
+        lambda *_args: "com.samsung.android.oneconnect",
+    )
+    client.dump_tree_sequence = [_device_plugin_detail_nodes(), _global_nav_nodes()]
+    _stub_device_start_observations(
+        monkeypatch, client, [_device_plugin_detail_nodes(), _global_nav_nodes()]
+    )
     stabilize_calls = []
 
     def _stabilize(**kwargs):
@@ -3030,7 +3070,15 @@ def test_device_recovery_sends_back_until_global_nav_then_verifies_devices(monke
 
 def test_device_recovery_does_not_accept_life_context(monkeypatch):
     client = DummyClient([])
+    monkeypatch.setattr(
+        collection_flow,
+        "_read_smartthings_foreground_package",
+        lambda *_args: "com.samsung.android.oneconnect",
+    )
     client.dump_tree_sequence = [_global_nav_nodes(), _global_nav_nodes()]
+    _stub_device_start_observations(
+        monkeypatch, client, [_global_nav_nodes(), _global_nav_nodes()]
+    )
     results = iter(
         [
             {
@@ -3069,7 +3117,15 @@ def test_device_recovery_does_not_accept_life_context(monkeypatch):
 
 def test_device_recovery_fails_closed_when_devices_context_is_not_verified(monkeypatch):
     client = DummyClient([])
+    monkeypatch.setattr(
+        collection_flow,
+        "_read_smartthings_foreground_package",
+        lambda *_args: "com.samsung.android.oneconnect",
+    )
     client.dump_tree_sequence = [_global_nav_nodes()] * 3
+    _stub_device_start_observations(
+        monkeypatch, client, [_global_nav_nodes()] * 3
+    )
     monkeypatch.setattr(
         collection_flow,
         "stabilize_tab_selection",
@@ -19877,3 +19933,111 @@ def test_popup_safety_rejection_preserves_snapshot_epoch(monkeypatch):
         state=_phase_ordering_state(), stop_reason="repeat_no_progress")
     assert result["handled"] is False
     assert clock.action_epoch == 0 and clock.current(captured)
+
+
+def test_identity_recovery_missing_history_fields_use_compatibility_defaults(monkeypatch):
+    from types import SimpleNamespace
+
+    inventory = [{"bounds": "0,0,10,10"}]
+    monkeypatch.setattr(collection_flow, "_build_identity_recovery_inventory",
+                        lambda **_kwargs: inventory)
+    received = {}
+
+    def select(_inventory, **kwargs):
+        received.update(kwargs)
+        return "selected"
+
+    monkeypatch.setattr(collection_flow, "select_recovery_candidate", select)
+    phase_ctx = SimpleNamespace(tab_cfg={"scenario_id": "life_sample_plugin"},
+                                output_path="", all_rows=[])
+    result = collection_flow._select_identity_recovery_candidate(
+        client=object(), phase_ctx=phase_ctx, state=SimpleNamespace(), row={})
+    assert result == "selected"
+    assert received["visited"] == set()
+    assert received["hard_failed"] == set()
+    assert received["attempted"] == set()
+
+
+def test_identity_recovery_explicit_none_history_fails_closed(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(collection_flow, "_build_identity_recovery_inventory",
+                        lambda **_kwargs: [])
+    monkeypatch.setattr(collection_flow, "select_recovery_candidate",
+                        lambda *_args, **_kwargs: pytest.fail("malformed history must not reach selector"))
+    state = SimpleNamespace(recovery_visited_candidate_ids=None)
+    phase_ctx = SimpleNamespace(tab_cfg={"scenario_id": "life_sample_plugin"},
+                                output_path="", all_rows=[])
+    assert collection_flow._select_identity_recovery_candidate(
+        client=object(), phase_ctx=phase_ctx, state=state, row={}) is None
+
+
+def test_identity_recovery_main_loop_state_preserves_real_history(monkeypatch):
+    from types import SimpleNamespace
+
+    state = collection_flow.MainLoopState.__new__(collection_flow.MainLoopState)
+    state.recovery_visited_candidate_ids = {"visited-id"}
+    state.recovery_hard_failed_candidate_ids = {"failed-id"}
+    state.recovery_attempted_candidate_ids = {"attempted-id"}
+    inventory = [{"bounds": "0,0,10,10"}]
+    monkeypatch.setattr(collection_flow, "_build_identity_recovery_inventory",
+                        lambda **_kwargs: inventory)
+    received = {}
+
+    def select(_inventory, **kwargs):
+        received.update(kwargs)
+        return None
+
+    monkeypatch.setattr(collection_flow, "select_recovery_candidate", select)
+    phase_ctx = SimpleNamespace(tab_cfg={"scenario_id": "life_sample_plugin"},
+                                output_path="", all_rows=[])
+    collection_flow._select_identity_recovery_candidate(
+        client=object(), phase_ctx=phase_ctx, state=state, row={})
+    assert received["visited"] == {"visited-id"}
+    assert received["hard_failed"] == {"failed-id"}
+    assert received["attempted"] == {"attempted-id"}
+
+
+def test_traversal_diagnostics_missing_is_compatible_but_explicit_none_fails_closed(monkeypatch):
+    from types import SimpleNamespace
+
+    from tb_runner.traversal_evidence_gate import TraversalDiagnostics
+
+    monkeypatch.setenv("TB_TRAVERSAL_IDENTITY_V2_ENABLED", "1")
+    row = {"step_index": 1}
+    client = SimpleNamespace()
+    missing = SimpleNamespace()
+    progress, visit = collection_flow._resolve_traversal_evidence_decision(
+        client=client, row=row, state=missing)
+    assert isinstance(missing.traversal_diagnostics, TraversalDiagnostics)
+    assert progress is not None and visit is not None
+
+    malformed = SimpleNamespace(traversal_diagnostics=None)
+    progress, visit = collection_flow._resolve_traversal_evidence_decision(
+        client=client, row=row, state=malformed)
+    assert malformed.traversal_diagnostics is None
+    assert progress.verdict == "INDETERMINATE"
+    assert progress.reason == "TRAVERSAL_DIAGNOSTICS_INVALID"
+    assert visit.visited is False and visit.consumed is False
+
+
+def test_real_main_loop_state_traversal_diagnostics_history_is_preserved(monkeypatch):
+    from types import SimpleNamespace
+
+    from tb_runner.traversal_evidence_gate import TraversalDiagnostics
+
+    monkeypatch.setenv("TB_TRAVERSAL_IDENTITY_V2_ENABLED", "1")
+    state = collection_flow.MainLoopState.__new__(collection_flow.MainLoopState)
+    original = TraversalDiagnostics(recovered_candidate_attempts=9,
+                                    recovered_visits=4,
+                                    indeterminate_count=3)
+    state.traversal_diagnostics = original
+    progress, visit = collection_flow._resolve_traversal_evidence_decision(
+        client=SimpleNamespace(), row={"step_index": 2}, state=state)
+    diagnostics = state.traversal_diagnostics
+    assert isinstance(diagnostics, TraversalDiagnostics)
+    assert diagnostics is not original  # immutable record_gate returns the updated value
+    assert diagnostics.recovered_candidate_attempts == 9
+    assert diagnostics.recovered_visits == 4
+    assert diagnostics.indeterminate_count >= 3
+    assert progress is not None and visit is not None

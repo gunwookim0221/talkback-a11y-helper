@@ -35,9 +35,16 @@ RISK_EFFECTS = {"delete": "DESTRUCTIVE", "remove": "DESTRUCTIVE", "reset": "DEST
 READ_ONLY_EFFECTS = {"read_only", "read_only_navigation", "read_only_expansion", "ui_filter"}
 
 
+# Read-only provenance peek for SHADOW; never triggers policy loading/I/O.
+_loaded_default_config = None
+
+
 @lru_cache(maxsize=1)
 def default_config():
-    return json.loads((Path(__file__).resolve().parents[1] / "config/safe_action_policy.json").read_text(encoding="utf-8"))
+    global _loaded_default_config
+    value = json.loads((Path(__file__).resolve().parents[1] / "config/safe_action_policy.json").read_text(encoding="utf-8"))
+    _loaded_default_config = value
+    return value
 
 
 def normalize_action(action):

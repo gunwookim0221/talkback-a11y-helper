@@ -208,6 +208,7 @@ def _install_device_responses(monkeypatch, client, *, failure: str | None = None
                 "protocol_version": PROTOCOL_VERSION,
                 "status": "OK",
                 "query_nonce": values["queryNonce"],
+                "generation": 0,
                 "process_epoch": PROCESS_EPOCH,
                 "service_instance_id": SERVICE_ID,
                 "helper_build_identity": helper_identity,

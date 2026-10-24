@@ -167,7 +167,7 @@ def _state_id(state: Mapping[str, Any]) -> str:
 
 
 def _target_identity(candidate: Mapping[str, Any], edge_type: str,
-                     focus_cursor: Mapping[str, Any] | None) -> tuple[str, dict[str, str], str]:
+                     focus_cursor: Mapping[str, Any] | None) -> tuple[str, dict[str, Any], str]:
     if edge_type == EdgeType.FOCUS_NEXT.value:
         cursor = focus_cursor if isinstance(focus_cursor, Mapping) else {}
         instance = _text(cursor.get("instance_id"))
@@ -182,7 +182,20 @@ def _target_identity(candidate: Mapping[str, Any], edge_type: str,
     # cannot be promoted into a production instance identity here.
     instance = _text(raw.get("instance_id") or raw.get("production_instance_id")
                      or raw.get("candidate_instance_id"))
-    return (instance, {"instance_id": instance}, "RESOLVED") if instance else ("", {}, "UNRESOLVED")
+    if not instance:
+        return "", {}, "UNRESOLVED"
+    domain = _text(raw.get("identity_domain"), 64)
+    attrs = raw.get("identity_attributes")
+    identity: dict[str, Any] = {"instance_id": instance}
+    if domain in {"production_scenario_scope_v1", "discovery_state_scope_v1"} and isinstance(attrs, Mapping):
+        stable = {
+            "resource_id": _text(attrs.get("resource_id"), MAX_ID_LENGTH),
+            "bounds": _text(attrs.get("bounds"), MAX_ID_LENGTH),
+            "class_name": _text(attrs.get("class_name"), MAX_ID_LENGTH),
+        }
+        if stable["resource_id"] and stable["bounds"] and stable["class_name"]:
+            identity.update(identity_domain=domain, identity_attributes=stable)
+    return instance, identity, "RESOLVED"
 
 
 def build_frontier_id(state_id: str, edge_type: str,
@@ -496,7 +509,12 @@ def evaluate_frontier(
         if edge_type in _SCROLL_EDGE_TYPES:
             target_status = "DEFERRED_PHASE6E"
         canonical_target, alias_valid = _resolve_alias(target_instance, aliases) if target_instance else ("", False)
-        identity_target = target_document if edge_type == EdgeType.FOCUS_NEXT.value else {"instance_id": canonical_target}
+        if edge_type == EdgeType.FOCUS_NEXT.value:
+            identity_target = target_document
+        else:
+            identity_target = {"instance_id": canonical_target}
+            if target_document.get("identity_attributes"):
+                target_document = {**target_document, "instance_id": canonical_target}
         if resolved_state and target_status == "RESOLVED" and identity_target and edge_type in _SUPPORTED_EDGE_TYPES:
             frontier_id = build_frontier_id(resolved_state, edge_type, identity_target)
             provisional = False

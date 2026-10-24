@@ -5,6 +5,7 @@ are a fallback when geometry is absent. Mutable labels/state are evidence, excep
 for the last-resort geometry/path-free identity (which cannot prove a visit).
 """
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 import json
 import re
@@ -27,6 +28,46 @@ def normalized_bounds(value: Any) -> str:
     return ",".join(str(part) for part in bounds) if bounds else ""
 
 
+def redirect_identity_attributes(identity: Any) -> tuple[dict[str, str], str, str]:
+    """Read one redirect identity shape and reject contradictory duplicates.
+
+    Production frontier candidates store attributes under
+    ``identity_attributes``. Discovery candidates use the flat schema. Flat
+    production identities are retained as an explicitly named legacy shape;
+    if a document supplies both forms, every duplicated field must agree.
+    The returned attributes may be partial so callers can fail closed on a
+    plausible but incomplete competing candidate.
+    """
+    if not isinstance(identity, Mapping):
+        return {}, "UNKNOWN", "IDENTITY_DOCUMENT_UNAVAILABLE"
+
+    fields = ("resource_id", "bounds", "class_name")
+
+    def normalize_field(name: str, value: Any) -> str:
+        if name == "bounds":
+            return normalized_bounds(value)
+        return str(value or "").strip()
+
+    if "identity_attributes" in identity:
+        nested = identity.get("identity_attributes")
+        if not isinstance(nested, Mapping):
+            return {}, "NESTED_IDENTITY_ATTRIBUTES", "NESTED_IDENTITY_ATTRIBUTES_INVALID"
+        attributes = {name: normalize_field(name, nested.get(name)) for name in fields}
+        for name in fields:
+            if name in identity and normalize_field(name, identity.get(name)) != attributes[name]:
+                return attributes, "CONFLICTING_NESTED_AND_FLAT", "IDENTITY_ATTRIBUTE_CONFLICT"
+        return attributes, "NESTED_IDENTITY_ATTRIBUTES", ""
+
+    domain = str(identity.get("identity_domain") or "")
+    if domain == "discovery_state_scope_v1":
+        source = "DISCOVERY_FLAT"
+    elif domain == "production_scenario_scope_v1":
+        source = "LEGACY_PRODUCTION_FLAT"
+    else:
+        return {}, "UNKNOWN", "IDENTITY_DOMAIN_UNAVAILABLE"
+    return ({name: normalize_field(name, identity.get(name)) for name in fields}, source, "")
+
+
 def instance_id(item: dict[str, Any]) -> str:
     scope = normalized(item.get("scenario_id", ""))
     rid = normalized(item.get("view_id", ""))
@@ -40,6 +81,27 @@ def instance_id(item: dict[str, Any]) -> str:
     else:
         discriminator = ["unresolved", container, normalized(item.get("label", "")), normalized(item.get("class_name", ""))]
     return json.dumps(["instance-v1", scope, rid, *discriminator], ensure_ascii=False, separators=(",", ":"))
+
+
+def snapshot_actual_focus_identity(row: dict[str, Any], node: dict[str, Any]) -> None:
+    """Project one observed node, including absent fields; never enrich from a row.
+
+    This does not establish focus or grant visits. The observed accessibility
+    flag and existing reconciliation remain authoritative.
+    """
+    row["actual_focus_node"] = dict(node)
+    row["actual_focus_resource_id"] = str(node.get("viewIdResourceName") or node.get("resourceId") or "").strip()
+    row["actual_focus_bounds"] = str(node.get("boundsInScreen") or node.get("bounds") or "").strip()
+    label = str(node.get("talkbackLabel") or node.get("contentDescription") or node.get("text")
+                or node.get("mergedLabel") or node.get("label") or "").strip()
+    row["actual_focus_visible"] = label
+    row["actual_focus_speech"] = label
+    row["actual_focus_class_name"] = str(node.get("className") or node.get("class") or "").strip()
+    row["actual_focus_accessibility_focused"] = node.get("accessibilityFocused")
+    row["actual_focus_input_focused"] = node.get("focused")
+    row["actual_focus_role"] = str(node.get("role") or node.get("accessibilityRole") or "")
+    row["actual_focus_container_id"] = str(node.get("containerId") or node.get("ancestorId") or node.get("parentResourceId") or "")
+    row["actual_focus_node_path"] = str(node.get("stableNodePath") or node.get("nodePath") or node.get("path") or "")
 
 
 def observed_focus_instance(row: dict[str, Any]) -> dict[str, Any] | None:

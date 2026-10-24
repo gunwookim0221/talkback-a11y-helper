@@ -16,6 +16,7 @@ from tb_runner.core_preflight import (
     recover_external_popup_contamination,
     unlock_swipe,
     wake_screen,
+    _popup_failure_reason,
 )
 
 STATE_CRASH_DETECTED = "CRASH_DETECTED"
@@ -265,11 +266,14 @@ def run_recovery_preflight(
     foreground_package = str(app_foreground.get("package") or "")
     if app_foreground.get("status") == "FAIL" and foreground_package in EXTERNAL_POPUP_PACKAGES:
         popup_status = recover_external_popup_contamination(
+            client=client,
             serial=serial,
             adb_path=adb_path,
             adb_runner=adb_runner,
             sleep_fn=resolved_sleep_fn,
             contamination_hint=foreground_package,
+            contamination_hint_current=True,
+            contamination_hint_source="app_foreground",
         )
         app_foreground = ensure_smartthings_foreground(
             serial=serial,
@@ -279,6 +283,7 @@ def run_recovery_preflight(
         )
     else:
         popup_status = recover_external_popup_contamination(
+            client=client,
             serial=serial,
             adb_path=adb_path,
             adb_runner=adb_runner,
@@ -621,7 +626,7 @@ def _recovery_preflight_failure_reason(
     if screen_awake.get("status") == "FAIL":
         return "wake_screen_failed"
     if popup_status.get("status") == "FAIL":
-        return "external_popup_contamination"
+        return _popup_failure_reason(popup_status)
     if helper.get("status") != "ok":
         return "helper_not_ready"
     if talkback.get("status") != "ok":

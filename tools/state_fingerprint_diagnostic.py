@@ -30,43 +30,95 @@ def capture_observation(client: Any, serial: str | None, *, scenario_id: str = "
     Service-owned XML complements flags missing in flat Helper nodes.
     Capture sources are sequential, not claimed to be one atomic UI snapshot.
     """
-    nodes = scroll_reliability.dump_with_capabilities(client, serial)
-    metadata = deepcopy(getattr(client, "last_dump_metadata", {}))
-    capabilities = deepcopy(getattr(client, "last_scroll_capabilities", []))
-    cap = scroll_reliability.capability(nodes, metadata, capabilities)
-    notes = []
-    try:
-        focus = client.get_focus(dev=serial, allow_fallback_dump=False, mode="fast") or {}
-    except Exception as exc:
-        focus = {}
-        notes.append("focus_capture:" + type(exc).__name__)
-    observed_nodes = nodes
-    source = "helper_flat"
-    xml_packages = set()
-    try:
-        raw = service_hierarchy_to_xml(client.dump_hierarchy(dev=serial))
-        observed_nodes = global_navigation.xml_nodes(raw)
-        root = ET.fromstring(raw[raw.find("<hierarchy"):])
-        attributes = [n.attrib for n in root.iter("node")]
-        xml_packages = {attrs["package"] for attrs in attributes if attrs.get("package")}
-        # Preserve unknown flags rather than adopting XML parser defaults when
-        # attributes are genuinely absent. No tree XML is stored twice.
-        for node, attrs in zip(observed_nodes, attributes):
-            for field, xml_name in (("selected", "selected"), ("checked", "checked"),
-                                    ("enabled", "enabled"), ("clickable", "clickable"),
-                                    ("focusable", "focusable"), ("focused", "focused"),
-                                    ("accessibilityFocused", "accessibility-focused"),
-                                    ("scrollable", "scrollable"), ("visibleToUser", "visible-to-user")):
-                node[field] = attrs[xml_name] == "true" if xml_name in attrs else None
-        source = "helper_capability+service_hierarchy_semantics"
-    except Exception as exc:
-        notes.append("hierarchy_capture:" + type(exc).__name__)
+    notes: list[str] = []
+    reliable_snapshot_used = callable(getattr(client, "get_traversal_candidate_snapshot", None))
+    snapshot_coherent = False
+    if reliable_snapshot_used:
+        try:
+            snapshot = client.get_traversal_candidate_snapshot(dev=serial)
+            from talkback_lib.hierarchy_snapshot import flatten_service_hierarchy, hierarchy_package
+
+            raw_hierarchy = snapshot.raw_hierarchy
+            if not isinstance(raw_hierarchy, dict) or raw_hierarchy.get("success") is not True:
+                raise ValueError("invalid reliable hierarchy snapshot")
+            observed_nodes = flatten_service_hierarchy(raw_hierarchy)
+            nodes = list(snapshot.candidates)
+            metadata = deepcopy(getattr(client, "last_dump_metadata", {}))
+            capabilities = deepcopy(getattr(client, "last_scroll_capabilities", []))
+            cap = scroll_reliability.capability(nodes, metadata, capabilities)
+            focused_nodes = [node for node in observed_nodes
+                             if node.get("accessibilityFocused") is True
+                             and node.get("visibleToUser") is not False]
+            focus = deepcopy(focused_nodes[0]) if len(focused_nodes) == 1 else {}
+            if len(focused_nodes) != 1:
+                notes.append("focus_capture:" + ("no_strict_accessibility_focus" if not focused_nodes
+                                                   else "ambiguous_accessibility_focus"))
+            package = hierarchy_package(raw_hierarchy)
+            xml_packages = {str(node.get("packageName") or "") for node in observed_nodes
+                            if node.get("packageName")}
+            decoded = getattr(snapshot, "decoded", None)
+            projection = getattr(decoded, "traversal_candidates", None)
+            complete = bool(getattr(decoded, "raw_completion_valid", False)
+                            and getattr(projection, "complete", False) and observed_nodes)
+            observation_coverage = "OBSERVED_FULL" if complete else "OBSERVED_PARTIAL"
+            coverage_source = "reliable_service_hierarchy" if complete else "reliable_snapshot_incomplete"
+            hierarchy_request_id = str(getattr(decoded, "request_id", "") or "")
+            source = "reliable_service_hierarchy_snapshot"
+            snapshot_coherent = True
+        except Exception as exc:
+            # Do not rescue a failed reliable hierarchy read with another source.
+            nodes, observed_nodes, focus = [], [], {}
+            metadata, capabilities = {}, []
+            cap = scroll_reliability.capability([], {})
+            package, xml_packages = None, set()
+            observation_coverage, coverage_source = "UNOBSERVED", "reliable_snapshot_failed"
+            hierarchy_request_id = ""
+            source = "reliable_snapshot_failed"
+            snapshot_coherent = False
+            notes.append("hierarchy_capture:" + type(exc).__name__)
+    else:
+        nodes = scroll_reliability.dump_with_capabilities(client, serial)
+        metadata = deepcopy(getattr(client, "last_dump_metadata", {}))
+        capabilities = deepcopy(getattr(client, "last_scroll_capabilities", []))
+        cap = scroll_reliability.capability(nodes, metadata, capabilities)
+        try:
+            focus = client.get_focus(dev=serial, allow_fallback_dump=False, mode="fast") or {}
+        except Exception as exc:
+            focus = {}
+            notes.append("focus_capture:" + type(exc).__name__)
+        observed_nodes = nodes
+        package = None
+        observation_coverage = "OBSERVED_PARTIAL" if nodes else "UNOBSERVED"
+        coverage_source = "helper_flat_candidates" if nodes else "no_hierarchy"
+        hierarchy_request_id = str(metadata.get("requestId") or "")
+        source = "helper_flat"
+    if not reliable_snapshot_used:
+        xml_packages = set()
+        try:
+            raw = service_hierarchy_to_xml(client.dump_hierarchy(dev=serial))
+            observed_nodes = global_navigation.xml_nodes(raw)
+            root = ET.fromstring(raw[raw.find("<hierarchy"):])
+            attributes = [n.attrib for n in root.iter("node")]
+            xml_packages = {attrs["package"] for attrs in attributes if attrs.get("package")}
+            # Preserve unknown flags rather than adopting parser defaults when
+            # the source omits them. No tree XML is stored twice.
+            for node, attrs in zip(observed_nodes, attributes):
+                for field, xml_name in (("selected", "selected"), ("checked", "checked"),
+                                        ("enabled", "enabled"), ("clickable", "clickable"),
+                                        ("focusable", "focusable"), ("focused", "focused"),
+                                        ("accessibilityFocused", "accessibility-focused"),
+                                        ("scrollable", "scrollable"), ("visibleToUser", "visible-to-user")):
+                    node[field] = attrs[xml_name] == "true" if xml_name in attrs else None
+            source = "helper_capability+service_hierarchy_semantics"
+            if observed_nodes:
+                observation_coverage, coverage_source = "OBSERVED_FULL", "service_hierarchy_xml"
+        except Exception as exc:
+            notes.append("hierarchy_capture:" + type(exc).__name__)
     items = global_navigation.discover(observed_nodes, dict(global_nav=BOTTOM_TAB_GLOBAL_NAV))
     selected = global_navigation.current(items)
     display = None
-    package = None
     activity = None
-    context_source = "unobserved"
+    context_source = "service_hierarchy" if reliable_snapshot_used and source == "reliable_service_hierarchy_snapshot" else "unobserved"
     window_evidence = {}
     try:
         size = client._run(["shell", "wm", "size"], dev=serial, timeout=5)
@@ -78,12 +130,18 @@ def capture_observation(client: Any, serial: str | None, *, scenario_id: str = "
         window_evidence = summarize_window_evidence(window)
         focused_windows = set(re.findall(r"mCurrentFocus=[^\n]*?\s([\w.]+)/([\w.$]+)", window))
         if len(focused_windows) == 1:
-            package, activity = focused_windows.pop()
-            context_source = "window_current_focus"
-            window_evidence["focused_activity_matches"] = (
-                window_evidence.get("focused_window_component") == activity
-                or window_evidence.get("focused_window_component") == f"{package}/{activity}"
-            )
+            window_package, window_activity = focused_windows.pop()
+            if package and package != window_package:
+                package = activity = None
+                context_source = "conflicting_observation"
+                notes.append("window_capture:HIERARCHY_PACKAGE_CONFLICT")
+            else:
+                package, activity = window_package, window_activity
+                context_source = "window_current_focus"
+                window_evidence["focused_activity_matches"] = (
+                    window_evidence.get("focused_window_component") == activity
+                    or window_evidence.get("focused_window_component") == f"{package}/{activity}"
+                )
         elif focused_windows:
             notes.append("window_capture:AMBIGUOUS_FOCUSED_WINDOWS")
         else:
@@ -125,14 +183,28 @@ def capture_observation(client: Any, serial: str | None, *, scenario_id: str = "
                    nodes=list(popup.safe_buttons or []))
     if popup.dangerous_buttons:
         overlay["nodes"].extend(popup.dangerous_buttons)
+    capture_id = uuid4().hex
+    focus_capture_id = capture_id if snapshot_coherent else uuid4().hex
+    geometry_capture_id = capture_id if snapshot_coherent else uuid4().hex
+    focus_capture_status = ("STRICT_ACCESSIBILITY_FOCUS" if isinstance(focus, dict)
+                            and focus.get("accessibilityFocused") is True else "FOCUS_UNAVAILABLE")
     return dict(nodes=observed_nodes, package_name=package, activity_name=activity,
                 navigation_context={"bottom_tab": selected["logical_name"]} if selected else None,
                 selected_tab=dict(name=selected["logical_name"], verified=True,
-                                  source="service_hierarchy_selected" if source == "helper_capability+service_hierarchy_semantics" else "helper_selected") if selected else None,
+                                  source=("service_hierarchy_selected" if source in {
+                                      "helper_capability+service_hierarchy_semantics",
+                                      "reliable_service_hierarchy_snapshot",
+                                  } else "helper_selected")) if selected else None,
                 display_bounds=display, capability=cap, focus_node=focus, window_evidence=window_evidence, overlay=overlay,
                 viewport=scroll_reliability.viewport(nodes, scenario_id, cap.get("container")),
                 timestamp=datetime.now(timezone.utc).isoformat(), scenario_id=scenario_id, step=step,
-                capture_id=uuid4().hex, scenario_run_id=scenario_run_id,
+                capture_id=capture_id, snapshot_coherent=snapshot_coherent,
+                focus_capture_id=focus_capture_id,
+                focus_capture_status=focus_capture_status,
+                scenario_run_id=scenario_run_id, observation_coverage=observation_coverage,
+                coverage_source=coverage_source, hierarchy_request_id=hierarchy_request_id,
+                hierarchy_complete=(observation_coverage == "OBSERVED_FULL"),
+                hierarchy_capture_id=capture_id, geometry_capture_id=geometry_capture_id,
                 source=source, context_source=context_source, notes=notes)
 
 

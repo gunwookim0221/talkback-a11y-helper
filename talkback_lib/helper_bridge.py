@@ -432,6 +432,19 @@ class HelperBridge:
                       "commandStdout": exc.stdout, "commandStderr": exc.stderr, "resultWaitStarted": False}
             self._client._safe_trace_print(f"[SMART_NEXT_TRANSPORT] delivery_failed req_id={req_id} reason={exc.reason} retry=false")
             return result
+        mark_dispatched = getattr(self._client, "_smart_nav_request_dispatched", None)
+        if callable(mark_dispatched):
+            try:
+                mark_dispatched(req_id)
+            except Exception:
+                pass
+        else:
+            mark_action_sent = getattr(self._client, "_evidence_action_sent", None)
+            if callable(mark_action_sent):
+                try:
+                    mark_action_sent(action=ACTION_SMART_NEXT, req_id=req_id)
+                except Exception:
+                    pass
         delivery_elapsed = time.monotonic() - delivery_start
         self._client._safe_trace_print(
             f"[SMART_NEXT_TRACE] adb_raw_response req_id={req_id} raw_stdout=\"{raw_stdout}\""

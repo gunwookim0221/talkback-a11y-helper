@@ -87,12 +87,16 @@ def pre(runtime, step=1, *, choice=None, history=None, candidates=None,
 def post(runtime, decision_id, step=1, *, owner="SEQUENTIAL", exact="EXACT_MATCH",
          target="", result_id="req-1", visit_status="UNVISITED",
          transition="CONFIRMED_UNCHANGED", state_changed=False):
+    current_action = "SMART_NEXT" if owner == "SEQUENTIAL" else "TARGETED_FOCUS"
     row = {
+        "phase6_current_action_type": current_action,
         "focus_transition_status": transition,
         "actual_focus_instance_id": target,
         "reconciled_visit_instance_id": target if visit_status in {"RECORDED", "ALREADY_VISITED"} else "",
         "visit_record_status": visit_status,
         "command_ack_status": "ACKED",
+        "smart_nav_req_id": result_id if current_action == "SMART_NEXT" else "",
+        "target_focus_request_id": result_id if current_action == "TARGETED_FOCUS" else "",
     }
     return runtime.post_result(
         decision_id=decision_id, step=step, result=row,
@@ -151,6 +155,147 @@ def test_recovery_owner_requires_recovery_scoped_request_id():
     assert _frontier_shadow_recovery_owner(
         recovered=True, result={"recovery_action_request_id": "recovery-request"}, step_idx=7,
     ) == ("RECOVERY", "EXACT_MATCH", "recovery-request")
+
+
+def test_canonical_request_selector_never_uses_attempt_or_operation_identity():
+    assert fs.canonical_action_request_id({
+        "target_focus_attempt_id": "attempt-1", "controlled_focus_operation_id": "operation-1",
+    }) == ""
+    assert fs.canonical_action_request_id({
+        "controlled_focus_request_id": "controlled-1",
+        "target_focus_attempt_id": "attempt-1",
+        "phase6_current_action_type": "CONTROLLED_FOCUS",
+    }) == "controlled-1"
+    assert fs.canonical_action_request_id({
+        "target_focus_request_id": "target-1", "target_focus_attempt_id": "attempt-1",
+        "phase6_current_action_type": "TARGETED_FOCUS",
+    }) == "target-1"
+    assert fs.canonical_action_request_id(
+        {"smart_nav_req_id": "smart-next-1"}, "SMART_NEXT"
+    ) == "smart-next-1"
+
+
+def test_action_scoped_request_selection_does_not_cross_borrow_mixed_row_receipts():
+    mixed = {
+        "phase6_current_action_type": "TARGETED_FOCUS",
+        "smart_nav_req_id": "request-A",
+        "target_focus_attempt_id": "attempt-B",
+        "target_focus_request_id": "",
+        "controlled_focus_operation_id": "operation-B",
+    }
+    assert fs.canonical_action_request_id(mixed) == ""
+    assert fs.canonical_action_request_id(mixed, "TARGETED_FOCUS") == ""
+
+    targeted = {**mixed, "target_focus_request_id": "request-B"}
+    assert fs.canonical_action_request_id(targeted) == "request-B"
+
+    smart_next_with_stale_target = {
+        **targeted,
+        "phase6_current_action_type": "SMART_NEXT",
+        "smart_nav_req_id": "request-C",
+    }
+    assert fs.canonical_action_request_id(smart_next_with_stale_target) == "request-C"
+
+    controlled = {
+        "phase6_current_action_type": "CONTROLLED_FOCUS",
+        "controlled_focus_request_id": "request-D",
+        "target_focus_request_id": "stale-target-request",
+    }
+    assert fs.canonical_action_request_id(controlled) == "request-D"
+    assert fs.canonical_action_request_id(
+        {"phase6_current_action_type": "TARGETED_FOCUS", "target_focus_attempt_id": "attempt-E",
+         "controlled_focus_operation_id": "operation-E", "smart_nav_req_id": "request-A"}
+    ) == ""
+
+
+def test_real_post_result_audit_and_history_share_request_identity_and_separate_attempt():
+    runtime = complete_runtime()
+    decision = runtime.pre_decision(
+        step=1, production_choice={"action_type": "TARGETED_FOCUS"},
+        current_inventory=[candidate("a", "target-a"), candidate("b", "target-b")],
+        state_id=STATE_ID, inventory_complete=True,
+        observation_ref={"source_step": 0, "state_id": STATE_ID,
+                         "request_id": "request-current"},
+    )
+    assert decision
+    runtime.capture_inventory(
+        step=0, state_id=STATE_ID,
+        candidates=[candidate("a", "target-a"), candidate("b", "target-b")],
+        inventory_complete=True,
+        observation_ref={"source_step": 0, "state_id": STATE_ID,
+                         "request_id": "request-current"},
+    )
+    frontier_decision = runtime.evaluate_post_action(
+        step=0, decision_id="closed-current", decision_watermark=1,
+        state_id=STATE_ID, result_request_id="request-current",
+    )
+    assert frontier_decision["source_request_id"] == "request-current"
+    result = {
+        "controlled_focus_request_id": "request-current",
+        "phase6_current_action_type": "CONTROLLED_FOCUS",
+        "target_focus_attempt_id": "attempt-current",
+        "controlled_focus_operation_id": "operation-current",
+        "focus_transition_status": "CONFIRMED_MOVED",
+        "actual_focus_instance_id": "target-a",
+        "visit_record_status": "UNVISITED",
+        "command_ack_status": "ACKED",
+    }
+
+    assert runtime.post_result(
+        decision_id=decision, step=1, result=result, owner="TARGETED",
+        ownership_status="EXACT_MATCH", result_id="request-current",
+        action_type="TARGETED_FOCUS", target_instance_id="target-a",
+        before_observation_valid=True, after_observation_valid=True,
+        outcome_observation_complete=True, state_changed=False,
+    )
+
+    audit = runtime.evaluations[0]["action_result"]
+    history = runtime.history["attempt_events"]
+    assert audit["result_id"] == "request-current"
+    assert audit["request_id"] == "request-current"
+    assert audit["attempt_id"] == "attempt-current"
+    assert audit["operation_id"] == "operation-current"
+    assert runtime.evaluations[0]["observation_ref"]["request_id"] == "request-current"
+    assert len(history) == 1
+    assert history[0]["request_id"] == "request-current"
+    assert history[0]["attempt_id"] == "attempt-current"
+    assert history[0]["operation_id"] == "operation-current"
+
+
+def test_attempt_only_post_result_is_unowned_and_request_alignment_is_incomplete(monkeypatch):
+    runtime = fs.FrontierShadowRuntime("run-shadow", "scenario-shadow")
+    runtime.capture_inventory(
+        step=1, state_id=STATE_ID, candidates=[candidate("a", "target-a")],
+        inventory_complete=True, observation_ref={"request_id": "request-inventory"},
+    )
+    monkeypatch.setattr("tb_runner.frontier_scheduler.evaluate_frontier",
+                        lambda *args, **kwargs: pytest.fail("missing request must not evaluate"))
+    result = runtime.evaluate_post_action(
+        step=1, decision_id="closed-1", decision_watermark=1,
+        state_id=STATE_ID, result_request_id="",
+    )
+    assert result["alignment_status"] == "INCOMPLETE"
+    assert "POST_ACTION_REQUEST_ID_MISSING" in result["alignment_reasons"]
+    assert result["source_request_id"] == "request-inventory"
+
+    decision = runtime.pre_decision(
+        step=2, production_choice={"action_type": "TARGETED_FOCUS"},
+        current_inventory=[candidate("a", "target-a")], state_id=STATE_ID,
+        inventory_complete=True,
+    )
+    assert decision
+    assert runtime.post_result(
+        decision_id=decision, step=2,
+        result={"target_focus_attempt_id": "attempt-only"}, owner="TARGETED",
+        ownership_status="EXACT_MATCH", result_id="decision-result",
+        action_type="TARGETED_FOCUS", target_instance_id="target-a",
+    )
+    audit = runtime.evaluations[-1]["action_result"]
+    assert audit["request_id"] is None
+    assert audit["attempt_id"] == "attempt-only"
+    assert audit["ownership_status"] == "UNKNOWN"
+    assert runtime.history["attempt_events"] == []
+    assert runtime.history["complete"] is False
 
 
 def test_reconciliation_inventory_adapter_uses_existing_candidates_without_io(monkeypatch):
@@ -320,7 +465,8 @@ def test_no_effect_repeat_requires_exact_owner_and_complete_before_after():
         decision = pre(runtime, step, choice={"action_type": "TARGETED_FOCUS", "candidate_id": "a"})
         row = {"focus_transition_status": "CONFIRMED_UNCHANGED",
                "actual_focus_instance_id": "target-current", "visit_record_status": "UNVISITED",
-               "command_ack_status": "ACKED"}
+               "phase6_current_action_type": "TARGETED_FOCUS",
+               "command_ack_status": "ACKED", "target_focus_request_id": f"target-{step}"}
         runtime.post_result(decision_id=decision, step=step, result=row,
                             owner="TARGETED", ownership_status="EXACT_MATCH",
                             result_id=f"target-{step}", action_type="TARGETED_FOCUS",

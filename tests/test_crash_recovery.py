@@ -4,7 +4,7 @@ import json
 from types import SimpleNamespace
 
 import script_test
-from tb_runner import crash_recovery
+from tb_runner import crash_recovery, core_preflight
 from tb_runner.accessibility_preflight import AccessibilityPreflightResult, AccessibilitySettings
 
 
@@ -127,6 +127,30 @@ class _RecoveryClient:
         self.calls.append(("talkback", dev))
         return {"status": self.talkback_status, "reason": "ok"}
 
+    def dump_hierarchy(self, dev=None):
+        self.calls.append(("hierarchy", dev))
+        return self.hierarchy_factory()
+
+
+def _popup_snapshot(package, *, bottom_tab=False):
+    resource_id = (
+        "com.samsung.android.oneconnect:id/bottom_navigation_tab_home"
+        if bottom_tab else ""
+    )
+    child = {
+        "packageName": package,
+        "viewIdResourceName": resource_id,
+        "text": "",
+        "contentDescription": "",
+        "children": [],
+    }
+    root = {"packageName": package, "children": [child]}
+    return {
+        "success": True,
+        "nodes": [root],
+        "windows": [{"root": root, "active": True, "focused": True}],
+    }
+
 
 def _step(status, **details):
     return {"status": status, "message": status.lower(), **details}
@@ -171,6 +195,220 @@ def test_recovery_preflight_success(monkeypatch):
     assert result.talkback_status == "ok"
     assert result.foreground_status == "ok"
     assert client.calls == [("ping", "SERIAL", 3.0), ("talkback", "SERIAL")]
+
+
+def test_recovery_preflight_passes_current_client_to_popup_surface_check(monkeypatch):
+    monkeypatch.setattr(crash_recovery, "wake_screen", lambda **_kwargs: _step("PASS"))
+    monkeypatch.setattr(crash_recovery, "unlock_swipe", lambda **_kwargs: _step("PASS"))
+    monkeypatch.setattr(
+        crash_recovery,
+        "ensure_smartthings_foreground",
+        lambda **_kwargs: _step("PASS", package="com.samsung.android.oneconnect"),
+    )
+    seen = []
+
+    def recover(**kwargs):
+        seen.append(kwargs)
+        return _step("PASS", recovered=True)
+
+    monkeypatch.setattr(crash_recovery, "recover_external_popup_contamination", recover)
+    monkeypatch.setattr(
+        crash_recovery,
+        "ensure_accessibility_service_enabled",
+        lambda **_kwargs: _accessibility_result(True),
+    )
+    client = _RecoveryClient()
+
+    result = crash_recovery.run_recovery_preflight(
+        client=client, serial="SERIAL", sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.ok is True
+    assert len(seen) == 1
+    assert seen[0]["client"] is client
+
+
+def test_recovery_preflight_keeps_hierarchy_failure_classification(monkeypatch):
+    monkeypatch.setattr(crash_recovery, "wake_screen", lambda **_kwargs: _step("PASS"))
+    monkeypatch.setattr(crash_recovery, "unlock_swipe", lambda **_kwargs: _step("PASS"))
+    monkeypatch.setattr(
+        crash_recovery,
+        "ensure_smartthings_foreground",
+        lambda **_kwargs: _step("PASS", package="com.samsung.android.oneconnect"),
+    )
+    monkeypatch.setattr(
+        crash_recovery,
+        "recover_external_popup_contamination",
+        lambda **_kwargs: _step(
+            "FAIL", reason="service_hierarchy_acquisition_failed",
+            contamination_package=None,
+            before={"hierarchy_ok": False, "hierarchy_error": "RuntimeError:transport timeout"},
+        ),
+    )
+    monkeypatch.setattr(
+        crash_recovery,
+        "ensure_accessibility_service_enabled",
+        lambda **_kwargs: _accessibility_result(True),
+    )
+
+    result = crash_recovery.run_recovery_preflight(
+        client=_RecoveryClient(), serial="SERIAL", sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.ok is False
+    assert result.reason == "service_hierarchy_acquisition_failed"
+    assert result.popup_recovery["contamination_package"] is None
+
+
+def test_crash_preflight_hint_with_unknown_current_surface_stays_unconfirmed(monkeypatch):
+    monkeypatch.setattr(crash_recovery, "wake_screen", lambda **_kwargs: _step("PASS"))
+    monkeypatch.setattr(crash_recovery, "unlock_swipe", lambda **_kwargs: _step("PASS"))
+    foreground_results = iter(
+        [
+            _step("FAIL", package="com.android.vending"),
+            _step("PASS", package=core_preflight.SMARTTHINGS_PACKAGE),
+            _step("PASS", package=core_preflight.SMARTTHINGS_PACKAGE),
+        ]
+    )
+    monkeypatch.setattr(
+        crash_recovery, "ensure_smartthings_foreground", lambda **_kwargs: next(foreground_results),
+    )
+    monkeypatch.setattr(
+        crash_recovery,
+        "ensure_accessibility_service_enabled",
+        lambda **_kwargs: _accessibility_result(True),
+    )
+    client = _RecoveryClient()
+    client.dump_hierarchy = lambda dev=None: (_ for _ in ()).throw(
+        RuntimeError("HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:PFD_READ_FAILED req_id=req-crash")
+    )
+    commands = []
+
+    def adb_runner(_adb_path, serial, *args, timeout=8.0):
+        commands.append(args)
+        if args == ("shell", "dumpsys", "window"):
+            return True, ""
+        if args == ("shell", "dumpsys", "activity", "activities"):
+            return True, ""
+        return True, ""
+
+    result = crash_recovery.run_recovery_preflight(
+        client=client, serial="SERIAL", adb_runner=adb_runner,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    popup = result.popup_recovery
+    assert result.ok is False
+    assert result.reason == "service_hierarchy_acquisition_failed"
+    assert popup["reason"] == "service_hierarchy_acquisition_failed"
+    assert popup["contamination_hint"] == "com.android.vending"
+    assert popup["contamination_hint_current"] is True
+    assert popup["contamination_hint_source"] == "app_foreground"
+    assert popup["contamination_package"] is None
+    assert popup["contamination_evidence_source"] == "hint_only_suspicion"
+    assert popup["before"]["foreground_package"] is None
+    assert popup["before"]["hierarchy_ok"] is False
+    assert ("shell", "input", "keyevent", "KEYCODE_BACK") not in commands
+
+
+def test_crash_preflight_latest_unknown_does_not_reuse_before_contamination(monkeypatch):
+    monkeypatch.setattr(crash_recovery, "wake_screen", lambda **_kwargs: _step("PASS"))
+    monkeypatch.setattr(crash_recovery, "unlock_swipe", lambda **_kwargs: _step("PASS"))
+    monkeypatch.setattr(
+        crash_recovery,
+        "ensure_smartthings_foreground",
+        lambda **_kwargs: _step("PASS", package=core_preflight.SMARTTHINGS_PACKAGE),
+    )
+    monkeypatch.setattr(
+        crash_recovery,
+        "ensure_accessibility_service_enabled",
+        lambda **_kwargs: _accessibility_result(True),
+    )
+
+    client = _RecoveryClient()
+    reads = 0
+
+    def hierarchy_factory():
+        nonlocal reads
+        reads += 1
+        if reads == 5:
+            raise RuntimeError(
+                "HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:PFD_READ_FAILED req_id=req-crash-latest operation_id=op-crash-latest"
+            )
+        return _popup_snapshot("com.android.vending")
+
+    client.hierarchy_factory = hierarchy_factory
+
+    result = crash_recovery.run_recovery_preflight(
+        client=client,
+        serial="SERIAL",
+        adb_runner=lambda *_args, **_kwargs: (
+            True,
+            "mCurrentFocus=Window{abc u0 com.samsung.android.oneconnect/.ui.SCMainActivity}",
+        ),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    popup = result.popup_recovery
+    assert reads == 5
+    assert result.ok is False
+    assert result.reason == "service_hierarchy_acquisition_failed"
+    assert popup["reason"] == "service_hierarchy_acquisition_failed"
+    assert popup["before_contamination_package"] == "com.android.vending"
+    assert popup["after_contamination_package"] is None
+    assert popup["contamination_package"] is None
+    assert popup["final_contamination_package"] is None
+    assert popup["final_observation"]["hierarchy_ok"] is False
+    assert popup["final_observation"]["hierarchy_request_id"] == "req-crash-latest"
+    assert popup["final_observation"]["hierarchy_operation_id"] == "op-crash-latest"
+
+
+def test_crash_preflight_accepts_latest_clean_surface_without_dismiss_action(monkeypatch):
+    monkeypatch.setattr(crash_recovery, "wake_screen", lambda **_kwargs: _step("PASS"))
+    monkeypatch.setattr(crash_recovery, "unlock_swipe", lambda **_kwargs: _step("PASS"))
+    monkeypatch.setattr(
+        crash_recovery,
+        "ensure_smartthings_foreground",
+        lambda **_kwargs: _step("PASS", package=core_preflight.SMARTTHINGS_PACKAGE),
+    )
+    monkeypatch.setattr(
+        crash_recovery,
+        "ensure_accessibility_service_enabled",
+        lambda **_kwargs: _accessibility_result(True),
+    )
+
+    client = _RecoveryClient()
+    reads = 0
+
+    def hierarchy_factory():
+        nonlocal reads
+        reads += 1
+        if reads < 5:
+            return _popup_snapshot("com.android.vending")
+        return _popup_snapshot(core_preflight.SMARTTHINGS_PACKAGE, bottom_tab=True)
+
+    client.hierarchy_factory = hierarchy_factory
+
+    result = crash_recovery.run_recovery_preflight(
+        client=client,
+        serial="SERIAL",
+        adb_runner=lambda *_args, **_kwargs: (
+            True,
+            "mCurrentFocus=Window{abc u0 com.samsung.android.oneconnect/.ui.SCMainActivity}",
+        ),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    popup = result.popup_recovery
+    assert reads >= 5
+    assert result.ok is True
+    assert result.reason == "ok"
+    assert popup["before_contamination_package"] == "com.android.vending"
+    assert popup["final_contamination_package"] is None
+    assert popup["contamination_package"] is None
+    assert popup["surface_recovered"] is True
+    assert popup["recovered"] is True
+    assert popup["recovery"] == "surface_observed_clean"
 
 
 def test_recovery_preflight_passes_when_final_sanity_is_ok_after_initial_foreground_failure(monkeypatch):

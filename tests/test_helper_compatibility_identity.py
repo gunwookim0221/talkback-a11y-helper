@@ -129,6 +129,47 @@ def test_python_only_head_difference_with_same_helper_inputs_is_compatible():
     assert result.to_dict()["required_schemas"]["raw_hierarchy_schema"] == "service-hierarchy-v2"
 
 
+@pytest.mark.parametrize("generation", [0, 1, 7])
+def test_prestart_capabilities_accepts_explicit_nonnegative_generation(generation):
+    result = _check(capabilities=_capabilities(generation=generation))
+
+    assert result.status == HelperIdentityStatus.COMPATIBLE_SAME_HELPER_INPUT
+    assert helper_compatibility_allows_execution(result)
+
+
+@pytest.mark.parametrize("generation_case", ["missing", None, -1, "invalid", True])
+def test_prestart_capabilities_rejects_missing_or_invalid_generation(generation_case):
+    capabilities = _capabilities()
+    if generation_case == "missing":
+        capabilities.pop("generation")
+    else:
+        capabilities["generation"] = generation_case
+
+    result = _check(capabilities=capabilities)
+
+    assert result.status == HelperIdentityStatus.UNKNOWN
+    assert result.reason == "CAPABILITY_IDENTITY_INCONSISTENT"
+    assert not helper_compatibility_allows_execution(result)
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"schema": "hierarchy-transfer-control.v0"},
+        {"service_instance_id": "another-service"},
+        {"process_epoch": ""},
+        {"helper_build_identity": None},
+    ],
+)
+def test_prestart_generation_zero_does_not_bypass_other_capability_identity_checks(changed):
+    capabilities = _capabilities(generation=0, **changed)
+
+    result = _check(capabilities=capabilities)
+
+    assert result.status == HelperIdentityStatus.UNKNOWN
+    assert not helper_compatibility_allows_execution(result)
+
+
 def test_changed_helper_input_digest_requires_rebuild_even_if_schema_is_supported():
     old_digest = "f" * 64
     result = _check(

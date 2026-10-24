@@ -8,7 +8,7 @@ expected-content membership separate from an observed focus outside that set.
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from tb_runner.traversal_reliability import observed_focus_instance, instance_id, normalized, normalized_bounds
 
@@ -146,6 +146,93 @@ def _previous_actual_id(previous_row: dict[str, Any] | None, scenario_id: str) -
     return (instance_id(previous), previous) if previous else ("", None)
 
 
+_CONTROLLED_FOCUS_INTENT_SCHEMA = "phase4-controlled-focus-intent-v1"
+
+
+def current_controlled_focus_intent(row: Mapping[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    """Return only a target intent correlated to this row's dispatched action.
+
+    The intent is comparison context, never focus evidence.  A current actual
+    accessibility-focus observation is still required by ``reconcile_focus``.
+    """
+    intent = row.get("controlled_focus_intent")
+    if not isinstance(intent, Mapping):
+        return None, "NONE"
+
+    def reject(reason: str):
+        return None, reason
+
+    if intent.get("schema_version") != _CONTROLLED_FOCUS_INTENT_SCHEMA:
+        return reject("INVALID_SCHEMA")
+    scenario_id = str(row.get("scenario_id") or "")
+    if (not scenario_id or intent.get("scenario_id") != scenario_id
+            or str(intent.get("step_index")) != str(row.get("step_index"))):
+        return reject("OPERATION_SCOPE_MISMATCH")
+    operation_id = str(intent.get("operation_id") or "").strip()
+    request_id = str(intent.get("request_id") or "").strip()
+    attempt_id = str(intent.get("target_attempt_id") or "").strip()
+    if (not operation_id or operation_id != str(row.get("controlled_focus_operation_id") or "").strip()
+            or not request_id or request_id != str(row.get("controlled_focus_request_id") or "").strip()
+            or intent.get("dispatch_status") != "DISPATCHED"
+            or row.get("controlled_focus_dispatch_status") != "DISPATCHED"
+            or not attempt_id or attempt_id != str(row.get("target_focus_attempt_id") or "").strip()):
+        return reject("ACTION_OWNERSHIP_MISMATCH")
+
+    move = row.get("move_result")
+    move = move if isinstance(move, Mapping) else {}
+    result = move.get("raw")
+    result = result if isinstance(result, Mapping) else move
+    result_request_id = str(result.get("reqId") or result.get("request_id") or "").strip()
+    if result_request_id != request_id:
+        return reject("REQUEST_ID_MISMATCH")
+
+    descriptor = intent.get("target_descriptor")
+    row_descriptor = row.get("target_focus_descriptor")
+    if not isinstance(descriptor, Mapping) or not isinstance(row_descriptor, Mapping):
+        return reject("TARGET_DESCRIPTOR_MISSING")
+    from tb_runner.scroll_reliability import normalized_bounds
+
+    def descriptor_key(value: Mapping[str, Any]) -> tuple[str, str, str, str]:
+        return (
+            str(value.get("resource_id") or value.get("view_id") or "").strip(),
+            normalized_bounds(value.get("bounds") or ""),
+            str(value.get("label") or "").strip(),
+            str(value.get("class_name") or "").strip(),
+        )
+
+    target_key = descriptor_key(descriptor)
+    if not target_key[1] or target_key != descriptor_key(row_descriptor):
+        return reject("TARGET_DESCRIPTOR_MISMATCH")
+
+    observation = row.get("_exploration_observation")
+    if not isinstance(observation, Mapping):
+        envelope = row.get("state_graph_observation")
+        envelope = envelope if isinstance(envelope, Mapping) else {}
+        production = envelope.get("production_observation_envelope")
+        production = production if isinstance(production, Mapping) else {}
+        observation = production.get("observation")
+    if not isinstance(observation, Mapping):
+        return reject("OBSERVATION_SCOPE_UNAVAILABLE")
+    observation_sequence = observation.get("observation_sequence")
+    if (not observation.get("scope_id")
+            or intent.get("scope_id") != observation.get("scope_id")
+            or type(intent.get("action_epoch")) is not int
+            or intent.get("action_epoch") != observation.get("action_epoch")
+            or type(observation_sequence) is not int or observation_sequence < 0
+            or observation.get("observation_id") !=
+                f"observation:{observation.get('scope_id')}:{observation_sequence}"
+            or observation.get("observation_epoch") != observation.get("action_epoch")
+            or observation.get("capture_end_action_epoch") != observation.get("action_epoch")
+            or observation.get("capture_complete") is not True):
+        return reject("OBSERVATION_EPOCH_MISMATCH")
+    intent_sequence = intent.get("observation_sequence")
+    intent_observation_id = str(intent.get("observation_id") or "")
+    if (type(intent_sequence) is not int or intent_sequence < 0
+            or intent_observation_id != f"observation:{intent.get('scope_id')}:{intent_sequence}"):
+        return reject("INTENT_OBSERVATION_INVALID")
+    return dict(intent), "CURRENT_CONTROLLED_TARGET"
+
+
 def reconcile_focus(
     *,
     row: dict[str, Any],
@@ -173,8 +260,21 @@ def reconcile_focus(
         strict_a11y = actual_node.get("accessibilityFocused")
     strict = strict_a11y is True
 
+    controlled_intent, controlled_intent_status = current_controlled_focus_intent(row)
     selected: dict[str, Any] | None = None
-    if str(row.get("row_source", "") or "").strip() == "representative":
+    if controlled_intent is not None:
+        descriptor = controlled_intent["target_descriptor"]
+        selected = {
+            "scenario_id": scenario_id,
+            "view_id": descriptor.get("resource_id") or descriptor.get("view_id") or "",
+            "bounds": descriptor.get("bounds", ""),
+            "label": descriptor.get("label", ""),
+            "class_name": descriptor.get("class_name", ""),
+            "role": "",
+            "container_id": "",
+            "stable_node_path": "",
+        }
+    elif str(row.get("row_source", "") or "").strip() == "representative":
         selected = {
             "scenario_id": scenario_id,
             "view_id": row.get("focus_view_id", ""),
@@ -186,7 +286,10 @@ def reconcile_focus(
             "stable_node_path": row.get("focus_node_path", ""),
         }
     selected_id = instance_id(selected) if selected else ""
-    requested_id = str(row.get("smart_nav_requested_view_id", "") or "").strip()
+    requested_id = str(
+        (selected.get("view_id") if controlled_intent is not None else row.get("smart_nav_requested_view_id", ""))
+        or ""
+    ).strip()
 
     inventory_items: dict[str, dict[str, Any]] = {}
     for raw in inventory:
@@ -201,11 +304,11 @@ def reconcile_focus(
     if selected is not None and selected_id:
         inventory_items.setdefault(selected_id, {**selected, "candidate": {**selected, **{k: row.get(k) for k in _SEMANTIC_KEYS}}})
 
-    expected_ids = {
+    expected_ids = ({selected_id} if controlled_intent is not None and selected_id else {
         instance_id(_candidate_item(candidate, scenario_id))
         for candidate in expected_candidates
         if isinstance(candidate, dict)
-    }
+    })
     if selected is not None and selected_id:
         expected_ids.add(selected_id)
 
@@ -322,6 +425,8 @@ def reconcile_focus(
         "planning_consumed": bool(planning_consumed),
         "selected_candidate_consumed": bool(physical_visit_confirmed and strict and selected_matches_actual and in_expected),
         "selected_candidate_state": "focused" if selected_matches_actual else ("selected_but_not_focused" if selected_id else "none"),
+        "expected_target_source": "CONTROLLED_TARGET_INTENT" if controlled_intent is not None else "GENERIC_RECONCILIATION",
+        "controlled_focus_intent_status": controlled_intent_status,
         "mapped_candidate": mapped_candidate if matched else None,
         "actual_item": actual,
     }

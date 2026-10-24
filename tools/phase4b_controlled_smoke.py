@@ -25,13 +25,62 @@ from tb_runner.state_registry import StateRegistry
 from tools.state_fingerprint_diagnostic import capture_observation
 from tb_runner.action_provenance import build_action_chain, digest, action_chain_failures
 from tb_runner.phase5c_hard_stop import Phase5CHardStopState, commit_audit_hard_stop
+from tools.phase6d3a_rf5_harness import (
+    REDIRECT_ATTEMPT_BUDGET,
+    SUPPORTED_SCENARIOS as RF5_SUPPORTED_SCENARIOS,
+)
 
 STAGES = (("home_main", "devices_main"), ("life_find_plugin", "device_smoke_sensor_plugin"),
           ("life_food_plugin", "life_family_care_plugin"))
 SCENARIOS = tuple(s for stage in STAGES for s in stage)
 
 
-def main(*, generalized=False, safe_navigation=False):
+def _invoke_step_with_controlled_collector(*, client, controlled_collector, step_call):
+    """Compose the bounded Phase4B collector under the production 6D3A hook.
+
+    In SHADOW/ACTIVE mode the production interceptor is already installed by
+    collection_flow. Supply the Phase4B collector as its move=True downstream
+    delegate, while leaving move=False post-action observations on the original
+    production collector. Outside that wrapper scope, preserve the legacy
+    Phase4B behavior by temporarily installing the controlled collector.
+    """
+    if getattr(client, "_phase6d3a_interceptor_installed", False) is True:
+        had_delegate = "_phase6d3a_controlled_collect_delegate" in vars(client)
+        previous_delegate = vars(client).get("_phase6d3a_controlled_collect_delegate")
+        client._phase6d3a_controlled_collect_delegate = controlled_collector
+        try:
+            return step_call()
+        finally:
+            if had_delegate:
+                client._phase6d3a_controlled_collect_delegate = previous_delegate
+            else:
+                del client._phase6d3a_controlled_collect_delegate
+
+    had_instance = "collect_focus_step" in vars(client)
+    previous_collector = vars(client).get("collect_focus_step")
+    client.collect_focus_step = controlled_collector
+    try:
+        return step_call()
+    finally:
+        if had_instance:
+            client.collect_focus_step = previous_collector
+        else:
+            del client.collect_focus_step
+
+
+def _rf5_active_evaluation_count(controller):
+    """Read the bounded attempt count from production ACTIVE audit history."""
+    events = getattr(controller, "events", ())
+    return sum(
+        1 for event in events
+        if isinstance(event, dict)
+        and event.get("mode") == "ACTIVE"
+        and event.get("schema_version") == "phase6d3a-redirect-attempt-v1"
+    )
+
+
+def main(*, generalized=False, safe_navigation=False, rf5_harness=False):
+    rf5_harness = bool(rf5_harness or os.environ.get("TB_PHASE6D3A_RF5_HARNESS") == "1")
     if safe_navigation and (not generalized or os.environ.get("TB_PHASE5B_CONTROLLED") != "1"):
         raise ValueError("Safe navigation requires explicit bounded Phase 5B opt-in")
     safety_mode = os.environ.get("TB_PHASE5A_ACTION_SAFETY_MODE", "off")
@@ -54,13 +103,20 @@ def main(*, generalized=False, safe_navigation=False):
     prefix = "TB_PHASE4C" if generalized else "TB_PHASE4B"
     file_prefix = "phase4c" if generalized else "phase4b"
     scenario = os.environ.get(prefix + "_SMOKE_SCENARIO", "")
-    if os.environ.get(prefix + "_CONTROLLED") != "1" or scenario not in selected_scenarios:
+    if (os.environ.get(prefix + "_CONTROLLED") != "1"
+            or (scenario not in selected_scenarios
+                and not (rf5_harness and scenario in RF5_SUPPORTED_SCENARIOS))):
         raise ValueError("Explicit Phase 4B opt-in and supported scenario required")
+    if rf5_harness and (not generalized or safe_navigation or scenario not in RF5_SUPPORTED_SCENARIOS):
+        raise ValueError("RF5 requires an allowlisted generalized plugin scenario without navigation probes")
     out = Path(os.environ[prefix + "_SMOKE_OUT"]).resolve()
     config = json.loads(Path(os.environ["TB_RUNTIME_CONFIG_PATH"]).read_text(encoding="utf-8"))
     configured_max_steps = config.get("scenarios", {}).get(scenario, {}).get("max_steps")
+    rf5_main_step_budget = int(os.environ.get("TB_PHASE6D3A_RF5_MAIN_STEP_BUDGET", "0") or 0)
+    if rf5_harness and (rf5_main_step_budget != 7 or configured_max_steps != rf5_main_step_budget):
+        raise ValueError("RF5 requires the offline-validated seven-main-step budget")
     phase5c_full32 = os.environ.get("TB_PHASE5C_FULL32_ACCEPTANCE") == "1"
-    controlled_action_budget = BUDGETS[scenario]
+    controlled_action_budget = (BUDGETS.get(scenario, 10) if rf5_harness else BUDGETS[scenario])
     if phase5c_full32:
         from tb_runner.phase5c_budget_policy import resolve_phase5c_budget_pair
 
@@ -77,7 +133,7 @@ def main(*, generalized=False, safe_navigation=False):
         if pair["controlled_action_budget"] != BUDGETS[scenario]:
             raise ValueError("Phase 5C controlled action budget differs from the worker mapping")
         controlled_action_budget = pair["controlled_action_budget"]
-    elif configured_max_steps != BUDGETS[scenario]:
+    elif not rf5_harness and configured_max_steps != BUDGETS[scenario]:
         raise ValueError("Exactly five TOTAL production traversal steps required")
     serial = os.environ.get(prefix + "_SERIAL", "R3CX40QFDBP")
     run_dir = out / "run" / scenario
@@ -88,16 +144,285 @@ def main(*, generalized=False, safe_navigation=False):
     budget = ExecutionBudget(max_actions=controlled_action_budget)
     session = TraversalSession(scenario, controlled_action_budget) if generalized else None
     active, pending = {}, {}
+    rf5_focus_authorizer = None
+    rf5_state = {"native_dispatches": 0,
+                 "controller_event_cursor": 0, "initial_closed_filter": False,
+                 "stop_reason": ""}
     original_loop = collection_flow._main_loop_phase
     original_step = collection_flow._apply_step_collection_phase
     original_persist = collection_flow._apply_row_persistence_phase
     original_reconcile = collection_flow._apply_focus_reconciliation
     original_terminal = collection_flow._apply_content_terminal_phase
+    original_redirect_initialize = collection_flow._phase6d3a_initialize_redirect_context
+    original_redirect_intercept = collection_flow._phase6d3a_intercept_focus_step
+    original_redirect_reconcile = collection_flow._phase6d3a_record_production_reconciliation
 
     def save(name, value):
         with (out / name.replace("phase4b", file_prefix)).open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(value, ensure_ascii=False, default=str) + "\n")
         registry.save(registry_path)
+
+    def rf5_emit(record):
+        if not rf5_harness:
+            return
+        path_value = os.environ.get("TB_PHASE6D3A_RF5_EVIDENCE_PATH", "")
+        if not path_value:
+            return
+        path = Path(path_value)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+            stream.flush()
+
+    def rf5_save_runtime(client, output_path, reason):
+        if not rf5_harness:
+            return
+        saved = {}
+        for attr, key in (("_phase6c2_frontier_shadow_runtime", "frontier"),
+                          ("_phase6d_exploration_shadow_runtime", "exploration")):
+            runtime = getattr(client, attr, None)
+            writer = getattr(runtime, "write", None)
+            if callable(writer):
+                try:
+                    saved[key] = str(writer(output_path))
+                except Exception as exc:
+                    saved[key + "_error"] = type(exc).__name__
+        controller = getattr(client, "_phase6d3a_redirect_controller", None)
+        events = getattr(controller, "events", None)
+        if isinstance(events, list):
+            start = min(int(rf5_state["controller_event_cursor"]), len(events))
+            for event in events[start:]:
+                rf5_emit({"event": "CONTROLLER_REDIRECT_EVIDENCE", "record": event})
+            rf5_state["controller_event_cursor"] = len(events)
+        exploration = getattr(client, "_phase6d_exploration_shadow_runtime", None)
+        active_budget = getattr(client, "_phase6d3a_controlled_budget", None)
+        controller = getattr(client, "_phase6d3a_redirect_controller", None)
+        active_evaluations = [
+            event for event in getattr(controller, "events", ())
+            if isinstance(event, dict) and event.get("mode") == "ACTIVE"
+            and event.get("schema_version") == "phase6d3a-redirect-attempt-v1"
+        ]
+        rf5_emit({
+            "event": "RUNTIME_EVIDENCE_SAVED",
+            "reason": reason,
+            "saved": saved,
+            "evaluated_attempts": len(active_evaluations),
+            "candidate_evaluations": len(active_evaluations),
+            "stale_rejections": sum(
+                any("STALE" in str(code).upper() for code in
+                    ((event.get("common_readiness") or {}).get("reason_codes") or event.get("reason_codes") or ()))
+                for event in active_evaluations
+            ),
+            "initial_closed_filter_observed": rf5_state["initial_closed_filter"],
+            "native_dispatches": rf5_state["native_dispatches"],
+            "finalized_decisions": len(getattr(exploration, "decisions", [])),
+            "pending_decisions": len(getattr(exploration, "_pending", {})),
+            "redirect_budget": int(getattr(getattr(controller, "budget", None), "redirects_used", 0) or 0),
+            "controlled_budget": int(getattr(active_budget, "actions", 0) or 0),
+        })
+
+    if rf5_harness:
+        from tb_runner.phase5b_navigation import SafeNavigationSession
+        rf5_focus_authorizer = SafeNavigationSession(
+            scenario, lambda name, record: save(name, record))
+
+        def rf5_redirect_initialize(**kwargs):
+            result = original_redirect_initialize(**kwargs)
+            controller = getattr(kwargs["client"], "_phase6d3a_redirect_controller", None)
+            if controller is not None:
+                # One native redirect dispatch maximum. A separate harness
+                # counter permits one candidate and one stale-rejection check.
+                controller.budget.max_per_run = 1
+                controller.budget.max_per_state = 1
+                controller.budget.max_per_condition = 1
+            rf5_emit({"event": "RF5_REDIRECT_BOUNDS_INSTALLED",
+                      "max_evaluated_attempts": 2, "max_native_dispatches": 1,
+                      "controller_max_per_run": getattr(getattr(controller, "budget", None), "max_per_run", None)})
+            return result
+
+        def rf5_redirect_intercept(**kwargs):
+            from collections.abc import Mapping
+            from tb_runner.exploration_redirect import selected_redirect_hint
+
+            client = kwargs["client"]
+            controller = getattr(client, "_phase6d3a_redirect_controller", None)
+            collect_kwargs = kwargs.get("collect_kwargs")
+            collect_kwargs = collect_kwargs if isinstance(collect_kwargs, Mapping) else {}
+            direction = str(collect_kwargs.get("direction", "next") or "next").strip().lower()
+            active_evaluation_eligible = bool(
+                getattr(controller, "effective_mode", "OFF") == "ACTIVE"
+                and collect_kwargs.get("move") is True
+                and direction == "next"
+            )
+            # Preserve production's move=False observation path. Candidate-like
+            # cached records are diagnostic context here, never evaluation
+            # attempts or budget entries.
+            if not active_evaluation_eligible:
+                return original_redirect_intercept(**kwargs)
+            evaluations_before = _rf5_active_evaluation_count(controller)
+            if evaluations_before >= REDIRECT_ATTEMPT_BUDGET:
+                rf5_state["stop_reason"] = "RF5_EVALUATED_ATTEMPT_CAP"
+                rf5_emit({"event": "RF5_CONTROLLED_STOP", "step": kwargs.get("step_idx"),
+                          "reason": rf5_state["stop_reason"],
+                          "production_evaluation_count": evaluations_before,
+                          "move": collect_kwargs.get("move"), "direction": direction})
+                rf5_save_runtime(client, kwargs["phase_ctx"].output_path, rf5_state["stop_reason"])
+                raise SystemExit(0)
+            inputs, record, hint, reason = {}, {}, None, "DECISION_PROBE_UNAVAILABLE"
+            try:
+                inputs = collection_flow._phase6d3a_shadow_decision_inputs(
+                    client, kwargs["state"], kwargs["phase_ctx"], kwargs["tab_cfg"])
+                record = inputs.get("record") if isinstance(inputs, Mapping) else {}
+                record = record if isinstance(record, Mapping) else {}
+                hint, reason = selected_redirect_hint(
+                    record,
+                    scenario_id=str(kwargs["tab_cfg"].get("scenario_id") or ""),
+                    scenario_type=str(kwargs["tab_cfg"].get("scenario_type", "content") or "content"),
+                    screen_context_mode=str(kwargs["tab_cfg"].get("screen_context_mode", "") or ""),
+                    require_execution_ready=False,
+                )
+            except Exception as exc:
+                reason = "DECISION_PROBE_" + type(exc).__name__
+            if reason.startswith("DECISION_PROBE_"):
+                rf5_state["stop_reason"] = "DECISION_PROBE_FAILED_CLOSED"
+                rf5_emit({
+                    "event": "RF5_CONTROLLED_STOP",
+                    "step": kwargs.get("step_idx"),
+                    "reason": rf5_state["stop_reason"],
+                    "probe_error": reason,
+                })
+                rf5_save_runtime(client, kwargs["phase_ctx"].output_path, rf5_state["stop_reason"])
+                raise SystemExit(0)
+            dispatches_before = int(getattr(getattr(controller, "metrics", None), "counters", {}).get(
+                "REDIRECT_DISPATCH_COUNT", 0) or 0)
+            has_closed_record = bool(record.get("decision_id") or record.get("decision_stage"))
+            stale_rejection = bool(dispatches_before > 0 and has_closed_record and hint is None and (
+                reason in {"CLOSED_CURRENT_DECISION_REQUIRED", "DECISION_WATERMARK_MISMATCH"}
+                or record.get("stale_status") != "NO"
+                or record.get("decision_evidence_usable") is not True
+            ))
+            if not has_closed_record and reason == "CLOSED_CURRENT_DECISION_REQUIRED":
+                rf5_state["initial_closed_filter"] = True
+            filter_kind = "CANDIDATE_OPPORTUNITY" if hint is not None else (
+                "STALE_CURRENTNESS_REJECTION" if stale_rejection else "ORDINARY_FILTER")
+            probe = {
+                "event": "RF5_REDIRECT_FILTER",
+                "step": kwargs.get("step_idx"),
+                "filter_kind": filter_kind,
+                "selection_reason": reason,
+                "move": collect_kwargs.get("move"),
+                "direction": direction,
+                "decision_id": record.get("decision_id"),
+                "decision_stage": record.get("decision_stage"),
+                "decision_evidence_usable": record.get("decision_evidence_usable"),
+                "stale_status": record.get("stale_status"),
+                "shadow_decision": record.get("shadow_decision"),
+                "frontier_priority": (record.get("selected_frontier") or {}).get("priority_class")
+                    if isinstance(record.get("selected_frontier"), Mapping) else None,
+                "frontier_edge_type": (record.get("selected_frontier") or {}).get("edge_type")
+                    if isinstance(record.get("selected_frontier"), Mapping) else None,
+                "frontier_id": hint.get("frontier_id") if hint else None,
+                "target_identity": hint.get("target_identity") if hint else None,
+                "dispatches_before": dispatches_before,
+            }
+            rf5_emit(probe)
+
+            # The naturally stale decision is a completed negative check. Stop
+            # before ordinary traversal can spend another action budget slot.
+            if stale_rejection:
+                rf5_state["stop_reason"] = "STALE_DECISION_REJECTED_WITH_ZERO_REDIRECT_DISPATCH"
+                rf5_emit({"event": "RF5_CONTROLLED_STOP", "step": kwargs.get("step_idx"),
+                          "reason": rf5_state["stop_reason"],
+                          "production_evaluation_count": evaluations_before,
+                          "dispatches_before": dispatches_before,
+                          "selection_reason": reason})
+                rf5_save_runtime(client, kwargs["phase_ctx"].output_path, rf5_state["stop_reason"])
+                raise SystemExit(0)
+
+            active_budget_before = getattr(client, "_phase6d3a_controlled_budget", None)
+            before_actions = int(getattr(active_budget_before, "actions", 0) or 0)
+            try:
+                result = original_redirect_intercept(**kwargs)
+            except BaseException:
+                rf5_emit({"event": "REDIRECT_HOOK_INTERRUPTED", "step": kwargs.get("step_idx"),
+                          "audit": getattr(client, "_phase6d3a_last_step_audit", None)})
+                rf5_save_runtime(client, kwargs["phase_ctx"].output_path, "REDIRECT_HOOK_INTERRUPTED")
+                raise
+            audit = result.get("phase6d3a_redirect") if isinstance(result, dict) else None
+            if not isinstance(audit, dict):
+                audit = getattr(client, "_phase6d3a_last_step_audit", None)
+            active_budget_after = getattr(client, "_phase6d3a_controlled_budget", None)
+            after_actions = int(getattr(active_budget_after, "actions", 0) or 0)
+            evaluations_after = _rf5_active_evaluation_count(controller)
+            evaluation_delta = evaluations_after - evaluations_before
+            if evaluation_delta not in (0, 1):
+                rf5_state["stop_reason"] = "PRODUCTION_EVALUATION_COUNTER_INCONSISTENT"
+                rf5_emit({"event": "RF5_CONTROLLED_STOP", "step": kwargs.get("step_idx"),
+                          "reason": rf5_state["stop_reason"],
+                          "production_evaluations_before": evaluations_before,
+                          "production_evaluations_after": evaluations_after})
+                rf5_save_runtime(client, kwargs["phase_ctx"].output_path, rf5_state["stop_reason"])
+                raise SystemExit(0)
+            current_dispatches = int(getattr(getattr(controller, "metrics", None), "counters", {}).get(
+                "REDIRECT_DISPATCH_COUNT", 0) or 0)
+            rf5_state["native_dispatches"] = current_dispatches
+            redirect_budget_after = int(getattr(getattr(controller, "budget", None), "redirects_used", 0) or 0)
+            rf5_emit({"event": "REDIRECT_HOOK_RESULT", "step": kwargs.get("step_idx"),
+                      "production_evaluation_delta": evaluation_delta,
+                      "production_evaluations_before": evaluations_before,
+                      "production_evaluations_after": evaluations_after,
+                      "audit": audit, "redirect_budget_before": redirect_budget_after
+                          - int(bool(audit and audit.get("dispatch_attempted"))),
+                      "redirect_budget_after": redirect_budget_after,
+                      "controlled_budget_before": before_actions,
+                      "controlled_budget_after": after_actions,
+                      "ordinary_action_classification": "ACTIVE_REDIRECT" if evaluation_delta else "PRODUCTION_OR_ORDINARY"})
+            if isinstance(audit, dict):
+                phase5_events = audit.get("phase5_authorization_events") or []
+                phase5_denied = any(isinstance(item, dict) and (
+                    item.get("event") == "BLOCKED_BEFORE_DISPATCH"
+                    or (item.get("record") or {}).get("event") == "BLOCKED_BEFORE_DISPATCH")
+                    for item in phase5_events)
+                common = audit.get("common_readiness") or {}
+                unknown_readiness = (audit.get("readiness_status") == "UNKNOWN"
+                                     or common.get("readiness_status") == "UNKNOWN")
+                reason_codes = common.get("reason_codes") or audit.get("reason_codes") or []
+                lifecycle_unstable = any(
+                    any(marker in str(code).upper() for marker in ("LIFECYCLE", "HELPER_UNSTABLE", "TRANSPORT_UNSTABLE"))
+                    for code in reason_codes)
+                if int(audit.get("dispatch_count", 0) or 0) > 1 or current_dispatches > 1:
+                    rf5_state["stop_reason"] = "DUPLICATE_REDIRECT_NATIVE_DISPATCH"
+                elif phase5_denied:
+                    rf5_state["stop_reason"] = "PHASE5_REDIRECT_AUTHORIZATION_DENIED"
+                elif lifecycle_unstable:
+                    rf5_state["stop_reason"] = "LIFECYCLE_OR_TRANSPORT_UNSTABLE"
+                elif hint is not None and unknown_readiness:
+                    rf5_state["stop_reason"] = "SAFETY_RELEVANT_READINESS_UNKNOWN"
+                if rf5_state["stop_reason"]:
+                    rf5_emit({"event": "RF5_CONTROLLED_STOP", "reason": rf5_state["stop_reason"],
+                              "step": kwargs.get("step_idx"), "audit": audit})
+                    rf5_save_runtime(client, kwargs["phase_ctx"].output_path, rf5_state["stop_reason"])
+                    raise SystemExit(0)
+            return result
+
+        def rf5_redirect_reconcile(*, client, row):
+            result = original_redirect_reconcile(client=client, row=row)
+            audit = row.get("phase6d3a_redirect") if isinstance(row, dict) else None
+            if isinstance(audit, dict) and audit.get("mode") == "ACTIVE":
+                rf5_emit({"event": "PRODUCTION_REDIRECT_RECONCILIATION", "step": row.get("step_index"),
+                          "audit": audit,
+                          "actual_focus_instance_id": row.get("actual_focus_instance_id"),
+                          "actual_focus_accessibility_focused": row.get("actual_focus_accessibility_focused"),
+                          "focus_transition_status": row.get("focus_transition_status"),
+                          "visit_record_status": row.get("visit_record_status")})
+                if audit.get("dispatch_attempted") is True and audit.get("production_target_reached") is not True:
+                    client._phase6d3a_rf5_stop_after_persist = True
+                    client._phase6d3a_rf5_stop_reason = "REDIRECT_FOCUS_RECONCILIATION_MISMATCH"
+            return result
+
+        collection_flow._phase6d3a_initialize_redirect_context = rf5_redirect_initialize
+        collection_flow._phase6d3a_intercept_focus_step = rf5_redirect_intercept
+        collection_flow._phase6d3a_record_production_reconciliation = rf5_redirect_reconcile
 
     navigation = SafeNavigationSession(scenario, save, safety_config=safety.config if safety else None) if safe_navigation else None
 
@@ -197,6 +522,9 @@ def main(*, generalized=False, safe_navigation=False):
                 save("phase5b_session_summary.jsonl", dict(scenario=scenario, blocked_candidate_repeats=navigation.blocked_repeats,
                     blocked_scope_count=len(navigation.blocked), transport_blocks=len(navigation.command_blocks),
                     completed_navigation_probe=navigation.completed, attempt_credit=0, visit_credit=0))
+            if rf5_harness:
+                rf5_save_runtime(client, phase_ctx.output_path,
+                    getattr(client, "_phase6d3a_rf5_stop_reason", "MAIN_LOOP_EXIT"))
             active.clear()
 
     def observed_step(**kwargs):
@@ -276,35 +604,51 @@ def main(*, generalized=False, safe_navigation=False):
         def controlled(**collect_kwargs):
             nonlocal collector_used
             collector_used = True
-            return controlled_collect(client=client, dev=kwargs["dev"], scenario=scenario, step=step,
+            focus_authorization = None
+            if navigation:
+                focus_authorization = lambda target, node: navigation.authorize_focus_target(
+                    raw=current_raw, value=current, target=target, phase4_gate=decision,
+                    step=step, dispatch_kind="PRIMARY")
+            elif rf5_focus_authorizer is not None:
+                rf5_focus_authorizer._active_client = client
+                focus_authorization = lambda target, node: rf5_focus_authorizer.authorize_focus_target(
+                    raw=current_raw, value=current, target=target, phase4_gate=decision,
+                    step=step, dispatch_kind="RF5_BASELINE_CONTROLLED_FOCUS")
+            controlled_kwargs = dict(client=client, dev=kwargs["dev"], scenario=scenario, step=step,
                 raw=current_raw, recommendation=recommendation, decision=decision, budget=budget,
                 collect=(lambda **kw: navigation.collect(collect, kw, audit, client)) if navigation else collect,
                 collect_kwargs=collect_kwargs, refresh=refresh,
                 output_dir=str(run_dir), audit=audit,
                 audit_sink=lambda event: save("phase4b_action_audit.jsonl", event),
-                focus_authorization=(lambda target, node: navigation.authorize_focus_target(
-                    raw=current_raw, value=current, target=target, phase4_gate=decision,
-                    step=step, dispatch_kind="PRIMARY")) if navigation else None)
-        had_instance = "collect_focus_step" in client.__dict__
-        prior_instance = client.__dict__.get("collect_focus_step")
-        client.collect_focus_step = controlled
-        try:
-            row = original_step(**kwargs)
-            if not collector_used:
-                # Existing forced local-tab/recovery paths can collect a row
-                # without calling collect_focus_step. Preserve that path and
-                # audit its production authority; never require a planner hook.
-                budget.fallback_count += 1
-                audit.update(actual_execution_mode="FALLBACK_PRODUCTION", classification="PRODUCTION_ONLY",
-                    fallback_used=True, fallback_reason=decision.reason if not decision.allowed else "PRODUCTION_RECOVERY_OWNS_STEP",
-                    production_fallback_action="PRODUCTION_RECOVERY")
-                save("phase4b_action_audit.jsonl", dict(event="PRODUCTION_RECOVERY_BYPASS", **audit))
-            return row
-        finally:
-            if had_instance:
-                client.collect_focus_step = prior_instance
-            else:
-                del client.collect_focus_step
+                focus_authorization=focus_authorization)
+            if rf5_focus_authorizer is not None and navigation is None:
+                with rf5_focus_authorizer.firewall(client, kwargs["dev"]):
+                    return controlled_collect(**controlled_kwargs)
+            return controlled_collect(**controlled_kwargs)
+        row = _invoke_step_with_controlled_collector(
+            client=client, controlled_collector=controlled,
+            step_call=lambda: original_step(**kwargs))
+        active_redirect = row.get("phase6d3a_redirect") if isinstance(row, dict) else None
+        if rf5_harness and not collector_used and isinstance(active_redirect, dict) \
+                and active_redirect.get("mode") == "ACTIVE":
+            # The 6D3A adapter owns its own typed dispatch/accounting path;
+            # do not mislabel this as a production-recovery bypass.
+            audit.update(actual_execution_mode="PHASE6D3A_ACTIVE",
+                classification="PHASE6D3A_REDIRECT_INTERCEPTED", fallback_used=False,
+                fallback_reason="", phase6d3a_redirect=deepcopy(active_redirect),
+                redirect_budget=active_redirect.get("redirect_budget_after"),
+                redirect_dispatch_count=active_redirect.get("dispatch_count"))
+            save("phase4c_execution_trace.jsonl", audit)
+        elif not collector_used:
+            # Existing forced local-tab/recovery paths can collect a row
+            # without calling collect_focus_step. Preserve that path and
+            # audit its production authority; never require a planner hook.
+            budget.fallback_count += 1
+            audit.update(actual_execution_mode="FALLBACK_PRODUCTION", classification="PRODUCTION_ONLY",
+                fallback_used=True, fallback_reason=decision.reason if not decision.allowed else "PRODUCTION_RECOVERY_OWNS_STEP",
+                production_fallback_action="PRODUCTION_RECOVERY")
+            save("phase4b_action_audit.jsonl", dict(event="PRODUCTION_RECOVERY_BYPASS", **audit))
+        return row
 
     def reconciled(**kwargs):
         row = kwargs["row"]
@@ -412,6 +756,14 @@ def main(*, generalized=False, safe_navigation=False):
                 return raw, replace(active["before"][1], snapshot=snapshot), resolve_phase3_context(raw)
             navigation.roundtrip(client=active["step_kwargs"]["client"], dev=active["step_kwargs"]["dev"],
                 capture=nav_capture, step=kwargs["step_idx"])
+        client = kwargs.get("client")
+        if rf5_harness and getattr(client, "_phase6d3a_rf5_stop_after_persist", False):
+            reason = str(getattr(client, "_phase6d3a_rf5_stop_reason", "REDIRECT_FOCUS_RECONCILIATION_MISMATCH"))
+            rf5_emit({"event": "RF5_CONTROLLED_STOP", "reason": reason,
+                      "step": kwargs.get("step_idx"),
+                      "audit": kwargs.get("row", {}).get("phase6d3a_redirect")})
+            rf5_save_runtime(client, kwargs["phase_ctx"].output_path, reason)
+            raise SystemExit(0)
         return result
 
     collection_flow._main_loop_phase = observed_loop
@@ -424,7 +776,17 @@ def main(*, generalized=False, safe_navigation=False):
     sys.argv = ["script_test.py", "--serial", serial, "--output-dir", str(run_dir),
                 "--language-mode", "current", "--launch-mode", "warm", "--scenario", scenario]
     try:
-        runpy.run_path("script_test.py", run_name="__main__")
+        if rf5_harness:
+            import importlib
+            script_module = importlib.import_module("script_test")
+            # A helper/service crash must stop this single bounded RF5 run;
+            # never restart the scenario and replenish its run-scoped budgets.
+            script_module.MAX_CRASH_RETRY_ATTEMPTS = 0
+            result_code = script_module.main()
+            if isinstance(result_code, int) and result_code != 0:
+                return result_code
+        else:
+            runpy.run_path("script_test.py", run_name="__main__")
     except SystemExit as exc:
         return exc.code if isinstance(exc.code, int) else 1
     finally:
@@ -433,6 +795,9 @@ def main(*, generalized=False, safe_navigation=False):
         collection_flow._apply_row_persistence_phase = original_persist
         collection_flow._apply_focus_reconciliation = original_reconcile
         collection_flow._apply_content_terminal_phase = original_terminal
+        collection_flow._phase6d3a_initialize_redirect_context = original_redirect_initialize
+        collection_flow._phase6d3a_intercept_focus_step = original_redirect_intercept
+        collection_flow._phase6d3a_record_production_reconciliation = original_redirect_reconcile
         sys.argv = previous_argv
         registry.save(registry_path)
     return 0

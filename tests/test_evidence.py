@@ -155,6 +155,27 @@ def test_smart_next_helper_facts_are_copied_to_runner_ledger(tmp_path: Path) -> 
     assert "HELPER_ACK_RECEIVED" in event_types
 
 
+def test_new_action_clears_old_request_and_completion_uses_current_dispatch_only(tmp_path: Path) -> None:
+    client = A11yAdbClient(start_monitor=False)
+    runtime = EvidenceRuntime(output_path=tmp_path / "current_action_request.xlsx")
+    runtime.start_scenario("home_safe_plugin", "home")
+    client.set_evidence_runtime(runtime)
+    client.last_smart_nav_result = {"reqId": "request-old", "success": True}
+    client._evidence_active_request_id = "request-old"
+
+    transaction = client._evidence_begin_step_action("SMART_NEXT")
+    assert transaction is not None
+    assert client._evidence_active_request_id == ""
+
+    fetched = []
+    client._evidence_fetch_helper_events = lambda _dev, *, req_id: fetched.append(req_id)
+    client._evidence_complete_step_action(
+        {"step_index": 1, "merged_announcement": "current"},
+        {"text": "current", "accessibilityFocused": True},
+    )
+    assert fetched == [""]
+
+
 def test_helper_evidence_accepts_json_string_and_snake_case_event_type(tmp_path: Path) -> None:
     client = A11yAdbClient(start_monitor=False)
     runtime = EvidenceRuntime(output_path=tmp_path / "talkback_compare.xlsx")

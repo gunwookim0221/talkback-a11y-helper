@@ -160,15 +160,24 @@ def plugin_context_evidence(entry: Mapping[str, Any], raw: Mapping[str, Any],
             or entry.get("entry_anchor_accessibility_focused") is not True
             or entry.get("entry_anchor_source") != "verified_pre_loop_anchor"):
         return {}
+    entity_root_provenance = raw.get("phase6d3a_entity_root_provenance")
     return dict(schema_version="generic-plugin-context-v1", source="production_post_open_main_loop",
                 scenario_id=entry.get("scenario_id"), scenario_run_id=entry.get("scenario_run_id"),
                 entry_contract_digest=entry.get("entry_contract_digest"),
+                # This is a contract correlation key only. Runtime entity
+                # identity is carried separately by entity_root_provenance.
+                context_contract_id=entry.get("entry_contract_digest"),
+                # Compatibility alias for existing Phase4C/Phase5 evidence
+                # consumers. It remains a config-contract key only and is
+                # never consulted by the entity-to-root link resolver.
                 destination_identity=entry.get("entry_contract_digest"),
                 navigation_epoch=navigation_epoch, captured_at=raw.get("timestamp"),
                 package_name=raw.get("package_name"), activity_name=raw.get("activity_name"),
                 component_source=raw.get("context_source"), body_resource_ids=body_resources(raw),
                 post_open_verified=True, post_open_summary=dict(summary),
-                proof_capture_id=raw.get("capture_id"))
+                proof_capture_id=raw.get("capture_id"),
+                entity_root_provenance=(deepcopy(dict(entity_root_provenance))
+                                        if isinstance(entity_root_provenance, Mapping) else None))
 
 
 def generic_plugin_context(raw, config, *, entry_current, entry_reason, labels,
@@ -177,9 +186,15 @@ def generic_plugin_context(raw, config, *, entry_current, entry_reason, labels,
     """Resolve an owned proof against current observations; never infer by name."""
     proof = raw.get("phase3_plugin_context_evidence")
     destination_evidence: dict[str, Any] = {"lexical_hints": [], "structural_evidence": []}
+    def contract_id(value):
+        if not isinstance(value, Mapping):
+            return None
+        # Older persisted v1 evidence used this field name for the same
+        # contract digest; it was never an entity identity.
+        return value.get("context_contract_id", value.get("destination_identity"))
     def result(status, reason, signals=()):
         return dict(status=status, context_tier=("PARTIAL_PLUGIN_CONTEXT" if status == "PARTIAL_CONTEXT" else status),
-                    context_type="plugin", context_id=(proof.get("destination_identity")
+                    context_type="plugin", context_id=(contract_id(proof)
                         if status == "VERIFIED_PLUGIN_CONTEXT" and isinstance(proof, Mapping) else None),
                     context_source="generic_production_entry+post_open+current_runtime",
                     confidence="HIGH" if status == "VERIFIED_PLUGIN_CONTEXT" else "LOW",
@@ -199,7 +214,7 @@ def generic_plugin_context(raw, config, *, entry_current, entry_reason, labels,
             or proof.get("scenario_run_id") != raw.get("scenario_run_id")
             or not raw.get("navigation_epoch")
             or proof.get("navigation_epoch") != raw.get("navigation_epoch")
-            or proof.get("destination_identity") != entry.get("entry_contract_digest")
+            or contract_id(proof) != entry.get("entry_contract_digest")
             or proof.get("entry_contract_digest") != entry.get("entry_contract_digest")
             or not proof.get("proof_capture_id")
             or not current_time or not proof_time or proof_time > current_time

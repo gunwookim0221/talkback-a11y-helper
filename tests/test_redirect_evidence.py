@@ -8,21 +8,27 @@ from talkback_lib.exploration_evidence_clock import EvidenceClock
 
 
 def ready():
-    selected = dict(frontier_id="frontier-1", candidate_id="candidate-1", state_id="state-1",
-                    edge_type="TARGETED_FOCUS", action_type="TARGETED_FOCUS",
-                    target_identity={"instance_id": "instance-1"}, status="ELIGIBLE")
-    context = dict(scope_id="scope-a", active_scope_id="scope-a",
-                   state_id="state-1", substate_ref="substate-1", action_epoch=1, observation_epoch=1,
-                   observation_id="observation:scope-a:1", observation_sequence=1, decision_watermark=3,
-                   ownership_ref="dispatch:scope-a:1", action_ownership={"owner": "PRIMARY", "ownership_status": "KNOWN", "action_id": "dispatch:scope-a:1", "action_epoch": 1},
-                   evidence_current=True, pending_action=False,
-                   planner_policy_ref="planner-v1", safety_policy_ref="safety-v1", binding_policy_ref="binding-v1")
-    sources = {}
-    for kind, status in [("planner", "ELIGIBLE"), ("safety", "ALLOWED"), ("binding", "RESOLVED"), ("presence", "PRESENT")]:
-        sources[kind] = {**deepcopy(context), "status": status, "source": SOURCES[kind],
-                         "proof_ref": kind + ":proof-1", "policy_ref": context.get(kind + "_policy_ref"),
-                         "resolver_ref": "resolver:proof-1", "action_type": "FOCUS",
-                         "target_identity": deepcopy(selected["target_identity"])}
+    # Reuse the actual proof producer, production frontier candidate, and
+    # current observation bridge used by the Phase 6D3A integration fixture.
+    # These contract tests must not reintroduce the old instance_id-only shape.
+    from test_exploration_redirect import _real_frontier_discovery_fixture
+    from tb_runner.redirect_evidence import current_execution_context
+
+    _value, _raw, _recommendation, _production, record, clock, _current = (
+        _real_frontier_discovery_fixture())
+    selected = deepcopy(record["selected_frontier"])
+    sources = deepcopy(record["actual_proof_sources"])
+    client = SimpleNamespace(
+        _adb_device=SimpleNamespace(shadow_evidence_clock=clock),
+        _phase6_redirect_context={
+            "planner_policy_ref": "planner-policy",
+            "safety_policy_ref": "safety-policy",
+            "binding_policy_ref": "binding-policy",
+        },
+    )
+    context = current_execution_context(
+        client, record["observation_alignment"], state_id=selected["state_id"],
+        watermark=record["step"], production_state=SimpleNamespace())
     return dict(selected=selected, sources=sources, context=context)
 
 
@@ -131,7 +137,10 @@ def test_live_context_projects_active_scope_and_rejects_foreign_observation():
 
 def test_frontier_planner_target_disagreement_is_explicit():
     inputs = ready()
-    inputs["sources"]["planner"]["target_identity"] = {"instance_id": "other"}
+    different = deepcopy(inputs["selected"]["target_identity"])
+    different["instance_id"] += ":other"
+    different["identity_attributes"]["resource_id"] += ":other"
+    inputs["sources"]["planner"]["target_identity"] = different
     result = evaluate_redirect_evidence(**inputs)
     assert result["status"] == "PLANNER_BLOCKED"
     assert result["reason_codes"] == ["PLANNER_TARGET_DISAGREEMENT"]
@@ -154,7 +163,8 @@ def test_runtime_completion_and_selected_execution_are_independent():
     from tb_runner.exploration_shadow import ExplorationShadowRuntime
     inputs = ready()
     selected = inputs["selected"]
-    kwargs = _inputs(3, state_id="state-1", items=[selected], evidence_complete=False, unknown_count=1)
+    step = inputs["context"]["decision_watermark"]
+    kwargs = _inputs(step, state_id=selected["state_id"], items=[selected], evidence_complete=False, unknown_count=1)
     kwargs["frontier_evaluation"]["shadow_next_frontier"] = selected["frontier_id"]
     runtime = ExplorationShadowRuntime("run", "scenario")
     token = runtime.prepare_decision(**kwargs, execution_context=inputs["context"], selected_execution_sources=inputs["sources"])
@@ -174,7 +184,8 @@ def test_policy_change_before_finalize_revokes_selected_ready():
     from test_exploration_shadow import _inputs
     from tb_runner.exploration_shadow import ExplorationShadowRuntime
     inputs = ready()
-    kwargs = _inputs(3, state_id="state-1", items=[inputs["selected"]], evidence_complete=False)
+    step = inputs["context"]["decision_watermark"]
+    kwargs = _inputs(step, state_id=inputs["selected"]["state_id"], items=[inputs["selected"]], evidence_complete=False)
     kwargs["frontier_evaluation"]["shadow_next_frontier"] = inputs["selected"]["frontier_id"]
     runtime = ExplorationShadowRuntime("run", "scenario")
     token = runtime.prepare_decision(**kwargs, execution_context=inputs["context"], selected_execution_sources=inputs["sources"])
@@ -187,17 +198,21 @@ def test_policy_change_before_finalize_revokes_selected_ready():
 def test_frontier_post_result_uses_current_proofs_without_granting_visits():
     from tb_runner.frontier_shadow import FrontierShadowRuntime
     inputs = ready()
+    step = inputs["context"]["decision_watermark"]
     runtime = FrontierShadowRuntime("run", "scenario")
-    runtime.capture_inventory(step=3, state_id="state-1", candidates=[inputs["selected"]], inventory_complete=True)
-    result = runtime.evaluate_post_action(step=3, decision_id="decision-3", decision_watermark=3,
-        state_id="state-1", execution_sources=inputs["sources"], execution_context=inputs["context"],
-        focus_cursor={"instance_id": "other", "confirmed": True})
+    runtime.capture_inventory(step=step, state_id=inputs["selected"]["state_id"],
+                              candidates=[inputs["selected"]], inventory_complete=True,
+                              observation_ref={"request_id": "action-current"})
+    result = runtime.evaluate_post_action(step=step, decision_id=f"decision-{step}", decision_watermark=step,
+        state_id=inputs["selected"]["state_id"], execution_sources=inputs["sources"], execution_context=inputs["context"],
+        focus_cursor={"instance_id": "other", "confirmed": True}, result_request_id="action-current")
     assert result["counts"]["eligible_count"] == 1
     assert runtime.history["visit_events"] == []
     assert result["shadow_next_frontier"]
     inputs["sources"]["planner"]["status"] = "UNKNOWN"
-    result = runtime.evaluate_post_action(step=3, decision_id="decision-3", decision_watermark=3,
-        state_id="state-1", execution_sources=inputs["sources"], execution_context=inputs["context"])
+    result = runtime.evaluate_post_action(step=step, decision_id=f"decision-{step}", decision_watermark=step,
+        state_id=inputs["selected"]["state_id"], execution_sources=inputs["sources"], execution_context=inputs["context"],
+        result_request_id="action-current")
     assert result["counts"]["eligible_count"] == 0
 
 
@@ -222,7 +237,8 @@ def test_ready_cannot_be_rebound_to_a_different_decision_at_finalize():
     from test_exploration_shadow import _inputs
     from tb_runner.exploration_shadow import ExplorationShadowRuntime
     inputs = ready()
-    kwargs = _inputs(3, state_id="state-1", items=[inputs["selected"]], evidence_complete=False)
+    step = inputs["context"]["decision_watermark"]
+    kwargs = _inputs(step, state_id=inputs["selected"]["state_id"], items=[inputs["selected"]], evidence_complete=False)
     kwargs["frontier_evaluation"]["shadow_next_frontier"] = inputs["selected"]["frontier_id"]
     runtime = ExplorationShadowRuntime("run", "scenario")
     token = runtime.prepare_decision(**kwargs, execution_context=inputs["context"], selected_execution_sources=inputs["sources"])
@@ -239,7 +255,8 @@ def test_new_policy_and_new_matching_proof_still_invalidate_pending_evidence():
     from test_exploration_shadow import _inputs
     from tb_runner.exploration_shadow import ExplorationShadowRuntime
     inputs = ready()
-    kwargs = _inputs(3, state_id="state-1", items=[inputs["selected"]], evidence_complete=False)
+    step = inputs["context"]["decision_watermark"]
+    kwargs = _inputs(step, state_id=inputs["selected"]["state_id"], items=[inputs["selected"]], evidence_complete=False)
     kwargs["frontier_evaluation"]["shadow_next_frontier"] = inputs["selected"]["frontier_id"]
     runtime = ExplorationShadowRuntime("run", "scenario")
     token = runtime.prepare_decision(**kwargs, execution_context=inputs["context"], selected_execution_sources=inputs["sources"])

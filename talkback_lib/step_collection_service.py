@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from typing import Any
+from talkback_lib.smart_nav_invocation import begin_invocation, collection_call, current_result
 
 from talkback_lib.step_row_builder import (
     build_noise_trim_anchor_labels,
@@ -36,14 +37,16 @@ class StepCollectionService:
         except Exception:
             pass
 
-    def _correlated_action_focus_observation(self, *, move: bool) -> dict[str, Any] | None:
+    def _correlated_action_focus_observation(self, *, move: bool,
+                                            invocation_generation=None) -> dict[str, Any] | None:
         """Return only a strongly correlated Helper post-action focus snapshot."""
         transaction = getattr(self.client, "_evidence_active_transaction", None)
         transaction_id = str(transaction.get("transaction_id") or "") if isinstance(transaction, dict) else ""
         request_id = str(getattr(self.client, "_evidence_active_request_id", "") or "").strip()
         if not transaction_id or not request_id:
             return None
-        result = self.client.last_smart_nav_result if move else self.client.last_target_action_result
+        result = (current_result(self.client, invocation_generation)
+                  if move else self.client.last_target_action_result)
         if not isinstance(result, dict) or not bool(result.get("success")):
             return None
         result_request_id = str(result.get("reqId") or result.get("requestId") or "").strip()
@@ -243,6 +246,9 @@ class StepCollectionService:
         allow_step_dump: bool = True,
         get_focus_mode: str = "normal",
     ) -> dict[str, Any]:
+        # Establish ownership before baseline/evidence hooks or row creation.
+        invocation_generation = (begin_invocation(self.client)
+                                 if move and str(direction).strip().lower() == "next" else None)
         step_started = time.monotonic()
         self.client.last_native_speech_evidence = []
         baseline_announcement = str(self.client.last_merged_announcement or "").strip()
@@ -252,6 +258,12 @@ class StepCollectionService:
             f"[ANN][baseline] text='{baseline_announcement}' ts={baseline_announcement_ts:.3f}"
         )
         step: dict[str, Any] = create_base_step_row(step_index=step_index)
+        if invocation_generation is not None:
+            step["smart_nav_invocation_generation"] = invocation_generation
+        if move:
+            step["phase6_current_action_type"] = (
+                "SMART_NEXT" if str(direction).strip().lower() == "next" else "SMART_PREVIOUS"
+            )
         set_evidence_step = getattr(self.client, "_evidence_set_step", None)
         begin_evidence_action = getattr(self.client, "_evidence_begin_step_action", None)
         if callable(set_evidence_step):
@@ -267,7 +279,8 @@ class StepCollectionService:
                     action_type = "SMART_NEXT" if str(direction).strip().lower() == "next" else "SMART_PREVIOUS"
                     begin_evidence_action(action_type, direction=direction)
                 if str(direction).strip().lower() == "next":
-                    step["move_result"] = self.client.move_focus_smart(dev=dev, direction=direction)
+                    with collection_call(self.client, invocation_generation):
+                        step["move_result"] = self.client.move_focus_smart(dev=dev, direction=direction)
                 else:
                     step["move_result"] = self.client.move_focus(dev=dev, direction=direction)
             except Exception as exc:
@@ -275,11 +288,35 @@ class StepCollectionService:
             step["move_elapsed_sec"] = round(time.monotonic() - move_started, 3)
         else:
             step["move_elapsed_sec"] = 0.0
-        smart_nav_result = self.client.last_smart_nav_result if isinstance(self.client.last_smart_nav_result, dict) else {}
+        cached_smart_nav_result = (
+            self.client.last_smart_nav_result
+            if isinstance(getattr(self.client, "last_smart_nav_result", None), dict)
+            else {}
+        )
+        if not move:
+            # A state-only capture may retain the previous action as
+            # diagnostic context; its action marker remains empty.
+            smart_nav_result = cached_smart_nav_result
+            smart_nav_terminal = bool(getattr(self.client, "last_smart_nav_terminal", False))
+        elif str(direction).strip().lower() == "next":
+            # Request ownership is based on the result returned by this exact
+            # move_focus_smart invocation, never the historical cache.
+            smart_nav_result = current_result(self.client, invocation_generation)
+            step["smart_nav_result_generation"] = invocation_generation if smart_nav_result else None
+            smart_nav_terminal = bool(
+                smart_nav_result
+                and smart_nav_result is cached_smart_nav_result
+                and getattr(self.client, "last_smart_nav_terminal", False)
+            )
+        else:
+            # move_focus(PREV) does not currently expose a request receipt.
+            # In particular, a prior SMART_NEXT receipt cannot stand in for it.
+            smart_nav_result = {}
+            smart_nav_terminal = False
         step.update(
             extract_smart_nav_row_fields(
                 smart_nav_result=smart_nav_result,
-                last_smart_nav_terminal=self.client.last_smart_nav_terminal,
+                last_smart_nav_terminal=smart_nav_terminal,
             )
         )
         smart_success = bool(step.get("smart_nav_success", False))
@@ -377,7 +414,8 @@ class StepCollectionService:
                     now = time.monotonic()
                     elapsed_total = now - ann_started
                     deadline_reached = now >= conservative_deadline
-                    action_focus = self._correlated_action_focus_observation(move=move)
+                    action_focus = self._correlated_action_focus_observation(
+                        move=move, invocation_generation=invocation_generation)
                     focus_confirmed = action_focus is not None
                     evidence_correlated = action_focus is not None
                     ambiguous_focus = not focus_confirmed

@@ -65,17 +65,39 @@ def test_e_current_without_value_no_action():
     assert gate(v).reason == "NO_SAFE_PLANNER_ACTION"
 
 
-def execute(monkeypatch, *, ack=True, actual="a", stale=False, sink=None):
+def execute(monkeypatch, *, ack=True, actual="a", stale=False, sink=None,
+            graph_off=False, fill_receipt_ring=False, record_receipt=True):
+    from talkback_lib.exploration_evidence_clock import EvidenceClock, NativeDispatchReceiptStore, dispatch_owner
+
     v, raw = value()
     selected = node("id.a", "A", accessibilityFocused=True) if actual == "a" else raw["focus_node"]
     if actual == "false":
         selected = node("id.a", "A", accessibilityFocused=False, focused=True)
-    client = SimpleNamespace(last_target_action_result={}, _evidence_active_request_id="current",
+    clock = None if graph_off else EvidenceClock(scope_id="phase4b-authority-test")
+    native_receipts = NativeDispatchReceiptStore()
+    if fill_receipt_ring:
+        with dispatch_owner("TARGETED"):
+            for index in range(2048):
+                native_receipts.observe(["shell", "am", "broadcast", "-a",
+                    "com.iotpart.sqe.talkbackhelper.TARGET_FOCUS_COMMIT",
+                    "--es", "reqId", f"ring-{index}"])
+    client = SimpleNamespace(last_target_action_result={}, _evidence_active_request_id="",
         last_smart_nav_result={}, last_smart_nav_terminal=False,
+        _adb_device=SimpleNamespace(shadow_evidence_clock=clock,
+                                    native_dispatch_receipts=native_receipts),
         _evidence_set_step=lambda *a, **kw: None,
         _normalize_action_result=lambda **kw: kw,
         get_focus=lambda **kw: selected)
     def target_focus_commit(**kw):
+        client._evidence_active_request_id = "current"
+        with dispatch_owner("TARGETED"):
+            command = ["shell", "am", "broadcast", "-a",
+                "com.iotpart.sqe.talkbackhelper.TARGET_FOCUS_COMMIT",
+                "--es", "reqId", "current"]
+            if record_receipt:
+                native_receipts.observe(command)
+                if clock is not None:
+                    clock.dispatch(command)
         client.last_target_action_result = dict(success=ack, status="SUCCESS" if ack else "FAILED",
                                                reqId="old" if stale else "current")
         return client.last_target_action_result
@@ -102,11 +124,12 @@ def test_f_success_unchanged_has_no_credit_and_one_fallback(monkeypatch):
 
 
 def test_g_failed_ack_actual_move_uses_production_reconcile(monkeypatch):
-    row, audit, calls, _, _ = execute(monkeypatch, ack=False)
+    row, audit, calls, budget, _ = execute(monkeypatch, ack=False)
     assert audit["focus_preview"]["focus_transition_status"] == "CONFIRMED_MOVED"
     assert len(calls) == 1 and calls[0]["move"] is False
     assert row["phase4b_before_row"]["actual_focus_node"]["viewIdResourceName"] == "id.b"
     assert "visit_credit" not in row  # The adapter does not award any visit.
+    assert budget.actions == 1  # A Phase6 clock receipt cannot double-consume it.
 
 
 def test_h_false_focus_fallback_no_visit(monkeypatch):
@@ -122,6 +145,120 @@ def test_i_stale_request_no_attribution(monkeypatch):
     assert audit["fallback_reason"] == "STALE_REQUEST_RESULT"
     assert "target_focus_descriptor" not in row
     assert len(calls) == 2
+
+
+def test_post_dispatch_error_after_receipt_rollover_consumes_controlled_budget_once(monkeypatch):
+    _row, audit, _calls, budget, _client = execute(
+        monkeypatch, ack=False, graph_off=True, fill_receipt_ring=True)
+    assert audit["dispatch_occurred"] is True
+    assert audit["dispatch_evidence_source"] == "GENERIC_NATIVE_RECEIPT"
+    assert budget.actions == 1
+
+
+def test_unknown_native_dispatch_fails_closed_without_budget_or_fallback(monkeypatch):
+    _row, audit, calls, budget, _client = execute(
+        monkeypatch, ack=True, actual="a", graph_off=True, record_receipt=False)
+    assert audit["dispatch_evidence_status"] == "UNKNOWN"
+    assert audit["dispatch_occurred"] is None
+    assert audit["classification"] == "PLANNER_DISPATCH_UNKNOWN_FAIL_CLOSED"
+    assert audit["fallback_used"] is False
+    assert audit["controlled_budget_outcome"] == "UNKNOWN_NO_CONSUMPTION_NO_RETRY"
+    assert [call["move"] for call in calls] == [False]
+    assert budget.actions == 0
+    assert budget.fallback_count == 0
+    assert budget.degraded is True
+
+
+def test_real_adb_target_focus_dispatch_is_counted_with_graph_off(monkeypatch):
+    from subprocess import CompletedProcess
+
+    from talkback_lib import A11yAdbClient
+    from tb_runner import collection_flow
+    from tb_runner.phase4b_execution import _target_dispatch_checkpoint, controlled_collect
+
+    monkeypatch.setenv("TB_STATE_GRAPH_MODE", "OFF")
+    client = A11yAdbClient(start_monitor=False)
+    device = client._adb_device
+    assert device.shadow_evidence_clock is None
+    device._resolve_serial = lambda _dev: "offline-serial"
+    native_calls = []
+
+    def fake_subprocess(command, **_kwargs):
+        native_calls.append(list(command))
+        return CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("talkback_lib.adb_device.subprocess.run", fake_subprocess)
+    client.check_helper_status = lambda **_kwargs: True
+    client._evidence_action_sent = lambda *, action, req_id: setattr(
+        client, "_evidence_active_request_id", req_id)
+
+    def transport_request(dev, action, req_id, extras):
+        device._run_adb_command(["shell", "am", "broadcast", "-a", action, *extras], dev=dev)
+        return {"success": True, "status": "SUCCESS", "reqId": req_id}
+
+    client._helper_bridge.request_focus_command = transport_request
+    client.target_focus_commit = client._target_focus_commit_impl
+    client.get_focus = lambda **_kwargs: node("id.a", "A", "0,100,500,200",
+                                              accessibilityFocused=True)
+    client._normalize_action_result = lambda **kwargs: kwargs
+    value, raw = globals()["value"]()
+    recommendation = plan_shadow(value)
+    decision = gate(value)
+    budget = ExecutionBudget()
+    audit = {}
+    focused = node("id.a", "A", "0,100,500,200", accessibilityFocused=True)
+
+    def realign(**kwargs):
+        kwargs["client"].target_focus_commit(
+            dev=kwargs["dev"],
+            target={"resource_id": kwargs["selected_rid"],
+                    "bounds": kwargs["selected_bounds"],
+                    "class_name": kwargs["selected_node"].get("className")})
+        return True, "FOCUS_CONFIRMED", focused
+
+    monkeypatch.setattr(collection_flow, "_maybe_realign_focus_to_representative", realign)
+    row = controlled_collect(
+        client=client, dev="offline", scenario="synthetic", step=1, raw=raw,
+        recommendation=recommendation, decision=decision, budget=budget,
+        collect=lambda **kwargs: {**focus_row(focused, "synthetic"), "focus_node": focused},
+        collect_kwargs={"move": True, "direction": "next", "step_index": 1},
+        refresh=lambda: {}, output_dir="", audit=audit)
+
+    assert len(native_calls) == 1, {key: audit.get(key) for key in (
+        "classification", "planner_failed", "fallback_reason", "dispatch_evidence",
+        "target_binding", "focus_attempt_metadata", "helper_ack_result")}
+    assert row["move_result"]["success"] is True
+    assert len(native_calls) == 1
+    assert client._adb_device.native_dispatch_receipts.receipt_sequence == 1
+    assert audit["dispatch_occurred"] is True
+    assert audit["dispatch_evidence_source"] == "GENERIC_NATIVE_RECEIPT"
+    assert audit["native_receipt_present"] is True
+    assert audit["current_request_id"] == client.last_target_action_result["reqId"]
+    assert budget.actions == 1
+
+
+def test_real_adb_helper_precheck_graph_off_does_not_count_dispatch(monkeypatch):
+    from talkback_lib import A11yAdbClient
+    from tb_runner.phase4b_execution import (
+        _phase4_native_dispatch_evidence, _target_dispatch_checkpoint,
+    )
+
+    monkeypatch.setenv("TB_STATE_GRAPH_MODE", "OFF")
+    client = A11yAdbClient(start_monitor=False)
+    device = client._adb_device
+    assert device.shadow_evidence_clock is None
+    client.check_helper_status = lambda **_kwargs: False
+    client._helper_bridge.request_focus_command = lambda *_args, **_kwargs: pytest.fail(
+        "unavailable helper must stop before native transport")
+    before = _target_dispatch_checkpoint(client)
+    result = client._target_focus_commit_impl(
+        dev="offline", target={"bounds": "0,100,500,200", "resource_id": "id.a"})
+    proof = _phase4_native_dispatch_evidence(client, before=before, result=result)
+    assert result["reason"] == "helper_unavailable"
+    assert device.native_dispatch_receipts.receipt_sequence == 0
+    assert proof["dispatch_occurred"] is False
+    assert proof["native_receipt_present"] is False
+    assert proof["preflight_block_reason"] == "helper_unavailable"
 
 
 def test_j_disappearing_target_denied():
@@ -274,13 +411,64 @@ def test_scroll_reuses_production_and_refreshes_before_next_decision(monkeypatch
     from tb_runner import scroll_reliability
     monkeypatch.setattr(scroll_reliability, "capture", lambda *a, **kw: dict(capability=cap))
     result = dict(status=status, before=dict(valid=valid), after=dict(valid=valid), action_success=True, viewport_changed=changed)
+    from talkback_lib.native_dispatch_evidence import NativeDispatchReceiptStore
+    native_store = NativeDispatchReceiptStore()
+    client = SimpleNamespace(
+        _adb_device=SimpleNamespace(native_dispatch_receipts=native_store, shadow_evidence_clock=None),
+        _evidence_active_request_id="",
+    )
     calls = []
-    monkeypatch.setattr(scroll_reliability, "verified_scroll", lambda *a, **kw: (calls.append("production_scroll") or result, {}))
     audit = {}
-    controlled_collect(client=SimpleNamespace(), dev="dev", scenario="synthetic", step=1, raw=raw,
+    def verified_scroll(*_args, **_kwargs):
+        from talkback_lib.native_dispatch_evidence import current_operation_id
+        request_id = "scroll-request-1"
+        native_store.observe(["shell", "am", "broadcast", "-a",
+            "com.iotpart.sqe.talkbackhelper.SCROLL", "--es", "reqId", request_id],
+            operation_id=current_operation_id())
+        audit["helper_request_id"] = request_id
+        return ({**result, "action_result": {"success": True, "status": "SUCCESS",
+                                               "reqId": request_id}}, {})
+    monkeypatch.setattr(scroll_reliability, "verified_scroll",
+                        lambda *a, **kw: (calls.append("production_scroll") or verified_scroll(*a, **kw)))
+    budget = ExecutionBudget()
+    controlled_collect(client=client, dev="dev", scenario="synthetic", step=1, raw=raw,
         recommendation=plan_shadow(v), decision=gate(v, evidence=trusted(scroll_container_proven=True)),
-        budget=ExecutionBudget(), collect=lambda **kw: calls.append("collect") or {}, collect_kwargs=dict(move=True),
+        budget=budget, collect=lambda **kw: calls.append("collect") or {}, collect_kwargs=dict(move=True),
         refresh=lambda: calls.append("fresh_hierarchy_state_candidates_focus_plan") or dict(new=True), output_dir="", audit=audit)
     assert audit["scroll_result"] == expected
     assert calls == ["production_scroll", "fresh_hierarchy_state_candidates_focus_plan", "collect"]
     assert audit["post_scroll_refresh"] == dict(new=True)
+    assert budget.actions == 1
+
+
+def test_scroll_unknown_dispatch_fails_closed_without_fallback_or_budget(monkeypatch):
+    from talkback_lib.native_dispatch_evidence import NativeDispatchReceiptStore
+    from tb_runner import scroll_reliability
+
+    v, raw = value(only_current=True, scroll=True)
+    cap = dict(axis_contract="axis-v1", contradictory=False, can_scroll_forward=True,
+               container=dict(path="0.1", boundsInScreen="0,0,1000,900", axis="VERTICAL"))
+    monkeypatch.setattr(scroll_reliability, "capture", lambda *a, **kw: dict(capability=cap))
+    transition = dict(status="SCROLL_MOVED", before=dict(valid=True), after=dict(valid=True),
+                      action_success=True, viewport_changed=True, action_result={})
+    monkeypatch.setattr(scroll_reliability, "verified_scroll", lambda *a, **kw: (transition, {}))
+    client = SimpleNamespace(
+        _adb_device=SimpleNamespace(native_dispatch_receipts=NativeDispatchReceiptStore(),
+                                    shadow_evidence_clock=None),
+        _evidence_active_request_id="prior-request")
+    calls = []
+    budget = ExecutionBudget()
+    audit = {}
+    controlled_collect(client=client, dev="dev", scenario="synthetic", step=1, raw=raw,
+        recommendation=plan_shadow(v), decision=gate(v, evidence=trusted(scroll_container_proven=True)),
+        budget=budget, collect=lambda **kw: calls.append(kw) or {}, collect_kwargs=dict(move=True),
+        refresh=lambda: pytest.fail("unknown dispatch must not continue or retry"),
+        output_dir="", audit=audit)
+
+    assert audit["dispatch_status"] == "UNKNOWN"
+    assert audit["planner_failed"] is True
+    assert audit["fallback_used"] is False
+    assert calls == [{"move": False}]
+    assert budget.actions == 0
+    assert budget.fallback_count == 0
+    assert budget.degraded is True

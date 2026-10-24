@@ -144,7 +144,8 @@ def test_disabled_control_availability_and_unlabeled_actionable():
     raw=observation();raw['nodes'][0]['enabled']=False
     assert any(c['eligibility']['availability']=='DISABLED' for c in rows(snapshot(raw),'CLICK'))
     raw['nodes'][0]['text']=''
-    assert any(c['evidence']['eligibility_reason']=='actionable_without_label' for c in rows(snapshot(raw)))
+    assert any(c['evidence']['eligibility_reason']=='actionable_without_label'
+               for c in rows(snapshot(raw)) if c['action_kind'] in {'FOCUS_TARGET', 'CLICK'})
 
 
 @pytest.mark.parametrize('kind',['activity','context','popup','collision','empty'])

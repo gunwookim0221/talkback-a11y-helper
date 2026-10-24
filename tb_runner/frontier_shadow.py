@@ -42,6 +42,133 @@ def _text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
+_ACTION_ALIASES = {
+    "FOCUS_NEXT": "SMART_NEXT",
+    "FOCUS_NEXT_UNTARGETED": "SMART_NEXT",
+    "SEQUENTIAL": "SMART_NEXT",
+    "SMART_PREVIOUS": "SMART_PREVIOUS",
+    "FOCUS_PREVIOUS": "SMART_PREVIOUS",
+    "TARGET_FOCUS": "TARGETED_FOCUS",
+    "FOCUS_TARGET": "TARGETED_FOCUS",
+    "FOCUS": "TARGETED_FOCUS",
+    "CONTROLLED_TARGET_FOCUS": "CONTROLLED_FOCUS",
+    "PRIMARY_ACTION": "PRIMARY",
+    "FALLBACK_ACTION": "FALLBACK",
+}
+
+
+def current_action_type(row: Mapping[str, Any], action_type: Any = None) -> str:
+    """Resolve the action represented by a row, independently of its receipts.
+
+    Production action producers stamp ``phase6_current_action_type``. The
+    event-shaped fields below are compatibility for existing focused callers;
+    request-field presence alone never determines the action.
+    """
+    value = _text(action_type).upper()
+    if not value:
+        value = _text(row.get("phase6_current_action_type")
+                      or row.get("current_action_type")
+                      or row.get("smart_nav_action_type")).upper()
+    value = _ACTION_ALIASES.get(value, value)
+    if value:
+        return value
+    if row.get("controlled_focus_intent") is not None or row.get("controlled_focus_dispatch_status"):
+        return "CONTROLLED_FOCUS"
+    if row.get("target_focus_attempted") is True:
+        return "TARGETED_FOCUS"
+    if row.get("recovery_action_attempted") is True:
+        return "RECOVERY"
+    return "UNKNOWN"
+
+
+def canonical_action_request_id(row: Mapping[str, Any], action_type: Any = None) -> str:
+    """Return only the Helper request receipt for the current action.
+
+    A row can retain receipts from earlier actions. The action discriminator
+    therefore chooses one authoritative field; it never searches across the
+    row. Attempt and operation IDs remain separate metadata.
+    """
+    action = current_action_type(row, action_type)
+    if action == "SMART_NEXT" or action == "SMART_PREVIOUS":
+        key = "smart_nav_req_id"
+    elif action == "TARGETED_FOCUS":
+        key = "target_focus_request_id"
+    elif action == "CONTROLLED_FOCUS":
+        key = "controlled_focus_request_id"
+    elif action == "RECOVERY":
+        key = "recovery_action_request_id"
+    elif action == "PRIMARY":
+        key = "phase5c_primary_action_request_id"
+    elif action == "FALLBACK":
+        key = "fallback_action_request_id"
+    else:
+        return ""
+    return _text(row.get(key))
+
+
+def snapshot_focus_cursor(row: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str, Any]:
+    """Build a current cursor only from strict focus linked to this snapshot.
+
+    Phase 4 focus fields are retained as historical production evidence. This
+    function intentionally reads the focus node embedded in the exact raw
+    Phase 6 snapshot and requires matching capture and observation identities.
+    """
+    envelope = _mapping(raw.get("production_observation_envelope"))
+    capture_id = _text(raw.get("capture_id"))
+    marker = raw.get("_exploration_observation")
+    if not (
+        raw.get("production_observation_current") is True
+        and raw.get("snapshot_coherent") is True
+        and envelope.get("capture_complete") is True
+        and envelope.get("snapshot_coherent") is True
+        and capture_id
+        and _text(row.get("capture_id")) == capture_id
+        and _text(row.get("scenario_id")) == _text(raw.get("scenario_id"))
+        and _text(row.get("scenario_run_id")) == _text(raw.get("scenario_run_id"))
+        and _text(envelope.get("scenario_id")) == _text(raw.get("scenario_id"))
+        and _text(envelope.get("scenario_run_id")) == _text(raw.get("scenario_run_id"))
+        and _text(envelope.get("capture_id")) == capture_id
+        and isinstance(marker, Mapping)
+        and dict(marker) == row.get("_exploration_observation")
+        and dict(marker) == envelope.get("observation")
+        and all(_text(envelope.get(key)) == capture_id for key in (
+            "hierarchy_capture_id", "focus_capture_id", "geometry_capture_id",
+        ))
+        and all(_text(raw.get(key)) == capture_id for key in (
+            "hierarchy_capture_id", "focus_capture_id", "geometry_capture_id",
+        ))
+    ):
+        return {"instance_id": "", "confirmed": False}
+
+    node = raw.get("focus_node")
+    if not isinstance(node, Mapping) or node.get("accessibilityFocused") is not True:
+        return {"instance_id": "", "confirmed": False}
+    bounds = _text(node.get("boundsInScreen") or node.get("bounds"))
+    resource_id = _text(
+        node.get("viewIdResourceName") or node.get("resourceId")
+        or node.get("resource_id") or node.get("view_id")
+    )
+    label = _text(
+        node.get("talkbackLabel") or node.get("contentDescription")
+        or node.get("text") or node.get("mergedLabel")
+    )
+    from tb_runner.traversal_reliability import focus_instance, instance_id
+
+    focus_row = {
+        "scenario_id": raw.get("scenario_id"),
+        "actual_focus_node": dict(node),
+        "actual_focus_resource_id": resource_id,
+        "actual_focus_bounds": bounds,
+        "actual_focus_visible": label,
+        "actual_focus_class_name": _text(node.get("className") or node.get("class")),
+        "actual_focus_accessibility_focused": True,
+    }
+    identity = focus_instance(focus_row)
+    if identity is None:
+        return {"instance_id": "", "confirmed": False}
+    return {"instance_id": instance_id(identity), "confirmed": True}
+
+
 def _stable_candidates(value: Sequence[Mapping[str, Any]], state_id: str) -> list[dict[str, Any]]:
     """Normalize existing production candidates without discovering new ones."""
     rows: list[dict[str, Any]] = []
@@ -272,14 +399,17 @@ class FrontierShadowRuntime:
         cached_state = cached.get("state_id") if isinstance(cached, Mapping) else None
         source_request_id = _text((_mapping(cached.get("observation_ref"))
                                    if isinstance(cached, Mapping) else {}).get("request_id"))
-        request_id_mismatch = bool(_text(result_request_id)
-                                   and _text(result_request_id) != source_request_id)
+        result_request_id = _text(result_request_id)
+        request_id_missing = not source_request_id or not result_request_id
+        request_id_mismatch = bool(
+            source_request_id and result_request_id and result_request_id != source_request_id
+        )
         if self.evidence_clock is not None:
             observation = _mapping(cached.get("observation_ref")) if isinstance(cached, Mapping) else {}
             snapshot_valid = bool(snapshot_valid and self.evidence_clock.current(dict(observation.get("capture") or {})))
         aligned = bool(self.enabled and snapshot_valid and isinstance(cached, Mapping)
                        and source_step == step and cached_state == state_id and state_id
-                       and not request_id_mismatch)
+                       and not request_id_missing and not request_id_mismatch)
         if not aligned:
             reasons = []
             if not snapshot_valid:
@@ -290,6 +420,8 @@ class FrontierShadowRuntime:
                 reasons.append("POST_ACTION_STATE_MISMATCH")
             if request_id_mismatch:
                 reasons.append("POST_ACTION_REQUEST_ID_MISMATCH")
+            if request_id_missing:
+                reasons.append("POST_ACTION_REQUEST_ID_MISSING")
             if not reasons:
                 reasons.append("POST_ACTION_STATE_UNRESOLVED")
             return {
@@ -333,7 +465,8 @@ class FrontierShadowRuntime:
         context.update(state_id=state_id, decision_watermark=decision_watermark)
         for candidate in candidates:
             selected = {**candidate, "frontier_id": build_frontier_id(
-                state_id, candidate["edge_type"], candidate["target_identity"])}
+                state_id, candidate["edge_type"],
+                candidate["target_identity"].get("instance_id", ""))}
             proof = evaluate_redirect_evidence(selected=selected, sources=execution_sources, context=context)
             if proof["selected_frontier_execution_ready"]:
                 candidate["target_binding_status"] = "RESOLVED"
@@ -402,14 +535,22 @@ class FrontierShadowRuntime:
             action = _text(action_type).upper()
             target = _text(target_instance_id)
             row = deepcopy(dict(result))
+            request_action = current_action_type(row)
+            if request_action == "UNKNOWN":
+                request_action = current_action_type({}, action_type)
+            request_id = canonical_action_request_id(row, request_action)
+            # An owner without an actual request receipt is not an exact
+            # request-correlated action. Keep the attempt ID separately.
+            exact = exact and bool(request_id)
             pending["record"]["attempt_owner"] = owner_value if exact else "UNKNOWN"
             pending["record"]["action_result"] = {
                 "ownership_status": "EXACT_MATCH" if exact else "UNKNOWN",
                 "owner": owner_value if exact else "UNKNOWN",
                 "action_type": action or "UNKNOWN",
                 "result_id": result_id,
-                "request_id": _text(row.get("phase5c_primary_action_request_id") or row.get("smart_nav_req_id")
-                                     or row.get("target_focus_attempt_id")) or None,
+                "request_id": request_id or None,
+                "attempt_id": _text(row.get("target_focus_attempt_id")) or None,
+                "operation_id": _text(row.get("controlled_focus_operation_id")) or None,
                 "focus_transition_status": _text(row.get("focus_transition_status")).upper() or "UNKNOWN",
                 "actual_focus_instance_id": _text(row.get("actual_focus_instance_id")) or None,
                 "visit_record_status": _text(row.get("visit_record_status")).upper() or "UNKNOWN",
@@ -476,8 +617,9 @@ class FrontierShadowRuntime:
             "state_changed": state_changed if complete else None,
             "ack_status": _text(row.get("command_ack_status") or row.get("last_smart_nav_result")).upper() or "UNKNOWN",
             "condition_fingerprint": _text(item.get("condition_fingerprint")) or "same",
-            "request_id": _text(row.get("phase5c_primary_action_request_id") or row.get("smart_nav_req_id")
-                                 or row.get("target_focus_attempt_id")) or None,
+            "request_id": canonical_action_request_id(row) or None,
+            "attempt_id": _text(row.get("target_focus_attempt_id")) or None,
+            "operation_id": _text(row.get("controlled_focus_operation_id")) or None,
         }
 
     def _record_production_visit(self, pending: Mapping[str, Any], row: Mapping[str, Any]) -> None:
@@ -528,7 +670,10 @@ class FrontierShadowRuntime:
             self.history["complete"] = False
             return False
         owner = str(owner or "UNKNOWN").strip().upper()
-        exact = ownership_status == "EXACT_MATCH" and owner in _OWNERS - {"UNKNOWN"}
+        action_type = _text(result.get("action_type") or result.get("planner_action"))
+        request_id = canonical_action_request_id(result, action_type)
+        exact = (ownership_status == "EXACT_MATCH" and owner in _OWNERS - {"UNKNOWN"}
+                 and bool(request_id))
         result_id = _text(result_id) or f"{decision_id}:followup:{owner}"
         if result_id in self._seen_results:
             return False
@@ -537,7 +682,8 @@ class FrontierShadowRuntime:
             "owner": owner if exact else "UNKNOWN",
             "ownership_status": "EXACT_MATCH" if exact else "UNKNOWN",
             "result_id": result_id,
-            "action_type": _text(result.get("action_type") or result.get("planner_action")).upper() or "UNKNOWN",
+            "request_id": request_id or None,
+            "action_type": action_type.upper() or "UNKNOWN",
             "result": _text(result.get("status") or result.get("move_result")).upper() or "UNKNOWN",
         })
         if not exact:
@@ -629,7 +775,19 @@ def production_candidate(*, state_id: str, scenario_id: str, candidate: Mapping[
         "candidate_id": candidate_id,
         "edge_type": "TARGETED_FOCUS",
         "state_id": state_id,
-        "target_identity": {"instance_id": instance},
+        # The production instance ID is scenario-scoped. Preserve its stable
+        # source attributes so a current discovery candidate can be resolved
+        # across its separate registry-state identity domain without comparing
+        # the two opaque instance strings.
+        "target_identity": {
+            "identity_domain": "production_scenario_scope_v1",
+            "instance_id": instance,
+            "identity_attributes": {
+                "resource_id": str(item.get("view_id") or "").strip(),
+                "bounds": normalized_bounds(item.get("bounds")),
+                "class_name": str(item.get("class_name") or "").strip(),
+            },
+        },
         "currently_present": True,
         "target_binding_status": "UNKNOWN",
     }
@@ -638,7 +796,8 @@ def production_candidate(*, state_id: str, scenario_id: str, candidate: Mapping[
 def capture_reconciled_inventory(runtime: FrontierShadowRuntime | None, *,
                                  row: Mapping[str, Any], candidates: Sequence[Mapping[str, Any]],
                                  scenario_id: str, raw_nodes: Sequence[Any] | None = None,
-                                 projection_complete: bool = True) -> None:
+                                 projection_complete: bool = True,
+                                 action_type: Any = None) -> None:
     """Reuse the exact candidate groups already computed for reconciliation."""
     if runtime is None or not runtime.enabled:
         return
@@ -646,7 +805,11 @@ def capture_reconciled_inventory(runtime: FrontierShadowRuntime | None, *,
 
     raw = _raw_observation_from_row(row)
     if raw_nodes is not None:
-        raw["nodes"] = deepcopy(list(raw_nodes))
+        if isinstance(raw.get("production_observation_envelope"), Mapping):
+            if list(raw_nodes) != list(raw.get("nodes") or []):
+                raw["production_observation_current"] = False
+        else:
+            raw["nodes"] = deepcopy(list(raw_nodes))
     identity = build_graph_state_identity(raw)
     state_id = identity.state_id
     normalized: list[dict[str, Any]] = []
@@ -666,15 +829,19 @@ def capture_reconciled_inventory(runtime: FrontierShadowRuntime | None, *,
     coverage = str(raw.get("observation_coverage", "") or "").upper()
     complete = bool(state_id and raw.get("nodes") and projection_complete
                     and coverage in {"OBSERVED_FULL", "COMPLETE"})
+    focus_cursor = snapshot_focus_cursor(row, raw)
+    envelope = _mapping(raw.get("production_observation_envelope"))
     runtime.capture_inventory(
         step=step, state_id=state_id, candidates=normalized,
         inventory_complete=complete,
         observation_ref={"source_step": step, "state_id": state_id,
                          "capture": deepcopy(dict(row.get("_exploration_observation") or {})),
+                         "production_capture_id": _text(envelope.get("capture_id") or raw.get("capture_id")),
+                         "scenario_id": _text(raw.get("scenario_id") or scenario_id),
+                         "scenario_run_id": _text(raw.get("scenario_run_id")),
+                         "focus_cursor": focus_cursor,
                          "state_resolution": identity.status,
-                         "request_id": _text(row.get("phase5c_primary_action_request_id")
-                                              or row.get("smart_nav_req_id")
-                                              or row.get("target_focus_attempt_id")),
+                         "request_id": canonical_action_request_id(row, action_type),
                          "focus_observation_id": _text(row.get("actual_focus_observation_id"))},
     )
 
@@ -682,5 +849,7 @@ def capture_reconciled_inventory(runtime: FrontierShadowRuntime | None, *,
 __all__ = [
     "FRONTIER_SHADOW_SCHEMA_VERSION", "MAX_ARTIFACT_BYTES", "MAX_EVALUATIONS",
     "MAX_FRONTIER_ITEMS", "MAX_RUN_HISTORY_RECORDS", "FrontierShadowRuntime",
-    "capture_reconciled_inventory", "compare_choices", "production_candidate", "shadow_enabled",
+    "canonical_action_request_id", "current_action_type", "capture_reconciled_inventory", "compare_choices",
+    "snapshot_focus_cursor",
+    "production_candidate", "shadow_enabled",
 ]

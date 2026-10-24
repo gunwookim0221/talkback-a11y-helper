@@ -26,6 +26,8 @@ from talkback_lib.hierarchy_file_transport import (
     encode_control,
     sha256_hex,
     validate_expected_build_precheck,
+    validate_prestart_capability_generation,
+    validate_request_generation,
 )
 from talkback_lib.reliable_hierarchy_schema import (
     CANDIDATE_CONTRACT_VERSION,
@@ -219,6 +221,51 @@ class HierarchyEnvelopeTests(unittest.TestCase):
                     decode_artifact(artifact, changed, expected_identity=changed_expected,
                                     expected_request_id=request_id, expected_client_nonce=nonce)
 
+    def test_artifact_generation_zero_remains_invalid(self):
+        request_id, nonce = "5" * 32, "6" * 32
+        artifact, control, expected, payload = _artifact_control(request_id, nonce, _identity())
+        header_size = struct.unpack(">I", artifact[len(MAGIC):len(MAGIC) + 4])[0]
+        header_start = len(MAGIC) + 12
+        header = json.loads(artifact[header_start:header_start + header_size])
+        header["generation"] = 0
+        changed_artifact = encode_artifact(header, payload)
+        changed_control = {
+            **control,
+            "generation": 0,
+            "artifact_bytes": len(changed_artifact),
+            "artifact_sha256": sha256_hex(changed_artifact),
+        }
+
+        with self.assertRaisesRegex(HierarchyTransportError, "GENERATION_INVALID"):
+            decode_artifact(
+                changed_artifact,
+                changed_control,
+                expected_identity=expected,
+                expected_request_id=request_id,
+                expected_client_nonce=nonce,
+            )
+
+    def test_request_generation_requires_positive_non_boolean_integer(self):
+        for generation in (0, None, -1, True, "1"):
+            with self.subTest(generation=generation), self.assertRaisesRegex(
+                HierarchyTransportError, "GENERATION_INVALID"
+            ):
+                validate_request_generation({"generation": generation}, request_id="request-1")
+        self.assertEqual(1, validate_request_generation({"generation": 1}, request_id="request-1"))
+
+    def test_prestart_capability_generation_requires_explicit_nonnegative_integer(self):
+        for generation in (0, 1, 8):
+            with self.subTest(generation=generation):
+                self.assertEqual(
+                    generation,
+                    validate_prestart_capability_generation({"generation": generation}, request_id="request-1"),
+                )
+        for value in ({}, {"generation": None}, {"generation": -1}, {"generation": "0"}, {"generation": True}):
+            with self.subTest(value=value), self.assertRaisesRegex(
+                HierarchyTransportError, "CAPABILITY_GENERATION_INVALID"
+            ):
+                validate_prestart_capability_generation(value, request_id="request-1")
+
     def test_rejects_invalid_utf8_json_duplicate_keys_and_incomplete_tree(self):
         request_id, nonce, identity = "9" * 32, "a" * 32, _identity()
         for body in (
@@ -268,6 +315,22 @@ class HierarchyControlTests(unittest.TestCase):
         self.assertTrue(encoded.startswith(CONTROL_PREFIX))
         decoded = decode_control_reply(f'Broadcasting: Intent {{}}\nBroadcast completed: result=1, data="{encoded}"')
         self.assertEqual(nonce, decoded["query_nonce"])
+
+    def test_explicit_zero_generation_parses_as_zero_without_coercion(self):
+        nonce = "b" * 32
+        body = {
+            "schema": CONTROL_SCHEMA,
+            "protocol_version": PROTOCOL_VERSION,
+            "status": "OK",
+            "query_nonce": nonce,
+            "request_id": None,
+            "generation": 0,
+        }
+        decoded = decode_control_reply(
+            f'Broadcast completed: result=1, data="{encode_control(body)}"'
+        )
+        self.assertIs(type(decoded["generation"]), int)
+        self.assertEqual(0, decoded["generation"])
 
     def test_ordered_control_error_preserves_structured_failure_and_requires_matching_result(self):
         failure = {
@@ -341,6 +404,7 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
                     "protocol_version": PROTOCOL_VERSION,
                     "status": "OK",
                     "query_nonce": query_nonce,
+                    "generation": 0,
                     "process_epoch": process_epoch,
                     "service_instance_id": identity["service_instance_id"],
                     "helper_build_identity": helper_control,
@@ -414,6 +478,132 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
         self.assertTrue(any(action.endswith("HIERARCHY_TRANSFER_START") for action in actions))
         self.assertTrue(any(action.endswith("HIERARCHY_TRANSFER_ACK") for action in actions))
         self.assertFalse(any(action.endswith("DUMP_HIERARCHY") for action in actions))
+
+    def test_reliable_mode_rejects_zero_generation_on_accepted_start(self):
+        client = self._client()
+        identity = _identity()
+        process_epoch = "process-epoch-1"
+        actions: list[str] = []
+        expected_build = {
+            "status": "COMPATIBLE_SAME_HELPER_INPUT",
+            "execution_allowed": True,
+            "helper_build_id": identity["build_id"],
+            "helper_git_commit": identity["git_commit"],
+            "helper_service_instance_id": identity["service_instance_id"],
+            "helper_input_digest": identity["input_digest"],
+        }
+
+        def broadcast(_dev, action, extras=None, *, timeout=30.0):
+            actions.append(action)
+            pairs = {
+                extras[index + 1]: extras[index + 2]
+                for index in range(0, len(extras or []) - 2, 3)
+                if extras[index] == "--es"
+            }
+            query_nonce = pairs["queryNonce"]
+            shared = {
+                "schema": CONTROL_SCHEMA,
+                "protocol_version": PROTOCOL_VERSION,
+                "query_nonce": query_nonce,
+                "process_epoch": process_epoch,
+                "service_instance_id": identity["service_instance_id"],
+                "helper_build_identity": {
+                    key: value for key, value in identity.items() if key != "service_instance_id"
+                },
+                "payload_schema_version": PAYLOAD_SCHEMA,
+            }
+            if action.endswith("CAPABILITIES"):
+                shared.update(
+                    status="OK",
+                    request_id=None,
+                    generation=0,
+                    completed=True,
+                    payload_complete=True,
+                    supported_payload_schema_versions=[PAYLOAD_SCHEMA],
+                    candidate_schema_version=CANDIDATE_SCHEMA_VERSION,
+                    supported_candidate_schema_versions=[CANDIDATE_SCHEMA_VERSION],
+                    candidate_contract_version=CANDIDATE_CONTRACT_VERSION,
+                    max_payload_bytes=MAX_PAYLOAD_BYTES,
+                    capabilities=["content_provider_pfd", "service_hierarchy_v2", CANDIDATE_SCHEMA_VERSION],
+                )
+            elif action.endswith("START"):
+                shared.update(
+                    status="ACCEPTED",
+                    request_id=pairs["requestId"],
+                    client_nonce=pairs["clientNonce"],
+                    generation=0,
+                    completed=False,
+                    payload_complete=False,
+                )
+            elif action.endswith("CANCEL"):
+                shared.update(
+                    status="CANCELLED",
+                    request_id=pairs["requestId"],
+                    client_nonce=pairs["clientNonce"],
+                    generation=1,
+                    completed=True,
+                )
+            else:
+                self.fail(f"unexpected transport action: {action}")
+            encoded = encode_control(shared)
+            return f'Broadcasting: Intent {{}}\nBroadcast completed: result=1, data="{encoded}"'
+
+        client._broadcast = broadcast
+        with self.assertRaisesRegex(HierarchyTransportError, "GENERATION_INVALID"):
+            client.dump_hierarchy(
+                transport_mode="RELIABLE_FILE_PFD",
+                expected_helper_build_identity=expected_build,
+            )
+
+        self.assertTrue(actions[0].endswith("HIERARCHY_TRANSFER_CAPABILITIES"))
+        self.assertTrue(actions[1].endswith("HIERARCHY_TRANSFER_START"))
+        self.assertNotIn("HIERARCHY_TRANSFER_STATUS", " ".join(actions))
+
+    def test_reliable_mode_rejects_missing_prestart_generation_before_start(self):
+        client = self._client()
+        identity = _identity()
+        actions: list[str] = []
+        expected_build = {
+            "status": "COMPATIBLE_SAME_HELPER_INPUT",
+            "execution_allowed": True,
+            "helper_build_id": identity["build_id"],
+            "helper_git_commit": identity["git_commit"],
+            "helper_service_instance_id": identity["service_instance_id"],
+            "helper_input_digest": identity["input_digest"],
+        }
+
+        def broadcast(_dev, action, extras=None, *, timeout=30.0):
+            actions.append(action)
+            pairs = {
+                extras[index + 1]: extras[index + 2]
+                for index in range(0, len(extras or []) - 2, 3)
+                if extras[index] == "--es"
+            }
+            response = {
+                "schema": CONTROL_SCHEMA,
+                "protocol_version": PROTOCOL_VERSION,
+                "status": "OK",
+                "request_id": None,
+                "query_nonce": pairs["queryNonce"],
+                "process_epoch": "process-epoch-1",
+                "service_instance_id": identity["service_instance_id"],
+                "helper_build_identity": {
+                    key: value for key, value in identity.items() if key != "service_instance_id"
+                },
+                "payload_schema_version": PAYLOAD_SCHEMA,
+            }
+            encoded = encode_control(response)
+            return f'Broadcasting: Intent {{}}\nBroadcast completed: result=1, data="{encoded}"'
+
+        client._broadcast = broadcast
+        with self.assertRaisesRegex(HierarchyTransportError, "CAPABILITY_GENERATION_INVALID"):
+            client.dump_hierarchy(
+                transport_mode="RELIABLE_FILE_PFD",
+                expected_helper_build_identity=expected_build,
+            )
+
+        self.assertEqual(1, len(actions))
+        self.assertTrue(actions[0].endswith("HIERARCHY_TRANSFER_CAPABILITIES"))
 
     def test_reliable_mode_requires_match_before_any_transport_command(self):
         client = self._client()

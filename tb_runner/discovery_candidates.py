@@ -74,7 +74,8 @@ def _node(raw: Mapping[str, Any]) -> dict[str, Any]:
 
 def _target(node: dict[str, Any], scope: str) -> dict[str, Any]:
     item = completeness.candidate(node, scope)
-    return dict(instance_id=instance_id(item), resource_id=item["view_id"],
+    return dict(identity_domain="discovery_state_scope_v1",
+                instance_id=instance_id(item), resource_id=item["view_id"],
                 bounds=item["bounds"], class_name=item["class_name"], identity_confidence="POSITIONAL_ONLY")
 
 

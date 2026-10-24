@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import json
 from typing import Any
 
+from talkback_lib.native_dispatch_evidence import DISPATCHED, NativeDispatchEvidence
 from tb_runner.phase4a_planner import PlannerInput, ShadowRecommendation, plan_shadow, production_instance
 from tb_runner.utils import parse_bounds_str
 
@@ -148,6 +149,7 @@ class ExecutionBudget:
     last_inventory: str | None = None
     last_state: Any = None
     target_attempts: dict[str, int] = field(default_factory=dict)
+    accounted_dispatch_operations: set[str] = field(default_factory=set)
 
     def __post_init__(self):
         if type(self.max_actions) is not int or not 1 <= self.max_actions <= 20:
@@ -164,6 +166,32 @@ class ExecutionBudget:
         if target:
             self.target_attempts[target] = self.target_attempts.get(target, 0) + 1
         self.last_target, self.last_inventory, self.last_state = target, inventory, state
+
+    def reserve_dispatched_once(self, *, evidence: NativeDispatchEvidence,
+                                mode: str, target: str | None, inventory: str,
+                                state: Any) -> bool:
+        """Consume one controlled action only from typed dispatch evidence.
+
+        Operation identity is deliberately separate from Helper request IDs.
+        Replaying the same authoritative result cannot consume the budget twice.
+        """
+        if not isinstance(evidence, NativeDispatchEvidence):
+            raise TypeError("controlled budget requires NativeDispatchEvidence")
+        if evidence.dispatch_status != DISPATCHED:
+            return False
+        operation = str(evidence.operation_id or "").strip()
+        if not operation:
+            raise RuntimeError("dispatched evidence has no operation identity")
+        if operation in self.accounted_dispatch_operations:
+            return False
+        self.reserve(mode, target, inventory, state)
+        self.accounted_dispatch_operations.add(operation)
+        return True
+
+    def block_unknown_dispatch(self) -> None:
+        """Stop further controlled attempts when a send may have occurred."""
+        self.degraded = True
+        self.degraded_reason = "NATIVE_DISPATCH_EVIDENCE_UNKNOWN"
 
     def outcome(self, result: str, moved: bool) -> None:
         self.repeated_result_count = self.repeated_result_count + 1 if result == self.last_result else 1

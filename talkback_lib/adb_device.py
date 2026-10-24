@@ -62,10 +62,14 @@ class AdbDevice:
         self.adb_path = adb_path
         self._resolve_serial = resolve_serial
         self.command_guard = None
-        from talkback_lib.exploration_evidence_clock import EvidenceClock
+        from talkback_lib.exploration_evidence_clock import EvidenceClock, NativeDispatchReceiptStore
         self.shadow_evidence_clock = (EvidenceClock() if os.environ.get("TB_STATE_GRAPH_MODE", "").strip().upper() == "SHADOW" else None)
+        self.native_dispatch_receipts = NativeDispatchReceiptStore()
 
     def _observe_native_dispatch(self, args: list[str]) -> None:
+        receipts = getattr(self, "native_dispatch_receipts", None)
+        if receipts is not None:
+            receipts.observe(args)
         clock = getattr(self, "shadow_evidence_clock", None)
         if clock is not None:
             clock.dispatch(args)

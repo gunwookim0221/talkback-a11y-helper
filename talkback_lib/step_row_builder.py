@@ -13,6 +13,7 @@ def create_base_step_row(step_index: int) -> dict[str, Any]:
         "last_smart_nav_detail": "",
         "last_smart_nav_terminal": False,
         "smart_nav_req_id": "",
+        "phase6_current_action_type": "",
         "smart_nav_status": "",
         "smart_nav_detail": "",
         "smart_nav_requested_view_id": "",

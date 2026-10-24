@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
+import pytest
+
 from tb_runner import core_preflight
 from tb_runner.accessibility_preflight import AccessibilityPreflightResult, AccessibilitySettings
 
@@ -51,6 +53,13 @@ def _samsung_account_popup_ko_xml() -> str:
 
 def _smartthings_xml() -> str:
     return f'<hierarchy><node package="{core_preflight.SMARTTHINGS_PACKAGE}" /></hierarchy>'
+
+
+def _smartthings_ready_xml() -> str:
+    return (
+        f'<hierarchy><node package="{core_preflight.SMARTTHINGS_PACKAGE}" '
+        'resource-id="com.samsung.android.oneconnect:id/bottom_navigation_tab_home" /></hierarchy>'
+    )
 
 
 def _snapshot_from_xml(xml_text: str) -> dict[str, object]:
@@ -601,6 +610,11 @@ def test_popup_recovery_fails_when_play_store_contamination_remains():
 
     assert result["status"] == "FAIL"
     assert result["recovered"] is False
+    assert result["surface_recovered"] is False
+    assert result["reason"] == "external_popup_contamination"
+    assert result["contamination_package"] == "com.android.vending"
+    assert result["final_contamination_package"] == "com.android.vending"
+    assert result["after_contamination_package"] == "com.android.vending"
     assert ("shell", "input", "keyevent", "KEYCODE_BACK") in commands
     assert (
         "shell", "monkey", "-p", core_preflight.SMARTTHINGS_PACKAGE,
@@ -718,7 +732,87 @@ def test_popup_recovery_does_not_tap_not_now_without_review_sheet_submit():
     assert not any(args[:3] == ("shell", "input", "tap") for args in commands)
 
 
-def test_review_sheet_dismiss_requires_smartthings_bottom_tab_after_tap():
+def test_latest_clean_surface_is_recovery_even_without_review_sheet_candidate():
+    client = _Client()
+    client.hierarchy_factory = lambda: _snapshot_from_xml(_smartthings_ready_xml())
+    commands = []
+
+    def adb_runner(_adb_path, serial, *args, timeout=8.0):
+        commands.append(args)
+        return _successful_adb(_adb_path, serial, *args, timeout=timeout)
+
+    result = core_preflight._dismiss_review_sheet_not_now(
+        client=client, serial="SERIAL", adb_path=core_preflight.DEFAULT_ADB_PATH,
+        adb_runner=adb_runner, sleep_fn=lambda _seconds: None, settle_seconds=0,
+    )
+
+    assert result["recovered"] is True
+    assert result["surface_recovered"] is True
+    assert result["recovery_action_attempted"] is False
+    assert result["recovery_action_succeeded"] is False
+    assert result["recovery"] == "surface_already_clean"
+    assert result["after"]["foreground_package"] == core_preflight.SMARTTHINGS_PACKAGE
+    assert result["after"]["hierarchy_ok"] is True
+    assert result["after"]["bottom_tab_present"] is True
+    assert not any(args[:3] == ("shell", "input", "tap") for args in commands)
+
+
+def test_latest_clean_surface_at_final_read_is_accepted_without_dismiss_candidate(monkeypatch):
+    client = _Client()
+    reads = 0
+
+    def hierarchy_factory():
+        nonlocal reads
+        reads += 1
+        if reads < 5:
+            return _snapshot_from_xml(
+                '<hierarchy><node package="com.android.vending" /></hierarchy>'
+            )
+        return _snapshot_from_xml(_smartthings_ready_xml())
+
+    client.hierarchy_factory = hierarchy_factory
+    logs = []
+    commands = []
+
+    def adb_runner(adb_path, serial, *args, timeout=8.0):
+        commands.append(args)
+        return _successful_adb(adb_path, serial, *args, timeout=timeout)
+
+    monkeypatch.setattr(
+        core_preflight,
+        "ensure_smartthings_foreground",
+        lambda **_kwargs: core_preflight._step_result(
+            "PASS", "SmartThings foreground", package=core_preflight.SMARTTHINGS_PACKAGE,
+        ),
+    )
+    _enable_core_preflight_for_rf5r9(monkeypatch)
+
+    result = core_preflight.run_preflight(
+        client=client, serial="SERIAL", log_fn=logs.append,
+        adb_runner=adb_runner, sleep_fn=lambda _seconds: None,
+    )
+
+    assert reads >= 5
+    assert result.ok is True
+    popup = result.app_foreground["popup_check"]
+    assert popup["before_contamination_package"] == "com.android.vending"
+    assert popup["after_contamination_package"] is None
+    assert popup["final_contamination_package"] is None
+    assert popup["contamination_package"] is None
+    assert popup["reason"] == "ok"
+    assert popup["recovered"] is True
+    assert popup["surface_recovered"] is True
+    assert popup["recovery"] == "surface_observed_clean"
+    assert popup["recovery_action_attempted"] is True
+    assert not any(args[:3] == ("shell", "input", "tap") for args in commands)
+    diagnostic = next(line for line in logs if "[PREFLIGHT][readiness]" in line)
+    assert "READINESS_RESULT='PASS'" in diagnostic
+    assert "BEFORE_CONTAMINATION_PACKAGE='com.android.vending'" in diagnostic
+    assert "FINAL_CONTAMINATION_PACKAGE=''" in diagnostic
+    assert "SURFACE_RECOVERED='true'" in diagnostic
+
+
+def test_review_sheet_dismiss_accepts_current_clean_surface_after_tap():
     dismissed = False
     client = _Client()
 
@@ -745,5 +839,395 @@ def test_review_sheet_dismiss_requires_smartthings_bottom_tab_after_tap():
         sleep_fn=lambda _seconds: None,
     )
 
-    assert result["status"] == "FAIL"
+    assert result["status"] == "PASS"
+    assert result["surface_recovered"] is True
+    assert result["final_contamination_package"] is None
     assert result["recovery"] == "dismiss_review_sheet"
+
+
+def _enable_core_preflight_for_rf5r9(monkeypatch):
+    settings = AccessibilitySettings("helper", "1")
+    monkeypatch.setattr(
+        core_preflight,
+        "ensure_accessibility_service_enabled",
+        lambda **kwargs: AccessibilityPreflightResult(
+            True, "ok", settings, settings, False, bool(kwargs["helper_ready_check"]())
+        ),
+    )
+
+
+def test_preflight_hierarchy_exception_fails_closed_without_popup_misclassification(monkeypatch):
+    client = _Client()
+    logs = []
+    client.hierarchy_factory = lambda: (_ for _ in ()).throw(
+        RuntimeError("HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:END_TO_END_TIMEOUT req_id=req-current")
+    )
+    _enable_core_preflight_for_rf5r9(monkeypatch)
+
+    result = core_preflight.run_preflight(
+        client=client, serial="SERIAL", log_fn=logs.append,
+        adb_runner=_successful_adb, sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.ok is False
+    assert result.reason == "service_hierarchy_acquisition_failed"
+    assert result.reason != "external_popup_contamination"
+    assert result.talkback_status == "unknown"
+    assert not any(call[0] == "talkback" for call in client.serials)
+    popup = result.app_foreground["popup_check"]
+    assert popup["contamination_package"] is None
+    assert popup["before"]["hierarchy_error_type"] == "RuntimeError"
+    assert "END_TO_END_TIMEOUT" in popup["before"]["hierarchy_error_message"]
+    assert popup["before"]["hierarchy_request_id"] == "req-current"
+    assert popup["before"]["hierarchy_failure_stage"] == "dump_hierarchy"
+    diagnostic = next(line for line in logs if "[PREFLIGHT][readiness]" in line)
+    assert "READINESS_RESULT='service_hierarchy_acquisition_failed'" in diagnostic
+    assert "HIERARCHY_ERROR_TYPE='RuntimeError'" in diagnostic
+    assert "HIERARCHY_ERROR_MESSAGE='HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:END_TO_END_TIMEOUT req_id=req-current'" in diagnostic
+    assert "CONTAMINATION_PACKAGE=''" in diagnostic
+
+
+def test_preflight_empty_hierarchy_fails_closed_as_surface_failure_not_popup(monkeypatch):
+    client = _Client()
+    client.hierarchy_factory = lambda: {"success": True, "nodes": [], "windows": []}
+    _enable_core_preflight_for_rf5r9(monkeypatch)
+
+    result = core_preflight.run_preflight(
+        client=client, serial="SERIAL", log_fn=lambda _line: None,
+        adb_runner=_successful_adb, sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.ok is False
+    assert result.reason == "service_hierarchy_acquisition_failed"
+    popup = result.app_foreground["popup_check"]
+    assert popup["reason"] == "service_hierarchy_acquisition_failed"
+    assert popup["contamination_package"] is None
+    assert popup["before"]["hierarchy_ok"] is False
+    assert popup["before"]["hierarchy_root_result"] == "FAIL"
+    assert popup["before"]["hierarchy_error_type"] == "ValueError"
+
+
+def test_fresh_clean_surface_overrides_stale_external_popup_hint():
+    client = _Client()
+    commands = []
+
+    def adb_runner(_adb_path, serial, *args, timeout=8.0):
+        commands.append(args)
+        return _successful_adb(_adb_path, serial, *args, timeout=timeout)
+
+    result = core_preflight.recover_external_popup_contamination(
+        client=client,
+        serial="SERIAL",
+        adb_runner=adb_runner,
+        sleep_fn=lambda _seconds: None,
+        contamination_hint="com.android.vending",
+        contamination_hint_current=True,
+        contamination_hint_source="stale_previous_observation",
+    )
+
+    assert result["status"] == "PASS"
+    assert result["recovery_attempted"] is False
+    assert result["contamination_package"] is None
+    assert result["contamination_hint"] == "com.android.vending"
+    assert result["contamination_evidence_source"] == "current_clean_observation"
+    assert ("shell", "input", "keyevent", "KEYCODE_BACK") not in commands
+
+
+def test_current_google_play_package_still_confirms_external_contamination():
+    client = _Client()
+    client.hierarchy_factory = lambda: _snapshot_from_xml(
+        '<hierarchy><node package="com.android.vending" /></hierarchy>'
+    )
+    result = core_preflight.recover_external_popup_contamination(
+        client=client, serial="SERIAL", adb_runner=_successful_adb,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result["reason"] == "external_popup_contamination"
+    assert result["contamination_package"] == "com.android.vending"
+    assert result["contamination_evidence_source"] == "hierarchy_package"
+    assert core_preflight.EXTERNAL_POPUP_PACKAGES == {
+        "com.android.vending", "com.google.android.finsky",
+    }
+
+
+def test_talkback_contamination_recovery_receives_current_client(monkeypatch):
+    client = _Client()
+    observed_clients = []
+    original_recovery = core_preflight.recover_external_popup_contamination
+
+    def recovery_spy(**kwargs):
+        observed_clients.append((kwargs.get("client"), kwargs.get("contamination_hint_source")))
+        return original_recovery(**kwargs)
+
+    responses = iter([
+        {"status": "enabled_but_not_ready", "reason": "external_popup_contamination", "packageName": "com.android.vending"},
+        {"status": "enabled", "reason": "ok"},
+    ])
+    client.check_talkback_ready = lambda dev=None: next(responses)
+    monkeypatch.setattr(core_preflight, "recover_external_popup_contamination", recovery_spy)
+    _enable_core_preflight_for_rf5r9(monkeypatch)
+
+    result = core_preflight.run_preflight(
+        client=client, serial="SERIAL", log_fn=lambda _line: None,
+        adb_runner=_successful_adb, sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.ok is True
+    assert observed_clients[-1] == (client, "talkback_focus")
+
+
+def test_missing_popup_recovery_client_has_dependency_specific_fail_closed_result():
+    commands = []
+
+    def adb_runner(_adb_path, serial, *args, timeout=8.0):
+        commands.append(args)
+        return _successful_adb(_adb_path, serial, *args, timeout=timeout)
+
+    result = core_preflight.recover_external_popup_contamination(
+        client=None, serial="SERIAL", adb_runner=adb_runner,
+        contamination_hint="com.android.vending", contamination_hint_current=True,
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["reason"] == "readiness_recovery_dependency_unavailable"
+    assert result["contamination_package"] is None
+    assert result["contamination_evidence_source"] == "hint_only_suspicion"
+    assert result["before"]["hierarchy_error_type"] == "MissingDependency"
+    assert ("shell", "input", "keyevent", "KEYCODE_BACK") not in commands
+
+
+def _unknown_package_adb(_adb_path, serial, *args, timeout=8.0):
+    assert serial == "SERIAL"
+    if args == ("get-state",):
+        return True, "device"
+    if args == ("shell", "dumpsys", "window", "policy"):
+        return True, "mShowingLockscreen=false"
+    if args in {
+        ("shell", "dumpsys", "window"),
+        ("shell", "dumpsys", "activity", "activities"),
+    }:
+        return True, ""
+    return True, ""
+
+
+def _raise_hierarchy_error(message):
+    raise RuntimeError(message)
+
+
+def test_current_unknown_surface_with_hint_is_suspicion_only_in_normal_preflight(monkeypatch):
+    client = _Client()
+    client.hierarchy_factory = lambda: _raise_hierarchy_error(
+        "HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:PFD_READ_FAILED req_id=req-unknown"
+    )
+    logs = []
+    commands = []
+
+    def adb_runner(adb_path, serial, *args, timeout=8.0):
+        commands.append(args)
+        return _unknown_package_adb(adb_path, serial, *args, timeout=timeout)
+
+    monkeypatch.setattr(
+        core_preflight,
+        "ensure_smartthings_foreground",
+        lambda **_kwargs: core_preflight._step_result(
+            "FAIL", "foreground observed Google Play", package="com.android.vending",
+        ),
+    )
+    _enable_core_preflight_for_rf5r9(monkeypatch)
+
+    result = core_preflight.run_preflight(
+        client=client, serial="SERIAL", log_fn=logs.append,
+        adb_runner=adb_runner, sleep_fn=lambda _seconds: None,
+    )
+
+    popup = result.app_foreground["popup_check"]
+    assert result.ok is False
+    assert result.reason == "service_hierarchy_acquisition_failed"
+    assert popup["reason"] == "service_hierarchy_acquisition_failed"
+    assert popup["contamination_hint"] == "com.android.vending"
+    assert popup["contamination_hint_current"] is True
+    assert popup["contamination_hint_source"] == "app_foreground"
+    assert popup["contamination_package"] is None
+    assert popup["contamination_evidence_source"] == "hint_only_suspicion"
+    assert popup["before"]["foreground_package"] is None
+    assert popup["before"]["hierarchy_package"] is None
+    assert popup["before"]["hierarchy_focused_package"] is None
+    assert popup["before"]["hierarchy_ok"] is False
+    assert ("shell", "input", "keyevent", "KEYCODE_BACK") not in commands
+    diagnostic = next(line for line in logs if "[PREFLIGHT][readiness]" in line)
+    assert "CONTAMINATION_HINT='com.android.vending'" in diagnostic
+    assert "CONTAMINATION_HINT_CURRENT='true'" in diagnostic
+    assert "CONTAMINATION_PACKAGE=''" in diagnostic
+
+
+@pytest.mark.parametrize(
+    ("package", "source"),
+    [
+        (package, source)
+        for package in ("com.android.vending", "com.google.android.finsky")
+        for source in ("foreground_package", "hierarchy_focused_package", "hierarchy_package")
+    ],
+)
+def test_current_google_play_evidence_from_each_approved_source_is_detected(package, source):
+    client = _Client()
+    snapshots = iter(
+        [
+            _snapshot_from_xml(
+                f'<hierarchy><node package="{package}" focused="true" /></hierarchy>'
+                if source == "hierarchy_focused_package"
+                else f'<hierarchy><node package="{package}" /></hierarchy>'
+                if source == "hierarchy_package"
+                else _smartthings_xml()
+            ),
+            _snapshot_from_xml(_smartthings_xml()),
+        ]
+    )
+    client.hierarchy_factory = lambda: next(snapshots)
+    window_reads = 0
+
+    def adb_runner(_adb_path, serial, *args, timeout=8.0):
+        nonlocal window_reads
+        if args == ("shell", "dumpsys", "window"):
+            window_reads += 1
+            if source == "foreground_package" and window_reads == 1:
+                return True, f"mCurrentFocus=Window{{abc u0 {package}/.Popup}}"
+            return True, _smartthings_foreground()
+        if args == ("shell", "dumpsys", "activity", "activities"):
+            return True, ""
+        return True, ""
+
+    result = core_preflight.recover_external_popup_contamination(
+        client=client, serial="SERIAL", adb_runner=adb_runner,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result["status"] == "PASS"
+    assert result["recovery_attempted"] is True
+    assert result["contamination_package"] is None
+    assert result["before_contamination_package"] == package
+    assert result["after_contamination_package"] is None
+    assert result["final_contamination_package"] is None
+    assert result["contamination_evidence_source"] == source
+    assert result["final_contamination_evidence_source"] is None
+    assert result["surface_recovered"] is True
+    assert result["recovery_action_attempted"] is True
+    assert result["final_observation"] == result["after"]
+    assert result["after"]["foreground_package"] == core_preflight.SMARTTHINGS_PACKAGE
+    assert result["after"]["hierarchy_ok"] is True
+
+
+def test_latest_recovery_hierarchy_failure_drives_final_diagnostic(monkeypatch):
+    client = _Client()
+    reads = 0
+
+    def hierarchy_factory():
+        nonlocal reads
+        reads += 1
+        if reads == 5:
+            return _raise_hierarchy_error(
+                "HIERARCHY_SNAPSHOT:TRANSPORT_ERROR:PFD_READ_FAILED req_id=req-latest operation_id=op-latest"
+            )
+        return _snapshot_from_xml(
+            '<hierarchy><node package="com.android.vending" /></hierarchy>'
+        )
+
+    client.hierarchy_factory = hierarchy_factory
+    logs = []
+    monkeypatch.setattr(
+        core_preflight,
+        "ensure_smartthings_foreground",
+        lambda **_kwargs: core_preflight._step_result(
+            "PASS", "SmartThings foreground", package=core_preflight.SMARTTHINGS_PACKAGE,
+        ),
+    )
+    _enable_core_preflight_for_rf5r9(monkeypatch)
+
+    result = core_preflight.run_preflight(
+        client=client, serial="SERIAL", log_fn=logs.append,
+        adb_runner=_unknown_package_adb, sleep_fn=lambda _seconds: None,
+    )
+
+    assert reads == 5
+    assert result.ok is False
+    assert result.reason == "service_hierarchy_acquisition_failed"
+    popup = result.app_foreground["popup_check"]
+    assert popup["before"]["hierarchy_ok"] is True
+    assert popup["before_contamination_package"] == "com.android.vending"
+    assert popup["after"]["hierarchy_ok"] is False
+    assert popup["after_contamination_package"] is None
+    assert popup["contamination_package"] is None
+    assert popup["final_contamination_package"] is None
+    assert popup["reason"] == "service_hierarchy_acquisition_failed"
+    assert popup["recovered"] is False
+    assert popup["surface_recovered"] is False
+    assert popup["final_observation"] == popup["after"]
+    assert popup["after"]["hierarchy_error_type"] == "RuntimeError"
+    assert "PFD_READ_FAILED" in popup["after"]["hierarchy_error_message"]
+    assert popup["after"]["hierarchy_failure_stage"] == "dump_hierarchy"
+    assert popup["after"]["hierarchy_transport_status"] == "TRANSPORT_ERROR"
+    assert popup["after"]["hierarchy_request_id"] == "req-latest"
+    assert popup["after"]["hierarchy_operation_id"] == "op-latest"
+    diagnostic = next(line for line in logs if "[PREFLIGHT][readiness]" in line)
+    assert "FINAL_OBSERVATION='after'" in diagnostic
+    assert "BEFORE_HIERARCHY_OK='true'" in diagnostic
+    assert "AFTER_HIERARCHY_OK='false'" in diagnostic
+    assert "BEFORE_CONTAMINATION_PACKAGE='com.android.vending'" in diagnostic
+    assert "FINAL_CONTAMINATION_PACKAGE=''" in diagnostic
+    assert "CONTAMINATION_PACKAGE=''" in diagnostic
+    assert "RECOVERY_ACTION_ATTEMPTED='true'" in diagnostic
+    assert "SURFACE_RECOVERED='false'" in diagnostic
+    assert "HIERARCHY_OK='false'" in diagnostic
+    assert "HIERARCHY_ERROR_TYPE='RuntimeError'" in diagnostic
+    assert "HIERARCHY_REQUEST_ID='req-latest'" in diagnostic
+    assert "HIERARCHY_OPERATION_ID='op-latest'" in diagnostic
+    assert "PFD_READ_FAILED" in diagnostic
+
+
+def test_successful_popup_recovery_final_diagnostic_uses_fresh_clean_surface(monkeypatch):
+    client = _Client()
+    reads = 0
+
+    def hierarchy_factory():
+        nonlocal reads
+        reads += 1
+        if reads == 1:
+            return _snapshot_from_xml('<hierarchy><node package="com.android.vending" /></hierarchy>')
+        return _snapshot_from_xml(_smartthings_xml())
+
+    client.hierarchy_factory = hierarchy_factory
+    logs = []
+    monkeypatch.setattr(
+        core_preflight,
+        "ensure_smartthings_foreground",
+        lambda **_kwargs: core_preflight._step_result(
+            "PASS", "SmartThings foreground", package=core_preflight.SMARTTHINGS_PACKAGE,
+        ),
+    )
+    _enable_core_preflight_for_rf5r9(monkeypatch)
+
+    result = core_preflight.run_preflight(
+        client=client, serial="SERIAL", log_fn=logs.append,
+        adb_runner=_successful_adb, sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.ok is True
+    popup = result.app_foreground["popup_check"]
+    assert popup["status"] == "PASS"
+    assert popup["before"]["hierarchy_package"] == "com.android.vending"
+    assert popup["after"]["hierarchy_package"] == core_preflight.SMARTTHINGS_PACKAGE
+    assert popup["final_observation"] == popup["after"]
+    assert popup["after"]["hierarchy_ok"] is True
+    assert popup["before_contamination_package"] == "com.android.vending"
+    assert popup["final_contamination_package"] is None
+    assert popup["contamination_package"] is None
+    assert popup["surface_recovered"] is True
+    diagnostic = next(line for line in logs if "[PREFLIGHT][readiness]" in line)
+    assert "READINESS_RESULT='PASS'" in diagnostic
+    assert "FINAL_OBSERVATION='after'" in diagnostic
+    assert "BEFORE_CONTAMINATION_PACKAGE='com.android.vending'" in diagnostic
+    assert "FINAL_CONTAMINATION_PACKAGE=''" in diagnostic
+    assert "RECOVERY_ACTION_ATTEMPTED='true'" in diagnostic
+    assert "SURFACE_RECOVERED='true'" in diagnostic
+    assert "HIERARCHY_OK='true'" in diagnostic
+    assert f"HIERARCHY_PACKAGE='{core_preflight.SMARTTHINGS_PACKAGE}'" in diagnostic

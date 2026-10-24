@@ -203,7 +203,7 @@ def _validate_identity(
         raise HierarchyTransportError("REQUEST_IDENTITY_MISMATCH", request_id)
     if header.get("payload_schema_version") != PAYLOAD_SCHEMA or header.get("payload_schema_version") != control.get("payload_schema_version"):
         raise HierarchyTransportError("PAYLOAD_SCHEMA_MISMATCH", request_id)
-    if not isinstance(header.get("generation"), int) or header["generation"] < 1:
+    if type(header.get("generation")) is not int or header["generation"] < 1:
         raise HierarchyTransportError("GENERATION_INVALID", request_id)
     if not isinstance(header.get("process_epoch"), str) or not header["process_epoch"]:
         raise HierarchyTransportError("PROCESS_EPOCH_MISSING", request_id)
@@ -303,6 +303,26 @@ def validate_control_identity(value: dict[str, Any], expected: dict[str, str], *
         raise HierarchyTransportError("SERVICE_INSTANCE_MISMATCH", request_id)
     if value.get("payload_schema_version") not in (None, PAYLOAD_SCHEMA):
         raise HierarchyTransportError("PAYLOAD_SCHEMA_MISMATCH", request_id)
+
+
+def validate_prestart_capability_generation(value: dict[str, Any], *, request_id: str = "") -> int:
+    """Accept only an explicit nonnegative integer on prestart CAPABILITIES."""
+    generation = value.get("generation")
+    if type(generation) is not int or generation < 0:
+        raise HierarchyTransportError("CAPABILITY_GENERATION_INVALID", request_id)
+    return generation
+
+
+def validate_request_generation(value: dict[str, Any], *, request_id: str = "") -> int:
+    """Require a positive generation on request-scoped control responses.
+
+    Prestart CAPABILITIES has a separate empty-counter baseline of zero; this
+    validator is for ACCEPTED/STATUS/READY/ACK request records only.
+    """
+    generation = value.get("generation")
+    if type(generation) is not int or generation < 1:
+        raise HierarchyTransportError("GENERATION_INVALID", request_id)
+    return generation
 
 
 def validate_control_response(

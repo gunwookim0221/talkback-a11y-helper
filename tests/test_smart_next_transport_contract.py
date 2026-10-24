@@ -137,6 +137,24 @@ def test_move_focus_smart_does_not_retry_transport_failure(client, monkeypatch):
     assert len(client.last_smart_nav_result["reqId"]) == 32
 
 
+def test_smart_next_action_sent_evidence_requires_successful_broadcast_boundary(client, monkeypatch):
+    sent = []
+    client._evidence_action_sent = lambda *, action, req_id: sent.append((action, req_id))
+    client._broadcast = lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("before-dispatch"))
+
+    with pytest.raises(RuntimeError, match="before-dispatch"):
+        client._helper_bridge._request_smart_next(None, "not-dispatched")
+    assert sent == []
+
+    client._broadcast = lambda *_args, **_kwargs: "Broadcast completed: result=0"
+    client._read_log_result = lambda _dev, _prefix, req_id, **_kwargs: {
+        "reqId": req_id, "success": False, "status": "transport_error",
+    }
+    result = client._helper_bridge._request_smart_next(None, "dispatched")
+    assert result["reqId"] == "dispatched"
+    assert sent == [(ACTION_SMART_NEXT, "dispatched")]
+
+
 def test_generic_adb_timeout_contract_remains_unchanged(client, monkeypatch):
     def run(*a, **k):
         raise subprocess.TimeoutExpired(a[0], k["timeout"])

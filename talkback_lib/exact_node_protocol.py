@@ -1189,10 +1189,15 @@ def precheck_helper_build_identity(
         "candidate_contract": capabilities.get("candidate_contract_version"),
         "capabilities": capabilities.get("capabilities"),
     })
+    # CAPABILITIES is queried before any hierarchy request is accepted. Its
+    # generation is the current request counter, so zero is the valid empty
+    # baseline for a freshly connected service. Request-scoped control replies
+    # and artifacts retain the stricter >= 1 contract in their own validators.
+    capability_generation = capabilities.get("generation")
     if (capabilities.get("schema") != _REQUIRED_HELPER_SCHEMAS["control_schema"]
             or capabilities.get("request_id") is not None
             or capabilities.get("status") != "OK" or capabilities.get("completed") is not True
-            or type(capabilities.get("generation")) is not int or capabilities.get("generation", 0) < 1
+            or type(capability_generation) is not int or capability_generation < 0
             or not isinstance(capabilities.get("process_epoch"), str) or not capabilities.get("process_epoch")
             or not isinstance(capabilities.get("service_instance_id"), str) or not capabilities.get("service_instance_id")
             or not isinstance(cap_identity, dict)

@@ -11,6 +11,7 @@ import subprocess
 import threading
 import time
 import uuid
+from contextlib import nullcontext
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from dataclasses import dataclass
@@ -73,6 +74,8 @@ from talkback_lib.hierarchy_file_transport import (
     validate_control_identity as validate_hierarchy_control_identity,
     validate_control_response as validate_hierarchy_control_response,
     validate_expected_build_precheck as validate_expected_hierarchy_build_precheck,
+    validate_prestart_capability_generation as validate_hierarchy_prestart_capability_generation,
+    validate_request_generation as validate_hierarchy_request_generation,
 )
 from talkback_lib.reliable_hierarchy_schema import (
     ReliableHierarchyPayload,
@@ -92,6 +95,7 @@ from talkback_lib.step_row_builder import (
     populate_get_focus_trace_fields,
 )
 from talkback_lib.step_collection_service import StepCollectionService
+from talkback_lib.smart_nav_invocation import begin_move, producing_generation, publish_result, result_producer
 from talkback_lib.window_lifecycle import capture_window_lifecycle, get_talkback_restart_event
 from talkback_lib.utils import (
     json_safe_value,
@@ -151,6 +155,7 @@ class A11yAdbClient:
         self._last_log_marker: tuple[tuple[int, int, int, int, int, int], int] | None = None
         self.last_dump_metadata: dict[str, Any] = {}
         self.last_hierarchy_metadata: dict[str, Any] = {}
+        self.last_hierarchy_cleanup_diagnostic: dict[str, Any] = {}
         self._last_hierarchy_capabilities: dict[str, Any] | None = None
         self._last_hierarchy_transport_metadata: dict[str, Any] | None = None
         self._hierarchy_capture_sequence = 0
@@ -158,6 +163,9 @@ class A11yAdbClient:
         self.last_device_collection: dict[str, Any] = {}
         self.last_scroll_result: dict[str, Any] = {}
         self.last_smart_nav_result: dict[str, Any] = {}
+        self._last_smart_nav_invocation_result: dict[str, Any] = {}
+        self._smart_nav_invocation_generation = 0
+        self._smart_nav_result_generation = None
         self.last_smart_nav_terminal: bool = False
         self.last_target_action_result: dict[str, Any] = {}
         self._helper_status_cache: dict[str, Any] = {
@@ -214,6 +222,7 @@ class A11yAdbClient:
         runtime = self.evidence_runtime
         if not self._evidence_is_enabled() or runtime is None:
             return None
+        self._evidence_active_request_id = ""
         transaction = runtime.begin_transaction(action_type, phase="main_loop", payload={"direction": direction})
         self._evidence_active_transaction = transaction
         runtime.observe(
@@ -244,6 +253,7 @@ class A11yAdbClient:
         runtime = self.evidence_runtime
         if not self._evidence_is_enabled() or runtime is None:
             return None
+        self._evidence_active_request_id = ""
         transaction = runtime.begin_transaction(action_type, phase=phase, payload={"target_kind": "node"})
         self._evidence_active_transaction = transaction
         runtime.observe(
@@ -281,6 +291,22 @@ class A11yAdbClient:
                 transaction=self._evidence_active_transaction,
                 payload={"command_type": action, "request_id": req_id},
             )
+
+    def _smart_nav_request_dispatched(self, req_id: str) -> None:
+        """Bind a current SMART_NEXT receipt at the successful broadcast boundary."""
+        request_id = str(req_id or "").strip()
+        if not request_id:
+            return
+        # Keep the exact request ID available if the subsequent result read or
+        # normalization raises. A successful ADB broadcast is current dispatch
+        # evidence; the historical result cache is not used for this purpose.
+        publish_result(self, producing_generation(self), {
+            "reqId": request_id,
+            "success": False,
+            "status": "transport_error",
+            "reason": "smart_nav_result_unavailable",
+        })
+        self._evidence_action_sent(action=ACTION_SMART_NEXT, req_id=request_id)
 
     def _evidence_helper_ack(self, result: dict[str, Any], *, req_id: str, source: str = "inline", emit_ack: bool = True) -> dict[str, int]:
         runtime = self.evidence_runtime
@@ -519,10 +545,12 @@ class A11yAdbClient:
             if isinstance(focus_node, dict) and focus_node:
                 self._evidence_last_focus_node = dict(focus_node)
             return
-        smart_result = self.last_smart_nav_result if isinstance(self.last_smart_nav_result, dict) else {}
         action_type = str(transaction.get("action_type") or "")
         if action_type in {"SMART_NEXT", "SMART_PREVIOUS"}:
-            active_req_id = str(smart_result.get("reqId") or self._evidence_active_request_id or "")
+            # The active request is stamped only at this transaction's
+            # dispatch boundary. A cached last_smart_nav_result may belong to
+            # a previous invocation and cannot establish current ownership.
+            active_req_id = str(self._evidence_active_request_id or "")
         else:
             active_req_id = str(self._evidence_active_request_id or "")
         self._evidence_fetch_helper_events(dev, req_id=active_req_id)
@@ -1640,6 +1668,10 @@ class A11yAdbClient:
             raise
         request_id = uuid.uuid4().hex
         client_nonce = self._hierarchy_nonce()
+        self.last_hierarchy_cleanup_diagnostic = {
+            "request_id": request_id,
+            "status": "NO_CLEANUP_REQUIRED",
+        }
         started = time.monotonic()
         budget = min(30.0, max(0.1, float(wait_seconds)))
         deadline = started + budget
@@ -1671,7 +1703,10 @@ class A11yAdbClient:
             if response.get("request_id") not in (None, request_id):
                 raise HierarchyTransportError("CONTROL_REQUEST_ID_MISMATCH", request_id)
             validate_hierarchy_control_identity(response, expected, request_id=request_id)
-            if action != "CAPABILITIES":
+            if action == "CAPABILITIES":
+                validate_hierarchy_prestart_capability_generation(response, request_id=request_id)
+            else:
+                validate_hierarchy_request_generation(response, request_id=request_id)
                 if response.get("client_nonce") != client_nonce:
                     raise HierarchyTransportError("CONTROL_CLIENT_NONCE_MISMATCH", request_id)
                 if expected_process_epoch is not None and response.get("process_epoch") != expected_process_epoch:
@@ -1760,6 +1795,13 @@ class A11yAdbClient:
                 prepositioned.authorize_hierarchy_payload_read(
                     user_id=user_text.strip(), uri=uri, control=ready
                 )
+            phase5_authorize_read = getattr(
+                self, "_phase5b_authorize_hierarchy_payload_read", None
+            )
+            if callable(phase5_authorize_read):
+                phase5_authorize_read(
+                    user_id=user_text.strip(), uri=uri, control=ready
+                )
             binary = self._adb_device._run_adb_binary_command(
                 ["shell", "-T", "content", "read", "--user", user_text.strip(), "--uri", uri],
                 dev=dev,
@@ -1818,6 +1860,16 @@ class A11yAdbClient:
                     ack.get("generation") != ready.get("generation") or
                     ack.get("helper_build_identity") != ready.get("helper_build_identity")):
                 raise HierarchyTransportError("ACK_IDENTITY_MISMATCH", request_id)
+            if ack.get("client_nonce") != client_nonce or ack.get("completed") is not True \
+                    or ack.get("payload_complete") is not True:
+                raise HierarchyTransportError("ACK_COMPLETION_INVALID", request_id)
+            complete_phase5_ack = getattr(self, "_phase5b_complete_hierarchy_ack", None)
+            if callable(complete_phase5_ack):
+                complete_phase5_ack(ack)
+            self.last_hierarchy_cleanup_diagnostic = {
+                "request_id": request_id,
+                "status": "ACKED",
+            }
             acknowledged = True
 
             self._last_hierarchy_transport_metadata = {
@@ -1882,10 +1934,13 @@ class A11yAdbClient:
             raise
 
     def _cancel_hierarchy_transfer(self, dev: Any, request_id: str, client_nonce: str, remaining: float) -> None:
-        if remaining <= 0:
-            return
-        query_nonce = self._hierarchy_nonce()
+        query_nonce = ""
+        cleanup_status = "SKIPPED"
+        cleanup_error = "CLEANUP_BUDGET_EXHAUSTED" if remaining <= 0 else ""
         try:
+            if remaining <= 0:
+                return
+            query_nonce = self._hierarchy_nonce()
             response = self._hierarchy_transfer_control(
                 dev,
                 "CANCEL",
@@ -1897,10 +1952,35 @@ class A11yAdbClient:
                 request_id=request_id,
                 remaining_seconds=remaining,
             )
-            if response.get("query_nonce") != query_nonce or response.get("request_id") != request_id:
+            if (response.get("query_nonce") != query_nonce
+                    or response.get("request_id") != request_id
+                    or response.get("client_nonce") != client_nonce
+                    or response.get("status") != "CANCELLED"
+                    or response.get("completed") is not True):
                 raise HierarchyTransportError("CANCEL_CORRELATION_MISMATCH", request_id)
-        except Exception:
-            return
+            cleanup_status = "CANCELLED"
+        except Exception as error:
+            cleanup_status = "FAILED"
+            cleanup_error = (error.reason if isinstance(error, HierarchyTransportError)
+                             else str(getattr(error, "reason", "")) or type(error).__name__)
+        finally:
+            diagnostic = {
+                "request_id": request_id,
+                "status": cleanup_status,
+            }
+            if cleanup_error:
+                diagnostic["error_code"] = cleanup_error
+            finish_phase5_cancel = getattr(self, "_phase5b_finish_hierarchy_cancel", None)
+            if callable(finish_phase5_cancel):
+                try:
+                    finish_phase5_cancel(
+                        request_id=request_id,
+                        client_nonce=client_nonce,
+                        query_nonce=query_nonce,
+                    )
+                except Exception as error:
+                    diagnostic["phase5_release_error"] = type(error).__name__
+            self.last_hierarchy_cleanup_diagnostic = diagnostic
 
     @staticmethod
     def _remaining_for_cleanup(deadline: float) -> float:
@@ -3504,6 +3584,9 @@ class A11yAdbClient:
         print(f"[{label}] Focus history has been explicitly reset.")
 
     def move_focus_smart(self, dev: Any = None, direction: str = "next") -> dict[str, Any]:
+        # Keep the historical result cache intact, but expose a separate
+        # receipt for this invocation. Pre-request failures leave it empty.
+        invocation_generation = begin_move(self)
         direction_token = str(direction).strip().lower()
         self._safe_trace_print(
             f"[SMART_NEXT_TRACE] move_focus_smart_entry "
@@ -3538,12 +3621,55 @@ class A11yAdbClient:
         def _attempt_smart_next() -> tuple[bool, dict[str, Any]]:
             req_id = uuid.uuid4().hex
             self._safe_trace_print(f"[SMART_NEXT_TRACE] req_id_generated req_id={req_id} source=move_focus_smart")
-            self._evidence_action_sent(action=ACTION_SMART_NEXT, req_id=req_id)
-            result = self._helper_bridge._request_smart_next(dev=dev, req_id=req_id)
-            self.last_smart_nav_result = result
-            self._evidence_helper_ack(result if isinstance(result, dict) else {}, req_id=req_id)
+            # Give this exact native request its own receipt scope. ADB can
+            # time out after entering the subprocess boundary, before the
+            # HelperBridge starts waiting for a result; only the typed native
+            # receipt may preserve that request as current in that case.
+            native_store = getattr(getattr(self, "_adb_device", None), "native_dispatch_receipts", None)
+            operation_id = uuid.uuid4().hex
+            checkpoint = None
+            native_evidence_fn = None
+            operation_context = nullcontext()
+            dispatched_status = "DISPATCHED"
+            try:
+                from talkback_lib.native_dispatch_evidence import (
+                    DISPATCHED as dispatched_status,
+                    native_dispatch_checkpoint,
+                    native_dispatch_evidence as native_evidence_fn,
+                    native_dispatch_operation,
+                )
+                checkpoint = native_dispatch_checkpoint(native_store, operation_id=operation_id)
+                operation_context = native_dispatch_operation(operation_id)
+            except Exception:
+                # Receipt instrumentation must not alter normal action behavior.
+                pass
+            with operation_context, result_producer(self, invocation_generation):
+                result = self._helper_bridge._request_smart_next(dev=dev, req_id=req_id)
+            result_available = (
+                isinstance(result, dict) and result.get("resultWaitStarted") is not False
+            )
+            current_request_observed = result_available
+            if (not current_request_observed and isinstance(result, dict)
+                    and result.get("resultWaitStarted") is False and callable(native_evidence_fn)):
+                try:
+                    dispatch_evidence = native_evidence_fn(
+                        checkpoint,
+                        native_store,
+                        request_id=req_id,
+                        native_boundary_entered=True,
+                        operation_error=True,
+                    )
+                    current_request_observed = dispatch_evidence.dispatch_status == dispatched_status
+                except Exception:
+                    # Missing, stale, or malformed receipt evidence stays fail-closed.
+                    current_request_observed = False
+            publish_result(self, invocation_generation, result if current_request_observed else {})
+            if result_available:
+                self.last_smart_nav_result = result
+                self._evidence_helper_ack(result if isinstance(result, dict) else {}, req_id=req_id)
             normalized, terminal, _, _ = self._helper_bridge.normalize_smart_next_status(result)
-            self.last_smart_nav_terminal = terminal
+            if result_available:
+                self.last_smart_nav_terminal = terminal
             self._safe_trace_print(
                 f"[SMART_NEXT_TRACE] move_focus_smart_result req_id={req_id} "
                 f"status={result.get('status', '')} detail={result.get('detail', '')} normalized={normalized}"

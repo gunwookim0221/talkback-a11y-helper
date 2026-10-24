@@ -284,6 +284,12 @@ class ExplorationShadowRuntime:
             token = f"{decision_id}@{watermark}#{len(self.decisions) + len(self._pending) + 1}"
             evaluation_doc = evaluation.to_dict()
             evaluation_doc.pop("proposed_history", None)
+            selected_frontier_item = next((item for item in frontier.get("frontier_items", [])
+                                           if item.get("frontier_id") == frontier.get("shadow_next_frontier")), {})
+            selected_frontier_record = ({key: deepcopy(selected_frontier_item.get(key)) for key in (
+                "frontier_id", "candidate_id", "state_id", "edge_type", "priority_class",
+                "target_identity", "status", "reason_codes")}
+                if isinstance(selected_frontier_item, Mapping) and selected_frontier_item else {})
             record = {
                 "decision_id": decision_id,
                 "decision_watermark": watermark,
@@ -337,6 +343,9 @@ class ExplorationShadowRuntime:
                     "truncation_summary": _dict(frontier.get("truncation_summary")),
                     "truncated": frontier.get("truncated") is True,
                 },
+                # This is a bounded recommendation reference for future 6D3A
+                # revalidation. It is never an execution permit.
+                "selected_frontier": selected_frontier_record,
                 "progress_events": list(evaluation.progress_types and
                                          (item.value for item in evaluation.progress_types) or ()),
                 "progress_reasons": list(evaluation.reason_codes),
@@ -370,8 +379,7 @@ class ExplorationShadowRuntime:
                 "evaluation": evaluation_doc,
             }
             from tb_runner.redirect_evidence import evaluate_redirect_evidence
-            selected = next((item for item in frontier.get("frontier_items", [])
-                             if item.get("frontier_id") == frontier.get("shadow_next_frontier")), {})
+            selected = selected_frontier_item
             context = _dict(execution_context)
             context.update(decision_watermark=watermark,
                            state_id=current.get("state_id"),

@@ -86,6 +86,33 @@ def test_ack_success_without_actual_focus_move_has_no_match():
     assert row["target_focus_status"] == "FOCUS_UNCHANGED"
 
 
+def test_generic_target_focus_propagates_helper_request_id_to_row():
+    target = node()
+
+    class RequestClient(Client):
+        def target_focus_commit(self, **kwargs):
+            self.calls.append(kwargs)
+            return {"success": True, "status": "TARGET_MATCHED", "reqId": "helper-target-request"}
+
+    row, (ok, reason, _actual) = commit(RequestClient(target), target)
+
+    assert ok and reason == "TARGET_MATCHED"
+    assert row["target_focus_request_id"] == "helper-target-request"
+    assert row["target_focus_attempt_id"] != row["target_focus_request_id"]
+
+
+def test_missing_generic_target_request_does_not_promote_attempt_id():
+    from tb_runner.frontier_shadow import canonical_action_request_id
+
+    target = node()
+    row, (ok, reason, _actual) = commit(Client(target), target)
+
+    assert ok and reason == "TARGET_MATCHED"
+    assert row["target_focus_attempt_id"]
+    assert row["target_focus_request_id"] == ""
+    assert canonical_action_request_id(row) == ""
+
+
 def test_no_progress_waits_for_unattempted_target_then_terminates_after_attempt():
     candidate = {
         "viewIdResourceName": "id/a", "text": "A", "className": "android.widget.Button",

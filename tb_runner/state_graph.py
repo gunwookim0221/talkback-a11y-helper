@@ -5,6 +5,7 @@ hierarchy I/O, selects actions, grants visits, or makes traversal decisions.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
 import json
@@ -101,6 +102,7 @@ class GraphEdge(TypedDict):
     step: int
     opportunity_id: str
     edge_type: str
+    request_id: str | None
     source_state_id: str | None
     destination_state_id: str | None
     target: dict[str, Any]
@@ -184,6 +186,8 @@ def _structural_node(node: Mapping[str, Any]) -> dict[str, Any]:
 
 def _identity_from_observation(raw: Mapping[str, Any]) -> GraphIdentityResult:
     try:
+        if raw.get("production_observation_current") is False or not _production_observation_envelope_valid(raw):
+            return GraphIdentityResult(None, "UNRESOLVED", ("PRODUCTION_OBSERVATION_NOT_CURRENT_OR_ALIGNED",))
         context = resolve_phase3_context(raw)
         context_evidence = {"status": context.get("status"), "verified": context.get("verified") is True,
                             "context_type": context.get("context_type"), "context_id": context.get("context_id"),
@@ -253,6 +257,61 @@ def build_graph_state_identity(raw: Mapping[str, Any]) -> GraphIdentityResult:
     if not isinstance(raw, Mapping):
         raise TypeError("graph observation must be a mapping")
     return _identity_from_observation(raw)
+
+
+def _production_observation_envelope_valid(raw: Mapping[str, Any]) -> bool:
+    """Validate an attached production snapshot without joining sibling captures."""
+    envelope = raw.get("production_observation_envelope")
+    if not isinstance(envelope, Mapping):
+        return True
+    if envelope.get("schema_version") != "phase6-production-observation-v1":
+        return False
+    capture_id = str(envelope.get("capture_id") or "")
+    scenario_id = str(envelope.get("scenario_id") or "")
+    run_id = str(envelope.get("scenario_run_id") or "")
+    if (not capture_id or not scenario_id or not run_id
+            or raw.get("capture_id") != capture_id
+            or raw.get("scenario_id") != scenario_id
+            or raw.get("scenario_run_id") != run_id):
+        return False
+    if any(envelope.get(key) != capture_id for key in (
+            "hierarchy_capture_id", "focus_capture_id", "geometry_capture_id")):
+        return False
+    observation = envelope.get("observation")
+    if not isinstance(observation, Mapping):
+        return False
+    scope_id = observation.get("scope_id")
+    sequence = observation.get("observation_sequence")
+    epoch = observation.get("action_epoch")
+    context_revision = observation.get("context_revision")
+    if (not isinstance(scope_id, str) or not scope_id
+            or type(sequence) is not int or sequence < 0
+            or type(epoch) is not int or epoch < 0
+            or type(context_revision) is not int or context_revision < 0
+            or observation.get("observation_epoch") != epoch
+            or observation.get("capture_end_action_epoch") != epoch
+            or observation.get("observation_id") != f"observation:{scope_id}:{sequence}"
+            or observation.get("capture_complete") is not True
+            or envelope.get("capture_complete") is not True):
+        return False
+    if raw.get("_exploration_observation") != dict(observation):
+        return False
+    if (envelope.get("coverage") != raw.get("observation_coverage")
+            or envelope.get("coverage_source") != raw.get("coverage_source")
+            or envelope.get("navigation_epoch") != raw.get("navigation_epoch")
+            or envelope.get("snapshot_coherent") is not True
+            or raw.get("snapshot_coherent") is not True):
+        return False
+    if raw.get("observation_coverage") == "OBSERVED_FULL":
+        if (envelope.get("hierarchy_complete") is not True
+                or raw.get("hierarchy_complete") is not True
+                or envelope.get("coverage_source") not in {
+                    "reliable_service_hierarchy", "service_hierarchy_xml",
+                }):
+            return False
+    elif raw.get("hierarchy_complete") is True or envelope.get("hierarchy_complete") is True:
+        return False
+    return True
 
 
 def _focus_projection(evidence: Mapping[str, Any]) -> dict[str, Any]:
@@ -430,6 +489,9 @@ class StateGraphRecorder:
             "step": step,
             "opportunity_id": opportunity_id,
             "edge_type": action_type,
+            "request_id": (action.get("request_id")
+                           if isinstance(action.get("request_id"), str) and action.get("request_id")
+                           else None),
             "source_state_id": source_state_id,
             "destination_state_id": destination_state_id,
             "target": target_descriptor,
@@ -497,14 +559,30 @@ def replay_state_graph(manifest: Mapping[str, Any], *, limits: GraphLimits | Non
 def _raw_observation_from_row(row: Mapping[str, Any]) -> dict[str, Any]:
     supplied = row.get("state_graph_observation")
     if isinstance(supplied, Mapping):
-        return dict(supplied)
+        raw = deepcopy(dict(supplied))
+        if isinstance(raw.get("production_observation_envelope"), Mapping):
+            marker = row.get("_exploration_observation")
+            aligned = bool(
+                _production_observation_envelope_valid(raw)
+                and isinstance(marker, Mapping)
+                and dict(marker) == raw.get("_exploration_observation")
+                and row.get("capture_id") == raw.get("capture_id")
+                and row.get("scenario_id") == raw.get("scenario_id")
+                and row.get("scenario_run_id") == raw.get("scenario_run_id")
+            )
+            raw["production_observation_current"] = bool(
+                raw.get("production_observation_current") is True and aligned)
+        return raw
     focus = row.get("actual_focus_node") or row.get("focus_node") or {}
     focus = focus if isinstance(focus, Mapping) else {}
     raw = {
         "scenario_id": row.get("scenario_id"),
         "scenario_run_id": row.get("scenario_run_id"),
         "timestamp": row.get("timestamp"),
+        "capture_id": row.get("capture_id"),
         "phase3_entry_evidence": row.get("phase3_entry_evidence"),
+        "phase3_plugin_context_evidence": row.get("phase3_plugin_context_evidence"),
+        "navigation_epoch": row.get("navigation_epoch"),
         "package_name": row.get("package_name") or focus.get("packageName") or focus.get("package_name"),
         "activity_name": row.get("activity_name"),
         "context_source": row.get("context_source"),
@@ -533,26 +611,120 @@ def _evidence_from_row(row: Mapping[str, Any]) -> dict[str, Any]:
         "terminal_status": row.get("status") if row.get("status") == "END" else None,
         "terminal_reason": row.get("stop_reason") or None,
     }
-    try:
-        step_index = int(row.get("step_index", 0) or 0)
-    except (TypeError, ValueError):
-        step_index = 0
-    action_request_id = row.get("smart_nav_req_id") or row.get("get_focus_req_id")
-    has_action_observation = bool(action_request_id or row.get("move_result") is not None or step_index > 0)
-    if row.get("forced_local_tab_navigation") is True:
-        action_type = EdgeType.TARGETED_FOCUS.value
-    else:
-        action_type = EdgeType.FOCUS_NEXT.value
-    target = {}
-    for target_key, source_key in (("resource_id", "smart_nav_requested_view_id"),
-                                   ("class_name", "smart_nav_requested_class_name"),
-                                   ("bounds", "smart_nav_requested_bounds")):
-        if row.get(source_key):
-            target[target_key] = row[source_key]
-    evidence["action"] = {"type": action_type, "target": target} if has_action_observation else None
-    evidence["attempted"] = bool(action_request_id or row.get("move_result") is not None or step_index > 0)
-    evidence["dispatched"] = bool(row.get("smart_nav_req_id"))
-    evidence["command_ack"] = row.get("command_ack_status") or row.get("last_smart_nav_result")
+    # Reuse the production action discriminator and action-scoped request
+    # selector. Import lazily because frontier_shadow consumes this module's
+    # graph types during its own initialization.
+    from tb_runner.frontier_shadow import canonical_action_request_id, current_action_type
+
+    action_family = current_action_type(row)
+    action_request_id = canonical_action_request_id(row, action_family)
+    graph_action = {
+        "SMART_NEXT": EdgeType.FOCUS_NEXT.value,
+        "SMART_PREVIOUS": EdgeType.FOCUS_PREVIOUS.value,
+        "TARGETED_FOCUS": EdgeType.TARGETED_FOCUS.value,
+        # Controlled focus is a target-directed focus edge in the v1 graph
+        # vocabulary; retain its request and target as separate provenance.
+        "CONTROLLED_FOCUS": EdgeType.TARGETED_FOCUS.value,
+        "RECOVERY": EdgeType.RECOVERY.value,
+        "SCROLL_FORWARD": EdgeType.SCROLL_FORWARD.value,
+        "SCROLL_BACKWARD": EdgeType.SCROLL_BACKWARD.value,
+        "TAB_CHANGE": EdgeType.TAB_CHANGE.value,
+        "BACK": EdgeType.BACK.value,
+        "SAFE_ACTIVATION": EdgeType.SAFE_ACTIVATION.value,
+    }.get(action_family)
+
+    marker = str(row.get("phase6_current_action_type")
+                or row.get("current_action_type")
+                or row.get("smart_nav_action_type") or "").strip()
+    action_attempted = bool(
+        marker or action_request_id or row.get("move_result") is not None
+        or row.get("target_focus_attempted") is True
+        or row.get("recovery_action_attempted") is True
+        or row.get("controlled_focus_intent") is not None
+        or row.get("controlled_focus_dispatch_status") is not None
+    )
+
+    target: dict[str, Any] = {}
+    descriptor = None
+    if action_family == "CONTROLLED_FOCUS":
+        intent = row.get("controlled_focus_intent")
+        if isinstance(intent, Mapping):
+            descriptor = intent.get("target_descriptor")
+        if not isinstance(descriptor, Mapping):
+            descriptor = row.get("target_focus_descriptor")
+    elif action_family == "TARGETED_FOCUS":
+        descriptor = row.get("target_focus_descriptor")
+    if isinstance(descriptor, Mapping):
+        for key in ("resource_id", "class_name", "bounds", "candidate_instance_id", "direction"):
+            if descriptor.get(key) is not None and descriptor.get(key) != "":
+                target[key] = deepcopy(descriptor[key])
+    elif action_family == "SMART_NEXT":
+        for target_key, source_key in (("resource_id", "smart_nav_requested_view_id"),
+                                       ("class_name", "smart_nav_requested_class_name"),
+                                       ("bounds", "smart_nav_requested_bounds")):
+            if row.get(source_key):
+                target[target_key] = row[source_key]
+
+    has_action_observation = graph_action is not None and action_attempted
+    evidence["action"] = ({"type": graph_action, "target": target,
+                           "request_id": action_request_id or None}
+                          if has_action_observation else None)
+    evidence["attempted"] = bool(has_action_observation)
+
+    dispatch_status = "UNKNOWN"
+    dispatch_status_key = {
+        "SMART_NEXT": "smart_nav_dispatch_status",
+        "SMART_PREVIOUS": "smart_previous_dispatch_status",
+        "TARGETED_FOCUS": "target_focus_dispatch_status",
+        "CONTROLLED_FOCUS": "controlled_focus_dispatch_status",
+        "RECOVERY": "recovery_action_dispatch_status",
+        "SCROLL_FORWARD": "scroll_dispatch_status",
+        "SCROLL_BACKWARD": "scroll_dispatch_status",
+        "TAB_CHANGE": "tab_change_dispatch_status",
+        "BACK": "back_dispatch_status",
+        "SAFE_ACTIVATION": "activation_dispatch_status",
+    }.get(action_family)
+    if dispatch_status_key and action_request_id:
+        status_request_key = {
+            "SMART_NEXT": "smart_nav_dispatch_request_id",
+            "SMART_PREVIOUS": "smart_previous_dispatch_request_id",
+            "TARGETED_FOCUS": "target_focus_dispatch_request_id",
+            "CONTROLLED_FOCUS": "controlled_focus_request_id",
+            "RECOVERY": "recovery_action_dispatch_request_id",
+            "SCROLL_FORWARD": "scroll_dispatch_request_id",
+            "SCROLL_BACKWARD": "scroll_dispatch_request_id",
+            "TAB_CHANGE": "tab_change_dispatch_request_id",
+            "BACK": "back_dispatch_request_id",
+            "SAFE_ACTIVATION": "activation_dispatch_request_id",
+        }.get(action_family)
+        status_request = str(row.get(status_request_key) or "").strip() if status_request_key else ""
+        # CONTROLLED_FOCUS's status is written beside its action-scoped request
+        # by controlled_collect and is itself produced from NativeDispatchEvidence.
+        if status_request == action_request_id:
+            dispatch_status = str(row.get(dispatch_status_key) or "UNKNOWN").strip().upper()
+        elif action_family == "CONTROLLED_FOCUS":
+            dispatch_status = str(row.get("controlled_focus_dispatch_status") or "UNKNOWN").strip().upper()
+    if dispatch_status not in {"DISPATCHED", "NOT_DISPATCHED", "UNKNOWN"}:
+        dispatch_status = "UNKNOWN"
+    evidence["dispatch_status"] = dispatch_status
+    evidence["dispatched"] = dispatch_status == "DISPATCHED"
+
+    command_ack = None
+    if action_family == "SMART_NEXT" and action_request_id:
+        result = row.get("last_smart_nav_result")
+        result_request = ""
+        if isinstance(result, Mapping):
+            result_request = str(result.get("reqId") or result.get("requestId")
+                                 or result.get("request_id") or "").strip()
+        generation = row.get("smart_nav_invocation_generation")
+        result_generation = row.get("smart_nav_result_generation")
+        if result_request == action_request_id or (
+                isinstance(result, str) and type(generation) is int
+                and result_generation == generation):
+            command_ack = result
+    if command_ack is None and action_request_id and row.get("command_ack_request_id") == action_request_id:
+        command_ack = row.get("command_ack_status") or row.get("command_ack_result")
+    evidence["command_ack"] = command_ack
     return evidence
 
 

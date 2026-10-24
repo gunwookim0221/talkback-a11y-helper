@@ -28,6 +28,20 @@ STAGES = (("home_main", "devices_main", "life_main"), ("life_food_plugin", "life
 SCENARIOS = tuple(s for stage in STAGES for s in stage)
 BUDGETS = {s: 20 if s in {"life_food_plugin", "device_camera_plugin"} else 10 for s in SCENARIOS}
 
+_HIERARCHY_TRANSFER_PREFIX = "com.iotpart.sqe.talkbackhelper.HIERARCHY_TRANSFER_"
+_HIERARCHY_TRANSFER_OPERATIONS = {
+    "CAPABILITIES", "START", "STATUS", "ACK", "CANCEL",
+}
+_HIERARCHY_EVIDENCE_EXTRAS = {
+    "evidenceRunId", "evidenceScenarioTxId", "evidenceTransactionId",
+    "evidenceAttemptId", "evidenceLogicalActionId",
+}
+_HEX32 = re.compile(r"^[0-9a-f]{32}$")
+_HEX40 = re.compile(r"^[0-9a-f]{40}$")
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+_HIERARCHY_SAFE_VALUE = re.compile(r"^[A-Za-z0-9_.:/-]{1,256}$")
+_HIERARCHY_PROVIDER_AUTHORITY = "com.iotpart.sqe.talkbackhelper.hierarchy"
+
 
 class SafetyBlocked(RuntimeError):
     pass
@@ -173,6 +187,8 @@ class SafeNavigationSession:
         self.command_blocks = []
         self._active_client = None
         self.blocked_repeats = 0
+        self._phase5_hierarchy_capabilities_seen = False
+        self._phase5_hierarchy_request = None
 
     def _guard_hard_stop(self, operation):
         client = self._active_client
@@ -531,9 +547,241 @@ class SafeNavigationSession:
             "--es", "reqId", str(request_id or "")]
         return self._focus_command_allowed(command, dispatch_boundary=False)
 
+    @staticmethod
+    def _hierarchy_broadcast_extras(words):
+        """Parse only the string extras emitted by the reliable transport producer."""
+        if (len(words) < 7 or words[:3] != ["shell", "am", "broadcast"]
+                or words[3] != "-a" or words[5] != "-p"
+                or words[6] != "com.iotpart.sqe.talkbackhelper"):
+            return None
+        action = words[4]
+        if not action.startswith(_HIERARCHY_TRANSFER_PREFIX):
+            return None
+        operation = action[len(_HIERARCHY_TRANSFER_PREFIX):]
+        if operation not in _HIERARCHY_TRANSFER_OPERATIONS:
+            return {"operation": operation, "valid": False}
+        tail = words[7:]
+        if len(tail) % 3:
+            return {"operation": operation, "valid": False}
+        extras = {}
+        for index in range(0, len(tail), 3):
+            if tail[index] != "--es":
+                return {"operation": operation, "valid": False}
+            key, value = tail[index + 1], tail[index + 2]
+            if key in extras or not _HIERARCHY_SAFE_VALUE.fullmatch(value):
+                return {"operation": operation, "valid": False}
+            extras[key] = value
+        allowed = _HIERARCHY_EVIDENCE_EXTRAS | {
+            "queryNonce", "requestId", "clientNonce", "expectedBuildId",
+            "expectedGitCommit", "expectedServiceInstanceId", "payloadSha256",
+        }
+        if set(extras) - allowed or not _HEX32.fullmatch(extras.get("queryNonce", "")):
+            return {"operation": operation, "valid": False}
+        required = {
+            "CAPABILITIES": {"queryNonce"},
+            "START": {"requestId", "clientNonce", "expectedBuildId", "expectedGitCommit",
+                      "expectedServiceInstanceId", "queryNonce"},
+            "STATUS": {"requestId", "clientNonce", "queryNonce"},
+            "ACK": {"requestId", "clientNonce", "payloadSha256", "queryNonce"},
+            "CANCEL": {"requestId", "clientNonce", "queryNonce"},
+        }[operation]
+        if set(extras) - (_HIERARCHY_EVIDENCE_EXTRAS | required) or not required.issubset(extras):
+            return {"operation": operation, "valid": False}
+        if operation != "CAPABILITIES":
+            if not _HEX32.fullmatch(extras.get("requestId", "")):
+                return {"operation": operation, "valid": False}
+            if not _HEX32.fullmatch(extras.get("clientNonce", "")):
+                return {"operation": operation, "valid": False}
+        if operation == "START" and not (
+                _HEX64.fullmatch(extras.get("expectedBuildId", ""))
+                and _HEX40.fullmatch(extras.get("expectedGitCommit", ""))):
+            return {"operation": operation, "valid": False}
+        if operation == "ACK" and not _HEX64.fullmatch(extras.get("payloadSha256", "")):
+            return {"operation": operation, "valid": False}
+        return {"operation": operation, "extras": extras, "valid": True}
+
+    def _phase5_hierarchy_command(self, words, *, commit=False):
+        """Validate exact Helper control requests and their request-scoped order."""
+        parsed = self._hierarchy_broadcast_extras(words)
+        if parsed is None or not parsed.get("valid"):
+            return parsed
+        operation, extras = parsed["operation"], parsed["extras"]
+        request = self._phase5_hierarchy_request
+        if operation == "CAPABILITIES":
+            if commit:
+                self._phase5_hierarchy_capabilities_seen = True
+            return parsed
+        if operation == "START":
+            if not self._phase5_hierarchy_capabilities_seen or request is not None:
+                return {"operation": operation, "valid": False}
+            if commit:
+                self._phase5_hierarchy_request = {
+                    "request_id": extras["requestId"],
+                    "client_nonce": extras["clientNonce"],
+                    "status_seen": False,
+                    "payload_read": False,
+                    "payload_user_id": None,
+                    "payload_uri": None,
+                    "payload_sha256": None,
+                    "payload_generation": None,
+                    "payload_process_epoch": None,
+                    "payload_service_instance_id": None,
+                    "payload_helper_build_identity": None,
+                    "ack_sent": False,
+                    "ack_query_nonce": None,
+                    "cancel_sent": False,
+                    "cancel_query_nonce": None,
+                }
+                self._phase5_hierarchy_capabilities_seen = False
+            return parsed
+        if (request is None or extras.get("requestId") != request["request_id"]
+                or extras.get("clientNonce") != request["client_nonce"]):
+            return {"operation": operation, "valid": False}
+        if operation == "STATUS":
+            if request["ack_sent"] or request["cancel_sent"]:
+                return {"operation": operation, "valid": False}
+            if commit:
+                request["status_seen"] = True
+            return parsed
+        if operation == "ACK":
+            if (not request["payload_read"] or request["ack_sent"] or request["cancel_sent"]
+                    or extras.get("payloadSha256") != request["payload_sha256"]):
+                return {"operation": operation, "valid": False}
+            if commit:
+                request["ack_sent"] = True
+                request["ack_query_nonce"] = extras["queryNonce"]
+            return parsed
+        if operation == "CANCEL":
+            if request["cancel_sent"]:
+                return {"operation": operation, "valid": False}
+            if commit:
+                request["cancel_sent"] = True
+                request["cancel_query_nonce"] = extras["queryNonce"]
+        return parsed
+
+    def _phase5_hierarchy_payload_command(self, words):
+        """Match one exact bounded read of the active request's Helper PFD URI."""
+        if (len(words) != 8 or words[:5] != ["shell", "-T", "content", "read", "--user"]
+                or words[6] != "--uri"):
+            return None
+        user_id, uri = words[5], words[7]
+        if not re.fullmatch(r"[0-9]+", user_id):
+            return None
+        from urllib.parse import urlsplit
+        try:
+            parsed = urlsplit(uri)
+        except ValueError:
+            return None
+        path = parsed.path.split("/")
+        request = self._phase5_hierarchy_request
+        if (request is None or not request["status_seen"] or request["payload_read"]
+                or not request["payload_uri"]
+                or parsed.scheme != "content" or parsed.netloc != _HIERARCHY_PROVIDER_AUTHORITY
+                or parsed.query or parsed.fragment or len(path) != 6 or path[1] != "v1"
+                or path[3] != request["request_id"] or not _HEX32.fullmatch(path[3])
+                or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", path[2])
+                or not re.fullmatch(r"[1-9][0-9]*", path[4])
+                or not _HEX32.fullmatch(path[5])
+                or user_id != request["payload_user_id"]
+                or uri != request["payload_uri"]):
+            return None
+        return {"request_id": request["request_id"], "user_id": user_id, "uri": uri}
+
+    def authorize_hierarchy_payload_read(self, *, user_id, uri, control):
+        """Bind one PFD read to the exact READY response validated by the client."""
+        self._guard_hard_stop("hierarchy_payload_authorization")
+        request = self._phase5_hierarchy_request
+        client = self._active_client
+        validator = getattr(client, "_valid_hierarchy_uri", None) if client is not None else None
+        if (request is None or not request["status_seen"] or request["payload_uri"]
+                or not isinstance(user_id, str) or not re.fullmatch(r"[0-9]+", user_id)
+                or not isinstance(control, dict)
+                or control.get("status") != "READY"
+                or control.get("completed") is not True
+                or control.get("payload_complete") is not True
+                or control.get("request_id") != request["request_id"]
+                or control.get("client_nonce") != request["client_nonce"]
+                or not isinstance(uri, str) or not callable(validator) or not validator(uri, control)):
+            raise SafetyBlocked("Hierarchy PFD read is not bound to the active validated READY request")
+        parsed = self._phase5_hierarchy_payload_command([
+            "shell", "-T", "content", "read", "--user", user_id, "--uri", uri
+        ])
+        # Validate the path shape without needing the not-yet-installed URI
+        # binding to pass the exact-match portion of the one-shot command gate.
+        if parsed is not None:
+            raise SafetyBlocked("Hierarchy PFD URI was already authorized")
+        from urllib.parse import urlsplit
+        path = urlsplit(uri).path.split("/") if isinstance(uri, str) else []
+        if (len(path) != 6 or path[1] != "v1" or path[3] != request["request_id"]
+                or not _HEX32.fullmatch(path[3])
+                or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", path[2])
+                or not re.fullmatch(r"[1-9][0-9]*", path[4])
+                or not _HEX32.fullmatch(path[5])):
+            raise SafetyBlocked("Hierarchy PFD URI is outside the active request scope")
+        request["payload_user_id"] = user_id
+        request["payload_uri"] = uri
+        request["payload_sha256"] = control.get("payload_sha256")
+        request["payload_generation"] = control.get("generation")
+        request["payload_process_epoch"] = control.get("process_epoch")
+        request["payload_service_instance_id"] = control.get("service_instance_id")
+        request["payload_helper_build_identity"] = deepcopy(control.get("helper_build_identity"))
+
+    def complete_hierarchy_ack(self, control):
+        """Release only after the reliable transport validates the ACK response."""
+        request = self._phase5_hierarchy_request
+        if (request is None or not request["ack_sent"] or not request["payload_read"]
+                or not isinstance(control, dict)
+                or control.get("status") != "ACKED"
+                or control.get("completed") is not True
+                or control.get("payload_complete") is not True
+                or control.get("request_id") != request["request_id"]
+                or control.get("client_nonce") != request["client_nonce"]
+                or control.get("query_nonce") != request["ack_query_nonce"]
+                or control.get("generation") != request["payload_generation"]
+                or control.get("process_epoch") != request["payload_process_epoch"]
+                or control.get("service_instance_id") != request["payload_service_instance_id"]
+                or control.get("helper_build_identity") != request["payload_helper_build_identity"]):
+            raise SafetyBlocked("Hierarchy ACK completion is not bound to the active validated request")
+        self._phase5_hierarchy_request = None
+
+    def finish_hierarchy_cancel(self, *, request_id, client_nonce, query_nonce=""):
+        """Release one exact transfer after its cleanup policy reaches a terminal result."""
+        request = self._phase5_hierarchy_request
+        if (request is None or request_id != request["request_id"]
+                or client_nonce != request["client_nonce"]
+                or (request["cancel_sent"] and query_nonce != request["cancel_query_nonce"])):
+            raise SafetyBlocked("Hierarchy CANCEL completion does not match the active request")
+        self._phase5_hierarchy_request = None
+
+    def _phase5_note_hierarchy_success(self, words):
+        if words[:3] == ["shell", "am", "broadcast"]:
+            parsed = self._phase5_hierarchy_command(words, commit=False)
+            if not parsed or not parsed.get("valid"):
+                return
+            # A native broadcast return is only transport evidence.  The ACK
+            # response is released by complete_hierarchy_ack after protocol,
+            # nonce, request, and Helper identity checks.  CANCEL is released
+            # by finish_hierarchy_cancel after its terminal best-effort path.
+            return
+        payload_read = self._phase5_hierarchy_payload_command(words)
+        if payload_read and self._phase5_hierarchy_request is not None:
+            self._phase5_hierarchy_request["payload_read"] = True
+
     def command_allowed(self, command):
+        from talkback_lib.window_lifecycle import is_lifecycle_readonly_command
+        if is_lifecycle_readonly_command(command):
+            return True
         words = [str(w) for w in command]
         upper = " ".join(words).upper()
+        if words[:3] == ["shell", "am", "broadcast"]:
+            action = words[4] if len(words) > 4 and words[3] == "-a" else ""
+            if action.startswith(_HIERARCHY_TRANSFER_PREFIX):
+                contract = self._phase5_hierarchy_command(words, commit=True)
+                return bool(contract and contract.get("valid"))
+        if words == ["shell", "am", "get-current-user"]:
+            return True
+        if self._phase5_hierarchy_payload_command(words):
+            return True
         if words[:3] == ["shell", "am", "broadcast"]:
             try: action = words[words.index("-a")+1]
             except (ValueError, IndexError): return False
@@ -621,6 +869,20 @@ class SafeNavigationSession:
         activation_callback_prior = vars(client).get(activation_callback_name)
         setattr(client, activation_callback_name, self.preflight_activation_dispatch)
         saved.append((client, activation_callback_name, activation_callback_had, activation_callback_prior))
+        hierarchy_read_callback_name = "_phase5b_authorize_hierarchy_payload_read"
+        hierarchy_read_callback_had = hierarchy_read_callback_name in vars(client)
+        hierarchy_read_callback_prior = vars(client).get(hierarchy_read_callback_name)
+        setattr(client, hierarchy_read_callback_name, self.authorize_hierarchy_payload_read)
+        saved.append((client, hierarchy_read_callback_name,
+                      hierarchy_read_callback_had, hierarchy_read_callback_prior))
+        for callback_name, callback in (
+            ("_phase5b_complete_hierarchy_ack", self.complete_hierarchy_ack),
+            ("_phase5b_finish_hierarchy_cancel", self.finish_hierarchy_cancel),
+        ):
+            callback_had = callback_name in vars(client)
+            callback_prior = vars(client).get(callback_name)
+            setattr(client, callback_name, callback)
+            saved.append((client, callback_name, callback_had, callback_prior))
         def install(obj, name):
             original = getattr(obj, name, None)
             if not callable(original): return
@@ -643,7 +905,9 @@ class SafeNavigationSession:
                     raise SafetyBlocked("Unapproved navigation/mutation transport")
                 if forwarded: receipt["used"] = True
                 if name != "_run":
-                    return original(command, *args, **kwargs)
+                    result = original(command, *args, **kwargs)
+                    self._phase5_note_hierarchy_success([str(word) for word in command])
+                    return result
                 forwarding.append(dict(command=tuple(command), dev=requested_dev, used=False))
                 try:
                     return original(command, *args, **kwargs)
@@ -655,6 +919,9 @@ class SafeNavigationSession:
         install(client, "_run")
         # _run_adb_command delegates to the executor directly, not client._run.
         install(getattr(client, "_adb_device", None), "_run_adb_command")
+        # Reliable hierarchy payload retrieval is binary and bypasses _run;
+        # keep it under the same Phase5 command guard as control broadcasts.
+        install(getattr(client, "_adb_device", None), "_run_adb_binary_command")
         device = getattr(client, "_adb_device", None)
         if callable(getattr(device, "_tap", None)):
             had, prior = "_tap" in vars(device), vars(device).get("_tap")

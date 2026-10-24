@@ -151,6 +151,22 @@ def _maybe_realign_focus_to_representative_impl(
     current_rid = str(row.get("focus_view_id", "") or "").strip()
     current_label = str(row.get("visible_label", "") or row.get("merged_announcement", "") or "").strip()
     actual_node = row.get("actual_focus_node") if isinstance(row.get("actual_focus_node"), dict) else row.get("focus_node")
+    try:
+        from tb_runner.focus_reconciliation import current_controlled_focus_intent
+        controlled_intent, _intent_status = current_controlled_focus_intent(row)
+    except Exception:
+        controlled_intent = None
+    if controlled_intent is not None and isinstance(actual_node, dict):
+        descriptor = controlled_intent.get("target_descriptor") or {}
+        if (actual_node.get("accessibilityFocused") is True
+                and _target_focus_matches(
+                    focus_node=actual_node,
+                    target_rid=str(descriptor.get("resource_id") or descriptor.get("view_id") or ""),
+                    target_label=str(descriptor.get("label") or ""),
+                    target_bounds=str(descriptor.get("bounds") or ""),
+                    target_class=str(descriptor.get("class_name") or ""),
+                )):
+            return False, "controlled_target_already_confirmed", None
     selected_class = str(selected_node.get("className", "") or selected_node.get("class", "") or "").strip()
     if not isinstance(actual_node, dict) and (
         current_rid == selected_rid or (current_label and selected_label and current_label == selected_label)
@@ -242,6 +258,7 @@ def _maybe_realign_focus_to_representative_impl(
         )
     ledger = get_target_attempt_ledger(client)
     attempt_id = ledger.begin(scenario_id, step_idx, target_descriptor)
+    row["phase6_current_action_type"] = "TARGETED_FOCUS"
     row["target_focus_attempt_id"] = attempt_id
     log_fn(
         f"[TARGET_FOCUS][attempt] attempt_id='{attempt_id}' scenario='{scenario_id}' step={step_idx} "
@@ -252,10 +269,17 @@ def _maybe_realign_focus_to_representative_impl(
         command_result = target_focus_fn(dev=dev, target=target_descriptor, wait_=2.0)
     except Exception as error:
         command_result = {"success": False, "status": "ERROR", "reason": type(error).__name__}
+    request_id = str(
+        command_result.get("reqId") or command_result.get("requestId")
+        or command_result.get("request_id") or ""
+    ).strip() if isinstance(command_result, dict) else ""
     helper_status = str(command_result.get("status", "") or "ERROR").strip().upper()
     row["target_focus_attempted"] = True
     row["target_focus_status"] = helper_status
     row["target_focus_descriptor"] = target_descriptor
+    # Keep the Helper dispatch identity on the production row. The ledger's
+    # attempt_id remains a separate identity and is never a request fallback.
+    row["target_focus_request_id"] = request_id
     row["target_focus_fallback_used"] = False
     try:
         focus_node = get_focus_fn(dev=dev, wait_seconds=0.35, allow_fallback_dump=False, mode="fast")

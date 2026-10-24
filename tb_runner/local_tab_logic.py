@@ -3581,25 +3581,19 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
         selected_rid = str(
             realigned_focus_node.get("viewIdResourceName", "")
             or realigned_focus_node.get("resourceId", "")
-            or selected_rid
-        ).strip() or selected_rid
-        selected_label = _extract_cta_node_label(realigned_focus_node) or _node_label_blob(realigned_focus_node) or selected_label
-        selected_bounds = str(realigned_focus_node.get("boundsInScreen", "") or realigned_focus_node.get("bounds", "") or selected_bounds).strip() or selected_bounds
-        selected_class = str(realigned_focus_node.get("className", "") or realigned_focus_node.get("class", "") or selected_class).strip() or selected_class
+            or ""
+        ).strip()
+        selected_label = _extract_cta_node_label(realigned_focus_node) or _node_label_blob(realigned_focus_node)
+        selected_bounds = str(realigned_focus_node.get("boundsInScreen", "") or realigned_focus_node.get("bounds", "") or "").strip()
+        selected_class = str(realigned_focus_node.get("className", "") or realigned_focus_node.get("class", "") or "").strip()
         if callable(normalize_fn):
             normalized_label = normalize_fn(selected_label) if selected_label else ""
         else:
             normalized_label = re.sub(r"\s+", " ", str(selected_label or "").strip()).lower()
         # Reconciliation must see the post-commit accessibility focus, not the
         # earlier SMART_NEXT sibling snapshot.
-        row["actual_focus_node"] = dict(realigned_focus_node)
-        row["actual_focus_accessibility_focused"] = realigned_focus_node.get("accessibilityFocused")
-        row["actual_focus_input_focused"] = realigned_focus_node.get("focused")
-        row["actual_focus_resource_id"] = selected_rid
-        row["actual_focus_bounds"] = selected_bounds
-        row["actual_focus_visible"] = selected_label
-        row["actual_focus_speech"] = selected_label
-        row["actual_focus_class_name"] = selected_class
+        from tb_runner.traversal_reliability import snapshot_actual_focus_identity
+        snapshot_actual_focus_identity(row, realigned_focus_node)
         row["actual_focus_payload_source"] = "target_focus_commit_verified"
     content_summary = "|".join(str(item.get("label", "") or "").strip() for item in content_candidates[:5])
     bottom_summary = "|".join(str(item.get("label", "") or "").strip() for item in bottom_strip_candidates[:3])

@@ -20,6 +20,30 @@ _PID_MARKER = "__TB_PID__"
 _WINDOW_HEADER = re.compile(r"(?m)^\s*Window #(?P<index>\d+) Window\{(?P<header>[^}]*)\}:")
 
 
+LIFECYCLE_SNAPSHOT_COMMAND = (
+    "dumpsys window windows | grep -E "
+    "'^[[:space:]]*Window #[0-9]+ Window\\{|package=|mAttrs=.*ty=|mHasSurface=|SearchScreenOverlay'; "
+    f"echo {_ACTIVITY_MARKER}; "
+    "dumpsys activity activities | grep -E 'topResumedActivity=|mResumedActivity:|mCurrentFocus='; "
+    f"echo {_ACCESSIBILITY_MARKER}; "
+    "dumpsys accessibility | grep -E 'Enabled services:|Accessibility Focused Window Id =|A11yWindow\\['; "
+    f"echo {_PID_MARKER}; pidof {TALKBACK_PACKAGE}"
+)
+LIFECYCLE_PROCESS_PROBE_COMMAND = (
+    f"echo {_ACTIVITY_MARKER}; "
+    f"echo {_ACCESSIBILITY_MARKER}; "
+    "dumpsys accessibility | grep -F 'Enabled services:'; "
+    f"echo {_PID_MARKER}; pidof {TALKBACK_PACKAGE}"
+)
+
+
+def is_lifecycle_readonly_command(command: Any) -> bool:
+    """Exact recorder-owned diagnostic scripts only; no shell-pattern approval."""
+    return (isinstance(command, (list, tuple)) and len(command) == 2
+            and command[0] == "shell"
+            and command[1] in (LIFECYCLE_SNAPSHOT_COMMAND, LIFECYCLE_PROCESS_PROBE_COMMAND))
+
+
 def _split_sections(raw: str) -> tuple[str, str, str, str]:
     before_pid, _, pid_section = raw.partition(_PID_MARKER)
     window_section, activity_marker, after_activity = before_pid.partition(_ACTIVITY_MARKER)
@@ -164,6 +188,8 @@ class WindowLifecycleRecorder:
         self.step: int | None = None
         self.output_path = Path(output_dir) / "talkback_window_lifecycle.jsonl" if output_dir else None
         self.event_count = 0
+        self.process_continuity_revision = 0
+        self.last_process_observation: dict[str, Any] | None = None
         self.previous_pid: str | None = getattr(client, "_preflight_talkback_pid", None)
         self.saw_enabled_process_gap = False
         self.restart_event: dict[str, Any] | None = None
@@ -175,6 +201,7 @@ class WindowLifecycleRecorder:
         self.step = int(step) if step is not None else None
 
     def _track_talkback_process(self, payload: dict[str, Any]) -> None:
+        gap_before = self.saw_enabled_process_gap
         current_pid = payload.get("talkback_pid")
         previous_pid = str(self.previous_pid) if self.previous_pid else None
         restart_detected = False
@@ -191,6 +218,8 @@ class WindowLifecycleRecorder:
         elif payload.get("talkback_enabled") is True and self.previous_pid:
             self.saw_enabled_process_gap = True
             process_event = "enabled_but_pid_missing"
+        if restart_detected or (self.saw_enabled_process_gap and not gap_before):
+            self.process_continuity_revision += 1
         payload.update(
             {
                 "talkback_restart_detected": restart_detected,
@@ -217,6 +246,15 @@ class WindowLifecycleRecorder:
                 + json.dumps(self.restart_event, ensure_ascii=False, separators=(",", ":"))
             )
 
+    def _remember_process_observation(self, payload: dict[str, Any]) -> None:
+        self.last_process_observation = {
+            "schema": "lifecycle-process-observation-v1", "event_count": self.event_count,
+            "pid": payload.get("talkback_pid"), "enabled": payload.get("talkback_enabled"),
+            "process_event": payload.get("talkback_process_event"),
+            "restart_detected": payload.get("talkback_restart_detected"),
+            "snapshot_error": bool(payload.get("snapshot_error")),
+        }
+
     def _probe_talkback_process_at_limit(
         self,
         phase: str,
@@ -226,12 +264,7 @@ class WindowLifecycleRecorder:
         run = getattr(self.client, "_run", None)
         if not callable(run):
             return
-        command = (
-            f"echo {_ACTIVITY_MARKER}; "
-            f"echo {_ACCESSIBILITY_MARKER}; "
-            "dumpsys accessibility | grep -F 'Enabled services:'; "
-            f"echo {_PID_MARKER}; pidof {TALKBACK_PACKAGE}"
-        )
+        command = LIFECYCLE_PROCESS_PROBE_COMMAND
         try:
             output = run(["shell", command], dev=self.dev, timeout=5.0)
         except Exception as exc:
@@ -254,6 +287,7 @@ class WindowLifecycleRecorder:
         if command_error:
             payload["snapshot_error"] = command_error
         self._write_artifact(payload)
+        self._remember_process_observation(payload)
 
     def _write_artifact(self, payload: dict[str, Any]) -> None:
         if self.output_path is not None:
@@ -284,15 +318,7 @@ class WindowLifecycleRecorder:
         run = getattr(self.client, "_run", None)
         if not callable(run):
             return None
-        command = (
-            "dumpsys window windows | grep -E "
-            "'^[[:space:]]*Window #[0-9]+ Window\\{|package=|mAttrs=.*ty=|mHasSurface=|SearchScreenOverlay'; "
-            f"echo {_ACTIVITY_MARKER}; "
-            "dumpsys activity activities | grep -E 'topResumedActivity=|mResumedActivity:|mCurrentFocus='; "
-            f"echo {_ACCESSIBILITY_MARKER}; "
-            "dumpsys accessibility | grep -E 'Enabled services:|Accessibility Focused Window Id =|A11yWindow\\['; "
-            f"echo {_PID_MARKER}; pidof {TALKBACK_PACKAGE}"
-        )
+        command = LIFECYCLE_SNAPSHOT_COMMAND
         try:
             output = run(["shell", command], dev=self.dev, timeout=8.0)
         except Exception as exc:
@@ -332,6 +358,7 @@ class WindowLifecycleRecorder:
             print(f"[TALKBACK_WINDOW] {serialized}")
             self._write_artifact(payload)
             self.event_count += 1
+        self._remember_process_observation(payload)
         return payload
 
 

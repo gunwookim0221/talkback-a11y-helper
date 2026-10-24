@@ -40,6 +40,15 @@ def test_entry_post_open_with_incomplete_body_is_explicit_partial():
     assert result["status"] == "PARTIAL_CONTEXT"
     assert result["context_tier"] == "PARTIAL_PLUGIN_CONTEXT"
     assert not result["verified"]
+    assert result["reasons"] == ["PLUGIN_BODY_EVIDENCE_INCOMPLETE"]
+
+
+def test_context_contract_key_and_legacy_alias_remain_contract_only():
+    raw = observation()
+    proof = raw["phase3_plugin_context_evidence"]
+    assert proof["context_contract_id"] == raw["phase3_entry_evidence"]["entry_contract_digest"]
+    assert proof["destination_identity"] == proof["context_contract_id"]
+    assert resolve_phase3_context(raw)["status"] == "VERIFIED_PLUGIN_CONTEXT"
 
 
 def test_scenario_name_only_cannot_authorize_context():
@@ -48,7 +57,7 @@ def test_scenario_name_only_cannot_authorize_context():
 
 @pytest.mark.parametrize("key,value", [("scenario_id", "device_washer_plugin"),
     ("scenario_run_id", "old-run"), ("navigation_epoch", "previous-epoch"),
-    ("destination_identity", "wrong-destination"), ("entry_contract_digest", "old-config"),
+    ("context_contract_id", "wrong-contract"), ("entry_contract_digest", "old-config"),
     ("captured_at", "2026-10-12T08:00:01+00:00"), ("proof_capture_id", ""),
     ("post_open_verified", False), ("schema_version", "unknown")])
 def test_stale_or_mismatched_proof_is_unresolved(key, value):

@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 from test_talkback_lib import CollectFocusStepClient
+from talkback_lib.smart_nav_invocation import begin_invocation, begin_move, publish_result
 
 
 def _helper_events(transaction_id: str) -> list[dict]:
@@ -51,6 +52,11 @@ def _run_collection(*, complete_evidence: bool) -> tuple[dict, float, int]:
         "reqId": "req-current",
         "evidenceEvents": _helper_events("tx-current") if complete_evidence else [],
     }
+    def move_current(*args, **kwargs):
+        generation = begin_move(client)
+        publish_result(client, generation, client.last_smart_nav_result)
+        return "moved"
+    client.move_focus_smart = move_current
     clock = {"value": 0.0}
 
     def fake_monotonic() -> float:
@@ -112,4 +118,19 @@ def test_transient_delayed_focus_preserves_conservative_deadline() -> None:
         "reqId": "req-current",
         "evidenceEvents": events,
     }
-    assert client._step_collection_service._correlated_action_focus_observation(move=True) is None
+    generation = begin_invocation(client)
+    publish_result(client, generation, client.last_smart_nav_result)
+    assert client._step_collection_service._correlated_action_focus_observation(
+        move=True, invocation_generation=generation) is None
+
+
+def test_historical_success_cannot_supply_current_adaptive_focus_evidence() -> None:
+    client = CollectFocusStepClient()
+    client._evidence_active_transaction = {"transaction_id": "tx-old", "phase": "main_loop"}
+    client._evidence_active_request_id = "req-old"
+    client.last_smart_nav_result = {
+        "success": True, "reqId": "req-old", "evidenceEvents": _helper_events("tx-old"),
+    }
+    generation = begin_invocation(client)
+    assert client._step_collection_service._correlated_action_focus_observation(
+        move=True, invocation_generation=generation) is None
