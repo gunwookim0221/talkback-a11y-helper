@@ -343,10 +343,9 @@ def test_previous_wrapper_order_keeps_active_adapter_unreachable(monkeypatch):
     assert len(f.collected) == 1 and f.collected[0]["move"] is False
 
 
-def test_active_adapter_positive_candidate_reached_through_production_wrapper(monkeypatch):
+def test_active_adapter_requires_capture_component_before_dispatch(monkeypatch):
     from tb_runner import active_redirect
     from tb_runner.phase4b_authority import ExecutionBudget
-    from tb_runner.phase4b_execution import focus_row
     from test_phase6d3a_rf4_active import active_fixture
 
     f = active_fixture(monkeypatch)
@@ -387,32 +386,21 @@ def test_active_adapter_positive_candidate_reached_through_production_wrapper(mo
     assert adapter_calls[0]["original_collect"] is f.collect
     assert adapter_calls[0]["fallback_collect"] is controlled_fallback
     assert not controlled_fallback_calls
-    assert audit["common_readiness"]["readiness_status"] == "READY"
-    assert audit["ready"] is True
-    assert audit["final_revalidation"] == "FINAL_REVALIDATION_PASS"
-    assert audit["dispatch_count"] == 1
-    assert len(f.native) == 1
+    assert audit["common_readiness"]["readiness_status"] == "UNKNOWN"
+    assert "PLUGIN_CONTEXT_UNKNOWN" in audit["common_readiness"]["reason_codes"]
+    assert audit["ready"] is False
+    assert audit["dispatch_count"] == 0
+    assert f.native == []
     assert len(f.collected) == 1 and f.collected[0]["move"] is False
-    assert f.controller.budget.redirects_used == 1
-    assert f.client._phase6d3a_controlled_budget.actions == 1
-    assert f.controller.budget.available(audit)[0] is False
-    assert any(e["record"].get("event") == "NATIVE_DISPATCH_AUTHORIZED"
-               for e in audit["phase5_authorization_events"])
+    assert f.controller.budget.redirects_used == 0
+    assert f.client._phase6d3a_controlled_budget.actions == 0
     assert audit["common_readiness"].get("phase5_permit_issued") is False
+    assert not any(e["record"].get("event") == "NATIVE_DISPATCH_AUTHORIZED"
+                   for e in audit["phase5_authorization_events"])
+    assert row.get("visit_record_status") != "RECORDED"
+    assert isinstance(f.client._phase6d3a_controlled_budget, ExecutionBudget)
 
-    # The redirect result proceeds through the ordinary production reconciliation.
-    collection_flow._apply_focus_reconciliation(
-        client=f.client, dev="offline", row=row,
-        previous_row=focus_row(f.raw["focus_node"], f.scenario_id),
-        state=SimpleNamespace(reliability_metrics=None, consumed_cluster_signatures=set()),
-        progress_decision=None, visit_decision=None,
-    )
-    assert row["focus_transition_status"] == "CONFIRMED_MOVED"
-    assert row["visit_record_status"] == "RECORDED"
-    collection_flow._phase6d3a_record_production_reconciliation(client=f.client, row=row)
-    assert row["phase6d3a_redirect"]["production_reconciliation_recorded"] is True
-    assert row["phase6d3a_redirect"]["production_target_reached"] is True
-    assert len(controlled_fallback_calls) == 0
+
     assert isinstance(f.client._phase6d3a_controlled_budget, ExecutionBudget)
 
 
@@ -679,15 +667,22 @@ def test_rf5_installed_hook_counts_only_real_active_controller_evaluations(monke
         monkeypatch, tmp_path, f, ["focus", "focus"])
 
     assert result == 0
-    assert counts == [1, 2]
-    assert [call.get("move") for call in f.collected] == [False, False]
+    assert counts == []
+    assert rows == []
     active_events = [event for event in f.controller.events
                      if event.get("mode") == "ACTIVE"
                      and event.get("schema_version") == "phase6d3a-redirect-attempt-v1"]
-    assert len(active_events) == 2
-    assert len(f.native) == 1
-    assert f.controller.metrics.counters["REDIRECT_DISPATCH_COUNT"] == 1
-    assert rows[0]["phase6d3a_redirect"]["dispatch_count"] == 1
+    assert len(active_events) == 1
+    assert active_events[0]["common_readiness"]["readiness_status"] == "UNKNOWN"
+    assert active_events[0]["dispatch_count"] == 0
+    assert f.native == []
+    assert f.controller.metrics.counters["REDIRECT_DISPATCH_COUNT"] == 0
+    assert active_events[0]["common_readiness"].get("phase5_permit_issued") is False
+    assert active_events[0]["visit_credit"] == 0
+    assert f.client._phase6d3a_controlled_budget.actions == 0
+    assert f.controller.budget.redirects_used == 0
+    assert not any(event["record"].get("event") == "NATIVE_DISPATCH_AUTHORIZED"
+                   for event in active_events[0]["phase5_authorization_events"])
     assert not any(record.get("reason") == "RF5_EVALUATED_ATTEMPT_CAP" for record in records)
 
 
@@ -699,36 +694,54 @@ def test_rf5_installed_hook_blocks_third_true_evaluation_from_controller_history
         monkeypatch, tmp_path, f, ["focus", "focus", "focus"])
 
     assert result == 0
-    assert counts == [1, 2]
-    assert len(rows) == 2
-    assert smoke._rf5_active_evaluation_count(f.controller) == 2
-    assert f.controller.metrics.counters["REDIRECT_DISPATCH_COUNT"] == 1
-    assert len(f.native) == 1
+    assert counts == []
+    assert rows == []
+    assert smoke._rf5_active_evaluation_count(f.controller) == 1
+    assert f.controller.metrics.counters["REDIRECT_DISPATCH_COUNT"] == 0
+    assert f.native == []
     stops = [record for record in records if record.get("event") == "RF5_CONTROLLED_STOP"]
-    assert len(stops) == 1
-    assert stops[0]["reason"] == "RF5_EVALUATED_ATTEMPT_CAP"
-    assert stops[0]["production_evaluation_count"] == 2
+    assert not any(record.get("reason") == "RF5_EVALUATED_ATTEMPT_CAP" for record in stops)
 
 
-def test_rf5_stale_closed_decision_does_not_consume_evaluation_budget(monkeypatch, tmp_path):
+def test_rf5_unknown_component_evaluation_counts_attempt_without_execution(monkeypatch, tmp_path):
     from test_phase6d3a_rf4_active import active_fixture
 
     f = active_fixture(monkeypatch)
     result, rows, counts, records = _run_rf5_actual_hook_actions(
-        monkeypatch, tmp_path, f, ["focus", "stale_focus"])
+        monkeypatch, tmp_path, f, ["focus"])
 
     assert result == 0
-    assert counts == [1]
-    assert len(rows) == 1
+    assert counts == []
+    assert rows == []
+    active_events = [event for event in f.controller.events
+                     if event.get("mode") == "ACTIVE"
+                     and event.get("schema_version") == "phase6d3a-redirect-attempt-v1"]
     assert smoke._rf5_active_evaluation_count(f.controller) == 1
-    assert f.controller.metrics.counters["REDIRECT_DISPATCH_COUNT"] == 1
-    filters = [record for record in records if record.get("event") == "RF5_REDIRECT_FILTER"]
-    assert [record["filter_kind"] for record in filters] == [
-        "CANDIDATE_OPPORTUNITY", "STALE_CURRENTNESS_REJECTION"]
-    stops = [record for record in records if record.get("event") == "RF5_CONTROLLED_STOP"]
-    assert len(stops) == 1
-    assert stops[0]["reason"] == "STALE_DECISION_REJECTED_WITH_ZERO_REDIRECT_DISPATCH"
+    assert len(active_events) == 1
+    blocked = active_events[0]
+    assert blocked["common_readiness"]["readiness_status"] == "UNKNOWN"
+    assert "PLUGIN_CONTEXT_UNKNOWN" in blocked["common_readiness"]["reason_codes"]
+    assert blocked["ready"] is False
+    assert blocked["dispatch_count"] == 0
+    assert blocked["visit_credit"] == 0
+    assert blocked["attempt_credit"] == 0
+    assert blocked["common_readiness"].get("phase5_permit_issued") is False
+    assert f.controller.metrics.counters["REDIRECT_DISPATCH_COUNT"] == 0
+    assert f.controller.budget.redirects_used == 0
+    assert f.client._phase6d3a_controlled_budget.actions == 0
+    assert f.native == []
+    assert all(call.get("move") is False for call in f.collected)
+    assert not any(event["record"].get("event") == "NATIVE_DISPATCH_AUTHORIZED"
+                   for event in blocked["phase5_authorization_events"])
 
+    saved = next(record for record in records
+                 if record.get("event") == "RUNTIME_EVIDENCE_SAVED")
+    assert saved["reason"] == "SAFETY_RELEVANT_READINESS_UNKNOWN"
+    assert saved["evaluated_attempts"] == 1
+    assert saved["candidate_evaluations"] == 1
+    assert saved["native_dispatches"] == 0
+    assert saved["redirect_budget"] == 0
+    assert saved["controlled_budget"] == 0
 
 def test_rf5_local_tab_move_false_post_action_observation_does_not_count(monkeypatch, tmp_path):
     from test_phase6d3a_rf4_active import active_fixture
