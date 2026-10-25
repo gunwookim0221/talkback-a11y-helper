@@ -103,11 +103,29 @@ def collect_active_redirect(*, original_collect, collect_kwargs, client, dev,
         require_execution_ready=False)
     if hint is None:
         # No redirect candidate means continue through the harness's normal
-        # controlled path when present. The ACTIVE adapter's own observation
-        # and fallback calls still use the base production collector supplied
-        # as original_collect, avoiding wrapper recursion.
+        # controlled path when present. Its Phase4B fallback may have captured
+        # the installed interceptor as its collector, so route any re-entry
+        # through that interceptor to the base collector for this fallback.
         collector = fallback_collect if callable(fallback_collect) else original_collect
-        return collector(**dict(collect_kwargs))
+        client_state = getattr(client, "__dict__", {})
+        delegate_name = "_phase6d3a_controlled_collect_delegate"
+        previous_delegate = client_state.get(delegate_name)
+        isolate_controlled_fallback = (
+            collector is fallback_collect
+            and getattr(client, "_phase6d3a_interceptor_installed", False) is True
+            and delegate_name in client_state
+            and callable(previous_delegate)
+            and callable(original_collect)
+            and fallback_collect is not original_collect
+            and previous_delegate is not original_collect
+        )
+        if isolate_controlled_fallback:
+            setattr(client, delegate_name, original_collect)
+        try:
+            return collector(**dict(collect_kwargs))
+        finally:
+            if isolate_controlled_fallback:
+                setattr(client, delegate_name, previous_delegate)
     run_limit = int(tab_cfg.get("max_steps", 0) or 0) or None
     audit = {**hint, "mode": "ACTIVE", "schema_version": "phase6d3a-redirect-attempt-v1",
              "status": "PREPARING", "recommendation": True, "ready": False,

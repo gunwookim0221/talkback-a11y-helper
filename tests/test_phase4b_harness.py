@@ -416,6 +416,78 @@ def test_active_adapter_positive_candidate_reached_through_production_wrapper(mo
     assert isinstance(f.client._phase6d3a_controlled_budget, ExecutionBudget)
 
 
+def test_active_adapter_blocked_phase4b_fallback_uses_base_collector_once(monkeypatch):
+    from tb_runner.phase4b_authority import ExecutionBudget
+    from tb_runner.phase4b_execution import controlled_collect
+    from test_phase6d3a_rf4_active import active_fixture
+
+    f = active_fixture(monkeypatch)
+    base_calls = []
+
+    def base_collector(**kwargs):
+        base_calls.append(dict(kwargs))
+        assert f.client._phase6d3a_controlled_collect_delegate is base_collector
+        return {
+            "scenario_id": f.scenario_id,
+            "step_index": kwargs.get("step_index"),
+            "move_result": "BASE_COLLECTED",
+        }
+
+    f.client.collect_focus_step = base_collector
+    incomplete = deepcopy(f.record)
+    incomplete.update(shadow_decision="CONTINUE", selected_frontier=None,
+                      frontier_exhaustion="UNKNOWN", evidence_complete=False)
+    f.client._phase6d_exploration_shadow_runtime.decisions = [incomplete]
+    monkeypatch.setattr(collection_flow, "_frontier_shadow_pre_decision", lambda **_kwargs: "pre")
+
+    phase4b_decision = SimpleNamespace(
+        allowed=False, mode="SHADOW_ONLY", reason="PHASE4B_UNKNOWN")
+    phase4b_budget = ExecutionBudget()
+    phase4b_audit = {}
+    phase4b_calls = []
+
+    def phase4b_controlled_fallback(**collect_kwargs):
+        phase4b_calls.append(dict(collect_kwargs))
+        if len(phase4b_calls) > 1:
+            pytest.fail("blocked Phase4B fallback re-entered through the interceptor")
+        return controlled_collect(
+            client=f.client, dev="offline", scenario=f.scenario_id, step=8,
+            raw=f.raw, recommendation=SimpleNamespace(), decision=phase4b_decision,
+            budget=phase4b_budget, collect=f.client.collect_focus_step,
+            collect_kwargs=collect_kwargs,
+            refresh=lambda: pytest.fail("blocked fallback must not refresh"),
+            output_dir="", audit=phase4b_audit,
+        )
+
+    def production_step():
+        return smoke._invoke_step_with_controlled_collector(
+            client=f.client, controlled_collector=phase4b_controlled_fallback,
+            step_call=lambda: f.client.collect_focus_step(
+                move=True, direction="next", step_index=8),
+        )
+
+    row, decision_id = collection_flow._run_main_step_with_frontier_shadow(
+        client=f.client, state=f.state, step_idx=8,
+        tab_cfg={**f.tab_cfg, "max_steps": 20}, collect_step_fn=production_step,
+        phase_ctx=f.phase_ctx, dev="offline",
+    )
+
+    assert decision_id == "pre"
+    assert isinstance(row, dict)
+    assert len(phase4b_calls) == 1 and phase4b_calls[0]["move"] is True
+    assert len(base_calls) == 1
+    assert base_calls[0] == {"move": True, "direction": "next", "step_index": 8}
+    assert phase4b_audit["fallback_used"] is True
+    assert phase4b_audit["fallback_reason"] == "PHASE4B_UNKNOWN"
+    assert phase4b_budget.actions == 0
+    assert f.native == []
+    assert f.controller.metrics.counters["REDIRECT_DISPATCH_COUNT"] == 0
+    assert f.controller.budget.redirects_used == 0
+    assert f.client.collect_focus_step is base_collector
+    assert "_phase6d3a_controlled_collect_delegate" not in vars(f.client)
+    assert "_phase6d3a_interceptor_installed" not in vars(f.client)
+
+
 def test_active_adapter_no_candidate_falls_through_controlled_path_and_keeps_unknown(monkeypatch):
     from tb_runner import active_redirect
     from test_phase6d3a_rf4_active import active_fixture
