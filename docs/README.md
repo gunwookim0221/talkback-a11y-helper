@@ -98,6 +98,7 @@ current Runner/Traversal Identity V2 경로가 담당합니다. **Controlled Rou
 다음 문서들은 당시 checkpoint를 기록한 evidence 또는 handoff입니다. 현재 운영을
 설명하는 문서로 읽지 말고, 날짜와 scope를 함께 확인하십시오.
 
+- [TalkBack Phase 6D closure (2026-10-30)](design/talkback-phase6d-closure-20261030.md): live NAV and ACCEPT-1 acceptance, evidence, limitations, and Phase 6E handoff
 - [Phase 5B Safe Navigation (2026-10-11)](design/talkback-phase5b-safe-navigation-20261011.md): integration branch의 bounded 안전 실행·반환 계약과 staged live 검증; production 기본값은 OFF
 - [Phase 5B Secondary Authorization RCA (2026-10-12)](design/talkback-phase5b-secondary-authorization-rca-20261012.md): native focus dispatch target binding, fallback invalidation, exact UNKNOWN replay, and staged retry verdict
 - [Phase 5A Safe Action Classification (2026-10-11)](design/talkback-phase5a-safe-action-classification-20261011.md): integration branch의 분류/정책 기반, shadow 검증과 Phase 5B readiness; production 기본값은 OFF
