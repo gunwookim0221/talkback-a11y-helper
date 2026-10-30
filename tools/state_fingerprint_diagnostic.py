@@ -22,6 +22,38 @@ from tb_runner.state_fingerprint import build_state_fingerprint, write_fingerpri
 from talkback_lib.hierarchy_snapshot import service_hierarchy_to_xml
 
 
+def _validated_capture_snapshot(snapshot: Any) -> tuple[Any, dict[str, Any]]:
+    """Rebind the mutable snapshot to its already validated Helper capture."""
+    from talkback_lib.reliable_hierarchy_schema import (
+        _decode_reliable_hierarchy_payload, _thaw, candidate_projection_matches_decoded,
+        capture_canonical_json, legacy_dump_tree_response, validate_capture_authority,
+    )
+
+    decoded = snapshot.decoded
+    authority = validate_capture_authority(decoded.capture_authority)
+    if authority is None or not candidate_projection_matches_decoded(decoded):
+        raise ValueError("capture authority or candidate projection invalid")
+    raw = deepcopy(snapshot.raw_hierarchy)
+    if capture_canonical_json(raw) != capture_canonical_json(decoded.raw_hierarchy):
+        raise ValueError("hierarchy snapshot differs from decoded capture")
+    if capture_canonical_json(snapshot.response) != capture_canonical_json(legacy_dump_tree_response(decoded)):
+        raise ValueError("consumed candidates differ from decoded capture")
+    payload = dict(raw, traversalCandidates=_thaw(decoded.validated_candidate_projection))
+    verified = _decode_reliable_hierarchy_payload(
+        payload, capability_verified=True, transport_metadata=_thaw(decoded.transport_metadata))
+    fields = ("schema_version", "request_id", "platform_api_level", "traversal_root_ref",
+              "traversal_root_window_id", "raw_node_count", "raw_completion_valid")
+    if (any(type(getattr(decoded, key)) is not type(getattr(verified, key))
+            or getattr(decoded, key) != getattr(verified, key) for key in fields)
+            or validate_capture_authority(verified.capture_authority) != authority):
+        raise ValueError("decoded capture identity mismatch")
+    match = re.fullmatch(r"windows\[(\d+)\]\.root", authority.root_ref)
+    if match is None:
+        raise ValueError("invalid capture root reference")
+    root = deepcopy(raw["windows"][int(match.group(1))]["root"])
+    return authority, root
+
+
 def capture_observation(client: Any, serial: str | None, *, scenario_id: str = "diagnostic", step: int = 0,
                        scenario_run_id: str | None = None) -> dict[str, Any]:
     """Read existing Helper/XML/focus sources; no gesture, click, recovery or APK.
@@ -33,6 +65,8 @@ def capture_observation(client: Any, serial: str | None, *, scenario_id: str = "
     notes: list[str] = []
     reliable_snapshot_used = callable(getattr(client, "get_traversal_candidate_snapshot", None))
     snapshot_coherent = False
+    capture_authority = None
+    capture_root = None
     if reliable_snapshot_used:
         try:
             snapshot = client.get_traversal_candidate_snapshot(dev=serial)
@@ -41,6 +75,7 @@ def capture_observation(client: Any, serial: str | None, *, scenario_id: str = "
             raw_hierarchy = snapshot.raw_hierarchy
             if not isinstance(raw_hierarchy, dict) or raw_hierarchy.get("success") is not True:
                 raise ValueError("invalid reliable hierarchy snapshot")
+            capture_authority, capture_root = _validated_capture_snapshot(snapshot)
             observed_nodes = flatten_service_hierarchy(raw_hierarchy)
             nodes = list(snapshot.candidates)
             metadata = deepcopy(getattr(client, "last_dump_metadata", {}))
@@ -75,6 +110,7 @@ def capture_observation(client: Any, serial: str | None, *, scenario_id: str = "
             hierarchy_request_id = ""
             source = "reliable_snapshot_failed"
             snapshot_coherent = False
+            capture_authority = capture_root = None
             notes.append("hierarchy_capture:" + type(exc).__name__)
     else:
         nodes = scroll_reliability.dump_with_capabilities(client, serial)
@@ -183,12 +219,13 @@ def capture_observation(client: Any, serial: str | None, *, scenario_id: str = "
                    nodes=list(popup.safe_buttons or []))
     if popup.dangerous_buttons:
         overlay["nodes"].extend(popup.dangerous_buttons)
-    capture_id = uuid4().hex
-    focus_capture_id = capture_id if snapshot_coherent else uuid4().hex
-    geometry_capture_id = capture_id if snapshot_coherent else uuid4().hex
+    capture_id = (capture_authority.capture_key if capture_authority is not None else
+                  None if reliable_snapshot_used else uuid4().hex)
+    focus_capture_id = capture_id if snapshot_coherent else None
+    geometry_capture_id = capture_id if snapshot_coherent else None
     focus_capture_status = ("STRICT_ACCESSIBILITY_FOCUS" if isinstance(focus, dict)
                             and focus.get("accessibilityFocused") is True else "FOCUS_UNAVAILABLE")
-    return dict(nodes=observed_nodes, package_name=package, activity_name=activity,
+    observation = dict(nodes=observed_nodes, package_name=package, activity_name=activity,
                 navigation_context={"bottom_tab": selected["logical_name"]} if selected else None,
                 selected_tab=dict(name=selected["logical_name"], verified=True,
                                   source=("service_hierarchy_selected" if source in {
@@ -205,7 +242,30 @@ def capture_observation(client: Any, serial: str | None, *, scenario_id: str = "
                 coverage_source=coverage_source, hierarchy_request_id=hierarchy_request_id,
                 hierarchy_complete=(observation_coverage == "OBSERVED_FULL"),
                 hierarchy_capture_id=capture_id, geometry_capture_id=geometry_capture_id,
-                source=source, context_source=context_source, notes=notes)
+                source=source, context_source=context_source, notes=notes,
+                capture_authority=capture_authority.to_dict() if capture_authority is not None else None)
+    if capture_authority is not None:
+        bounds = (list(capture_authority.hierarchy_root_bounds)
+                  if capture_authority.hierarchy_root_bounds is not None else None)
+        observation.update(
+            hierarchy_snapshot_id=capture_id,
+            hierarchy_capture_sequence=capture_authority.capture_sequence,
+            hierarchy_process_epoch=capture_authority.process_epoch,
+            hierarchy_generation=capture_authority.generation,
+            hierarchy_service_instance_id=capture_authority.service_instance_id,
+            hierarchy_root_digest=capture_authority.root_digest,
+            hierarchy_candidate_digest=capture_authority.candidate_digest,
+            hierarchy_root_class_name=capture_authority.hierarchy_root_class_name,
+            hierarchy_root_source_node_id=capture_authority.hierarchy_root_source_node_id,
+            hierarchy_root_bounds=bounds, capture_root_bounds=bounds,
+            traversal_root_ref=capture_authority.root_ref,
+            traversal_root_window_id=capture_authority.hierarchy_window_id,
+            traversal_root_digest=capture_authority.root_digest,
+            traversal_root_class_name=capture_authority.hierarchy_root_class_name,
+            traversal_root_source_node_id=capture_authority.hierarchy_root_source_node_id,
+            traversal_root_bounds=bounds, _capture_root_tree=capture_root,
+        )
+    return observation
 
 
 def summarize_window_evidence(window_dump: str) -> dict[str, Any]:

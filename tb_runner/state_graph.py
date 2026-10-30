@@ -112,6 +112,7 @@ class GraphEdge(TypedDict):
     visit_outcome: str
     visit_instance_id: str | None
     effect_attribution: str
+    scroll_evidence: dict[str, Any]
 
 
 class GraphRun(TypedDict):
@@ -336,6 +337,311 @@ def _production_observation_envelope_valid(raw: Mapping[str, Any]) -> bool:
     return True
 
 
+def _phase6e_capture_is_current(raw: Any, expected_marker: Any = None) -> bool:
+    if not isinstance(raw, Mapping) or raw.get("production_observation_current") is not True:
+        return False
+    try:
+        if not _production_observation_envelope_valid(raw):
+            return False
+        from tb_runner.state_fingerprint import validated_capture_root_tree
+        from talkback_lib.hierarchy_snapshot import flatten_service_hierarchy
+        root = validated_capture_root_tree(raw)
+        if root is None or not isinstance(raw.get("nodes"), list):
+            return False
+        projected = flatten_service_hierarchy({"success": True, "windows": [
+            {"active": True, "focused": True, "root": deepcopy(dict(root))}]})
+        # The original service window index is transport-local; all other
+        # consumed hierarchy fields must come from the sealed root itself.
+        def without_service_index(nodes):
+            return [{key: value for key, value in node.items() if key != "serviceWindowIndex"}
+                    for node in nodes]
+        if canonical_json(without_service_index(raw["nodes"])) != canonical_json(without_service_index(projected)):
+            return False
+    except (TypeError, ValueError, KeyError):
+        return False
+    envelope = raw.get("production_observation_envelope")
+    observed_marker = raw.get("_exploration_observation")
+    marker = expected_marker if isinstance(expected_marker, Mapping) else observed_marker
+    return bool(
+        isinstance(envelope, Mapping)
+        and isinstance(observed_marker, Mapping)
+        and isinstance(marker, Mapping)
+        and dict(marker) == dict(observed_marker)
+        and dict(marker) == dict(envelope.get("observation") or {})
+        and envelope.get("capture_complete") is True
+        and marker.get("capture_complete") is True
+    )
+
+
+def _phase6e_scroll_owner(raw: Mapping[str, Any], transition: Mapping[str, Any]) -> dict[str, Any]:
+    """Resolve a scroll target from this capture's hierarchy, never from focus or RID alone."""
+    from tb_runner.scroll_reliability import scroll_axis
+    from tb_runner.traversal_reliability import normalized_bounds
+
+    capability = raw.get("capability") if isinstance(raw.get("capability"), Mapping) else {}
+    if (capability.get("vertical_can_scroll_forward", capability.get("can_scroll_forward")) is not True
+            or capability.get("contradictory") is True):
+        return {"status": "VERTICAL_OPPORTUNITY_UNAVAILABLE", "identity": None}
+
+    package = str(raw.get("package_name") or "")
+    candidates = []
+    nodes = raw.get("nodes") if isinstance(raw.get("nodes"), list) else []
+    for node in nodes:
+        if not isinstance(node, Mapping):
+            continue
+        if (node.get("scrollable", node.get("isScrollable")) is not True
+                or node.get("visibleToUser", node.get("isVisibleToUser", True)) is False
+                or node.get("enabled", node.get("isEnabled", True)) is False):
+            continue
+        axis, _axis_source = scroll_axis(node)
+        if axis not in {"VERTICAL", "BIDIRECTIONAL"}:
+            continue
+        path = str(node.get("stable_node_path") or node.get("path") or "").strip()
+        bounds = normalized_bounds(node.get("boundsInScreen", node.get("bounds")))
+        # A scrollable class or resource-id by itself cannot bind an owner.
+        if not path or not bounds:
+            continue
+        action_ids = sorted({
+            str(item.get("id") if isinstance(item, Mapping) else item)
+            for item in (node.get("actions") or [])
+            if (item.get("id") if isinstance(item, Mapping) else item) is not None
+            and str(item.get("id") if isinstance(item, Mapping) else item) in {
+                "16908344", "16908345", "16908346", "16908347", "4096", "8192",
+            }
+        })
+        projection = {
+            "package_name": package,
+            "path": path,
+            "bounds": bounds,
+            "resource_id": str(node.get("viewIdResourceName") or node.get("resource-id") or ""),
+            "class_name": str(node.get("className") or node.get("class") or ""),
+            "ancestors": [
+                {key: item.get(key) for key in ("path", "resource_id", "class_name", "role")}
+                for item in (node.get("ancestors") or []) if isinstance(item, Mapping)
+            ],
+            "axis": axis,
+            "scrollable": True,
+            "visible": True,
+            "enabled": True,
+            "actions": action_ids,
+            "scroll_forward_supported": node.get("scroll_forward_supported", node.get("canScrollForward")),
+            "scroll_down_supported": node.get("scroll_down_supported"),
+        }
+        identity_projection = {key: projection[key] for key in (
+            "package_name", "path", "bounds", "resource_id", "class_name", "ancestors", "axis")}
+        candidates.append((projection, "scroll_owner_" + canonical_sha256(identity_projection)))
+
+    target = transition.get("action_target") if isinstance(transition.get("action_target"), Mapping) else {}
+    action_result = transition.get("action_result") if isinstance(transition.get("action_result"), Mapping) else {}
+    mode = str(target.get("mode") or "").strip().upper()
+    requested_path = str(target.get("container_path") or "").strip()
+    requested_bounds = normalized_bounds(target.get("container_bounds"))
+    result_path = str(action_result.get("scrollContainerPath") or "").strip()
+
+    if mode == "EXPLICIT_CONTAINER":
+        if (not requested_path or not requested_bounds
+                or action_result.get("explicitTarget") is not True
+                or result_path != requested_path):
+            return {"status": "OWNER_TARGET_MISMATCH", "identity": None}
+        matches = [item for item in candidates
+                   if item[0]["path"] == requested_path and item[0]["bounds"] == requested_bounds]
+        if not matches and any(item[0]["path"] == requested_path for item in candidates):
+            return {"status": "OWNER_TARGET_MISMATCH", "identity": None}
+    elif mode == "ACCESSIBILITY_FALLBACK":
+        if result_path or action_result.get("explicitTarget") is True:
+            return {"status": "OWNER_TARGET_MISMATCH", "identity": None}
+        matches = candidates
+    else:
+        return {"status": "OWNER_TARGET_MISMATCH", "identity": None}
+
+    if len(matches) == 0:
+        return {"status": "OWNER_NOT_IN_CURRENT_HIERARCHY", "identity": None}
+    if len(matches) != 1:
+        return {"status": "OWNER_AMBIGUOUS", "identity": None}
+    projection, identity = matches[0]
+    return {
+        "status": "RESOLVED",
+        "identity": identity,
+        "path": projection["path"],
+        "bounds": projection["bounds"],
+        "resource_id": projection["resource_id"],
+        "class_name": projection["class_name"],
+        "axis": projection["axis"],
+        "state": {key: projection[key] for key in (
+            "scrollable", "visible", "enabled", "actions",
+            "scroll_forward_supported", "scroll_down_supported")},
+    }
+
+
+def _phase6e_accessibility_focus(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """Read only the unique strict accessibility-focus bit from this capture."""
+    from tb_runner.traversal_reliability import instance_id
+
+    nodes = raw.get("nodes") if isinstance(raw.get("nodes"), list) else []
+    focused = [node for node in nodes if isinstance(node, Mapping)
+               and node.get("accessibilityFocused") is True
+               and node.get("visibleToUser", node.get("isVisibleToUser", True)) is not False]
+    if len(focused) != 1:
+        return {"status": "AMBIGUOUS" if focused else "UNAVAILABLE", "instance_id": None,
+                "authority": "CURRENT_HIERARCHY_ACCESSIBILITY_FOCUS"}
+    node = focused[0]
+    focus_id = instance_id({
+        "scenario_id": raw.get("scenario_id"),
+        "view_id": node.get("viewIdResourceName") or node.get("resource-id") or "",
+        "bounds": node.get("boundsInScreen") or node.get("bounds") or "",
+    })
+    return {"status": "CONFIRMED", "instance_id": focus_id,
+            "authority": "CURRENT_HIERARCHY_ACCESSIBILITY_FOCUS"}
+
+
+def build_phase6e_scroll_evidence(source: Mapping[str, Any] | None,
+                                  result: Mapping[str, Any] | None,
+                                  transition: Mapping[str, Any] | None,
+                                  *, source_marker: Mapping[str, Any] | None = None,
+                                  result_marker: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Build non-authoritative, capture-bound diagnostics for one verified scroll."""
+    source = source if isinstance(source, Mapping) else {}
+    result = result if isinstance(result, Mapping) else {}
+    transition = transition if isinstance(transition, Mapping) else {}
+    action_result = transition.get("action_result") if isinstance(transition.get("action_result"), Mapping) else {}
+    source_current = _phase6e_capture_is_current(source, source_marker)
+    result_current = _phase6e_capture_is_current(result, result_marker)
+    before_marker = source_marker if isinstance(source_marker, Mapping) else source.get("_exploration_observation")
+    after_marker = result_marker if isinstance(result_marker, Mapping) else result.get("_exploration_observation")
+    before_marker = before_marker if isinstance(before_marker, Mapping) else {}
+    after_marker = after_marker if isinstance(after_marker, Mapping) else {}
+    source_capture_id = str(source.get("capture_id") or "")
+    result_capture_id = str(result.get("capture_id") or "")
+    capture_linked = bool(
+        source_current and result_current and source_capture_id and result_capture_id
+        and source_capture_id != result_capture_id
+        and source.get("scenario_id") == result.get("scenario_id")
+        and source.get("scenario_run_id") == result.get("scenario_run_id")
+        and before_marker.get("scope_id")
+        and before_marker.get("scope_id") == after_marker.get("scope_id")
+        and before_marker.get("context_revision") == after_marker.get("context_revision")
+        and type(before_marker.get("action_epoch")) is int
+        and type(after_marker.get("action_epoch")) is int
+        and after_marker.get("action_epoch") == before_marker.get("action_epoch") + 1
+        and type(before_marker.get("observation_sequence")) is int
+        and type(after_marker.get("observation_sequence")) is int
+        and after_marker.get("observation_sequence") > before_marker.get("observation_sequence")
+    )
+
+    action_type = str(transition.get("action_type") or "").strip().upper()
+    action_request_id = str(transition.get("action_request_id") or "").strip()
+    result_request_id = str(transition.get("action_result_request_id")
+                            or action_result.get("reqId") or action_result.get("requestId")
+                            or action_result.get("request_id") or "").strip()
+    action_success = transition.get("action_success") is True
+    result_success = action_result.get("success") is True
+    receipt = after_marker.get("action_ownership") if isinstance(after_marker.get("action_ownership"), Mapping) else {}
+    receipt_correlated = bool(
+        type(receipt.get("action_epoch")) is int
+        and receipt.get("action_epoch") == after_marker.get("action_epoch")
+        and str(receipt.get("action_type") or "").strip().upper() == "SCROLL"
+        and str(receipt.get("request_id") or "").strip() == action_request_id
+        and receipt.get("ownership_status") == "KNOWN"
+    )
+    action_linked = bool(
+        action_type in {EdgeType.SCROLL_FORWARD.value, EdgeType.SCROLL_BACKWARD.value}
+        and action_request_id and result_request_id == action_request_id
+        and transition.get("action_result_correlated") is True
+        and receipt_correlated
+        and action_result.get("reqId", action_result.get("requestId", action_result.get("request_id")))
+        == action_request_id
+        and action_result.get("action") == action_type
+        and action_result.get("actionAttempted") is True
+        and ((action_type == EdgeType.SCROLL_FORWARD.value and transition.get("direction") == "down")
+             or (action_type == EdgeType.SCROLL_BACKWARD.value and transition.get("direction") == "up"))
+        and action_success == result_success
+    )
+
+    owner = (_phase6e_scroll_owner(source, transition) if source_current
+             else {"status": "SOURCE_CAPTURE_STALE", "identity": None})
+    source_identity = build_graph_state_identity(source) if source_current else GraphIdentityResult(
+        None, "UNRESOLVED", ("SOURCE_CAPTURE_STALE",))
+    result_identity = build_graph_state_identity(result) if result_current else GraphIdentityResult(
+        None, "UNRESOLVED", ("RESULT_CAPTURE_STALE",))
+    state_changed = bool(source_identity.state_id and result_identity.state_id
+                         and source_identity.state_id != result_identity.state_id)
+    # Derive movement from the two bound captures, not a separately acquired
+    # transition dump that may belong to a different observation epoch.
+    from tb_runner.scroll_reliability import viewport
+    container = {"boundsInScreen": owner.get("bounds")} if owner.get("status") == "RESOLVED" else None
+    before_viewport = viewport(source.get("nodes", []), source.get("scenario_id"), container)
+    after_viewport = viewport(result.get("nodes", []), result.get("scenario_id"), container)
+    viewport_valid = before_viewport["valid"] and after_viewport["valid"]
+    viewport_changed = bool(viewport_valid and before_viewport["stable_signature"] != after_viewport["stable_signature"])
+    new_content = bool(viewport_valid and set(before_viewport["instances"]) != set(after_viewport["instances"]))
+    meaningful_reasons = []
+    if state_changed:
+        meaningful_reasons.append("GRAPH_STATE_CHANGED")
+    if viewport_changed:
+        meaningful_reasons.append("VIEWPORT_CHANGED")
+    if new_content:
+        meaningful_reasons.append("CONTENT_INSTANCES_CHANGED")
+    meaningful_change = bool(meaningful_reasons)
+    after_capability = transition.get("capability_after") if isinstance(transition.get("capability_after"), Mapping) else {}
+    captured_capability = result.get("capability") if isinstance(result.get("capability"), Mapping) else {}
+    boundary = bool(transition.get("viewport_end") is True
+                    and after_capability.get("can_scroll_forward") is False
+                    and after_capability.get("contradictory") is not True
+                    and captured_capability.get("vertical_can_scroll_forward",
+                                                captured_capability.get("can_scroll_forward")) is False
+                    and captured_capability.get("contradictory") is not True)
+    focus_after = _phase6e_accessibility_focus(result) if result_current else {
+        "status": "UNAVAILABLE", "instance_id": None,
+        "authority": "CURRENT_HIERARCHY_ACCESSIBILITY_FOCUS"}
+
+    if not source_current or not result_current or not capture_linked:
+        classification = "STALE_CAPTURE"
+    elif not action_linked:
+        classification = "STALE_INVOCATION_RESULT"
+    elif owner.get("status") != "RESOLVED":
+        classification = str(owner.get("status") or "OWNER_UNAVAILABLE")
+    elif not source_identity.state_id or not result_identity.state_id:
+        classification = "STATE_UNRESOLVED"
+    elif not action_success:
+        classification = "NO_OP"
+    elif meaningful_change:
+        classification = "SCROLL_MOVED"
+    elif boundary:
+        classification = "BOUNDARY"
+    else:
+        classification = "NO_PROGRESS"
+
+    return {
+        "schema_version": "phase6e-scroll-evidence.v1",
+        "classification": classification,
+        "valid_for_edge": classification == "SCROLL_MOVED",
+        "owner_status": owner.get("status"),
+        "owner_identity": owner.get("identity"),
+        "owner": {key: owner.get(key) for key in (
+            "path", "bounds", "resource_id", "class_name", "axis", "state")},
+        "action_type": action_type or None,
+        "direction": transition.get("direction"),
+        "action_request_id": action_request_id or None,
+        "result_request_id": result_request_id or None,
+        "action_result_correlated": action_linked,
+        "dispatch_receipt_correlated": receipt_correlated,
+        "action_attempted": bool(action_request_id and action_result.get("actionAttempted") is not False),
+        "action_dispatched": action_result.get("actionAttempted") is True,
+        "action_success": action_success if action_linked else None,
+        "source_capture_current": source_current,
+        "result_capture_current": result_current,
+        "capture_linked_to_invocation": capture_linked,
+        "source_capture_id": source_capture_id or None,
+        "result_capture_id": result_capture_id or None,
+        "source_state_id": source_identity.state_id,
+        "result_state_id": result_identity.state_id,
+        "meaningful_change": meaningful_change,
+        "meaningful_change_reasons": meaningful_reasons,
+        "boundary": boundary,
+        "focus_after_scroll": focus_after,
+    }
+
+
 def _focus_projection(evidence: Mapping[str, Any]) -> dict[str, Any]:
     status = str(evidence.get("focus_transition_status", "") or "").strip().upper()
     if status == "CONFIRMED_MOVED":
@@ -434,7 +740,9 @@ class StateGraphRecorder:
             scroll = evidence.get("scroll_evidence")
             if isinstance(scroll, Mapping) and scroll:
                 compact_scroll = {key: scroll.get(key) for key in (
-                    "status", "axis", "direction", "owner_identity", "movement_status", "end_evidence")
+                    "status", "classification", "axis", "direction", "owner_identity",
+                    "owner_status", "movement_status", "end_evidence", "valid_for_edge",
+                    "action_request_id", "result_request_id", "source_capture_id", "result_capture_id")
                     if key in scroll}
                 if compact_scroll and compact_scroll not in state_meta["scroll_observations"]:
                     state_meta["scroll_observations"].append(compact_scroll)
@@ -448,7 +756,10 @@ class StateGraphRecorder:
             else:
                 edge = self._record_edge(step, source_state_id, state_id, action, evidence,
                                          focus, visit_outcome, visit_id)
-                edge_id = edge["edge_id"]
+                # An earlier observation can coexist with a later attempt in
+                # the row without becoming that attempt's observation.
+                if evidence.get("action_effect_current") is not False:
+                    edge_id = edge["edge_id"]
 
         context = identity_result.context or {}
         candidate_nodes = raw_observation.get("nodes")
@@ -482,7 +793,8 @@ class StateGraphRecorder:
         action_type = _edge_type(action.get("type"))
         target = action.get("target") if isinstance(action.get("target"), Mapping) else {}
         target_descriptor = {key: target[key] for key in sorted(target)
-                             if key in {"resource_id", "class_name", "bounds", "candidate_instance_id", "direction"}}
+                             if key in {"resource_id", "class_name", "bounds", "candidate_instance_id",
+                                        "direction", "owner_identity", "container_path", "axis"}}
         opportunity = {"source_state_id": source_state_id, "edge_type": action_type,
                        "target": target_descriptor}
         opportunity_id = "opportunity_" + canonical_sha256(opportunity)
@@ -492,9 +804,29 @@ class StateGraphRecorder:
                                            ("dispatched", EdgeLifecycle.DISPATCHED)):
             if evidence.get(field_name) is True:
                 lifecycle.append(lifecycle_name.value)
-        state_changed = bool(source_state_id and destination_state_id and source_state_id != destination_state_id)
-        focus_moved = focus.get("observation") == FocusObservation.FOCUS_MOVED.value
-        effect_observed = state_changed or focus_moved or evidence.get("effect_observed") is True
+        scroll_evidence = evidence.get("scroll_evidence")
+        scroll_evidence = scroll_evidence if isinstance(scroll_evidence, Mapping) else {}
+        is_scroll = action_type in {EdgeType.SCROLL_FORWARD.value, EdgeType.SCROLL_BACKWARD.value}
+        unbound_focus = not is_scroll and evidence.get("action_effect_current") is False
+        if unbound_focus:
+            focus = {"observation": FocusObservation.FOCUS_UNKNOWN.value}
+            visit_outcome, visit_id = VisitObservation.VISIT_UNKNOWN.value, None
+            destination_state_id = None
+        if is_scroll:
+            # A scroll is successful only when the Phase6E evidence binds a
+            # current owner, current invocation/result, current captures, and
+            # an observable state/viewport/content/window change. A request or
+            # focus-only movement cannot promote it to progress.
+            effect_observed = scroll_evidence.get("valid_for_edge") is True
+            state_changed = bool(effect_observed and source_state_id and destination_state_id
+                                 and source_state_id != destination_state_id)
+            focus_moved = False
+        elif unbound_focus:
+            effect_observed = state_changed = focus_moved = False
+        else:
+            state_changed = bool(source_state_id and destination_state_id and source_state_id != destination_state_id)
+            focus_moved = focus.get("observation") == FocusObservation.FOCUS_MOVED.value
+            effect_observed = state_changed or focus_moved or evidence.get("effect_observed") is True
         if effect_observed:
             lifecycle.append(EdgeLifecycle.EFFECT_OBSERVED.value)
         if state_changed:
@@ -522,8 +854,15 @@ class StateGraphRecorder:
             "focus_observation": focus.get("observation"),
             "visit_outcome": visit_outcome,
             "visit_instance_id": visit_id if visit_outcome == VisitObservation.VISIT_GRANTED.value else None,
-            "effect_attribution": str(evidence.get("effect_attribution") or (
+            "effect_attribution": str((None if unbound_focus else evidence.get("effect_attribution")) or (
+                "OBSERVED_SCROLL_CHANGE" if is_scroll and effect_observed else
+                "UNKNOWN" if is_scroll else
                 "FOCUS_RECONCILIATION" if focus_moved else "OBSERVED_STATE" if state_changed else "UNKNOWN")),
+            "scroll_evidence": ({key: deepcopy(scroll_evidence.get(key)) for key in (
+                "classification", "owner_status", "owner_identity", "action_request_id",
+                "result_request_id", "action_result_correlated", "source_capture_id",
+                "result_capture_id", "meaningful_change", "meaningful_change_reasons",
+                "boundary", "valid_for_edge") if key in scroll_evidence} if is_scroll else {}),
         }
         self.edges.append(row)
         return row
@@ -621,6 +960,55 @@ def _raw_observation_from_row(row: Mapping[str, Any]) -> dict[str, Any]:
     return raw
 
 
+def _raw_observation_from_phase6e_slot(row: Mapping[str, Any], slot: str,
+                                       marker_slot: str) -> dict[str, Any] | None:
+    supplied = row.get(slot)
+    if not isinstance(supplied, Mapping):
+        return None
+    raw = deepcopy(dict(supplied))
+    wrapper = dict(row)
+    wrapper.update(
+        state_graph_observation=raw,
+        capture_id=raw.get("capture_id"),
+        scenario_id=raw.get("scenario_id"),
+        scenario_run_id=raw.get("scenario_run_id"),
+        _exploration_observation=deepcopy(row.get(marker_slot) or raw.get("_exploration_observation")),
+    )
+    return _raw_observation_from_row(wrapper)
+
+
+def _phase6e_scroll_action_evidence(scroll: Mapping[str, Any]) -> dict[str, Any]:
+    evidence: dict[str, Any] = {"scroll_evidence": deepcopy(dict(scroll))}
+    # Graph edges represent observed traversal success. Keep unsuccessful,
+    # boundary, stale, and no-progress scrolls on the current state's bounded
+    # diagnostic record without manufacturing a traversed edge.
+    if (scroll.get("valid_for_edge") is not True
+            or scroll.get("action_result_correlated") is not True
+            or scroll.get("capture_linked_to_invocation") is not True):
+        return evidence
+    owner = scroll.get("owner") if isinstance(scroll.get("owner"), Mapping) else {}
+    target = {
+        key: deepcopy(value) for key, value in (
+            ("owner_identity", scroll.get("owner_identity")),
+            ("container_path", owner.get("path")),
+            ("bounds", owner.get("bounds")),
+            ("resource_id", owner.get("resource_id")),
+            ("class_name", owner.get("class_name")),
+            ("axis", owner.get("axis")),
+            ("direction", scroll.get("direction")),
+        ) if value is not None
+    }
+    evidence.update(
+        action={"type": scroll.get("action_type"), "target": target,
+                "request_id": scroll.get("action_request_id")},
+        planned=True,
+        attempted=scroll.get("action_attempted") is True,
+        dispatched=scroll.get("action_dispatched") is True,
+        command_ack=("SUCCESS" if scroll.get("action_success") is True else "FAILED"),
+    )
+    return evidence
+
+
 def _evidence_from_row(row: Mapping[str, Any]) -> dict[str, Any]:
     focus_status = str(row.get("focus_transition_status", "") or "").strip().upper()
     evidence: dict[str, Any] = {
@@ -640,6 +1028,9 @@ def _evidence_from_row(row: Mapping[str, Any]) -> dict[str, Any]:
 
     action_family = current_action_type(row)
     action_request_id = canonical_action_request_id(row, action_family)
+    if action_family == "TARGETED_FOCUS":
+        from tb_runner.focus_realign_logic import targeted_focus_observation_current
+        evidence["action_effect_current"] = targeted_focus_observation_current(row)
     graph_action = {
         "SMART_NEXT": EdgeType.FOCUS_NEXT.value,
         "SMART_PREVIOUS": EdgeType.FOCUS_PREVIOUS.value,
@@ -763,8 +1154,34 @@ def recorder_from_existing_rows(rows: list[Mapping[str, Any]], *, run_id: str, s
             step = int(row.get("step_index", ordinal) or ordinal)
         except (TypeError, ValueError):
             step = ordinal
-        recorder.record(step=max(0, step), raw_observation=_raw_observation_from_row(row),
-                        evidence=_evidence_from_row(row))
+        step = max(0, step)
+        primary_raw = _raw_observation_from_row(row)
+        recorder.record(step=step, raw_observation=primary_raw, evidence=_evidence_from_row(row))
+
+        if not (isinstance(row.get("scroll_transition"), Mapping)
+                or isinstance(row.get("phase6e_scroll_source_observation"), Mapping)
+                or isinstance(row.get("phase6e_scroll_result_observation"), Mapping)):
+            continue
+        source_raw = _raw_observation_from_phase6e_slot(
+            row, "phase6e_scroll_source_observation", "phase6e_scroll_source_marker")
+        result_raw = _raw_observation_from_phase6e_slot(
+            row, "phase6e_scroll_result_observation", "phase6e_scroll_result_marker")
+        scroll = build_phase6e_scroll_evidence(
+            source_raw, result_raw,
+            row.get("scroll_transition") if isinstance(row.get("scroll_transition"), Mapping) else {},
+            source_marker=row.get("phase6e_scroll_source_marker"),
+            result_marker=row.get("phase6e_scroll_result_marker"),
+        )
+        if source_raw is not None:
+            source_identity = build_graph_state_identity(source_raw)
+            if source_identity.state_id != recorder._previous_state_id:
+                recorder.record(step=step, raw_observation=source_raw, evidence={})
+        if result_raw is not None:
+            recorder.record(step=step, raw_observation=result_raw,
+                            evidence=_phase6e_scroll_action_evidence(scroll))
+        else:
+            recorder.record(step=step, raw_observation=source_raw or primary_raw,
+                            evidence={"scroll_evidence": scroll})
     return recorder
 
 
@@ -844,7 +1261,8 @@ __all__ = [
     "EdgeLifecycle", "EdgeType", "FocusObservation", "GraphEdge", "GraphIdentityResult", "GraphLimits",
     "GraphMode", "GraphObservation", "GraphRun", "GraphState",
     "GRAPH_MODE_ENV", "GRAPH_SCHEMA_VERSION", "IDENTITY_SCHEMA_VERSION", "REPLAY_SCHEMA_VERSION",
-    "StateGraphRecorder", "VisitObservation", "build_graph_state_identity", "graph_mode_from_environment",
+    "StateGraphRecorder", "VisitObservation", "build_graph_state_identity",
+    "build_phase6e_scroll_evidence", "graph_mode_from_environment",
     "maybe_write_shadow_graph_from_rows", "read_state_graph", "recorder_from_existing_rows",
     "replay_state_graph", "state_graph_artifact_path", "write_replay_manifest", "write_state_graph",
 ]

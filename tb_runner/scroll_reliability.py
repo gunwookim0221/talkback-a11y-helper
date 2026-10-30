@@ -237,6 +237,21 @@ def verified_scroll(client,dev,scenario_id,step_idx,before=None,output_base_dir=
     before=before or capture(client,dev,scenario_id,step_index=step_idx,evidence="verified_scroll_before")
     target=before["capability"]["container"]
     emit(client,"SCROLL_ATTEMPTED",dict(scenario_id=scenario_id,step_index=step_idx,capability=before["capability"],viewport=before["viewport"]))
+    action_target = {"mode": "ACCESSIBILITY_FALLBACK", "container_path": None, "container_bounds": None}
+    if target and target.get("path"):
+        action_target = {
+            "mode": "EXPLICIT_CONTAINER",
+            "container_path": str(target["path"]),
+            "container_bounds": normalized_bounds(target.get("boundsInScreen")) or None,
+        }
+    # Clear any prior receipt before calling a client wrapper. Production
+    # A11yAdbClient also clears these fields at its public dispatch boundary.
+    for name, value in (("last_scroll_request_id", ""), ("last_scroll_result", {})):
+        if hasattr(client, name):
+            try:
+                setattr(client, name, value)
+            except (AttributeError, TypeError):
+                pass
     try:
         parameters = inspect.signature(client.scroll).parameters
         accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters.values())
@@ -250,6 +265,9 @@ def verified_scroll(client,dev,scenario_id,step_idx,before=None,output_base_dir=
         action=deepcopy(getattr(client,"last_scroll_result",{}) or {})
     except Exception as exc:
         ok=False; action=dict(error=type(exc).__name__)
+    action_request_id = str(getattr(client, "last_scroll_request_id", "") or "").strip()
+    action_result_request_id = str(action.get("reqId") or action.get("requestId")
+                                   or action.get("request_id") or "").strip()
     time.sleep(0.25)
     try:
         after=capture(client,dev,scenario_id)
@@ -261,7 +279,14 @@ def verified_scroll(client,dev,scenario_id,step_idx,before=None,output_base_dir=
         after=dict(nodes=[],capability=capability([],{}),viewport=viewport([],scenario_id))
         action["after_dump_error"]=type(exc).__name__
     result=transition(before["viewport"],after["viewport"],ok,after["capability"])
-    result.update(scenario_id=scenario_id,step_index=step_idx,capability_before=before["capability"],capability_after=after["capability"],action_result=action)
+    result.update(scenario_id=scenario_id,step_index=step_idx,
+                  capability_before=before["capability"],capability_after=after["capability"],
+                  action_type="SCROLL_FORWARD", direction="down",
+                  action_request_id=action_request_id or None,
+                  action_result_request_id=action_result_request_id or None,
+                  action_result_correlated=bool(action_request_id and action_result_request_id
+                                                and action_request_id == action_result_request_id),
+                  action_target=action_target, action_result=action)
     result["after_dump_path"]=""
     if output_base_dir:
         folder=Path(output_base_dir)/scenario_id/"scroll_dumps"

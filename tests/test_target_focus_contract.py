@@ -113,6 +113,39 @@ def test_missing_generic_target_request_does_not_promote_attempt_id():
     assert canonical_action_request_id(row) == ""
 
 
+def test_verified_target_focus_read_is_bound_to_its_native_dispatch():
+    from talkback_lib.exploration_evidence_clock import EvidenceClock
+    from tb_runner.focus_realign_logic import targeted_focus_observation_current
+
+    clock = EvidenceClock()
+    target = node()
+
+    class ClockedClient(Client):
+        def __init__(self):
+            super().__init__(target)
+            self._adb_device = SimpleNamespace(shadow_evidence_clock=clock)
+
+        def target_focus_commit(self, **kwargs):
+            clock.dispatch(["shell", "am", "broadcast", "-a",
+                            "com.iotpart.sqe.talkbackhelper.TARGET_FOCUS_COMMIT",
+                            "--es", "reqId", "target-request"])
+            return {"success": True, "status": "TARGET_MATCHED", "reqId": "target-request"}
+
+    row, (ok, _, actual) = commit(ClockedClient(), target)
+    assert ok
+    row.update(actual_focus_node=actual, actual_focus_accessibility_focused=True,
+               actual_focus_payload_source="target_focus_commit_verified",
+               _exploration_observation=clock.finish_observation(clock.begin_observation()))
+    assert targeted_focus_observation_current(row)
+    row["target_focus_request_id"] = "later-request"
+    assert not targeted_focus_observation_current(row)
+    row["target_focus_request_id"] = "target-request"
+    clock.dispatch(["shell", "am", "broadcast", "-a",
+                    "com.iotpart.sqe.talkbackhelper.SMART_NEXT", "--es", "reqId", "new-action"])
+    row["_exploration_observation"] = clock.finish_observation(clock.begin_observation())
+    assert not targeted_focus_observation_current(row)
+
+
 def test_no_progress_waits_for_unattempted_target_then_terminates_after_attempt():
     candidate = {
         "viewIdResourceName": "id/a", "text": "A", "className": "android.widget.Button",

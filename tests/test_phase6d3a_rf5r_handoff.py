@@ -277,14 +277,15 @@ def test_reliable_capture_uses_one_snapshot_for_focus_and_hierarchy():
     assert client.legacy_calls == []
     assert captured["snapshot_coherent"] is True
     assert captured["package_name"] == PACKAGE
-    assert captured["activity_name"] is None
+    assert captured["activity_name"] == ".MainActivity"
+    assert captured["context_source"] == "window_current_focus"
     assert captured["focus_node"]["accessibilityFocused"] is True
     assert captured["focus_node"]["viewIdResourceName"] == f"{PACKAGE}:id/more"
     assert captured["nodes"]
     assert captured["capture_authority"]["capture_key"] == captured["capture_id"]
     assert captured["hierarchy_capture_id"] == captured["focus_capture_id"]
     assert captured["hierarchy_capture_id"] == captured["geometry_capture_id"]
-    assert captured["overlay"]["observed"] is None
+    assert captured["overlay"]["classification"] == "UNKNOWN_COMPONENT_BINDING"
 
 
 @pytest.mark.parametrize("mutation", [
@@ -306,7 +307,8 @@ def test_stale_or_cross_capture_envelope_is_rejected(mutation):
     assert captured["focus_capture_id"] is None
     assert captured["geometry_capture_id"] is None
     assert captured["focus_node"] == {}
-    assert any(note.startswith("hierarchy_capture:ValueError") for note in captured["notes"])
+    assert any(note.startswith(("hierarchy_capture:ValueError", "hierarchy_capture:ReliableHierarchySchemaError"))
+               for note in captured["notes"])
 
     stale = _production_raw()
     stale["focus_capture_id"] = "other-capture"

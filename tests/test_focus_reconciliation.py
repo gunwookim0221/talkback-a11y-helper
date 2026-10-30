@@ -467,6 +467,20 @@ def test_non_strict_reconciliation_emits_current_unresolved_event_without_visit_
     assert client._focus_reconciliation_lineage_by_step == {}
 
 
+def test_reconciliation_does_not_assign_earlier_focus_to_failed_target_request():
+    from tb_runner import collection_flow as flow
+
+    current = row("id.actual", "Actual", "0,0,100,100")
+    current.update(phase6_current_action_type="TARGETED_FOCUS", smart_nav_req_id="earlier-smart-next",
+                   target_focus_attempted=True, target_focus_request_id="later-target",
+                   target_focus_status="TARGET_NOT_FOUND", actual_focus_payload_source="top_level")
+    result = {"focus_transition_status": "CONFIRMED_MOVED", "classification": "MATCHED",
+              "visit_record_status": "RECORDED"}
+    payload = flow._focus_reconciliation_event_payload(client=SimpleNamespace(), row=current, result=result)
+    assert payload["primary_action_request_id"] == "earlier-smart-next"
+    assert payload["action_request_id"] == ""
+
+
 def test_unmatched_actual_instance_still_records_visit_separately_from_expected_coverage():
     expected = candidate("id.expected", "Expected", "0,0,100,100")
     previous = row("id.before", "Before", "0,200,100,300")

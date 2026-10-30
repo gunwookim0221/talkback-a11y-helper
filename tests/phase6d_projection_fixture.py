@@ -8,7 +8,7 @@ from talkback_lib.reliable_hierarchy_schema import (
     CANDIDATE_ALGORITHM_VERSION, CANDIDATE_ANALYZER_VERSION, CANDIDATE_PROFILE_ID,
     CANDIDATE_PROFILE_VERSION,
 )
-from test_reliable_hierarchy_schema import _candidate
+from test_reliable_hierarchy_schema import _candidate, _raw_node
 from tb_runner.traversal_reliability import normalized_bounds
 
 
@@ -17,7 +17,34 @@ def fixture_snapshot(hierarchy, transfer, *, mutation=None):
     hierarchy, transfer = deepcopy(hierarchy), deepcopy(transfer)
     envelope = hierarchy['captureEnvelope']
     index = int(envelope['root_ref'].split('[')[1].split(']')[0])
+    def valid_node(source, window_id, child_index=None):
+        bounds = source.get('boundsInScreen', {})
+        if isinstance(bounds, dict):
+            bounds = tuple(bounds.get(k, 0) for k in ('l', 't', 'r', 'b'))
+        else:
+            bounds = tuple(int(x) for x in normalized_bounds(bounds).split(','))
+        children = [valid_node(child, window_id, i)
+                    for i, child in enumerate(source.get('children', []))]
+        result = _raw_node(window_id=window_id, api_level=34, text=source.get('text'),
+                           resource_id=source.get('viewIdResourceName'), bounds=bounds,
+                           children=children, child_index=child_index)
+        for key in ('className', 'contentDescription', 'packageName', 'clickable',
+                    'effectiveClickable', 'focusable', 'focused', 'accessibilityFocused',
+                    'selected', 'scrollable', 'visibleToUser', 'enabled'):
+            if key in source:
+                result[key] = source[key]
+        return result
+
+    def node_count(node):
+        return 1 + sum(node_count(child) for child in node['children'])
+
+    for window in hierarchy['windows']:
+        window['root'] = valid_node(window['root'], window['id'])
+    hierarchy['nodes'] = [deepcopy(window['root']) for window in hierarchy['windows']]
+    hierarchy['platformApiLevel'] = 34
+    hierarchy['nodeCount'] = sum(node_count(window['root']) for window in hierarchy['windows'])
     root = hierarchy['windows'][index]['root']
+    envelope['root_digest'] = capture_canonical_sha256(root)
     rows = []
     for n in hierarchy['traversalCandidates']['candidates']:
         b = n.get('boundsInScreen', {})
@@ -52,7 +79,7 @@ def fixture_snapshot(hierarchy, transfer, *, mutation=None):
     decoded=ReliableHierarchyPayload(raw_hierarchy=_freeze(hierarchy),traversal_candidates=view,
         schema_version=RAW_SCHEMA_VERSION,request_id=authority.request_id,platform_api_level=34,
         traversal_root_ref=authority.root_ref,traversal_root_window_id=authority.hierarchy_window_id,
-        raw_node_count=1,raw_completion_valid=True,scroll_metadata=_freeze({}),device_collection=None,
+        raw_node_count=hierarchy['nodeCount'],raw_completion_valid=True,scroll_metadata=_freeze({}),device_collection=None,
         transport_metadata=_freeze(transfer),capability_verified=True,capture_authority=authority,
         validated_candidate_projection=_freeze(retained))
     return TraversalCandidateSnapshot(response=legacy_dump_tree_response(decoded),

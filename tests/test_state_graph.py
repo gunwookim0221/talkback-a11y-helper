@@ -1,12 +1,13 @@
 from copy import deepcopy
 import json
+import pytest
 
 from phase6d_capture_support import attach_capture_authority
 
 from tb_runner.state_graph import (
     EdgeLifecycle, GraphLimits, GraphMode, GRAPH_MODE_ENV, REPLAY_SCHEMA_VERSION,
     StateGraphRecorder, VisitObservation, build_graph_state_identity,
-    graph_mode_from_environment, maybe_write_shadow_graph_from_rows,
+    build_phase6e_scroll_evidence, graph_mode_from_environment, maybe_write_shadow_graph_from_rows,
     read_state_graph, recorder_from_existing_rows, replay_state_graph, write_state_graph,
 )
 
@@ -68,6 +69,123 @@ def evidence(*, focus="CONFIRMED_UNCHANGED", focus_id="candidate-a", visit="NO_V
             "reconciled_visit_instance_id": visit_id,
             "action": action,
             **extra}
+
+
+def _focus_row_for_attribution(action="TARGETED_FOCUS"):
+    raw = observation(focus="second")
+    actual = raw["focus_node"]
+    return {
+        "step_index": 1, "scenario_id": raw["scenario_id"],
+        "state_graph_observation": raw, "actual_focus_node": actual,
+        "actual_focus_accessibility_focused": True,
+        "actual_focus_payload_source": "top_level",
+        "actual_focus_instance_id": "actual-focused-node",
+        "focus_transition_status": "CONFIRMED_MOVED",
+        "visit_record_status": "RECORDED",
+        "reconciled_visit_instance_id": "actual-focused-node",
+        "phase6_current_action_type": action, "smart_nav_req_id": "earlier-smart-next",
+        "target_focus_attempted": True, "target_focus_status": "TARGET_NOT_FOUND",
+        "target_focus_request_id": "later-target",
+        "target_focus_descriptor": {"resource_id": "different-target", "bounds": "[0,0][1,1]"},
+    }
+
+
+def test_failed_later_target_cannot_borrow_smart_next_focus_or_visit():
+    row = _focus_row_for_attribution()
+    graph = recorder_from_existing_rows([row], run_id="attribution", scenario_id=row["scenario_id"]).to_dict()
+    edge, observed = graph["edges"][0], graph["observations"][0]
+    assert edge["request_id"] == "later-target"
+    assert "ATTEMPTED" in edge["lifecycle"]
+    assert not {"EFFECT_OBSERVED", "STATE_CHANGED", "VISIT_CREDIT"} & set(edge["lifecycle"])
+    assert edge["focus_observation"] == "FOCUS_UNKNOWN"
+    assert edge["visit_outcome"] == "VISIT_UNKNOWN" and edge["visit_instance_id"] is None
+    assert edge["destination_state_id"] is None
+    assert observed["focus"]["observation"] == "FOCUS_MOVED"
+    assert observed["focus"]["instance_id"] == "actual-focused-node"
+    assert observed["visit_outcome"] == "VISIT_GRANTED"
+    assert observed["edge_id"] is None
+
+
+def test_failed_target_producer_through_reconciliation_and_graph_keeps_earlier_visit():
+    from types import SimpleNamespace
+    from talkback_lib.exploration_evidence_clock import EvidenceClock
+    from tb_runner import collection_flow, focus_realign_logic
+
+    row = _focus_row_for_attribution("SMART_NEXT")
+    actual = row["actual_focus_node"]
+    clock = EvidenceClock()
+    clock.dispatch(["shell", "am", "broadcast", "-a",
+                    "com.iotpart.sqe.talkbackhelper.SMART_NEXT", "--es", "reqId", "earlier-smart-next"])
+
+    class Client:
+        _adb_device = SimpleNamespace(shadow_evidence_clock=clock)
+
+        def target_focus_commit(self, **_kwargs):
+            clock.dispatch(["shell", "am", "broadcast", "-a",
+                            "com.iotpart.sqe.talkbackhelper.TARGET_FOCUS_COMMIT",
+                            "--es", "reqId", "later-target"])
+            return {"reqId": "later-target", "status": "TARGET_NOT_FOUND", "success": False}
+
+        def get_focus(self, **_kwargs):
+            return actual
+
+    client = Client()
+    target = node("different-target", "[0,0][50,50]", "Other")
+    ok, _, _ = focus_realign_logic._maybe_realign_focus_to_representative_impl(
+        client=client, dev="device", row=row, selected_node=target,
+        selected_rid="different-target", selected_label="Other", selected_bounds="[0,0][50,50]",
+        scenario_id=row["scenario_id"], step_idx=1, mismatch_logged=True, force_reason="",
+        scenario_perf=None, focus_matches_fn=lambda **_kwargs: False,
+        extract_label_fn=lambda value: value.get("text", ""), label_blob_fn=lambda _value: "",
+        truncate_fn=lambda value, *_args: value, log_fn=lambda _message: None)
+    assert not ok and row["actual_focus_node"] == actual
+    row["_exploration_observation"] = clock.finish_observation(clock.begin_observation())
+    payload = collection_flow._focus_reconciliation_event_payload(
+        client=client, row=row, result={"focus_transition_status": "CONFIRMED_MOVED",
+                                       "classification": "MATCHED", "visit_record_status": "RECORDED"})
+    assert payload["primary_action_request_id"] == "earlier-smart-next"
+    assert payload["action_request_id"] == ""
+    graph = recorder_from_existing_rows([row], run_id="producer", scenario_id=row["scenario_id"]).to_dict()
+    edge = graph["edges"][0]
+    assert edge["request_id"] == "later-target"
+    assert not {"EFFECT_OBSERVED", "STATE_CHANGED", "VISIT_CREDIT"} & set(edge["lifecycle"])
+    assert graph["observations"][0]["focus"]["instance_id"] == "actual-focused-node"
+    assert graph["observations"][0]["visit_outcome"] == "VISIT_GRANTED"
+
+
+def test_smart_next_current_focus_still_credits_actual_focused_node():
+    row = _focus_row_for_attribution("SMART_NEXT")
+    graph = recorder_from_existing_rows([row], run_id="attribution", scenario_id=row["scenario_id"]).to_dict()
+    edge = graph["edges"][0]
+    assert edge["request_id"] == "earlier-smart-next"
+    assert {"EFFECT_OBSERVED", "VISIT_CREDIT"} <= set(edge["lifecycle"])
+    assert edge["visit_instance_id"] == "actual-focused-node"
+
+
+def test_verified_current_target_focus_credits_its_actual_focused_node():
+    from talkback_lib.exploration_evidence_clock import EvidenceClock
+
+    row = _focus_row_for_attribution()
+    actual = row["actual_focus_node"]
+    clock = EvidenceClock()
+    clock.dispatch(["shell", "am", "broadcast", "-a",
+                    "com.iotpart.sqe.talkbackhelper.TARGET_FOCUS_COMMIT",
+                    "--es", "reqId", "later-target"])
+    row.update(target_focus_status="TARGET_MATCHED",
+               target_focus_descriptor={"resource_id": actual["viewIdResourceName"],
+                                        "bounds": actual["boundsInScreen"]},
+               actual_focus_payload_source="target_focus_commit_verified",
+               _phase6_target_focus_observation=clock.finish_observation(clock.begin_observation()),
+               _exploration_observation=clock.finish_observation(clock.begin_observation()))
+    graph = recorder_from_existing_rows([row], run_id="attribution", scenario_id=row["scenario_id"]).to_dict()
+    edge = graph["edges"][0]
+    assert edge["request_id"] == "later-target"
+    assert {"EFFECT_OBSERVED", "VISIT_CREDIT"} <= set(edge["lifecycle"])
+    assert edge["visit_instance_id"] == "actual-focused-node"
+
+    row["target_focus_request_id"] = "mismatched-later-request"
+    graph = recorder_from_existing_rows([row], run_id="attribution", scenario_id=row["scenario_id"]).to_dict()
+    assert "VISIT_CREDIT" not in graph["edges"][0]["lifecycle"]
 
 
 def test_focus_only_change_reuses_same_graph_state_and_records_cursor():
@@ -291,6 +409,272 @@ def test_scroll_evidence_is_recorded_without_capability_or_scheduling_decisions(
     assert data["states"][0]["scroll_observations"][0]["status"] == "UNKNOWN"
     assert data["terminal_evidence"] == {}
     assert data["decision_authority"] == "NONE"
+
+
+def _phase6e_capture(*, sequence, changed=False, second_container=False, focus=False,
+                     omit_owner=False, action_epoch=0, request_id=None, volatile_owner=False):
+    raw = observation(extra_node=changed)
+    owner = {
+        "viewIdResourceName": f"{PACKAGE}:id/content_list",
+        "className": "android.widget.ScrollView",
+        "boundsInScreen": "[0,100][900,800]",
+        "stable_node_path": "0.0.1",
+        "scrollable": True, "visibleToUser": True, "enabled": True,
+        "actions": [16908346], "scroll_down_supported": True,
+    }
+    if volatile_owner:
+        owner.update(actions=[4096], scroll_down_supported=False)
+    nodes = [owner]
+    if second_container:
+        nodes.append({**owner, "viewIdResourceName": f"{PACKAGE}:id/secondary_list",
+                      "boundsInScreen": "[0,200][900,700]", "stable_node_path": "0.0.2"})
+    if focus:
+        raw["nodes"][1]["accessibilityFocused"] = True
+    else:
+        raw["nodes"][1]["focused"] = True  # input focus alone is not accessibility focus
+    raw["nodes"] = [raw["nodes"][0], *([] if omit_owner else nodes), *raw["nodes"][1:]]
+    selected = nodes[0]
+    raw["capability"] = {
+        "status": "SCROLL_CAPABLE", "source": "helper_metadata",
+        "can_scroll_forward": True, "vertical_can_scroll_forward": True,
+        "contradictory": False,
+        "container": {**selected, "path": selected["stable_node_path"]},
+        "containers": nodes,
+    }
+    raw = attach_capture_authority(raw, production=True, sequence=sequence)
+    from talkback_lib.hierarchy_snapshot import flatten_service_hierarchy
+    raw["nodes"] = flatten_service_hierarchy({"success": True, "windows": [
+        {"active": True, "focused": True, "root": deepcopy(raw["_capture_root_tree"])}]})
+    if action_epoch:
+        marker = deepcopy(raw["_exploration_observation"])
+        marker.update(action_epoch=action_epoch, observation_epoch=action_epoch,
+                      capture_end_action_epoch=action_epoch)
+        marker["action_ownership"] = {
+            "action_epoch": action_epoch, "action_type": "SCROLL",
+            "request_id": request_id, "ownership_status": "KNOWN",
+        }
+        raw["_exploration_observation"] = marker
+        raw["production_observation_envelope"]["observation"] = deepcopy(marker)
+    return raw
+
+
+def _phase6e_transition(source, *, request_id="scroll-1", result_request_id=None,
+                        target_path=None, target_bounds=None, changed=True,
+                        boundary=False, action_epoch=1):
+    owner = next((item for item in source["nodes"]
+                  if item.get("scrollable") is True and item.get("stable_node_path") == (target_path or "0.0.1")), None)
+    if target_bounds is None and owner is not None:
+        target_bounds = owner["boundsInScreen"]
+    return {
+        "action_type": "SCROLL_FORWARD", "direction": "down",
+        "action_request_id": request_id,
+        "action_result_request_id": result_request_id or request_id,
+        "action_result_correlated": bool(request_id and (result_request_id or request_id) == request_id),
+        "action_success": True, "viewport_changed": changed,
+        "new_count": 1 if changed else 0, "disappeared_count": 0,
+        "viewport_end": boundary,
+        "capability_after": {"can_scroll_forward": False if boundary else True,
+                              "contradictory": False},
+        "action_target": {"mode": "EXPLICIT_CONTAINER", "container_path": target_path or "0.0.1",
+                          "container_bounds": target_bounds},
+        "action_result": {"reqId": result_request_id or request_id,
+                          "action": "SCROLL_FORWARD", "success": True,
+                          "actionAttempted": True, "explicitTarget": True,
+                          "scrollContainerPath": target_path or "0.0.1"},
+    }
+
+
+def _phase6e_row(source, result, transition):
+    return {
+        "step_index": 1, "scenario_id": source["scenario_id"],
+        "scenario_run_id": source["scenario_run_id"],
+        "state_graph_observation": source, "capture_id": source["capture_id"],
+        "_exploration_observation": deepcopy(source["_exploration_observation"]),
+        "phase6e_scroll_source_observation": source,
+        "phase6e_scroll_source_marker": deepcopy(source["_exploration_observation"]),
+        "phase6e_scroll_result_observation": result,
+        "phase6e_scroll_result_marker": deepcopy(result["_exploration_observation"]),
+        "scroll_transition": transition,
+    }
+
+
+def test_phase6e_resolves_explicit_current_scroll_owner_across_multiple_containers():
+    identities = set()
+    for path, bounds in (("0.0.1", "[0,100][900,800]"),
+                         ("0.0.2", "[0,200][900,700]")):
+        source = _phase6e_capture(sequence=10, second_container=True)
+        result = _phase6e_capture(sequence=11, changed=True, second_container=True,
+                                  focus=True, action_epoch=1, request_id="scroll-1")
+        transition = _phase6e_transition(source, target_path=path, target_bounds=bounds)
+        evidence_row = build_phase6e_scroll_evidence(
+            source, result, transition,
+            source_marker=source["_exploration_observation"],
+            result_marker=result["_exploration_observation"],
+        )
+        assert evidence_row["classification"] == "SCROLL_MOVED"
+        assert evidence_row["owner_status"] == "RESOLVED"
+        assert evidence_row["owner"]["path"] == path
+        identities.add(evidence_row["owner_identity"])
+    assert len(identities) == 2
+
+
+@pytest.mark.parametrize("target_path,target_bounds,result_path,expected", [
+    ("missing", "[0,100][900,800]", "missing", "OWNER_NOT_IN_CURRENT_HIERARCHY"),
+    ("0.0.1", "[1,100][900,800]", "0.0.1", "OWNER_TARGET_MISMATCH"),
+    (None, "[0,100][900,800]", "0.0.1", "OWNER_TARGET_MISMATCH"),
+])
+def test_phase6e_rejects_stale_or_mismatched_owner(target_path, target_bounds, result_path, expected):
+    source = _phase6e_capture(sequence=10, omit_owner=(target_path == "missing"))
+    result = _phase6e_capture(sequence=11, changed=True, action_epoch=1, request_id="scroll-1")
+    transition = _phase6e_transition(source, target_path=target_path,
+                                     target_bounds=target_bounds)
+    if target_path is None:
+        transition["action_target"]["container_path"] = None
+    transition["action_result"]["scrollContainerPath"] = result_path
+    evidence_row = build_phase6e_scroll_evidence(
+        source, result, transition,
+        source_marker=source["_exploration_observation"],
+        result_marker=result["_exploration_observation"],
+    )
+    assert evidence_row["classification"] == expected
+    assert evidence_row["valid_for_edge"] is False
+
+
+def test_phase6e_requires_current_matching_dispatch_receipt_and_result():
+    source = _phase6e_capture(sequence=10)
+    result = _phase6e_capture(sequence=11, changed=True, action_epoch=1,
+                              request_id="different-dispatch")
+    transition = _phase6e_transition(source, result_request_id="scroll-1")
+    evidence_row = build_phase6e_scroll_evidence(
+        source, result, transition,
+        source_marker=source["_exploration_observation"],
+        result_marker=result["_exploration_observation"],
+    )
+    assert evidence_row["classification"] == "STALE_INVOCATION_RESULT"
+    assert evidence_row["dispatch_receipt_correlated"] is False
+    assert evidence_row["valid_for_edge"] is False
+
+    stale_result = _phase6e_capture(sequence=12, changed=True, action_epoch=2,
+                                    request_id="scroll-1")
+    stale = build_phase6e_scroll_evidence(
+        source, stale_result, _phase6e_transition(source),
+        source_marker=source["_exploration_observation"],
+        result_marker=stale_result["_exploration_observation"],
+    )
+    assert stale["classification"] == "STALE_CAPTURE"
+    assert stale["valid_for_edge"] is False
+
+
+def test_phase6e_real_change_creates_edge_with_strict_after_scroll_focus_and_no_visit_credit():
+    source = _phase6e_capture(sequence=10)
+    result = _phase6e_capture(sequence=11, changed=True, focus=True,
+                              action_epoch=1, request_id="scroll-1")
+    transition = _phase6e_transition(source)
+    evidence_row = build_phase6e_scroll_evidence(
+        source, result, transition,
+        source_marker=source["_exploration_observation"],
+        result_marker=result["_exploration_observation"],
+    )
+    assert evidence_row["valid_for_edge"] is True
+    assert evidence_row["focus_after_scroll"]["status"] == "CONFIRMED"
+    graph = recorder_from_existing_rows([_phase6e_row(source, result, transition)],
+                                        run_id="phase6e", scenario_id=source["scenario_id"]).to_dict()
+    assert len(graph["edges"]) == 1
+    edge = graph["edges"][0]
+    assert EdgeLifecycle.EFFECT_OBSERVED.value in edge["lifecycle"]
+    assert edge["request_id"] == "scroll-1"
+    assert edge["visit_outcome"] == VisitObservation.VISIT_UNKNOWN.value
+    assert EdgeLifecycle.VISIT_CREDIT.value not in edge["lifecycle"]
+
+
+def test_phase6e_no_change_and_top_bottom_boundary_create_no_graph_edge():
+    source = _phase6e_capture(sequence=10)
+    unchanged = _phase6e_capture(sequence=11, focus=True, action_epoch=1,
+                                 request_id="scroll-1")
+    no_change = _phase6e_transition(source, changed=False)
+    evidence_row = build_phase6e_scroll_evidence(
+        source, unchanged, no_change,
+        source_marker=source["_exploration_observation"],
+        result_marker=unchanged["_exploration_observation"],
+    )
+    assert evidence_row["classification"] == "NO_PROGRESS"
+    assert evidence_row["focus_after_scroll"]["status"] == "CONFIRMED"
+    graph = recorder_from_existing_rows([_phase6e_row(source, unchanged, no_change)],
+                                        run_id="phase6e-no-change", scenario_id=source["scenario_id"]).to_dict()
+    assert graph["edges"] == []
+    assert graph["states"][0]["scroll_observations"]
+
+    boundary = _phase6e_transition(source, changed=False, boundary=True)
+    unchanged["capability"].update(can_scroll_forward=False, vertical_can_scroll_forward=False)
+    top = build_phase6e_scroll_evidence(
+        source, unchanged, boundary,
+        source_marker=source["_exploration_observation"],
+        result_marker=unchanged["_exploration_observation"],
+    )
+    assert top["classification"] == "BOUNDARY"
+    assert top["valid_for_edge"] is False
+
+
+def test_phase6e_uses_bound_captures_not_claimed_transition_movement():
+    source = _phase6e_capture(sequence=10)
+    result = _phase6e_capture(sequence=11, action_epoch=1, request_id="scroll-1")
+    evidence = build_phase6e_scroll_evidence(source, result, _phase6e_transition(source, changed=True))
+    assert evidence["classification"] == "NO_PROGRESS"
+    assert evidence["valid_for_edge"] is False
+
+
+def test_phase6e_movement_at_boundary_still_records_actual_change():
+    source = _phase6e_capture(sequence=10)
+    result = _phase6e_capture(sequence=11, changed=True, action_epoch=1, request_id="scroll-1")
+    result["capability"].update(can_scroll_forward=False, vertical_can_scroll_forward=False)
+    evidence = build_phase6e_scroll_evidence(source, result, _phase6e_transition(source, boundary=True))
+    assert evidence["classification"] == "SCROLL_MOVED"
+    assert evidence["valid_for_edge"] is True
+
+
+def test_phase6e_boundary_requires_matching_current_capability():
+    source = _phase6e_capture(sequence=10)
+    result = _phase6e_capture(sequence=11, action_epoch=1, request_id="scroll-1")
+    evidence = build_phase6e_scroll_evidence(source, result, _phase6e_transition(source, changed=False, boundary=True))
+    assert evidence["classification"] == "NO_PROGRESS"
+    assert evidence["boundary"] is False
+
+
+def test_phase6e_owner_identity_excludes_volatile_window_and_action_state():
+    source = _phase6e_capture(sequence=10)
+    result = _phase6e_capture(sequence=11, changed=True, action_epoch=1, request_id="scroll-1")
+    original = build_phase6e_scroll_evidence(source, result, _phase6e_transition(source))
+    revised_source = _phase6e_capture(sequence=10, volatile_owner=True)
+    revised = build_phase6e_scroll_evidence(revised_source, result, _phase6e_transition(revised_source))
+    assert original["owner_identity"] == revised["owner_identity"]
+
+
+def test_phase6e_rejects_hierarchy_nodes_changed_after_capture():
+    source = _phase6e_capture(sequence=10)
+    result = _phase6e_capture(sequence=11, changed=True, action_epoch=1, request_id="scroll-1")
+    transition = _phase6e_transition(source)
+    next(node for node in source["nodes"] if node.get("scrollable"))["stable_node_path"] = "forged"
+    evidence = build_phase6e_scroll_evidence(source, result, transition)
+    assert evidence["classification"] == "STALE_CAPTURE"
+    assert evidence["valid_for_edge"] is False
+
+
+@pytest.mark.parametrize("mutation", ["not_attempted", "unknown_target", "wrong_direction", "context_revision"])
+def test_phase6e_rejects_unbound_action_or_context(mutation):
+    source = _phase6e_capture(sequence=10)
+    result = _phase6e_capture(sequence=11, changed=True, action_epoch=1, request_id="scroll-1")
+    transition = _phase6e_transition(source)
+    if mutation == "not_attempted":
+        transition["action_result"]["actionAttempted"] = False
+    elif mutation == "unknown_target":
+        transition["action_target"]["mode"] = "UNKNOWN"
+    elif mutation == "wrong_direction":
+        transition["direction"] = "up"
+    else:
+        result["_exploration_observation"]["context_revision"] += 1
+        result["production_observation_envelope"]["observation"] = deepcopy(result["_exploration_observation"])
+    evidence = build_phase6e_scroll_evidence(source, result, transition)
+    assert evidence["valid_for_edge"] is False
 
 
 def test_serialization_and_ordered_replay_are_deterministic():

@@ -265,3 +265,62 @@ def test_transport_through_current_collection_handoff_fail_closed(condition, mon
         client=client, row=row, state=SimpleNamespace())
     assert not visit.visited and progress.verdict == 'INDETERMINATE'
     assert visit.consumed and visit.consumption_source == 'legacy_fallback'
+
+
+def test_real_capture_handoff_binds_scroll_to_current_owner_and_result():
+    from phase6d_capture_support import bind_reliable_capture_envelope
+    from talkback_lib.exploration_evidence_clock import EvidenceClock
+    from tb_runner import collection_flow
+    from tb_runner.state_graph import build_phase6e_scroll_evidence, recorder_from_existing_rows
+
+    raw = _payload()
+    root = raw['windows'][0]['root']
+    root.update(className='android.widget.ScrollView', scrollable=True, isScrollable=True,
+                actions=[{'id': 16908346}])
+    raw['nodes'][0] = deepcopy(root)
+    container = {'path': '0.0', 'boundsInScreen': root['boundsInScreen'],
+                 'className': root['className'], 'isScrollable': True,
+                 'actions': [{'id': 16908346}]}
+    raw['scrollCapabilities'] = [container]
+    before, transfer_before = bind_reliable_capture_envelope(
+        raw, request_id='before', process_epoch='epoch', generation=1,
+        service_instance_id='service', capture_sequence=1)
+    changed = deepcopy(raw)
+    changed['windows'][0]['root']['children'][0]['boundsInScreen'] = {'l': 10, 't': 40, 'r': 70, 'b': 75}
+    changed['nodes'][0] = deepcopy(changed['windows'][0]['root'])
+    after, transfer_after = bind_reliable_capture_envelope(
+        changed, request_id='after', process_epoch='epoch', generation=1,
+        service_instance_id='service', capture_sequence=2)
+    decoded = iter([decode_reliable_hierarchy_payload(before, capabilities=_capabilities(), transport_metadata=transfer_before),
+                    decode_reliable_hierarchy_payload(after, capabilities=_capabilities(), transport_metadata=transfer_after)])
+    client = A11yAdbClient(start_monitor=False)
+    clock = EvidenceClock(scope_id='scroll-test')
+    client._adb_device.shadow_evidence_clock = clock
+    client._phase6d_exploration_shadow_runtime = object()
+    client.dump_hierarchy_decoded = lambda **kw: next(decoded)
+    client._run = lambda command, **kw: 'Physical size: 100x100' if command == ['shell', 'wm', 'size'] else ''
+    source_row = {'scenario_id': 'fixture', 'scenario_run_id': 'run-1', 'step_index': 1}
+    source = collection_flow._capture_phase6d3a_production_observation(client=client, dev='serial', row=source_row)
+    clock.dispatch(['shell', 'am', 'broadcast', '-a', 'com.iotpart.sqe.talkbackhelper.SCROLL', '--es', 'reqId', 'scroll-1'])
+    result_row = {'scenario_id': 'fixture', 'scenario_run_id': 'run-1', 'step_index': 1}
+    result = collection_flow._capture_phase6d3a_production_observation(client=client, dev='serial', row=result_row)
+    transition = {
+        'action_type': 'SCROLL_FORWARD', 'direction': 'down', 'action_success': True,
+        'action_request_id': 'scroll-1', 'action_result_request_id': 'scroll-1',
+        'action_result_correlated': True,
+        'action_target': {'mode': 'EXPLICIT_CONTAINER', 'container_path': '0.0',
+                          'container_bounds': '[0,0][100,80]'},
+        'action_result': {'reqId': 'scroll-1', 'action': 'SCROLL_FORWARD', 'success': True,
+                          'actionAttempted': True, 'explicitTarget': True, 'scrollContainerPath': '0.0'},
+    }
+    evidence = build_phase6e_scroll_evidence(source, result, transition)
+    assert evidence['classification'] == 'SCROLL_MOVED'
+    assert evidence['owner']['path'] == '0.0'
+    row = {**source_row, 'phase6e_scroll_source_observation': source,
+           'phase6e_scroll_source_marker': source['_exploration_observation'],
+           'phase6e_scroll_result_observation': result,
+           'phase6e_scroll_result_marker': result['_exploration_observation'],
+           'scroll_transition': transition}
+    graph = recorder_from_existing_rows([row], run_id='run-1', scenario_id='fixture').to_dict()
+    assert len(graph['edges']) == 1
+    assert graph['edges'][0]['visit_outcome'] == 'VISIT_UNKNOWN'

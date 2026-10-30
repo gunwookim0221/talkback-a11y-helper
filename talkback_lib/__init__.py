@@ -165,6 +165,7 @@ class A11yAdbClient:
         self._last_traversal_candidate_snapshot: TraversalCandidateSnapshot | None = None
         self.last_scroll_capabilities: list[dict[str, Any]] = []
         self.last_device_collection: dict[str, Any] = {}
+        self.last_scroll_request_id: str = ""
         self.last_scroll_result: dict[str, Any] = {}
         self.last_smart_nav_result: dict[str, Any] = {}
         self._last_smart_nav_invocation_result: dict[str, Any] = {}
@@ -3057,6 +3058,10 @@ class A11yAdbClient:
         container_path: str | None = None,
         container_bounds: str | None = None,
     ) -> bool:
+        # Keep the invocation discriminator action-scoped. A preflight failure
+        # must not leave a previous scroll receipt looking current.
+        self.last_scroll_request_id = ""
+        self.last_scroll_result = {}
         action = f"SCROLL_{str(direction or '').strip().upper()[:24]}"
         capture_window_lifecycle(self, dev, "before", action)
         if get_talkback_restart_event(self):
@@ -3095,6 +3100,7 @@ class A11yAdbClient:
         container_path: str | None = None,
         container_bounds: str | None = None,
     ) -> bool:
+        self.last_scroll_request_id = ""
         self.last_scroll_result = {}
         if not self.check_helper_status(dev=dev):
             return False
@@ -3115,6 +3121,7 @@ class A11yAdbClient:
 
         self.clear_logcat(dev=dev)
         req_id = str(uuid.uuid4())[:8]
+        self.last_scroll_request_id = req_id
         extras = [
             "--ez", "forward", "true" if forward else "false",
             "--es", "direction", normalized_direction,

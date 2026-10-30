@@ -395,6 +395,9 @@ def _focus_reconciliation_event_payload(
     production_observation_request = str(row.get("get_focus_req_id", "") or "")
     if not observation_ids and production_observation_request:
         observation_ids = [production_observation_request]
+    from tb_runner.frontier_shadow import current_action_type
+    focus_action_bound = (current_action_type(row) != "TARGETED_FOCUS"
+                          or focus_realign_logic.targeted_focus_observation_current(row))
     payload.update({
         # The legacy result identity can describe an input-focused diagnostic
         # node. Keep it separately; the authoritative field follows the same
@@ -440,7 +443,7 @@ def _focus_reconciliation_event_payload(
         # The action request is selected from the exact dispatch fields using
         # the shared Phase6 contract; keep the legacy primary-action lineage
         # field above semantically unchanged.
-        "action_request_id": _phase6d_action_request_id(row),
+        "action_request_id": _phase6d_action_request_id(row) if focus_action_bound else "",
         "primary_action_type": str(lineage.get("primary_action_type") or row.get("smart_nav_action_type") or ""),
         "observation_transaction_id": str(lineage.get("observation_transaction_id") or transaction_id),
         "observation_request_ids": list(observation_ids),
@@ -22414,8 +22417,46 @@ def _apply_content_terminal_phase(client, dev, state, row, phase_ctx, step_idx, 
             selected_reason = tracker.decision()
         runtime_error = bool(stop and reason and termination_status(reason) == "INCOMPLETE_ERROR")
         if not runtime_error and not selected_reason and tracker.scroll_opportunity():
+            source_capture_row = dict(row)
+            source_snapshot = _capture_phase6d3a_production_observation(
+                client=client, dev=dev, row=source_capture_row)
+            source_marker = deepcopy(source_capture_row.get("_exploration_observation"))
+            scroll_before = (source_snapshot if isinstance(source_snapshot, Mapping)
+                             and source_snapshot.get("production_observation_current") is True
+                             else observation)
             transition, after = scroll_reliability.verified_scroll(client, dev, tracker.scenario_id, step_idx,
-                before=observation, output_base_dir=phase_ctx.output_base_dir)
+                before=scroll_before, output_base_dir=phase_ctx.output_base_dir)
+            result_capture_row = dict(row)
+            result_snapshot = _capture_phase6d3a_production_observation(
+                client=client, dev=dev, row=result_capture_row)
+            result_marker = deepcopy(result_capture_row.get("_exploration_observation"))
+            from tb_runner.state_graph import build_phase6e_scroll_evidence
+            scroll_evidence = build_phase6e_scroll_evidence(
+                source_snapshot if isinstance(source_snapshot, Mapping) else None,
+                result_snapshot if isinstance(result_snapshot, Mapping) else None,
+                transition,
+                source_marker=source_marker if isinstance(source_marker, Mapping) else None,
+                result_marker=result_marker if isinstance(result_marker, Mapping) else None,
+            )
+            row["phase6e_scroll_evidence"] = scroll_evidence
+            snapshots = getattr(client, "_phase6e_scroll_snapshots", None)
+            if snapshots is None:
+                snapshots = {}
+                client._phase6e_scroll_snapshots = snapshots
+            snapshots[(tracker.scenario_id, int(step_idx))] = {
+                "source_observation": deepcopy(source_snapshot) if isinstance(source_snapshot, Mapping) else None,
+                "source_marker": source_marker if isinstance(source_marker, Mapping) else None,
+                "result_observation": deepcopy(result_snapshot) if isinstance(result_snapshot, Mapping) else None,
+                "result_marker": result_marker if isinstance(result_marker, Mapping) else None,
+            }
+            log(
+                f"[PHASE6E][scroll_model] scenario='{tracker.scenario_id}' step={step_idx} "
+                f"owner_status='{scroll_evidence.get('owner_status', 'UNKNOWN')}' "
+                f"action_request_id='{scroll_evidence.get('action_request_id') or 'none'}' "
+                f"result_request_id='{scroll_evidence.get('result_request_id') or 'none'}' "
+                f"classification='{scroll_evidence.get('classification', 'UNKNOWN')}' "
+                f"valid_for_edge={str(scroll_evidence.get('valid_for_edge') is True).lower()}"
+            )
             tracker.transition_count += 1
             row["scroll_transition"] = transition
             row["scroll_status"] = transition["status"]
@@ -24818,8 +24859,27 @@ def _collect_tab_rows_inner(
                              if isinstance(item, dict) and item.get("scenario_run_id")), "")
         if not graph_run_id:
             graph_run_id = graph_scenario_id + ":" + Path(output_path).stem
+        scroll_snapshots = getattr(client, "_phase6e_scroll_snapshots", {})
+        graph_rows = []
+        for item in phase_ctx.rows:
+            if not isinstance(item, Mapping):
+                continue
+            graph_row = dict(item)
+            try:
+                graph_step = int(graph_row.get("step_index", -1))
+            except (TypeError, ValueError):
+                graph_step = -1
+            snapshot = scroll_snapshots.get((graph_scenario_id, graph_step)) if isinstance(scroll_snapshots, Mapping) else None
+            if isinstance(snapshot, Mapping):
+                graph_row.update(
+                    phase6e_scroll_source_observation=snapshot.get("source_observation"),
+                    phase6e_scroll_source_marker=snapshot.get("source_marker"),
+                    phase6e_scroll_result_observation=snapshot.get("result_observation"),
+                    phase6e_scroll_result_marker=snapshot.get("result_marker"),
+                )
+            graph_rows.append(graph_row)
         graph_path = maybe_write_shadow_graph_from_rows(
-            rows=phase_ctx.rows,
+            rows=graph_rows,
             output_path=output_path,
             run_id=graph_run_id,
             scenario_id=graph_scenario_id,
@@ -24827,6 +24887,9 @@ def _collect_tab_rows_inner(
         )
         if graph_path is not None:
             log(f"[STATE_GRAPH][shadow_artifact] path='{graph_path}' decision_authority='none'")
+        if isinstance(scroll_snapshots, dict):
+            for key in [key for key in scroll_snapshots if isinstance(key, tuple) and key[0] == graph_scenario_id]:
+                scroll_snapshots.pop(key, None)
     except Exception as exc:
         log(f"[STATE_GRAPH][shadow_error] reason='{type(exc).__name__}' action='continue_production'")
     frontier_shadow_runtime = getattr(client, "_phase6c2_frontier_shadow_runtime", None)

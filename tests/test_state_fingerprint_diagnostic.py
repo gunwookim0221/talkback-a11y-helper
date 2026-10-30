@@ -70,9 +70,11 @@ def test_capture_reuses_sources_and_copies_capability_before_focus_cache_changes
     assert value["display_bounds"] == [0, 0, 1000, 1000]
     assert value["source"] == "helper_capability+service_hierarchy_semantics"
     assert value["overlay"]["source"] == "evidence_modal_classifier"
-    assert value["overlay"]["classification"] == "NON_MODAL_CONTROL"
+    # The existing classifier keeps component binding unknown when the tree
+    # contains no modal candidate; this does not establish overlay absence.
+    assert value["overlay"]["classification"] == "UNKNOWN_COMPONENT_BINDING"
     assert value["overlay"]["candidate_present"] is False
-    assert value["overlay"]["observed"] is False
+    assert value["overlay"]["observed"] is True
     assert len(client.calls) == 2
 
 
