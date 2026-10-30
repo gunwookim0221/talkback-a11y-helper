@@ -13,6 +13,7 @@ internal object ReliableHierarchyCandidateContract {
     const val CONTRACT_VERSION = "legacy-traversal-candidate-contract.v1"
     const val PROFILE_ID = "oneconnect-traversal-policy"
     const val PROFILE_VERSION = OneConnectTraversalPolicy.VERSION
+    const val ROOT_CAPTURE_ID_VERSION = "phase6d-root-capture-id-v1"
 
     private val ROOT_REF = Regex("^windows\\[(0|[1-9][0-9]*)]\\.root$")
 
@@ -57,6 +58,57 @@ internal object ReliableHierarchyCandidateContract {
             .put("candidates", candidates)
     }
 
+    /** Capture-local root correlation derived from the accepted transfer identity and exact root bytes. */
+    fun rootCaptureId(
+        requestId: String, processEpoch: String, generation: Long, serviceInstanceId: String,
+        captureSequence: Long, rootRef: String, rootDigest: String
+    ): String {
+        require(requestId.isNotBlank() && processEpoch.isNotBlank() && serviceInstanceId.isNotBlank()) {
+            "CAPTURE_ROOT_IDENTITY_INVALID"
+        }
+        require(generation > 0 && captureSequence > 0 && ROOT_REF.matches(rootRef)) {
+            "CAPTURE_ROOT_IDENTITY_INVALID"
+        }
+        require(rootDigest.matches(Regex("[0-9a-f]{64}"))) { "CAPTURE_ROOT_DIGEST_INVALID" }
+        return CaptureCanonicalJson.sha256(JSONObject()
+            .put("identity_schema", ROOT_CAPTURE_ID_VERSION)
+            .put("schema_version", HierarchyPayloadActions.CAPTURE_ENVELOPE_SCHEMA)
+            .put("canonicalization", CaptureCanonicalJson.VERSION)
+            .put("request_id", requestId)
+            .put("process_epoch", processEpoch)
+            .put("generation", generation)
+            .put("service_instance_id", serviceInstanceId)
+            .put("capture_sequence", captureSequence)
+            .put("root_ref", rootRef)
+            .put("root_digest", rootDigest))
+    }
+
+    /** Production projection over the immutable DTO and exact serialized root digest. */
+    fun buildFromImmutable(
+        root: CapturedHierarchyNode, traversalRootRef: String, rootDigest: String, rootCaptureId: String
+    ): JSONObject {
+        require(ROOT_REF.matches(traversalRootRef)) { "TRAVERSAL_ROOT_REF_INVALID" }
+        require(rootDigest.matches(Regex("[0-9a-f]{64}"))) { "TRAVERSAL_ROOT_DIGEST_INVALID" }
+        require(rootCaptureId.matches(Regex("[0-9a-f]{64}"))) { "TRAVERSAL_ROOT_CAPTURE_ID_INVALID" }
+        val legacy = ImmutableHierarchyCandidateProjection.build(root)
+        val candidates = legacy.getJSONArray("nodes")
+        val projection = JSONObject()
+            .put("schema_version", SCHEMA_VERSION)
+            .put("candidate_contract_version", CONTRACT_VERSION)
+            .put("algorithmVersion", A11yNavigator.NAVIGATOR_ALGORITHM_VERSION)
+            .put("analyzerVersion", A11yTraversalAnalyzer.VERSION)
+            .put("profileId", PROFILE_ID)
+            .put("profileVersion", PROFILE_VERSION)
+            .put("completion", JSONObject().put("status", "COMPLETE").put("complete", true).put("candidate_count", candidates.length()))
+            .put("traversalRootRef", traversalRootRef)
+            .put("traversalRootWindowId", root.windowId)
+            .put("canScrollDown", legacy.optBoolean("canScrollDown", false))
+            .put("scrollAxisContract", "axis-v1")
+            .put("source_root_digest", rootDigest)
+            .put("rootCaptureId", rootCaptureId)
+            .put("candidates", candidates)
+        return projection.put("candidate_digest", CaptureCanonicalJson.sha256(projection))
+    }
     /** Fail closed unless the candidate projection points at a serialized raw root. */
     fun hasValidRootBinding(payload: JSONObject): Boolean {
         if (payload.optString("schemaVersion") != HierarchyPayloadActions.PAYLOAD_SCHEMA) return false
@@ -80,7 +132,37 @@ internal object ReliableHierarchyCandidateContract {
         if (candidateProjection.optString("schema_version") != SCHEMA_VERSION) return false
         if (candidateProjection.optString("candidate_contract_version") != CONTRACT_VERSION) return false
         if (candidateProjection.optJSONArray("candidates") == null) return false
-        return completion.optInt("candidate_count", -1) == candidateProjection.getJSONArray("candidates").length()
+        if (completion.optInt("candidate_count", -1) != candidateProjection.getJSONArray("candidates").length()) return false
+        val rawDigest = CaptureCanonicalJson.sha256(rawRoot)
+        if (candidateProjection.optString("source_root_digest") != rawDigest) return false
+        val candidateDigest = candidateProjection.optString("candidate_digest")
+        if (!candidateDigest.matches(Regex("[0-9a-f]{64}"))) return false
+        val digestInput = JSONObject(candidateProjection.toString()).apply { remove("candidate_digest") }
+        if (CaptureCanonicalJson.sha256(digestInput) != candidateDigest) return false
+        val envelope = payload.optJSONObject("captureEnvelope") ?: return false
+        val generation = envelope.opt("generation")
+        val captureSequence = envelope.opt("capture_sequence")
+        if (envelope.optString("schema_version") != HierarchyPayloadActions.CAPTURE_ENVELOPE_SCHEMA ||
+            envelope.optString("canonicalization") != CaptureCanonicalJson.VERSION ||
+            envelope.optString("request_id") != payload.optString("reqId") ||
+            payload.optString("reqId").isBlank() ||
+            envelope.optString("process_epoch").isBlank() ||
+            envelope.optString("service_instance_id").isBlank() ||
+            generation !is Long && generation !is Int ||
+            captureSequence !is Long && captureSequence !is Int ||
+            (generation as Number).toLong() <= 0L || (captureSequence as Number).toLong() <= 0L ||
+            envelope.optString("root_ref") != rawRef || envelope.optString("root_digest") != rawDigest ||
+            envelope.optString("candidate_digest") != candidateDigest) return false
+        val expectedRootCaptureId = runCatching {
+            rootCaptureId(
+                envelope.getString("request_id"), envelope.getString("process_epoch"),
+                (generation as Number).toLong(), envelope.getString("service_instance_id"),
+                (captureSequence as Number).toLong(), envelope.getString("root_ref"),
+                envelope.getString("root_digest")
+            )
+        }.getOrNull() ?: return false
+        if (candidateProjection.optString("rootCaptureId") != expectedRootCaptureId) return false
+        return true
     }
 }
 

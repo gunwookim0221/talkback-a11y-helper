@@ -123,6 +123,18 @@ def _accessibility_focus_package(focus_node: Any) -> str | None:
     return None
 
 
+def _foreground_activity_component(activity_output: str, window_output: str) -> str | None:
+    for pattern, source in (
+        (r"topResumedActivity=.*?\bu\d+\s+([A-Za-z0-9_.]+/[A-Za-z0-9_.$]+)", activity_output),
+        (r"mResumedActivity:.*?\bu\d+\s+([A-Za-z0-9_.]+/[A-Za-z0-9_.$]+)", activity_output),
+        (r"mCurrentFocus=Window\{[^}]*?\bu\d+\s+([A-Za-z0-9_.]+/[A-Za-z0-9_.$]+)", window_output),
+    ):
+        match = re.search(pattern, source)
+        if match:
+            return match.group(1)[:256]
+    return None
+
+
 def parse_window_lifecycle_output(
     raw_output: str,
     *,
@@ -168,6 +180,7 @@ def parse_window_lifecycle_output(
             bool(item["has_surface"] and item["ready"]) for item in search_overlay_windows
         ),
         "foreground_package": _foreground_package(activity_output, window_output),
+        "foreground_activity_component": _foreground_activity_component(activity_output, window_output),
         "accessibility_focus_window_id": int(focus_id_match.group(1)) if focus_id_match else None,
         "accessibility_focus_package": _accessibility_focus_package(focus_node),
         "accessibility_focus_package_source": "helper_focus_node"
@@ -425,12 +438,34 @@ def capture_window_lifecycle(
     )
 
 
+def capture_entry_window_diagnostic(client: Any, dev: Any) -> dict[str, Any]:
+    """Take a read-only entry window sample without lifecycle/restart tracking."""
+    payload: dict[str, Any] = {
+        "schema_version": "phase6d3a-entry-window-diagnostic-v1",
+        "diagnostic_only": True,
+        "captured_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+    }
+    run = getattr(client, "_run", None)
+    if not callable(run):
+        payload.update(sample_status="UNAVAILABLE", sample_error="RUNNER_UNAVAILABLE")
+        return payload
+    try:
+        output = run(["shell", LIFECYCLE_SNAPSHOT_COMMAND], dev=dev, timeout=8.0)
+    except Exception as exc:
+        payload.update(sample_status="ERROR", sample_error=f"{type(exc).__name__}"[:96])
+        return payload
+    payload.update(parse_window_lifecycle_output(output or ""))
+    payload["sample_status"] = "CAPTURED" if payload.get("snapshot_available") else "EMPTY"
+    return payload
+
+
 __all__ = [
     "MAX_EVENTS",
     "MAX_WINDOW_DETAILS",
     "TALKBACK_PACKAGE",
     "WindowLifecycleRecorder",
     "capture_window_lifecycle",
+    "capture_entry_window_diagnostic",
     "configure_window_lifecycle",
     "parse_window_lifecycle_output",
     "set_window_lifecycle_step",

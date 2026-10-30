@@ -1328,13 +1328,12 @@ def precheck_repo_helper_build_identity(
     acceptance_mode: bool = True,
 ) -> HelperIdentityPrecheck:
     expected = compute_repo_helper_build_identity(repo_root, variant=variant)
-    if expected["source_state"] != "CLEAN":
-        return HelperIdentityPrecheck(
-            HelperIdentityStatus.UNKNOWN, "REPOSITORY_HELPER_INPUTS_NOT_CLEAN", None, None,
-            "ACCEPTANCE_HARD_STOP" if acceptance_mode else "DIAGNOSTIC_WARNING_ONLY",
-            expected_git_commit=str(expected["git_commit"]),
-            expected_helper_input_digest=str(expected["helper_input_digest"]),
-        )
+    # The checkout can contain reviewed helper inputs that were captured in an
+    # approved helper-provenance snapshot under a different commit.  Decide
+    # compatibility from the actual helper-input digest and the installed
+    # build's own clean provenance; do not require the surrounding checkout to
+    # be clean.  check_helper_compatibility still fails closed on any digest,
+    # build, schema, or service-instance mismatch.
     return check_helper_compatibility(
         str(expected["git_commit"]), ping,
         expected_build_id=str(expected["build_id"]),

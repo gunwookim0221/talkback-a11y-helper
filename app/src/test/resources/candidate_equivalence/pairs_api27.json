@@ -21,7 +21,7 @@
             "text": "Start",
             "contentDescription": "Start",
             "className": "android.widget.Button",
-            "viewIdResourceName": "com.example:id\/action",
+            "viewIdResourceName": "com.example:id/action",
             "boundsInScreen": {
               "l": 80,
               "t": 100,
@@ -138,7 +138,7 @@
                 {
                   "text": null,
                   "contentDescription": "Start",
-                  "viewIdResourceName": "com.example:id\/action",
+                  "viewIdResourceName": "com.example:id/action",
                   "className": "android.widget.Button",
                   "packageName": "com.example",
                   "windowId": -1,
@@ -215,7 +215,7 @@
               {
                 "text": null,
                 "contentDescription": "Start",
-                "viewIdResourceName": "com.example:id\/action",
+                "viewIdResourceName": "com.example:id/action",
                 "className": "android.widget.Button",
                 "packageName": "com.example",
                 "windowId": -1,
@@ -273,7 +273,7 @@
               "text": "Start",
               "contentDescription": "Start",
               "className": "android.widget.Button",
-              "viewIdResourceName": "com.example:id\/action",
+              "viewIdResourceName": "com.example:id/action",
               "boundsInScreen": {
                 "l": 80,
                 "t": 100,
@@ -294,7 +294,62 @@
               "actionableDescendantClassName": null,
               "actionableDescendantContentDescription": null
             }
-          ]
+          ],
+          "source_root_digest": "7c07940a69c77e312e5d41967c5c9768d0b66914ae7efc3b3a0dc8801d71183d",
+          "rootCaptureId": "d2934b4e62f180539296b44b9bc5e0d7e07e3ef4e22f7ef6c3ecdc8b2d403aa1",
+          "candidate_digest": "9927e92432b598fcfdd4efe000aee165d195ffe7f84932b329f90a24cc56fb30"
+        },
+        "captureEnvelope": {
+          "schema_version": "phase6d-capture-envelope-v1",
+          "canonicalization": "capture-canonical-json-v1",
+          "request_id": "c4-offline-simple_button_api27_null_focusable",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 1,
+          "root_ref": "windows[0].root",
+          "root_digest": "7c07940a69c77e312e5d41967c5c9768d0b66914ae7efc3b3a0dc8801d71183d",
+          "candidate_digest": "9927e92432b598fcfdd4efe000aee165d195ffe7f84932b329f90a24cc56fb30"
+        }
+      },
+      "capture_transport_metadata": {
+        "header": {
+          "request_id": "c4-offline-simple_button_api27_null_focusable",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 1,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
+        },
+        "control": {
+          "request_id": "c4-offline-simple_button_api27_null_focusable",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 1,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
         }
       }
     }

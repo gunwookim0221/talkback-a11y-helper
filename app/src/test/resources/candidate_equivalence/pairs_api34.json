@@ -21,7 +21,7 @@
             "text": "Living room",
             "contentDescription": "Living room",
             "className": "android.widget.FrameLayout",
-            "viewIdResourceName": "com.example:id\/card",
+            "viewIdResourceName": "com.example:id/card",
             "boundsInScreen": {
               "l": 80,
               "t": 300,
@@ -164,7 +164,7 @@
                 {
                   "text": null,
                   "contentDescription": null,
-                  "viewIdResourceName": "com.example:id\/card",
+                  "viewIdResourceName": "com.example:id/card",
                   "className": "android.widget.FrameLayout",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -282,7 +282,7 @@
               {
                 "text": null,
                 "contentDescription": null,
-                "viewIdResourceName": "com.example:id\/card",
+                "viewIdResourceName": "com.example:id/card",
                 "className": "android.widget.FrameLayout",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -380,7 +380,7 @@
               "text": "Living room",
               "contentDescription": "Living room",
               "className": "android.widget.FrameLayout",
-              "viewIdResourceName": "com.example:id\/card",
+              "viewIdResourceName": "com.example:id/card",
               "boundsInScreen": {
                 "l": 80,
                 "t": 300,
@@ -426,7 +426,62 @@
               "actionableDescendantClassName": null,
               "actionableDescendantContentDescription": null
             }
-          ]
+          ],
+          "source_root_digest": "5ac1d20130ce0f7dfc72e1e2c1365458d98729b58f54c2e82d95a8cdea5577cf",
+          "rootCaptureId": "d00b922b588a73afb3952eb78ba4f74f0ee6758d9a6f0f70b4aabdc4c6f6f6c2",
+          "candidate_digest": "efc3ebe2e5d85e8af46bb2a55b8826713d56ea67a88e7bf0da5527976c490882"
+        },
+        "captureEnvelope": {
+          "schema_version": "phase6d-capture-envelope-v1",
+          "canonicalization": "capture-canonical-json-v1",
+          "request_id": "c4-offline-nested_clickable_wrapper",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 101,
+          "root_ref": "windows[0].root",
+          "root_digest": "5ac1d20130ce0f7dfc72e1e2c1365458d98729b58f54c2e82d95a8cdea5577cf",
+          "candidate_digest": "efc3ebe2e5d85e8af46bb2a55b8826713d56ea67a88e7bf0da5527976c490882"
+        }
+      },
+      "capture_transport_metadata": {
+        "header": {
+          "request_id": "c4-offline-nested_clickable_wrapper",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 101,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
+        },
+        "control": {
+          "request_id": "c4-offline-nested_clickable_wrapper",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 101,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
         }
       }
     },
@@ -726,7 +781,62 @@
               "actionableDescendantClassName": null,
               "actionableDescendantContentDescription": null
             }
-          ]
+          ],
+          "source_root_digest": "afa8eead9bafbe93a1d9717a0f349941da2d6e2a4ccd4916e6172356242b3a20",
+          "rootCaptureId": "c95e8652c5ee623d12258d3734b14bddc2aac5dce7445c8cd2c2ac6563086322",
+          "candidate_digest": "dfca1a5afa18e7d27f348b44587d7df96c9ba504d78964abb3f9a302f383f8df"
+        },
+        "captureEnvelope": {
+          "schema_version": "phase6d-capture-envelope-v1",
+          "canonicalization": "capture-canonical-json-v1",
+          "request_id": "c4-offline-screen_reader_focusable_true",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 102,
+          "root_ref": "windows[0].root",
+          "root_digest": "afa8eead9bafbe93a1d9717a0f349941da2d6e2a4ccd4916e6172356242b3a20",
+          "candidate_digest": "dfca1a5afa18e7d27f348b44587d7df96c9ba504d78964abb3f9a302f383f8df"
+        }
+      },
+      "capture_transport_metadata": {
+        "header": {
+          "request_id": "c4-offline-screen_reader_focusable_true",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 102,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
+        },
+        "control": {
+          "request_id": "c4-offline-screen_reader_focusable_true",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 102,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
         }
       }
     },
@@ -1026,7 +1136,62 @@
               "actionableDescendantClassName": null,
               "actionableDescendantContentDescription": null
             }
-          ]
+          ],
+          "source_root_digest": "d920372dd2ad8584cad9e4bd6e47a0661ae8f51f25eb8d19bc859865fe99290f",
+          "rootCaptureId": "9365af65a7a8ae6ccd5bd1c16c3dc67226f16b6578b7d51e4565564b4763877f",
+          "candidate_digest": "4a9e6d4aa95cd467df211c040fe4c363a9389f48c4303c0f929ab9538e93a87c"
+        },
+        "captureEnvelope": {
+          "schema_version": "phase6d-capture-envelope-v1",
+          "canonicalization": "capture-canonical-json-v1",
+          "request_id": "c4-offline-screen_reader_focusable_false",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 103,
+          "root_ref": "windows[0].root",
+          "root_digest": "d920372dd2ad8584cad9e4bd6e47a0661ae8f51f25eb8d19bc859865fe99290f",
+          "candidate_digest": "4a9e6d4aa95cd467df211c040fe4c363a9389f48c4303c0f929ab9538e93a87c"
+        }
+      },
+      "capture_transport_metadata": {
+        "header": {
+          "request_id": "c4-offline-screen_reader_focusable_false",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 103,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
+        },
+        "control": {
+          "request_id": "c4-offline-screen_reader_focusable_false",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 103,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
         }
       }
     },
@@ -1049,7 +1214,7 @@
             "text": null,
             "contentDescription": null,
             "className": "android.widget.SeekBar",
-            "viewIdResourceName": "com.example:id\/level",
+            "viewIdResourceName": "com.example:id/level",
             "boundsInScreen": {
               "l": 204,
               "t": 2173,
@@ -1167,7 +1332,7 @@
                 {
                   "text": null,
                   "contentDescription": null,
-                  "viewIdResourceName": "com.example:id\/level",
+                  "viewIdResourceName": "com.example:id/level",
                   "className": "android.widget.SeekBar",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -1246,7 +1411,7 @@
               {
                 "text": null,
                 "contentDescription": null,
-                "viewIdResourceName": "com.example:id\/level",
+                "viewIdResourceName": "com.example:id/level",
                 "className": "android.widget.SeekBar",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -1305,7 +1470,7 @@
               "text": null,
               "contentDescription": null,
               "className": "android.widget.SeekBar",
-              "viewIdResourceName": "com.example:id\/level",
+              "viewIdResourceName": "com.example:id/level",
               "boundsInScreen": {
                 "l": 204,
                 "t": 2173,
@@ -1326,7 +1491,62 @@
               "actionableDescendantClassName": null,
               "actionableDescendantContentDescription": null
             }
-          ]
+          ],
+          "source_root_digest": "2ba149c759147b4d167b694f49ca6519a4ebdcbd61668baebb9175df95d84ad9",
+          "rootCaptureId": "1c9b007303e1fdd564baa95654d6878d463fec6226e46f9a175465754acd7be4",
+          "candidate_digest": "8a82c2b8c689877694e3494b49a8f2f0e981458b690eb30b930a6eba5d27b25d"
+        },
+        "captureEnvelope": {
+          "schema_version": "phase6d-capture-envelope-v1",
+          "canonicalization": "capture-canonical-json-v1",
+          "request_id": "c4-offline-range_info_control",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 104,
+          "root_ref": "windows[0].root",
+          "root_digest": "2ba149c759147b4d167b694f49ca6519a4ebdcbd61668baebb9175df95d84ad9",
+          "candidate_digest": "8a82c2b8c689877694e3494b49a8f2f0e981458b690eb30b930a6eba5d27b25d"
+        }
+      },
+      "capture_transport_metadata": {
+        "header": {
+          "request_id": "c4-offline-range_info_control",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 104,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
+        },
+        "control": {
+          "request_id": "c4-offline-range_info_control",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 104,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
         }
       }
     },
@@ -1638,7 +1858,62 @@
               "actionableDescendantClassName": null,
               "actionableDescendantContentDescription": null
             }
-          ]
+          ],
+          "source_root_digest": "bf634b67463afe201d18f275d1d36c86fc60392ac6c70e9186f8f03b095eb629",
+          "rootCaptureId": "de51dcebe6ff5a06ced7c4f77d53a082e7890714df170ff0fdbc83df7ffc5304",
+          "candidate_digest": "c32e7a53608f04b4701b51e02c92f0d4112b66107e25180467c597df7f289675"
+        },
+        "captureEnvelope": {
+          "schema_version": "phase6d-capture-envelope-v1",
+          "canonicalization": "capture-canonical-json-v1",
+          "request_id": "c4-offline-set_progress_only_unlabeled_control",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 105,
+          "root_ref": "windows[0].root",
+          "root_digest": "bf634b67463afe201d18f275d1d36c86fc60392ac6c70e9186f8f03b095eb629",
+          "candidate_digest": "c32e7a53608f04b4701b51e02c92f0d4112b66107e25180467c597df7f289675"
+        }
+      },
+      "capture_transport_metadata": {
+        "header": {
+          "request_id": "c4-offline-set_progress_only_unlabeled_control",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 105,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
+        },
+        "control": {
+          "request_id": "c4-offline-set_progress_only_unlabeled_control",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 105,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
         }
       }
     },
@@ -1886,7 +2161,62 @@
           "traversalRootWindowId": -1,
           "canScrollDown": false,
           "scrollAxisContract": "axis-v1",
-          "candidates": []
+          "candidates": [],
+          "source_root_digest": "72fdc98acd6996da3f20499e9d87463cd06a90c48e0f71c18142ca6bfa8709eb",
+          "rootCaptureId": "c998b1840a131828836bf589943e14e48f0bb48ddabaab707c7dc46f6659da29",
+          "candidate_digest": "bf8b4e9a7589997a3298e3b2dc2da27d9f9afc4f7372cc279c6766cb98203e6f"
+        },
+        "captureEnvelope": {
+          "schema_version": "phase6d-capture-envelope-v1",
+          "canonicalization": "capture-canonical-json-v1",
+          "request_id": "c4-offline-class_only_unlabeled_control_rejected",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 106,
+          "root_ref": "windows[0].root",
+          "root_digest": "72fdc98acd6996da3f20499e9d87463cd06a90c48e0f71c18142ca6bfa8709eb",
+          "candidate_digest": "bf8b4e9a7589997a3298e3b2dc2da27d9f9afc4f7372cc279c6766cb98203e6f"
+        }
+      },
+      "capture_transport_metadata": {
+        "header": {
+          "request_id": "c4-offline-class_only_unlabeled_control_rejected",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 106,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
+        },
+        "control": {
+          "request_id": "c4-offline-class_only_unlabeled_control_rejected",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 106,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
         }
       }
     },
@@ -1909,7 +2239,7 @@
             "text": "First",
             "contentDescription": "First",
             "className": "android.widget.Button",
-            "viewIdResourceName": "com.example:id\/first",
+            "viewIdResourceName": "com.example:id/first",
             "boundsInScreen": {
               "l": 20,
               "t": 400,
@@ -2027,7 +2357,7 @@
                 {
                   "text": "First",
                   "contentDescription": null,
-                  "viewIdResourceName": "com.example:id\/first",
+                  "viewIdResourceName": "com.example:id/first",
                   "className": "android.widget.Button",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -2065,7 +2395,7 @@
                 {
                   "text": "Second",
                   "contentDescription": null,
-                  "viewIdResourceName": "com.example:id\/second",
+                  "viewIdResourceName": "com.example:id/second",
                   "className": "android.widget.Button",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -2144,7 +2474,7 @@
               {
                 "text": "First",
                 "contentDescription": null,
-                "viewIdResourceName": "com.example:id\/first",
+                "viewIdResourceName": "com.example:id/first",
                 "className": "android.widget.Button",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -2182,7 +2512,7 @@
               {
                 "text": "Second",
                 "contentDescription": null,
-                "viewIdResourceName": "com.example:id\/second",
+                "viewIdResourceName": "com.example:id/second",
                 "className": "android.widget.Button",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -2241,7 +2571,7 @@
               "text": "First",
               "contentDescription": "First",
               "className": "android.widget.Button",
-              "viewIdResourceName": "com.example:id\/first",
+              "viewIdResourceName": "com.example:id/first",
               "boundsInScreen": {
                 "l": 20,
                 "t": 400,
@@ -2262,7 +2592,62 @@
               "actionableDescendantClassName": null,
               "actionableDescendantContentDescription": null
             }
-          ]
+          ],
+          "source_root_digest": "da1659bb1861867fe316c734333689ee7416d2e30646a331ae5fd3d8b8b2eb7e",
+          "rootCaptureId": "25927ee1b060a5af5751dc58ecc989ba5bbda21e401dea346433538b6fc9a48c",
+          "candidate_digest": "e788a216fb1b1801b8da5ca9606783da948d087a6bf601b38e672e7ecb36e881"
+        },
+        "captureEnvelope": {
+          "schema_version": "phase6d-capture-envelope-v1",
+          "canonicalization": "capture-canonical-json-v1",
+          "request_id": "c4-offline-same_bounds_duplicate",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 107,
+          "root_ref": "windows[0].root",
+          "root_digest": "da1659bb1861867fe316c734333689ee7416d2e30646a331ae5fd3d8b8b2eb7e",
+          "candidate_digest": "e788a216fb1b1801b8da5ca9606783da948d087a6bf601b38e672e7ecb36e881"
+        }
+      },
+      "capture_transport_metadata": {
+        "header": {
+          "request_id": "c4-offline-same_bounds_duplicate",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 107,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
+        },
+        "control": {
+          "request_id": "c4-offline-same_bounds_duplicate",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 107,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
         }
       }
     },
@@ -2285,7 +2670,7 @@
             "text": "Living Room Card A",
             "contentDescription": "Living Room Card A",
             "className": "android.widget.Button",
-            "viewIdResourceName": "com.example:id\/item",
+            "viewIdResourceName": "com.example:id/item",
             "boundsInScreen": {
               "l": 0,
               "t": 400,
@@ -2310,7 +2695,7 @@
             "text": "Living Room Card B",
             "contentDescription": "Living Room Card B",
             "className": "android.widget.Button",
-            "viewIdResourceName": "com.example:id\/item",
+            "viewIdResourceName": "com.example:id/item",
             "boundsInScreen": {
               "l": 0,
               "t": 580,
@@ -2428,7 +2813,7 @@
                 {
                   "text": "Living Room",
                   "contentDescription": "Card A",
-                  "viewIdResourceName": "com.example:id\/item",
+                  "viewIdResourceName": "com.example:id/item",
                   "className": "android.widget.Button",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -2466,7 +2851,7 @@
                 {
                   "text": "Living Room",
                   "contentDescription": "Card B",
-                  "viewIdResourceName": "com.example:id\/item",
+                  "viewIdResourceName": "com.example:id/item",
                   "className": "android.widget.Button",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -2545,7 +2930,7 @@
               {
                 "text": "Living Room",
                 "contentDescription": "Card A",
-                "viewIdResourceName": "com.example:id\/item",
+                "viewIdResourceName": "com.example:id/item",
                 "className": "android.widget.Button",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -2583,7 +2968,7 @@
               {
                 "text": "Living Room",
                 "contentDescription": "Card B",
-                "viewIdResourceName": "com.example:id\/item",
+                "viewIdResourceName": "com.example:id/item",
                 "className": "android.widget.Button",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -2642,7 +3027,7 @@
               "text": "Living Room Card A",
               "contentDescription": "Living Room Card A",
               "className": "android.widget.Button",
-              "viewIdResourceName": "com.example:id\/item",
+              "viewIdResourceName": "com.example:id/item",
               "boundsInScreen": {
                 "l": 0,
                 "t": 400,
@@ -2667,7 +3052,7 @@
               "text": "Living Room Card B",
               "contentDescription": "Living Room Card B",
               "className": "android.widget.Button",
-              "viewIdResourceName": "com.example:id\/item",
+              "viewIdResourceName": "com.example:id/item",
               "boundsInScreen": {
                 "l": 0,
                 "t": 580,
@@ -2688,7 +3073,62 @@
               "actionableDescendantClassName": null,
               "actionableDescendantContentDescription": null
             }
-          ]
+          ],
+          "source_root_digest": "b2b62b681416eeb32400d9e7658bafae0d5b5c25bfdc67d70d4b70fdc1d52a4a",
+          "rootCaptureId": "8a8c8f60b3791f7e75860de7d12283653eb675ba2bf1e0b24edd064213db0f74",
+          "candidate_digest": "eb65e147133566a8af30fa2d15c6d013081e8e012993fc9e8a12de34aae1bec4"
+        },
+        "captureEnvelope": {
+          "schema_version": "phase6d-capture-envelope-v1",
+          "canonicalization": "capture-canonical-json-v1",
+          "request_id": "c4-offline-same_resource_id_different_bounds",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 108,
+          "root_ref": "windows[0].root",
+          "root_digest": "b2b62b681416eeb32400d9e7658bafae0d5b5c25bfdc67d70d4b70fdc1d52a4a",
+          "candidate_digest": "eb65e147133566a8af30fa2d15c6d013081e8e012993fc9e8a12de34aae1bec4"
+        }
+      },
+      "capture_transport_metadata": {
+        "header": {
+          "request_id": "c4-offline-same_resource_id_different_bounds",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 108,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
+        },
+        "control": {
+          "request_id": "c4-offline-same_resource_id_different_bounds",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 108,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
         }
       }
     },
@@ -2803,7 +3243,7 @@
                 {
                   "text": null,
                   "contentDescription": null,
-                  "viewIdResourceName": "com.example:id\/empty_wrapper",
+                  "viewIdResourceName": "com.example:id/empty_wrapper",
                   "className": "android.widget.FrameLayout",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -2841,7 +3281,7 @@
                 {
                   "text": "Continue",
                   "contentDescription": null,
-                  "viewIdResourceName": "com.example:id\/labeled_target",
+                  "viewIdResourceName": "com.example:id/labeled_target",
                   "className": "android.widget.Button",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -2920,7 +3360,7 @@
               {
                 "text": null,
                 "contentDescription": null,
-                "viewIdResourceName": "com.example:id\/empty_wrapper",
+                "viewIdResourceName": "com.example:id/empty_wrapper",
                 "className": "android.widget.FrameLayout",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -2958,7 +3398,7 @@
               {
                 "text": "Continue",
                 "contentDescription": null,
-                "viewIdResourceName": "com.example:id\/labeled_target",
+                "viewIdResourceName": "com.example:id/labeled_target",
                 "className": "android.widget.Button",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -3012,7 +3452,62 @@
           "traversalRootWindowId": -1,
           "canScrollDown": false,
           "scrollAxisContract": "axis-v1",
-          "candidates": []
+          "candidates": [],
+          "source_root_digest": "9720457141914935c4dc128c5f934bf6638e4221ed1f5e9bd373005ac6a3fa2d",
+          "rootCaptureId": "83d91c8372469c564e24571f03b6ca0e2a6b22aedba0105ac3a63a665da9178e",
+          "candidate_digest": "1d124901d8c8cb41d04aa527f08c5a95f15767d5a28effbd491417c40d5542a8"
+        },
+        "captureEnvelope": {
+          "schema_version": "phase6d-capture-envelope-v1",
+          "canonicalization": "capture-canonical-json-v1",
+          "request_id": "c4-offline-empty_shell_duplicate_order",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 109,
+          "root_ref": "windows[0].root",
+          "root_digest": "9720457141914935c4dc128c5f934bf6638e4221ed1f5e9bd373005ac6a3fa2d",
+          "candidate_digest": "1d124901d8c8cb41d04aa527f08c5a95f15767d5a28effbd491417c40d5542a8"
+        }
+      },
+      "capture_transport_metadata": {
+        "header": {
+          "request_id": "c4-offline-empty_shell_duplicate_order",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 109,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
+        },
+        "control": {
+          "request_id": "c4-offline-empty_shell_duplicate_order",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 109,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
         }
       }
     },
@@ -3127,7 +3622,7 @@
                 {
                   "text": null,
                   "contentDescription": null,
-                  "viewIdResourceName": "com.example:id\/empty_shell",
+                  "viewIdResourceName": "com.example:id/empty_shell",
                   "className": "android.widget.FrameLayout",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -3206,7 +3701,7 @@
               {
                 "text": null,
                 "contentDescription": null,
-                "viewIdResourceName": "com.example:id\/empty_shell",
+                "viewIdResourceName": "com.example:id/empty_shell",
                 "className": "android.widget.FrameLayout",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -3260,7 +3755,62 @@
           "traversalRootWindowId": -1,
           "canScrollDown": false,
           "scrollAxisContract": "axis-v1",
-          "candidates": []
+          "candidates": [],
+          "source_root_digest": "fb5057315bddec4b4098182b05cd6a0516ee052a6676ced61c4442b5fbd901a6",
+          "rootCaptureId": "3f57d9bda64b28e18371e0d1a78e3c70b3b01b5a627941feda4a6d21e60295d0",
+          "candidate_digest": "e9327441aa54f044ef175d808822725e5f3d071729ee303975874d77fde245e6"
+        },
+        "captureEnvelope": {
+          "schema_version": "phase6d-capture-envelope-v1",
+          "canonicalization": "capture-canonical-json-v1",
+          "request_id": "c4-offline-empty_shell",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 110,
+          "root_ref": "windows[0].root",
+          "root_digest": "fb5057315bddec4b4098182b05cd6a0516ee052a6676ced61c4442b5fbd901a6",
+          "candidate_digest": "e9327441aa54f044ef175d808822725e5f3d071729ee303975874d77fde245e6"
+        }
+      },
+      "capture_transport_metadata": {
+        "header": {
+          "request_id": "c4-offline-empty_shell",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 110,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
+        },
+        "control": {
+          "request_id": "c4-offline-empty_shell",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 110,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
         }
       }
     },
@@ -3283,7 +3833,7 @@
             "text": "Settings",
             "contentDescription": "Settings",
             "className": "android.widget.FrameLayout",
-            "viewIdResourceName": "com.samsung.android.oneconnect:id\/setting_button_layout",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/setting_button_layout",
             "boundsInScreen": {
               "l": 40,
               "t": 1000,
@@ -3300,7 +3850,7 @@
             "hasClickableDescendant": true,
             "hasFocusableDescendant": true,
             "effectiveClickable": true,
-            "actionableDescendantResourceId": "com.samsung.android.oneconnect:id\/settings_image",
+            "actionableDescendantResourceId": "com.samsung.android.oneconnect:id/settings_image",
             "actionableDescendantClassName": "android.widget.ImageButton",
             "actionableDescendantContentDescription": "Settings"
           },
@@ -3308,7 +3858,7 @@
             "text": "Settings",
             "contentDescription": "Settings",
             "className": "android.widget.ImageButton",
-            "viewIdResourceName": "com.samsung.android.oneconnect:id\/settings_image",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/settings_image",
             "boundsInScreen": {
               "l": 900,
               "t": 1020,
@@ -3426,7 +3976,7 @@
                 {
                   "text": null,
                   "contentDescription": null,
-                  "viewIdResourceName": "com.samsung.android.oneconnect:id\/setting_button_layout",
+                  "viewIdResourceName": "com.samsung.android.oneconnect:id/setting_button_layout",
                   "className": "android.widget.FrameLayout",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -3462,7 +4012,7 @@
                     {
                       "text": null,
                       "contentDescription": "Settings",
-                      "viewIdResourceName": "com.samsung.android.oneconnect:id\/settings_image",
+                      "viewIdResourceName": "com.samsung.android.oneconnect:id/settings_image",
                       "className": "android.widget.ImageButton",
                       "packageName": "com.samsung.android.oneconnect",
                       "sourceNodeId": null,
@@ -3544,7 +4094,7 @@
               {
                 "text": null,
                 "contentDescription": null,
-                "viewIdResourceName": "com.samsung.android.oneconnect:id\/setting_button_layout",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/setting_button_layout",
                 "className": "android.widget.FrameLayout",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -3580,7 +4130,7 @@
                   {
                     "text": null,
                     "contentDescription": "Settings",
-                    "viewIdResourceName": "com.samsung.android.oneconnect:id\/settings_image",
+                    "viewIdResourceName": "com.samsung.android.oneconnect:id/settings_image",
                     "className": "android.widget.ImageButton",
                     "packageName": "com.samsung.android.oneconnect",
                     "sourceNodeId": null,
@@ -3642,7 +4192,7 @@
               "text": "Settings",
               "contentDescription": "Settings",
               "className": "android.widget.FrameLayout",
-              "viewIdResourceName": "com.samsung.android.oneconnect:id\/setting_button_layout",
+              "viewIdResourceName": "com.samsung.android.oneconnect:id/setting_button_layout",
               "boundsInScreen": {
                 "l": 40,
                 "t": 1000,
@@ -3659,7 +4209,7 @@
               "hasClickableDescendant": true,
               "hasFocusableDescendant": true,
               "effectiveClickable": true,
-              "actionableDescendantResourceId": "com.samsung.android.oneconnect:id\/settings_image",
+              "actionableDescendantResourceId": "com.samsung.android.oneconnect:id/settings_image",
               "actionableDescendantClassName": "android.widget.ImageButton",
               "actionableDescendantContentDescription": "Settings"
             },
@@ -3667,7 +4217,7 @@
               "text": "Settings",
               "contentDescription": "Settings",
               "className": "android.widget.ImageButton",
-              "viewIdResourceName": "com.samsung.android.oneconnect:id\/settings_image",
+              "viewIdResourceName": "com.samsung.android.oneconnect:id/settings_image",
               "boundsInScreen": {
                 "l": 900,
                 "t": 1020,
@@ -3688,7 +4238,62 @@
               "actionableDescendantClassName": null,
               "actionableDescendantContentDescription": null
             }
-          ]
+          ],
+          "source_root_digest": "f2caeaca33279235d5398eaccbd4a6263cc65386b865c552e6879447cdd627ad",
+          "rootCaptureId": "c0d88506ced298f84380f2d500437df30eb44786aa85d0bfe180af7fd07c3b98",
+          "candidate_digest": "d9bbaf027021aaed8bb4a6209327b9eb1f30ed40fbed9671b0485a70ad0df656"
+        },
+        "captureEnvelope": {
+          "schema_version": "phase6d-capture-envelope-v1",
+          "canonicalization": "capture-canonical-json-v1",
+          "request_id": "c4-offline-settings_row_exception",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 111,
+          "root_ref": "windows[0].root",
+          "root_digest": "f2caeaca33279235d5398eaccbd4a6263cc65386b865c552e6879447cdd627ad",
+          "candidate_digest": "d9bbaf027021aaed8bb4a6209327b9eb1f30ed40fbed9671b0485a70ad0df656"
+        }
+      },
+      "capture_transport_metadata": {
+        "header": {
+          "request_id": "c4-offline-settings_row_exception",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 111,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
+        },
+        "control": {
+          "request_id": "c4-offline-settings_row_exception",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 111,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
         }
       }
     },
@@ -3711,7 +4316,7 @@
             "text": "Living room Power",
             "contentDescription": "Living room Power",
             "className": "android.widget.LinearLayout",
-            "viewIdResourceName": "com.example:id\/device_card",
+            "viewIdResourceName": "com.example:id/device_card",
             "boundsInScreen": {
               "l": 30,
               "t": 300,
@@ -3728,7 +4333,7 @@
             "hasClickableDescendant": true,
             "hasFocusableDescendant": true,
             "effectiveClickable": true,
-            "actionableDescendantResourceId": "com.example:id\/power",
+            "actionableDescendantResourceId": "com.example:id/power",
             "actionableDescendantClassName": "android.widget.Switch",
             "actionableDescendantContentDescription": "Power"
           },
@@ -3761,7 +4366,7 @@
             "text": "Power",
             "contentDescription": "Power",
             "className": "android.widget.Switch",
-            "viewIdResourceName": "com.example:id\/power",
+            "viewIdResourceName": "com.example:id/power",
             "boundsInScreen": {
               "l": 900,
               "t": 340,
@@ -3879,7 +4484,7 @@
                 {
                   "text": null,
                   "contentDescription": null,
-                  "viewIdResourceName": "com.example:id\/device_list",
+                  "viewIdResourceName": "com.example:id/device_list",
                   "className": "androidx.recyclerview.widget.RecyclerView",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -3921,7 +4526,7 @@
                     {
                       "text": null,
                       "contentDescription": null,
-                      "viewIdResourceName": "com.example:id\/device_card",
+                      "viewIdResourceName": "com.example:id/device_card",
                       "className": "android.widget.LinearLayout",
                       "packageName": "com.samsung.android.oneconnect",
                       "sourceNodeId": null,
@@ -3995,7 +4600,7 @@
                         {
                           "text": null,
                           "contentDescription": "Power",
-                          "viewIdResourceName": "com.example:id\/power",
+                          "viewIdResourceName": "com.example:id/power",
                           "className": "android.widget.Switch",
                           "packageName": "com.samsung.android.oneconnect",
                           "sourceNodeId": null,
@@ -4080,7 +4685,7 @@
               {
                 "text": null,
                 "contentDescription": null,
-                "viewIdResourceName": "com.example:id\/device_list",
+                "viewIdResourceName": "com.example:id/device_list",
                 "className": "androidx.recyclerview.widget.RecyclerView",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -4122,7 +4727,7 @@
                   {
                     "text": null,
                     "contentDescription": null,
-                    "viewIdResourceName": "com.example:id\/device_card",
+                    "viewIdResourceName": "com.example:id/device_card",
                     "className": "android.widget.LinearLayout",
                     "packageName": "com.samsung.android.oneconnect",
                     "sourceNodeId": null,
@@ -4196,7 +4801,7 @@
                       {
                         "text": null,
                         "contentDescription": "Power",
-                        "viewIdResourceName": "com.example:id\/power",
+                        "viewIdResourceName": "com.example:id/power",
                         "className": "android.widget.Switch",
                         "packageName": "com.samsung.android.oneconnect",
                         "sourceNodeId": null,
@@ -4261,7 +4866,7 @@
               "text": "Living room Power",
               "contentDescription": "Living room Power",
               "className": "android.widget.LinearLayout",
-              "viewIdResourceName": "com.example:id\/device_card",
+              "viewIdResourceName": "com.example:id/device_card",
               "boundsInScreen": {
                 "l": 30,
                 "t": 300,
@@ -4278,7 +4883,7 @@
               "hasClickableDescendant": true,
               "hasFocusableDescendant": true,
               "effectiveClickable": true,
-              "actionableDescendantResourceId": "com.example:id\/power",
+              "actionableDescendantResourceId": "com.example:id/power",
               "actionableDescendantClassName": "android.widget.Switch",
               "actionableDescendantContentDescription": "Power"
             },
@@ -4311,7 +4916,7 @@
               "text": "Power",
               "contentDescription": "Power",
               "className": "android.widget.Switch",
-              "viewIdResourceName": "com.example:id\/power",
+              "viewIdResourceName": "com.example:id/power",
               "boundsInScreen": {
                 "l": 900,
                 "t": 340,
@@ -4332,7 +4937,62 @@
               "actionableDescendantClassName": null,
               "actionableDescendantContentDescription": null
             }
-          ]
+          ],
+          "source_root_digest": "71fc3ca40b89692a6f3facdffd97feb3f0f97a260329d1864d99ee7f27d030aa",
+          "rootCaptureId": "8aed653515fd1afb118aa268a7a99aa70733f0b799381fb7af7644f6a3c6cc2f",
+          "candidate_digest": "deb928c51aa3d061554d62307d611a3c71f934da10e71fec11b98081a5cf110f"
+        },
+        "captureEnvelope": {
+          "schema_version": "phase6d-capture-envelope-v1",
+          "canonicalization": "capture-canonical-json-v1",
+          "request_id": "c4-offline-complex_container",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 112,
+          "root_ref": "windows[0].root",
+          "root_digest": "71fc3ca40b89692a6f3facdffd97feb3f0f97a260329d1864d99ee7f27d030aa",
+          "candidate_digest": "deb928c51aa3d061554d62307d611a3c71f934da10e71fec11b98081a5cf110f"
+        }
+      },
+      "capture_transport_metadata": {
+        "header": {
+          "request_id": "c4-offline-complex_container",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 112,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
+        },
+        "control": {
+          "request_id": "c4-offline-complex_container",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 112,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
         }
       }
     },
@@ -4473,7 +5133,7 @@
                 {
                   "text": null,
                   "contentDescription": null,
-                  "viewIdResourceName": "com.samsung.android.oneconnect:id\/content",
+                  "viewIdResourceName": "com.samsung.android.oneconnect:id/content",
                   "className": "android.widget.ScrollView",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -4597,7 +5257,7 @@
               {
                 "text": null,
                 "contentDescription": null,
-                "viewIdResourceName": "com.samsung.android.oneconnect:id\/content",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/content",
                 "className": "android.widget.ScrollView",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -4722,7 +5382,62 @@
               "actionableDescendantClassName": null,
               "actionableDescendantContentDescription": null
             }
-          ]
+          ],
+          "source_root_digest": "2435aacdfa0f1cc7345887406a0b24fe45ceebbbf8b29fe4ac01e28a955ba8cf",
+          "rootCaptureId": "1b06b0527f166481f74488f3ebc10d9be99f5a1859e3985ffd62762b83b8a0cb",
+          "candidate_digest": "38fe722726dcf5a3c48f501f2a90163035e081e06467e478aa796097476f5411"
+        },
+        "captureEnvelope": {
+          "schema_version": "phase6d-capture-envelope-v1",
+          "canonicalization": "capture-canonical-json-v1",
+          "request_id": "c4-offline-oneconnect_food_readable_text_exception",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 113,
+          "root_ref": "windows[0].root",
+          "root_digest": "2435aacdfa0f1cc7345887406a0b24fe45ceebbbf8b29fe4ac01e28a955ba8cf",
+          "candidate_digest": "38fe722726dcf5a3c48f501f2a90163035e081e06467e478aa796097476f5411"
+        }
+      },
+      "capture_transport_metadata": {
+        "header": {
+          "request_id": "c4-offline-oneconnect_food_readable_text_exception",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 113,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
+        },
+        "control": {
+          "request_id": "c4-offline-oneconnect_food_readable_text_exception",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 113,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
         }
       }
     },
@@ -4745,7 +5460,7 @@
             "text": "Previous",
             "contentDescription": "Previous",
             "className": "android.widget.Button",
-            "viewIdResourceName": "com.example:id\/partially_offscreen",
+            "viewIdResourceName": "com.example:id/partially_offscreen",
             "boundsInScreen": {
               "l": -10,
               "t": -20,
@@ -4863,7 +5578,7 @@
                 {
                   "text": "Previous",
                   "contentDescription": null,
-                  "viewIdResourceName": "com.example:id\/partially_offscreen",
+                  "viewIdResourceName": "com.example:id/partially_offscreen",
                   "className": "android.widget.Button",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -4942,7 +5657,7 @@
               {
                 "text": "Previous",
                 "contentDescription": null,
-                "viewIdResourceName": "com.example:id\/partially_offscreen",
+                "viewIdResourceName": "com.example:id/partially_offscreen",
                 "className": "android.widget.Button",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -5001,7 +5716,7 @@
               "text": "Previous",
               "contentDescription": "Previous",
               "className": "android.widget.Button",
-              "viewIdResourceName": "com.example:id\/partially_offscreen",
+              "viewIdResourceName": "com.example:id/partially_offscreen",
               "boundsInScreen": {
                 "l": -10,
                 "t": -20,
@@ -5022,7 +5737,62 @@
               "actionableDescendantClassName": null,
               "actionableDescendantContentDescription": null
             }
-          ]
+          ],
+          "source_root_digest": "9b1c1a2812a293c5218630466f14420b320d471d46da624b276f359263802e1f",
+          "rootCaptureId": "8fabc5500e5b032fcb77e7e85c4a1afce5474f96fecb05fb2460904d1a4510e0",
+          "candidate_digest": "a0d35de12e0260d520bda0b4956b063720abf2c2d978afde669d039131bf7445"
+        },
+        "captureEnvelope": {
+          "schema_version": "phase6d-capture-envelope-v1",
+          "canonicalization": "capture-canonical-json-v1",
+          "request_id": "c4-offline-negative_bounds",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 114,
+          "root_ref": "windows[0].root",
+          "root_digest": "9b1c1a2812a293c5218630466f14420b320d471d46da624b276f359263802e1f",
+          "candidate_digest": "a0d35de12e0260d520bda0b4956b063720abf2c2d978afde669d039131bf7445"
+        }
+      },
+      "capture_transport_metadata": {
+        "header": {
+          "request_id": "c4-offline-negative_bounds",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 114,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
+        },
+        "control": {
+          "request_id": "c4-offline-negative_bounds",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 114,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
         }
       }
     },
@@ -5045,7 +5815,7 @@
             "text": "Left",
             "contentDescription": "Left",
             "className": "android.widget.Button",
-            "viewIdResourceName": "com.example:id\/left",
+            "viewIdResourceName": "com.example:id/left",
             "boundsInScreen": {
               "l": 40,
               "t": 1200,
@@ -5070,7 +5840,7 @@
             "text": "Right",
             "contentDescription": "Right",
             "className": "android.widget.Button",
-            "viewIdResourceName": "com.example:id\/right",
+            "viewIdResourceName": "com.example:id/right",
             "boundsInScreen": {
               "l": 500,
               "t": 1200,
@@ -5188,7 +5958,7 @@
                 {
                   "text": "Left",
                   "contentDescription": null,
-                  "viewIdResourceName": "com.example:id\/left",
+                  "viewIdResourceName": "com.example:id/left",
                   "className": "android.widget.Button",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -5226,7 +5996,7 @@
                 {
                   "text": "Right",
                   "contentDescription": null,
-                  "viewIdResourceName": "com.example:id\/right",
+                  "viewIdResourceName": "com.example:id/right",
                   "className": "android.widget.Button",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -5305,7 +6075,7 @@
               {
                 "text": "Left",
                 "contentDescription": null,
-                "viewIdResourceName": "com.example:id\/left",
+                "viewIdResourceName": "com.example:id/left",
                 "className": "android.widget.Button",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -5343,7 +6113,7 @@
               {
                 "text": "Right",
                 "contentDescription": null,
-                "viewIdResourceName": "com.example:id\/right",
+                "viewIdResourceName": "com.example:id/right",
                 "className": "android.widget.Button",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -5402,7 +6172,7 @@
               "text": "Left",
               "contentDescription": "Left",
               "className": "android.widget.Button",
-              "viewIdResourceName": "com.example:id\/left",
+              "viewIdResourceName": "com.example:id/left",
               "boundsInScreen": {
                 "l": 40,
                 "t": 1200,
@@ -5427,7 +6197,7 @@
               "text": "Right",
               "contentDescription": "Right",
               "className": "android.widget.Button",
-              "viewIdResourceName": "com.example:id\/right",
+              "viewIdResourceName": "com.example:id/right",
               "boundsInScreen": {
                 "l": 500,
                 "t": 1200,
@@ -5448,7 +6218,62 @@
               "actionableDescendantClassName": null,
               "actionableDescendantContentDescription": null
             }
-          ]
+          ],
+          "source_root_digest": "511dd8a8462ff34af0650c30ceb802f8a5544c3bdd0bf1f366352cff9df8a107",
+          "rootCaptureId": "0fd50cc0fc0e7250d9ff849a2535fb654eb299de40b6764488addd473b3c66d2",
+          "candidate_digest": "78f0d6420219d2ec8ded84c976c31e090bf81a26ca5e8356f1bff8711ed918e2"
+        },
+        "captureEnvelope": {
+          "schema_version": "phase6d-capture-envelope-v1",
+          "canonicalization": "capture-canonical-json-v1",
+          "request_id": "c4-offline-ordering_tie",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 115,
+          "root_ref": "windows[0].root",
+          "root_digest": "511dd8a8462ff34af0650c30ceb802f8a5544c3bdd0bf1f366352cff9df8a107",
+          "candidate_digest": "78f0d6420219d2ec8ded84c976c31e090bf81a26ca5e8356f1bff8711ed918e2"
+        }
+      },
+      "capture_transport_metadata": {
+        "header": {
+          "request_id": "c4-offline-ordering_tie",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 115,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
+        },
+        "control": {
+          "request_id": "c4-offline-ordering_tie",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 115,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
         }
       }
     },
@@ -5471,7 +6296,7 @@
             "text": "Arm Arm system",
             "contentDescription": "Arm Arm system",
             "className": "android.widget.Button",
-            "viewIdResourceName": "com.example:id\/arm_away",
+            "viewIdResourceName": "com.example:id/arm_away",
             "boundsInScreen": {
               "l": 30,
               "t": 1400,
@@ -5496,7 +6321,7 @@
             "text": "Arm Arm system",
             "contentDescription": "Arm Arm system",
             "className": "android.widget.Button",
-            "viewIdResourceName": "com.example:id\/arm_stay",
+            "viewIdResourceName": "com.example:id/arm_stay",
             "boundsInScreen": {
               "l": 540,
               "t": 1400,
@@ -5614,7 +6439,7 @@
                 {
                   "text": "Arm",
                   "contentDescription": "Arm system",
-                  "viewIdResourceName": "com.example:id\/arm_away",
+                  "viewIdResourceName": "com.example:id/arm_away",
                   "className": "android.widget.Button",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -5652,7 +6477,7 @@
                 {
                   "text": "Arm",
                   "contentDescription": "Arm system",
-                  "viewIdResourceName": "com.example:id\/arm_stay",
+                  "viewIdResourceName": "com.example:id/arm_stay",
                   "className": "android.widget.Button",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -5731,7 +6556,7 @@
               {
                 "text": "Arm",
                 "contentDescription": "Arm system",
-                "viewIdResourceName": "com.example:id\/arm_away",
+                "viewIdResourceName": "com.example:id/arm_away",
                 "className": "android.widget.Button",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -5769,7 +6594,7 @@
               {
                 "text": "Arm",
                 "contentDescription": "Arm system",
-                "viewIdResourceName": "com.example:id\/arm_stay",
+                "viewIdResourceName": "com.example:id/arm_stay",
                 "className": "android.widget.Button",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -5828,7 +6653,7 @@
               "text": "Arm Arm system",
               "contentDescription": "Arm Arm system",
               "className": "android.widget.Button",
-              "viewIdResourceName": "com.example:id\/arm_away",
+              "viewIdResourceName": "com.example:id/arm_away",
               "boundsInScreen": {
                 "l": 30,
                 "t": 1400,
@@ -5853,7 +6678,7 @@
               "text": "Arm Arm system",
               "contentDescription": "Arm Arm system",
               "className": "android.widget.Button",
-              "viewIdResourceName": "com.example:id\/arm_stay",
+              "viewIdResourceName": "com.example:id/arm_stay",
               "boundsInScreen": {
                 "l": 540,
                 "t": 1400,
@@ -5874,7 +6699,62 @@
               "actionableDescendantClassName": null,
               "actionableDescendantContentDescription": null
             }
-          ]
+          ],
+          "source_root_digest": "f99a0487f31a4701d295996c43ea4826a3a0d38fcbf5436bddd67fc99635ce02",
+          "rootCaptureId": "d8558a52a2b313002fbafda88cd4015d57bb3d9308bb87c69946ffe6ee0eef10",
+          "candidate_digest": "ab50252d180701a92bbdcd3c969b37fb310a661d738381e5c850c8749d1c1818"
+        },
+        "captureEnvelope": {
+          "schema_version": "phase6d-capture-envelope-v1",
+          "canonicalization": "capture-canonical-json-v1",
+          "request_id": "c4-offline-duplicate_text_and_description",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 116,
+          "root_ref": "windows[0].root",
+          "root_digest": "f99a0487f31a4701d295996c43ea4826a3a0d38fcbf5436bddd67fc99635ce02",
+          "candidate_digest": "ab50252d180701a92bbdcd3c969b37fb310a661d738381e5c850c8749d1c1818"
+        }
+      },
+      "capture_transport_metadata": {
+        "header": {
+          "request_id": "c4-offline-duplicate_text_and_description",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 116,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
+        },
+        "control": {
+          "request_id": "c4-offline-duplicate_text_and_description",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 116,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
         }
       }
     },
@@ -5897,7 +6777,7 @@
             "text": "Settings",
             "contentDescription": "Settings",
             "className": "android.widget.FrameLayout",
-            "viewIdResourceName": "com.samsung.android.oneconnect:id\/setting_button_layout",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/setting_button_layout",
             "boundsInScreen": {
               "l": 40,
               "t": 1600,
@@ -5914,7 +6794,7 @@
             "hasClickableDescendant": true,
             "hasFocusableDescendant": true,
             "effectiveClickable": true,
-            "actionableDescendantResourceId": "com.samsung.android.oneconnect:id\/settings_image",
+            "actionableDescendantResourceId": "com.samsung.android.oneconnect:id/settings_image",
             "actionableDescendantClassName": "android.widget.ImageButton",
             "actionableDescendantContentDescription": "Settings"
           },
@@ -5922,7 +6802,7 @@
             "text": "Settings",
             "contentDescription": "Settings",
             "className": "android.widget.ImageButton",
-            "viewIdResourceName": "com.samsung.android.oneconnect:id\/settings_image",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/settings_image",
             "boundsInScreen": {
               "l": 900,
               "t": 1620,
@@ -6040,7 +6920,7 @@
                 {
                   "text": null,
                   "contentDescription": null,
-                  "viewIdResourceName": "com.samsung.android.oneconnect:id\/setting_button_layout",
+                  "viewIdResourceName": "com.samsung.android.oneconnect:id/setting_button_layout",
                   "className": "android.widget.FrameLayout",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -6076,7 +6956,7 @@
                     {
                       "text": null,
                       "contentDescription": "Settings",
-                      "viewIdResourceName": "com.samsung.android.oneconnect:id\/settings_image",
+                      "viewIdResourceName": "com.samsung.android.oneconnect:id/settings_image",
                       "className": "android.widget.ImageButton",
                       "packageName": "com.samsung.android.oneconnect",
                       "sourceNodeId": null,
@@ -6158,7 +7038,7 @@
               {
                 "text": null,
                 "contentDescription": null,
-                "viewIdResourceName": "com.samsung.android.oneconnect:id\/setting_button_layout",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/setting_button_layout",
                 "className": "android.widget.FrameLayout",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -6194,7 +7074,7 @@
                   {
                     "text": null,
                     "contentDescription": "Settings",
-                    "viewIdResourceName": "com.samsung.android.oneconnect:id\/settings_image",
+                    "viewIdResourceName": "com.samsung.android.oneconnect:id/settings_image",
                     "className": "android.widget.ImageButton",
                     "packageName": "com.samsung.android.oneconnect",
                     "sourceNodeId": null,
@@ -6256,7 +7136,7 @@
               "text": "Settings",
               "contentDescription": "Settings",
               "className": "android.widget.FrameLayout",
-              "viewIdResourceName": "com.samsung.android.oneconnect:id\/setting_button_layout",
+              "viewIdResourceName": "com.samsung.android.oneconnect:id/setting_button_layout",
               "boundsInScreen": {
                 "l": 40,
                 "t": 1600,
@@ -6273,7 +7153,7 @@
               "hasClickableDescendant": true,
               "hasFocusableDescendant": true,
               "effectiveClickable": true,
-              "actionableDescendantResourceId": "com.samsung.android.oneconnect:id\/settings_image",
+              "actionableDescendantResourceId": "com.samsung.android.oneconnect:id/settings_image",
               "actionableDescendantClassName": "android.widget.ImageButton",
               "actionableDescendantContentDescription": "Settings"
             },
@@ -6281,7 +7161,7 @@
               "text": "Settings",
               "contentDescription": "Settings",
               "className": "android.widget.ImageButton",
-              "viewIdResourceName": "com.samsung.android.oneconnect:id\/settings_image",
+              "viewIdResourceName": "com.samsung.android.oneconnect:id/settings_image",
               "boundsInScreen": {
                 "l": 900,
                 "t": 1620,
@@ -6302,7 +7182,62 @@
               "actionableDescendantClassName": null,
               "actionableDescendantContentDescription": null
             }
-          ]
+          ],
+          "source_root_digest": "380b380cc3e15ed2b2b046367a11fd2417ae288050f501d8d01f6f9ea0508c30",
+          "rootCaptureId": "a8613f7b4c1a7e48be7bbb90dc0cf093941049288b5b0d0ef2b98c2cfd0f1e22",
+          "candidate_digest": "d4c6634b1f023e9ee7e96d411401e3b737ce01ebdb850f2294239917b30fe22d"
+        },
+        "captureEnvelope": {
+          "schema_version": "phase6d-capture-envelope-v1",
+          "canonicalization": "capture-canonical-json-v1",
+          "request_id": "c4-offline-actionable_descendant_selection",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 117,
+          "root_ref": "windows[0].root",
+          "root_digest": "380b380cc3e15ed2b2b046367a11fd2417ae288050f501d8d01f6f9ea0508c30",
+          "candidate_digest": "d4c6634b1f023e9ee7e96d411401e3b737ce01ebdb850f2294239917b30fe22d"
+        }
+      },
+      "capture_transport_metadata": {
+        "header": {
+          "request_id": "c4-offline-actionable_descendant_selection",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 117,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
+        },
+        "control": {
+          "request_id": "c4-offline-actionable_descendant_selection",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 117,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
         }
       }
     },
@@ -6325,7 +7260,7 @@
             "text": "Continue",
             "contentDescription": "Continue",
             "className": "android.widget.Button",
-            "viewIdResourceName": "com.example:id\/continue",
+            "viewIdResourceName": "com.example:id/continue",
             "boundsInScreen": {
               "l": 80,
               "t": 1900,
@@ -6443,7 +7378,7 @@
                 {
                   "text": null,
                   "contentDescription": null,
-                  "viewIdResourceName": "com.example:id\/content",
+                  "viewIdResourceName": "com.example:id/content",
                   "className": "android.widget.ScrollView",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -6485,7 +7420,7 @@
                     {
                       "text": "Continue",
                       "contentDescription": null,
-                      "viewIdResourceName": "com.example:id\/continue",
+                      "viewIdResourceName": "com.example:id/continue",
                       "className": "android.widget.Button",
                       "packageName": "com.samsung.android.oneconnect",
                       "sourceNodeId": null,
@@ -6567,7 +7502,7 @@
               {
                 "text": null,
                 "contentDescription": null,
-                "viewIdResourceName": "com.example:id\/content",
+                "viewIdResourceName": "com.example:id/content",
                 "className": "android.widget.ScrollView",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -6609,7 +7544,7 @@
                   {
                     "text": "Continue",
                     "contentDescription": null,
-                    "viewIdResourceName": "com.example:id\/continue",
+                    "viewIdResourceName": "com.example:id/continue",
                     "className": "android.widget.Button",
                     "packageName": "com.samsung.android.oneconnect",
                     "sourceNodeId": null,
@@ -6671,7 +7606,7 @@
               "text": "Continue",
               "contentDescription": "Continue",
               "className": "android.widget.Button",
-              "viewIdResourceName": "com.example:id\/continue",
+              "viewIdResourceName": "com.example:id/continue",
               "boundsInScreen": {
                 "l": 80,
                 "t": 1900,
@@ -6692,7 +7627,62 @@
               "actionableDescendantClassName": null,
               "actionableDescendantContentDescription": null
             }
-          ]
+          ],
+          "source_root_digest": "163b6fe7285cb3e1ac26719342700ccaf69a0c41cfb32d6337ad10a7a8bd769a",
+          "rootCaptureId": "503264391f2fcd7c9f30496240c445db3d6126fa5378ffd81b5d9ccef3a7cbd8",
+          "candidate_digest": "66dbbc05129713f42a89171790d29f203261a44c15b44dfdd769fb8b1941846a"
+        },
+        "captureEnvelope": {
+          "schema_version": "phase6d-capture-envelope-v1",
+          "canonicalization": "capture-canonical-json-v1",
+          "request_id": "c4-offline-scrollable_container_metadata",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 118,
+          "root_ref": "windows[0].root",
+          "root_digest": "163b6fe7285cb3e1ac26719342700ccaf69a0c41cfb32d6337ad10a7a8bd769a",
+          "candidate_digest": "66dbbc05129713f42a89171790d29f203261a44c15b44dfdd769fb8b1941846a"
+        }
+      },
+      "capture_transport_metadata": {
+        "header": {
+          "request_id": "c4-offline-scrollable_container_metadata",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 118,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
+        },
+        "control": {
+          "request_id": "c4-offline-scrollable_container_metadata",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 118,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
         }
       }
     },
@@ -6740,7 +7730,7 @@
             "text": "More options",
             "contentDescription": "More options",
             "className": "android.widget.ImageButton",
-            "viewIdResourceName": "com.samsung.android.oneconnect:id\/plugin_more_options",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/plugin_more_options",
             "boundsInScreen": {
               "l": 900,
               "t": 80,
@@ -6765,7 +7755,7 @@
             "text": "Arm away",
             "contentDescription": "Arm away",
             "className": "android.widget.Button",
-            "viewIdResourceName": "com.samsung.android.oneconnect:id\/shmBannerAwayButton",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/shmBannerAwayButton",
             "boundsInScreen": {
               "l": 60,
               "t": 400,
@@ -6815,7 +7805,7 @@
             "text": "Armed stay",
             "contentDescription": "Armed stay",
             "className": "android.widget.Button",
-            "viewIdResourceName": "com.samsung.android.oneconnect:id\/shmBannerStayButton",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/shmBannerStayButton",
             "boundsInScreen": {
               "l": 60,
               "t": 540,
@@ -6865,7 +7855,7 @@
             "text": "Disarm",
             "contentDescription": "Disarm",
             "className": "android.widget.Button",
-            "viewIdResourceName": "com.samsung.android.oneconnect:id\/shmBannerDisarmedButton",
+            "viewIdResourceName": "com.samsung.android.oneconnect:id/shmBannerDisarmedButton",
             "boundsInScreen": {
               "l": 60,
               "t": 680,
@@ -7046,7 +8036,7 @@
                 {
                   "text": null,
                   "contentDescription": "More options",
-                  "viewIdResourceName": "com.samsung.android.oneconnect:id\/plugin_more_options",
+                  "viewIdResourceName": "com.samsung.android.oneconnect:id/plugin_more_options",
                   "className": "android.widget.ImageButton",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -7084,7 +8074,7 @@
                 {
                   "text": null,
                   "contentDescription": null,
-                  "viewIdResourceName": "com.samsung.android.oneconnect:id\/shmBannerAwayButton",
+                  "viewIdResourceName": "com.samsung.android.oneconnect:id/shmBannerAwayButton",
                   "className": "android.widget.Button",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -7200,7 +8190,7 @@
                 {
                   "text": null,
                   "contentDescription": null,
-                  "viewIdResourceName": "com.samsung.android.oneconnect:id\/shmBannerStayButton",
+                  "viewIdResourceName": "com.samsung.android.oneconnect:id/shmBannerStayButton",
                   "className": "android.widget.Button",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -7316,7 +8306,7 @@
                 {
                   "text": null,
                   "contentDescription": null,
-                  "viewIdResourceName": "com.samsung.android.oneconnect:id\/shmBannerDisarmedButton",
+                  "viewIdResourceName": "com.samsung.android.oneconnect:id/shmBannerDisarmedButton",
                   "className": "android.widget.Button",
                   "packageName": "com.samsung.android.oneconnect",
                   "sourceNodeId": null,
@@ -7511,7 +8501,7 @@
               {
                 "text": null,
                 "contentDescription": "More options",
-                "viewIdResourceName": "com.samsung.android.oneconnect:id\/plugin_more_options",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/plugin_more_options",
                 "className": "android.widget.ImageButton",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -7549,7 +8539,7 @@
               {
                 "text": null,
                 "contentDescription": null,
-                "viewIdResourceName": "com.samsung.android.oneconnect:id\/shmBannerAwayButton",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/shmBannerAwayButton",
                 "className": "android.widget.Button",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -7665,7 +8655,7 @@
               {
                 "text": null,
                 "contentDescription": null,
-                "viewIdResourceName": "com.samsung.android.oneconnect:id\/shmBannerStayButton",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/shmBannerStayButton",
                 "className": "android.widget.Button",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -7781,7 +8771,7 @@
               {
                 "text": null,
                 "contentDescription": null,
-                "viewIdResourceName": "com.samsung.android.oneconnect:id\/shmBannerDisarmedButton",
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/shmBannerDisarmedButton",
                 "className": "android.widget.Button",
                 "packageName": "com.samsung.android.oneconnect",
                 "sourceNodeId": null,
@@ -7943,7 +8933,7 @@
               "text": "More options",
               "contentDescription": "More options",
               "className": "android.widget.ImageButton",
-              "viewIdResourceName": "com.samsung.android.oneconnect:id\/plugin_more_options",
+              "viewIdResourceName": "com.samsung.android.oneconnect:id/plugin_more_options",
               "boundsInScreen": {
                 "l": 900,
                 "t": 80,
@@ -7968,7 +8958,7 @@
               "text": "Arm away",
               "contentDescription": "Arm away",
               "className": "android.widget.Button",
-              "viewIdResourceName": "com.samsung.android.oneconnect:id\/shmBannerAwayButton",
+              "viewIdResourceName": "com.samsung.android.oneconnect:id/shmBannerAwayButton",
               "boundsInScreen": {
                 "l": 60,
                 "t": 400,
@@ -8018,7 +9008,7 @@
               "text": "Armed stay",
               "contentDescription": "Armed stay",
               "className": "android.widget.Button",
-              "viewIdResourceName": "com.samsung.android.oneconnect:id\/shmBannerStayButton",
+              "viewIdResourceName": "com.samsung.android.oneconnect:id/shmBannerStayButton",
               "boundsInScreen": {
                 "l": 60,
                 "t": 540,
@@ -8068,7 +9058,7 @@
               "text": "Disarm",
               "contentDescription": "Disarm",
               "className": "android.widget.Button",
-              "viewIdResourceName": "com.samsung.android.oneconnect:id\/shmBannerDisarmedButton",
+              "viewIdResourceName": "com.samsung.android.oneconnect:id/shmBannerDisarmedButton",
               "boundsInScreen": {
                 "l": 60,
                 "t": 680,
@@ -8114,7 +9104,62 @@
               "actionableDescendantClassName": null,
               "actionableDescendantContentDescription": null
             }
-          ]
+          ],
+          "source_root_digest": "c714e776e0a9752628060bfbe1004a5527f2c97684accdbeb5c8d1d9a7e9a55c",
+          "rootCaptureId": "9cf33cdd67461991e562cf2036e4de383afde4c6614d92ad586177f6f72d856d",
+          "candidate_digest": "21d63fca83a292c054a2bf0d827b795bc6199deea91c0e3f48add533761a4af5"
+        },
+        "captureEnvelope": {
+          "schema_version": "phase6d-capture-envelope-v1",
+          "canonicalization": "capture-canonical-json-v1",
+          "request_id": "c4-offline-home_monitor",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 119,
+          "root_ref": "windows[0].root",
+          "root_digest": "c714e776e0a9752628060bfbe1004a5527f2c97684accdbeb5c8d1d9a7e9a55c",
+          "candidate_digest": "21d63fca83a292c054a2bf0d827b795bc6199deea91c0e3f48add533761a4af5"
+        }
+      },
+      "capture_transport_metadata": {
+        "header": {
+          "request_id": "c4-offline-home_monitor",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 119,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
+        },
+        "control": {
+          "request_id": "c4-offline-home_monitor",
+          "client_nonce": "cccccccccccccccccccccccccccccccc",
+          "payload_schema_version": "service-hierarchy-v2",
+          "process_epoch": "c4-fixture-process-epoch",
+          "generation": 1,
+          "service_instance_id": "c4-fixture-service-instance",
+          "capture_sequence": 119,
+          "capture_envelope_schema_version": "phase6d-capture-envelope-v1",
+          "capture_canonicalization_version": "capture-canonical-json-v1",
+          "capture_root_id_version": "phase6d-root-capture-id-v1",
+          "helper_build_identity": {
+            "build_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "git_commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "input_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "source_state": "CLEAN",
+            "build_variant": "debug"
+          }
         }
       }
     }

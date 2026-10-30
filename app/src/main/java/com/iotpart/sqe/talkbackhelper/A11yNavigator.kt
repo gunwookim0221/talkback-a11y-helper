@@ -184,97 +184,94 @@ object A11yNavigator {
      * AccessibilityNodeInfo instance is serialized into the raw windows tree
      * and passed to the legacy Kotlin candidate generator.
      */
-    internal fun dumpReliableHierarchy(service: AccessibilityService, reqId: String): ReliableHierarchyCapture {
-        val serviceWindows = service.windows.orEmpty()
-        val traversalRoot = SmartNextPerf.acquireRoot("A11yNavigator.dumpReliableHierarchy") {
-            service.rootInActiveWindow
-        } ?: throw IllegalStateException("NO_ROOT")
-
-        val activeWindowIndex = when {
-            serviceWindows.isEmpty() -> 0
-            else -> ReliableHierarchyCandidateContract.traversalRootIndex(
-                serviceWindows.map { it.id }, traversalRoot.windowId
-            )
+    internal fun dumpReliableHierarchy(
+        service: AccessibilityService,
+        reqId: String,
+        processEpoch: String,
+        generation: Long,
+        serviceInstanceId: String,
+        captureSequence: Long
+    ): ReliableHierarchyCapture {
+        require(processEpoch.isNotBlank() && generation > 0 && serviceInstanceId.isNotBlank() && captureSequence > 0) {
+            "CAPTURE_IDENTITY_INVALID"
         }
+        val serviceWindows = service.windows.orEmpty()
+        val traversalRoot = SmartNextPerf.acquireRoot("A11yNavigator.dumpReliableHierarchy") { service.rootInActiveWindow }
+            ?: throw IllegalStateException("NO_ROOT")
+        val activeWindowIndex = if (serviceWindows.isEmpty()) 0 else ReliableHierarchyCandidateContract.traversalRootIndex(
+            serviceWindows.map { it.id }, traversalRoot.windowId
+        )
         val traversalRootRef = "windows[$activeWindowIndex].root"
         val rawSerializationStarted = System.nanoTime()
+        val captured = ImmutableHierarchyCapture.capture(traversalRoot)
         val totalNodes = intArrayOf(0)
         val serializedWindows = JSONArray()
         val rootNodes = JSONArray()
-
         if (serviceWindows.isNotEmpty()) {
             serviceWindows.forEachIndexed { index, window ->
-                val rawRoot = if (index == activeWindowIndex) traversalRoot else window.root
-                    ?: throw IllegalStateException("WINDOW_ROOT_UNAVAILABLE:index=$index windowId=${window.id}")
                 val bounds = Rect().also(window::getBoundsInScreen)
-                val rootJson = hierarchyNodeToJson(rawRoot, totalNodes, 0, includeCandidateFacts = true)
-                    .put("windowId", window.id)
+                val rootJson = if (index == activeWindowIndex) {
+                    totalNodes[0] += captured.nodeCount
+                    captured.root.toRawJson().put("windowId", window.id)
+                } else {
+                    val otherRoot = window.root ?: throw IllegalStateException("WINDOW_ROOT_UNAVAILABLE:index=$index windowId=${window.id}")
+                    hierarchyNodeToJson(otherRoot, totalNodes, 0, includeCandidateFacts = true).put("windowId", window.id)
+                }
                 rootNodes.put(rootJson)
                 serializedWindows.put(JSONObject().apply {
-                    put("order", index)
-                    put("id", window.id)
-                    put("type", window.type)
-                    put("layer", window.layer)
-                    put("title", window.title?.toString() ?: JSONObject.NULL)
-                    put("active", window.isActive)
-                    put("focused", window.isFocused)
-                    put("boundsInScreen", rectToJson(bounds))
-                    put("root", rootJson)
+                    put("order", index); put("id", window.id); put("type", window.type); put("layer", window.layer)
+                    put("title", window.title?.toString() ?: JSONObject.NULL); put("active", window.isActive); put("focused", window.isFocused)
+                    put("boundsInScreen", rectToJson(bounds)); put("root", rootJson)
                 })
             }
         } else {
-            val rootJson = hierarchyNodeToJson(traversalRoot, totalNodes, 0, includeCandidateFacts = true)
+            totalNodes[0] = captured.nodeCount
+            val rootJson = captured.root.toRawJson()
             rootNodes.put(rootJson)
             serializedWindows.put(JSONObject().apply {
-                put("order", 0)
-                put("id", traversalRoot.windowId)
-                put("type", JSONObject.NULL)
-                put("layer", JSONObject.NULL)
-                put("title", JSONObject.NULL)
-                put("active", true)
-                put("focused", false)
-                put("boundsInScreen", rectToJson(Rect().also(traversalRoot::getBoundsInScreen)))
-                put("root", rootJson)
+                put("order", 0); put("id", traversalRoot.windowId); put("type", JSONObject.NULL); put("layer", JSONObject.NULL)
+                put("title", JSONObject.NULL); put("active", true); put("focused", false)
+                put("boundsInScreen", rectToJson(Rect().also(traversalRoot::getBoundsInScreen))); put("root", rootJson)
             })
         }
-
+        val rawRoot = serializedWindows.getJSONObject(activeWindowIndex).getJSONObject("root")
+        val rootDigest = CaptureCanonicalJson.sha256(rawRoot)
         val payload = JSONObject().apply {
-            put("reqId", reqId)
-            put("success", true)
+            put("reqId", reqId); put("success", true)
             ReliableHierarchySchemaV2.addRawMetadata(this, Build.VERSION.SDK_INT)
             put("source", "accessibility_service_windows")
             put("windowCoverage", if (serviceWindows.isNotEmpty()) "all_service_visible_windows" else "active_root_fallback")
-            put("nodeCount", totalNodes[0])
-            put("traversalRootRef", traversalRootRef)
-            put("traversalRootWindowId", traversalRoot.windowId)
-            put("windows", serializedWindows)
-            put("nodes", rootNodes)
+            put("nodeCount", totalNodes[0]); put("traversalRootRef", traversalRootRef)
+            put("traversalRootWindowId", traversalRoot.windowId); put("windows", serializedWindows); put("nodes", rootNodes)
         }
         val rawSerializationElapsedNanos = System.nanoTime() - rawSerializationStarted
         val rawHierarchyBytes = HierarchyPayloadEnvelope.estimatedJsonUtf8Bytes(payload)
-        if (rawHierarchyBytes > HierarchyPayloadEnvelope.MAX_PAYLOAD_BYTES) {
-            throw IllegalStateException("PAYLOAD_TOO_LARGE")
-        }
-
+        if (rawHierarchyBytes > HierarchyPayloadEnvelope.MAX_PAYLOAD_BYTES) throw IllegalStateException("PAYLOAD_TOO_LARGE")
         val candidateStarted = System.nanoTime()
-        val candidates = ReliableHierarchyCandidateContract.build(
-            candidateRoot = traversalRoot,
-            serializedRawRoot = traversalRoot,
-            traversalRootRef = traversalRootRef
+        val rootCaptureId = ReliableHierarchyCandidateContract.rootCaptureId(
+            reqId, processEpoch, generation, serviceInstanceId, captureSequence, traversalRootRef, rootDigest,
+        )
+        val candidates = ReliableHierarchyCandidateContract.buildFromImmutable(
+            captured.root, traversalRootRef, rootDigest, rootCaptureId,
         )
         val candidateGenerationElapsedNanos = System.nanoTime() - candidateStarted
-        val candidateSerializationStarted = System.nanoTime()
         val candidateProjectionBytes = HierarchyPayloadEnvelope.estimatedJsonUtf8Bytes(candidates)
-        val candidateSerializationElapsedNanos = System.nanoTime() - candidateSerializationStarted
+        val candidateDigest = candidates.getString("candidate_digest")
         payload.put("traversalCandidates", candidates)
+        payload.put("captureEnvelope", JSONObject()
+            .put("schema_version", "phase6d-capture-envelope-v1")
+            .put("canonicalization", CaptureCanonicalJson.VERSION)
+            .put("request_id", reqId)
+            .put("process_epoch", processEpoch)
+            .put("generation", generation)
+            .put("service_instance_id", serviceInstanceId)
+            .put("capture_sequence", captureSequence)
+            .put("root_ref", traversalRootRef)
+            .put("root_digest", rootDigest)
+            .put("candidate_digest", candidateDigest))
         val totalPayloadBytes = HierarchyPayloadEnvelope.estimatedJsonUtf8Bytes(payload)
-        if (totalPayloadBytes > HierarchyPayloadEnvelope.MAX_PAYLOAD_BYTES) {
-            throw IllegalStateException("PAYLOAD_TOO_LARGE")
-        }
-        if (!ReliableHierarchyCandidateContract.hasValidRootBinding(payload)) {
-            throw IllegalStateException("TRAVERSAL_CANDIDATE_ROOT_BINDING_FAILED")
-        }
-
+        if (totalPayloadBytes > HierarchyPayloadEnvelope.MAX_PAYLOAD_BYTES) throw IllegalStateException("PAYLOAD_TOO_LARGE")
+        if (!ReliableHierarchyCandidateContract.hasValidRootBinding(payload)) throw IllegalStateException("TRAVERSAL_CANDIDATE_ROOT_BINDING_FAILED")
         return ReliableHierarchyCapture(
             payload = payload,
             rawHierarchyBytesEstimate = rawHierarchyBytes,
@@ -284,10 +281,9 @@ object A11yNavigator {
             rawNodeCount = totalNodes[0],
             rawSerializationElapsedNanos = rawSerializationElapsedNanos,
             candidateGenerationElapsedNanos = candidateGenerationElapsedNanos,
-            candidateSerializationElapsedNanos = candidateSerializationElapsedNanos
+            candidateSerializationElapsedNanos = 0L
         )
     }
-
     internal fun hierarchyNodeToJson(
         node: AccessibilityNodeInfo,
         totalNodes: IntArray,

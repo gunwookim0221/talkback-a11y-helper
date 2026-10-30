@@ -161,12 +161,18 @@ class A11yCommandReceiver : BroadcastReceiver() {
                 }
             }
             HierarchyPayloadActions.STATUS -> HierarchyPayloadRuntime.status(requestId, clientNonce, queryNonce)
-            HierarchyPayloadActions.CANCEL -> HierarchyPayloadRuntime.cancel(requestId, clientNonce, queryNonce)
+            HierarchyPayloadActions.CANCEL -> HierarchyPayloadRuntime.cancel(
+                requestId, clientNonce, queryNonce,
+                intent.getStringExtra(HierarchyPayloadActions.EXTRA_EXPECTED_PROCESS_EPOCH).orEmpty(),
+                intent.getStringExtra(HierarchyPayloadActions.EXTRA_EXPECTED_GENERATION)?.toLongOrNull(),
+            )
             HierarchyPayloadActions.ACK -> HierarchyPayloadRuntime.acknowledge(
                 requestId,
                 clientNonce,
                 queryNonce,
                 intent.getStringExtra(HierarchyPayloadActions.EXTRA_PAYLOAD_SHA256).orEmpty(),
+                intent.getStringExtra(HierarchyPayloadActions.EXTRA_EXPECTED_PROCESS_EPOCH).orEmpty(),
+                intent.getStringExtra(HierarchyPayloadActions.EXTRA_EXPECTED_GENERATION)?.toLongOrNull(),
             )
             else -> org.json.JSONObject().put("status", "FAILED").put("completed", true)
                 .put("payload_complete", false).put("error_code", "ACTION_UNSUPPORTED")

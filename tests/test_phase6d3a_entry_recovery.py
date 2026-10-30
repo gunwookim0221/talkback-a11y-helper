@@ -14,7 +14,8 @@ from talkback_lib.reliable_hierarchy_schema import (
     decode_reliable_hierarchy_payload,
     legacy_dump_tree_response,
 )
-from tests.test_reliable_hierarchy_schema import _candidate, _capabilities, _payload
+from tests.test_reliable_hierarchy_schema import _candidate, _capabilities, _payload, _transport_metadata
+from phase6d_capture_support import bind_reliable_capture_envelope
 
 
 SMARTTHINGS = "com.samsung.android.oneconnect"
@@ -165,12 +166,19 @@ class RealDecoderSnapshotClient:
             capture_id=capture_id,
             capture_sequence=self.capture_sequence,
         )
+        payload, transfer = bind_reliable_capture_envelope(
+            payload, request_id="request-123", process_epoch="epoch-1", generation=3,
+            service_instance_id="service-1", capture_sequence=self.capture_sequence,
+            client_nonce="nonce-1",
+            helper_build_identity={"build_id": "a" * 64, "git_commit": "b" * 40},
+        )
         if self.identity_mutator is not None:
             self.identity_mutator(payload["identityMetadata"]["snapshot"])
         decoded = decode_reliable_hierarchy_payload(
-            payload,
-            capabilities=_capabilities(),
+            payload, capabilities=_capabilities(), transport_metadata=transfer,
         )
+        self._last_hierarchy_transport_metadata = transfer
+        self._last_hierarchy_capabilities = _capabilities()
         self.last_hierarchy_metadata = {
             "reqId": decoded.request_id,
             "snapshotId": capture_id,
@@ -644,6 +652,8 @@ def test_focused_external_popup_blocks_detail_recovery(monkeypatch):
 
 def test_device_recovery_back_budget_is_enforced(monkeypatch):
     client = RecoveryClient([_plugin_detail_nodes()] * 4)
+    log_lines = []
+    monkeypatch.setattr(collection_flow, "log", log_lines.append)
 
     ok, reason = collection_flow.recover_to_device_start_state(
         client,
@@ -654,6 +664,57 @@ def test_device_recovery_back_budget_is_enforced(monkeypatch):
     assert ok is False
     assert reason == "global_nav_not_visible"
     assert client.back_calls == 2
+    back_diagnostics = [line for line in log_lines if "[DEVICE_RESET][back_action]" in line]
+    assert len(back_diagnostics) == 2
+    assert all("recovery_target='devices_tab'" in line for line in back_diagnostics)
+    assert all("action_type='INPUT_BACK'" in line for line in back_diagnostics)
+    assert all("runner_call_result='RETURNED'" in line for line in back_diagnostics)
+    assert all("operation_id='UNKNOWN'" in line for line in back_diagnostics)
+    assert all("native_receipt_status='UNAVAILABLE'" in line for line in back_diagnostics)
+
+
+def test_device_reset_capture_transport_failure_records_stage_and_ids(monkeypatch):
+    client = RecoveryClient([_plugin_detail_nodes()] * 2)
+    original_capture = client.get_traversal_candidate_snapshot
+    calls = 0
+    transport_error = RuntimeError("transport details intentionally not logged")
+    transport_error.reason = "END_TO_END_TIMEOUT"
+    transport_error.request_id = "request-after-back"
+
+    def capture_with_failure(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return original_capture(**kwargs)
+        raise transport_error
+
+    client.get_traversal_candidate_snapshot = capture_with_failure
+    log_lines = []
+    monkeypatch.setattr(collection_flow, "log", log_lines.append)
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_args: None)
+
+    ok, reason = collection_flow.recover_to_device_start_state(
+        client,
+        "SERIAL",
+        {"scenario_id": "device_air_purifier_plugin", "recovery": {"max_back_count": 2}},
+    )
+
+    assert ok is False
+    assert reason == "hierarchy_unavailable"
+    assert calls == 2
+    assert client.back_calls == 1
+    joined_logs = "\n".join(log_lines)
+    assert "observed stage='device_reset.gate_attempt_1'" in joined_logs
+    assert "request_id='request-1'" in joined_logs
+    assert "capture_id='request-1:1:capture-1'" in joined_logs
+    assert "response_status='CAPTURED_COMPLETE'" in joined_logs
+    assert "recovery_target='devices_tab' action_type='INPUT_BACK'" in joined_logs
+    assert "runner_call_result='RETURNED'" in joined_logs
+    assert "native_receipt_status='UNAVAILABLE'" in joined_logs
+    assert "failed stage='device_reset.gate_attempt_2'" in joined_logs
+    assert "transport_reason='END_TO_END_TIMEOUT'" in joined_logs
+    assert "request_id='request-after-back'" in joined_logs
+    assert "capture_id='UNKNOWN' response_status='UNKNOWN'" in joined_logs
 
 
 @pytest.mark.parametrize("scenario_id", ["device_air_purifier_plugin", "device_smoke_sensor_plugin"])

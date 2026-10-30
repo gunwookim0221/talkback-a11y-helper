@@ -22,9 +22,11 @@ from talkback_lib.hierarchy_file_transport import (
     sha256_hex,
 )
 from talkback_lib.reliable_hierarchy_schema import (
-    CANDIDATE_CONTRACT_VERSION,
-    CANDIDATE_SCHEMA_VERSION,
+    CANDIDATE_CONTRACT_VERSION, CANDIDATE_SCHEMA_VERSION,
+    CAPTURE_ENVELOPE_SCHEMA_VERSION, CAPTURE_CANONICALIZATION_VERSION,
+    CAPTURE_ROOT_IDENTITY_VERSION,
 )
+from phase6d_capture_support import bind_reliable_capture_envelope
 from tb_runner.entry_mode import PrepositionedSafetyStop, PrepositionedSession
 
 
@@ -126,7 +128,7 @@ def _install_device_responses(monkeypatch, client, *, failure: str | None = None
         "actionableDescendantClassName": None,
         "actionableDescendantContentDescription": None,
     }
-    payload = json.dumps({
+    payload_document = {
         "reqId": "pending", "success": True, "schemaVersion": PAYLOAD_SCHEMA,
         "platformApiLevel": 34, "traversalRootRef": "windows[0].root",
         "traversalRootWindowId": 1, "nodeCount": 1,
@@ -140,7 +142,7 @@ def _install_device_responses(monkeypatch, client, *, failure: str | None = None
             "traversalRootRef": "windows[0].root", "traversalRootWindowId": 1,
             "canScrollDown": False, "scrollAxisContract": "axis-v1", "candidates": [candidate],
         },
-    }, separators=(",", ":")).encode("utf-8")
+    }
     state: dict[str, object] = {
         "actions": [],
         "commands": [],
@@ -159,7 +161,11 @@ def _install_device_responses(monkeypatch, client, *, failure: str | None = None
     }
 
     def artifact_for(request_id: str, client_nonce: str) -> tuple[bytes, dict]:
-        body = dict(json.loads(payload.decode("utf-8")), reqId=request_id)
+        body, capture_transfer = bind_reliable_capture_envelope(
+            payload_document, request_id=request_id, process_epoch=PROCESS_EPOCH,
+            generation=1, service_instance_id=SERVICE_ID, capture_sequence=1,
+            client_nonce=client_nonce, helper_build_identity=helper_identity,
+        )
         payload_bytes = json.dumps(body, separators=(",", ":")).encode("utf-8")
         header = {
             "protocol_version": PROTOCOL_VERSION,
@@ -170,6 +176,10 @@ def _install_device_responses(monkeypatch, client, *, failure: str | None = None
             "service_instance_id": SERVICE_ID,
             "helper_build_identity": helper_identity,
             "payload_schema_version": PAYLOAD_SCHEMA,
+            "capture_sequence": 1,
+            "capture_envelope_schema_version": CAPTURE_ENVELOPE_SCHEMA_VERSION,
+            "capture_canonicalization_version": CAPTURE_CANONICALIZATION_VERSION,
+            "capture_root_id_version": CAPTURE_ROOT_IDENTITY_VERSION,
             "payload_bytes": len(payload_bytes),
             "payload_sha256": sha256_hex(payload_bytes),
             "created_elapsed_realtime_ns": 100,
@@ -186,6 +196,10 @@ def _install_device_responses(monkeypatch, client, *, failure: str | None = None
             "service_instance_id": SERVICE_ID,
             "helper_build_identity": helper_identity,
             "payload_schema_version": PAYLOAD_SCHEMA,
+            "capture_sequence": 1,
+            "capture_envelope_schema_version": CAPTURE_ENVELOPE_SCHEMA_VERSION,
+            "capture_canonicalization_version": CAPTURE_CANONICALIZATION_VERSION,
+            "capture_root_id_version": CAPTURE_ROOT_IDENTITY_VERSION,
             "status": "READY",
             "completed": True,
             "payload_complete": True,
@@ -217,8 +231,16 @@ def _install_device_responses(monkeypatch, client, *, failure: str | None = None
                 "candidate_schema_version": CANDIDATE_SCHEMA_VERSION,
                 "supported_candidate_schema_versions": [CANDIDATE_SCHEMA_VERSION],
                 "candidate_contract_version": CANDIDATE_CONTRACT_VERSION,
+                "capture_envelope_schema_version": CAPTURE_ENVELOPE_SCHEMA_VERSION,
+                "supported_capture_envelope_schema_versions": [CAPTURE_ENVELOPE_SCHEMA_VERSION],
+                "capture_canonicalization_version": CAPTURE_CANONICALIZATION_VERSION,
+                "supported_capture_canonicalization_versions": [CAPTURE_CANONICALIZATION_VERSION],
+                "capture_root_id_version": CAPTURE_ROOT_IDENTITY_VERSION,
+                "supported_capture_root_id_versions": [CAPTURE_ROOT_IDENTITY_VERSION],
                 "max_payload_bytes": MAX_PAYLOAD_BYTES,
-                "capabilities": ["content_provider_pfd", "service_hierarchy_v2", CANDIDATE_SCHEMA_VERSION],
+                "capabilities": ["content_provider_pfd", "service_hierarchy_v2", CANDIDATE_SCHEMA_VERSION,
+                                 CAPTURE_ENVELOPE_SCHEMA_VERSION, CAPTURE_CANONICALIZATION_VERSION,
+                                 CAPTURE_ROOT_IDENTITY_VERSION],
             }
             if not candidate_capability:
                 response.pop("candidate_schema_version")
@@ -446,6 +468,10 @@ def test_normal_default_dump_reaches_ack_through_actual_adb_guard(tmp_path, monk
     assert result["success"] is True
     assert client.last_hierarchy_metadata["transportMode"] == "RELIABLE_FILE_PFD"
     assert state["actions"] == ["CAPABILITIES", "START", "STATUS", "STATUS", "ACK"]
+    ack = next(command for command in state["commands"] if "HIERARCHY_TRANSFER_ACK" in " ".join(command))
+    values = {ack[i + 1]: ack[i + 2] for i in range(len(ack) - 2) if ack[i] == "--es"}
+    assert values["expectedProcessEpoch"] == PROCESS_EPOCH
+    assert values["expectedGeneration"] == "1"
     rows = _audit(session)
     allowed_commands = [row["command"] for row in rows if row["event"] == "COMMAND_ALLOWED"]
     actions = [command[4].removeprefix(HELPER_ACTION_PREFIX) for command in allowed_commands

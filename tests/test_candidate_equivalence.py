@@ -61,6 +61,24 @@ def test_pair_harness_rejects_same_id_with_different_fixture_digest(tmp_path):
     assert first["root_binding_valid"] is True
 
 
+def test_pair_harness_rejects_missing_capture_transport_metadata(tmp_path):
+    pair_path = next((path for path in _pair_paths() if "api27" in path.name), None)
+    api34 = next((path for path in _pair_paths() if "api34" in path.name), None)
+    if pair_path is None or api34 is None:
+        pytest.skip("Kotlin C4 pair artifacts have not been generated yet")
+    body = json.loads(pair_path.read_text(encoding="utf-8"))
+    fixture_id = body["pairs"][0]["fixture_id"]
+    del body["pairs"][0]["capture_transport_metadata"]
+    broken = tmp_path / "missing_capture_transport.json"
+    broken.write_text(json.dumps(body), encoding="utf-8")
+
+    result = run_candidate_equivalence(INPUTS, [broken, api34])
+    row = next(row for row in result["results"] if row["fixture_id"] == fixture_id)
+    assert row["verdict"] == "NONCOMPARABLE"
+    assert row["root_binding_valid"] is False
+    assert row["decode_error"] == "C4_PAIR_CAPTURE_TRANSPORT_METADATA_MISSING"
+
+
 def test_pair_harness_rejects_raw_scroll_metadata_that_differs_from_fixed_input(tmp_path):
     pair_path = next((path for path in _pair_paths() if "api34" in path.name), None)
     if pair_path is None:

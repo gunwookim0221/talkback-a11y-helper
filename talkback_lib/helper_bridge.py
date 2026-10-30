@@ -6,6 +6,7 @@ from __future__ import annotations
 import time
 import uuid
 import threading
+import re
 from datetime import datetime, timezone
 from collections import OrderedDict
 from pathlib import Path
@@ -36,8 +37,124 @@ from talkback_lib.exact_node_protocol import (
     canonical_json,
     helper_compatibility_allows_execution,
     precheck_repo_helper_build_identity,
+    compute_repo_helper_build_identity,
+    PROTOCOL_VERSION as EXACT_NODE_PROTOCOL_VERSION,
 )
 
+
+_DIAGNOSTIC_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+_DIAGNOSTIC_GIT = re.compile(r"^[0-9a-f]{40}$")
+_DIAGNOSTIC_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
+
+
+def _precheck_diagnostic_identity_projection(ping: Any, capabilities: Any) -> dict[str, Any]:
+    ping_identity = ping.get("helper_build_identity") if isinstance(ping, dict) else None
+    cap_identity = capabilities.get("helper_build_identity") if isinstance(capabilities, dict) else None
+
+    def safe(field: str, value: Any) -> Any:
+        if field in {"build_id", "input_digest"}:
+            return value if isinstance(value, str) and _DIAGNOSTIC_HEX64.fullmatch(value) else None
+        if field == "git_commit":
+            return value if isinstance(value, str) and _DIAGNOSTIC_GIT.fullmatch(value) else None
+        if field == "source_state":
+            return value if isinstance(value, str) and value in {"CLEAN", "DIRTY"} else None
+        if field in {"generation", "version_code"}:
+            return value if type(value) is int and value >= 0 else None
+        return value if isinstance(value, str) and _DIAGNOSTIC_TOKEN.fullmatch(value) else None
+
+    def identity(raw: Any, aliases: dict[str, str]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        if isinstance(raw, dict):
+            for field, source_key in aliases.items():
+                value = safe(field, raw.get(source_key))
+                if value is not None:
+                    result[field] = value
+        return result
+
+    ping_fields = identity(ping_identity, {
+        "build_id": "build_id", "git_commit": "git_commit", "input_digest": "helper_input_digest",
+        "source_state": "source_state", "build_variant": "build_variant",
+    })
+    cap_fields = identity(cap_identity, {
+        "build_id": "build_id", "git_commit": "git_commit", "input_digest": "input_digest",
+        "source_state": "source_state", "build_variant": "build_variant",
+    })
+    ping_protocol = identity(ping_identity, {
+        "schema_version": "schema_version", "helper_protocol_version": "helper_protocol_version",
+        "version_name": "versionName", "version_code": "versionCode", "gradle_version": "gradle_version",
+        "metadata_provenance": "metadata_provenance",
+    })
+    cap_protocol = identity(capabilities, {
+        "control_schema": "schema", "protocol_version": "protocol_version",
+        "payload_schema_version": "payload_schema_version", "candidate_schema_version": "candidate_schema_version",
+        "candidate_contract_version": "candidate_contract_version",
+    })
+    ping_service = ping.get("helper_service_instance_id") if isinstance(ping, dict) else None
+    cap_service = capabilities.get("service_instance_id") if isinstance(capabilities, dict) else None
+    comparisons: dict[str, str] = {}
+    for field in ("build_id", "git_commit", "input_digest", "source_state", "build_variant"):
+        if field not in ping_fields or field not in cap_fields:
+            comparisons[field] = "UNAVAILABLE"
+        else:
+            comparisons[field] = "MATCH" if ping_fields[field] == cap_fields[field] else "MISMATCH"
+    comparisons["service_instance_id"] = (
+        "UNAVAILABLE" if not isinstance(ping_service, str) or not ping_service
+        or not isinstance(cap_service, str) or not cap_service
+        else "MATCH" if ping_service == cap_service else "MISMATCH"
+    )
+    ping_source: dict[str, Any] = {
+        "available": isinstance(ping, dict), "build_identity": ping_fields,
+        "schema_protocol_fields": ping_protocol,
+    }
+    cap_source: dict[str, Any] = {
+        "available": isinstance(capabilities, dict), "build_identity": cap_fields,
+        "schema_protocol_fields": cap_protocol,
+    }
+    if isinstance(ping_service, str) and ping_service:
+        ping_source["service_identity_present"] = True
+    if isinstance(cap_service, str) and cap_service:
+        cap_source["service_identity_present"] = True
+    generation = safe("generation", capabilities.get("generation")) if isinstance(capabilities, dict) else None
+    if generation is not None:
+        cap_source["generation"] = generation
+    return {
+        "sources": {"PING": ping_source, "CAPABILITIES": cap_source},
+        "field_comparisons": comparisons,
+    }
+
+def _precheck_diagnostic_context(
+    root: Path,
+    result: dict[str, Any],
+    ping: Any,
+    capabilities: Any,
+) -> dict[str, Any]:
+    projection = _precheck_diagnostic_identity_projection(ping, capabilities)
+    try:
+        local = compute_repo_helper_build_identity(root, variant="debug")
+    except Exception:
+        local = {}
+    def prefer_result(result_key: str, local_key: str) -> Any:
+        value = result.get(result_key)
+        return value if value is not None and value != "" else local.get(local_key)
+    expected_manifest = {
+        "build_id": prefer_result("expected_helper_build_id", "build_id"),
+        "git_commit": prefer_result("expected_git_commit", "git_commit"),
+        "input_digest": prefer_result("expected_helper_input_digest", "helper_input_digest"),
+        "source_state": local.get("source_state"),
+        "build_variant": local.get("build_variant"),
+        "gradle_version": local.get("gradle_version"),
+        "version_name": local.get("version_name"),
+        "version_code": local.get("version_code"),
+    }
+    schemas = result.get("required_schemas")
+    expected_schemas = dict(schemas) if isinstance(schemas, dict) else {}
+    expected_schemas["helper_build_identity_schema"] = "1"
+    expected_schemas["helper_protocol"] = EXACT_NODE_PROTOCOL_VERSION
+    return {
+        "source_projection": projection,
+        "expected_local_manifest": expected_manifest,
+        "expected_schemas": expected_schemas,
+    }
 
 class HelperBridge:
     BRIDGE_VERSION = "1.0.1"
@@ -171,6 +288,7 @@ class HelperBridge:
         *,
         repo_root: str | Path | None = None,
         acceptance_mode: bool = True,
+        diagnostic_observer: Any = None,
     ) -> dict[str, Any]:
         """Issue one read-only PING and compare the reported Helper inputs locally."""
         self._client.clear_logcat(dev=dev)
@@ -211,6 +329,12 @@ class HelperBridge:
         result["capability_generation"] = capabilities.get("generation") if isinstance(capabilities, dict) else None
         if isinstance(ping, dict) and isinstance(ping.get("exact_action_state"), dict):
             result["exact_action_state"] = dict(ping["exact_action_state"])
+        if callable(diagnostic_observer):
+            try:
+                context = _precheck_diagnostic_context(root, result, ping, capabilities)
+                diagnostic_observer(context)
+            except Exception:
+                pass
         return result
 
     def resolve_exact_node_read_only(

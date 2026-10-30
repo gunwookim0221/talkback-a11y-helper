@@ -6,6 +6,8 @@ from talkback_lib.window_lifecycle import (
     MAX_EVENTS,
     WindowLifecycleRecorder,
     configure_window_lifecycle,
+    capture_entry_window_diagnostic,
+    LIFECYCLE_SNAPSHOT_COMMAND,
     get_talkback_restart_event,
     parse_window_lifecycle_output,
 )
@@ -48,6 +50,7 @@ def test_window_lifecycle_parser_extracts_bounded_window_and_focus_state():
     assert parsed["surfaced_window_count"] == 1
     assert parsed["ready_window_count"] == 1
     assert parsed["foreground_package"] == "com.example.app"
+    assert parsed["foreground_activity_component"] == "com.example.app/.MainActivity"
     assert parsed["accessibility_focus_window_id"] == 42
     assert parsed["accessibility_focus_package"] == "com.example.app"
     assert parsed["talkback_enabled"] is True
@@ -233,3 +236,24 @@ def test_capped_unavailable_pid_probe_is_explicit_in_artifact(tmp_path):
     assert sample["safety_probe_only"] is True
     assert sample["snapshot_error"].startswith("TimeoutError:")
     assert recorder.restart_event is None
+
+def test_entry_window_diagnostic_uses_readonly_sample_without_lifecycle_tracking():
+    class FakeClient:
+        def __init__(self):
+            self.calls = []
+
+        def _run(self, args, **kwargs):
+            self.calls.append((args, kwargs))
+            return _snapshot("321")
+
+    client = FakeClient()
+    sample = capture_entry_window_diagnostic(client, "serial")
+
+    assert client.calls == [
+        (["shell", LIFECYCLE_SNAPSHOT_COMMAND], {"dev": "serial", "timeout": 8.0})
+    ]
+    assert sample["diagnostic_only"] is True
+    assert sample["sample_status"] == "CAPTURED"
+    assert sample["foreground_package"] == "com.example.app"
+    assert sample["foreground_activity_component"] == "com.example.app/.MainActivity"
+    assert "talkback_restart_detected" not in sample

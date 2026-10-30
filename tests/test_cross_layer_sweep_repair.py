@@ -10,6 +10,8 @@ from talkback_lib.hierarchy_file_transport import (
 )
 from talkback_lib.reliable_hierarchy_schema import (
     CANDIDATE_CONTRACT_VERSION, CANDIDATE_SCHEMA_VERSION, RAW_SCHEMA_VERSION,
+    CAPTURE_ENVELOPE_SCHEMA_VERSION, CAPTURE_CANONICALIZATION_VERSION,
+    CAPTURE_ROOT_IDENTITY_VERSION,
 )
 
 from test_hierarchy_file_transport import _artifact_control, _identity
@@ -72,9 +74,16 @@ class _ReliableTransportBackend:
                     "candidate_schema_version": CANDIDATE_SCHEMA_VERSION,
                     "supported_candidate_schema_versions": [CANDIDATE_SCHEMA_VERSION],
                     "candidate_contract_version": CANDIDATE_CONTRACT_VERSION,
+                    "capture_envelope_schema_version": CAPTURE_ENVELOPE_SCHEMA_VERSION,
+                    "supported_capture_envelope_schema_versions": [CAPTURE_ENVELOPE_SCHEMA_VERSION],
+                    "capture_canonicalization_version": CAPTURE_CANONICALIZATION_VERSION,
+                    "supported_capture_canonicalization_versions": [CAPTURE_CANONICALIZATION_VERSION],
+                    "capture_root_id_version": CAPTURE_ROOT_IDENTITY_VERSION,
+                    "supported_capture_root_id_versions": [CAPTURE_ROOT_IDENTITY_VERSION],
                     "max_payload_bytes": 750_000,
                     "capabilities": ["content_provider_pfd", "service_hierarchy_v2",
-                                     CANDIDATE_SCHEMA_VERSION],
+                                     CANDIDATE_SCHEMA_VERSION, CAPTURE_ENVELOPE_SCHEMA_VERSION,
+                                     CAPTURE_CANONICALIZATION_VERSION, CAPTURE_ROOT_IDENTITY_VERSION],
                 }
             else:
                 self.request_id = pairs["requestId"]

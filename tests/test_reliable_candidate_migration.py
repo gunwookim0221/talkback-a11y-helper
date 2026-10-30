@@ -11,6 +11,7 @@ from talkback_lib.hierarchy_file_transport import (
     DEFAULT_HIERARCHY_TRANSPORT_MODE,
     HierarchyTransportError,
 )
+from phase6d_capture_support import bind_reliable_capture_envelope
 from talkback_lib.reliable_hierarchy_schema import (
     CANDIDATE_ALGORITHM_VERSION,
     CANDIDATE_ANALYZER_VERSION,
@@ -19,6 +20,8 @@ from talkback_lib.reliable_hierarchy_schema import (
     CANDIDATE_PROFILE_VERSION,
     CANDIDATE_SCHEMA_VERSION,
     RAW_SCHEMA_VERSION,
+    CAPTURE_CANONICALIZATION_VERSION, CAPTURE_ENVELOPE_SCHEMA_VERSION,
+    CAPTURE_ROOT_IDENTITY_VERSION,
     legacy_dump_tree_response,
 )
 
@@ -78,7 +81,7 @@ def _payload(candidates: list[dict] | None = None) -> dict:
         "children": [],
     }
     rows = deepcopy(candidates if candidates is not None else [_candidate()])
-    return {
+    payload = {
         "reqId": "request-123",
         "success": True,
         "schemaVersion": RAW_SCHEMA_VERSION,
@@ -113,6 +116,12 @@ def _payload(candidates: list[dict] | None = None) -> dict:
             "candidates": rows,
         },
     }
+    payload, _transfer = bind_reliable_capture_envelope(
+        payload, request_id="request-123", process_epoch="epoch-1", generation=3,
+        service_instance_id="service-1", capture_sequence=2, client_nonce="nonce-1",
+        helper_build_identity={"build_id": "a" * 64, "git_commit": "b" * 40},
+    )
+    return payload
 
 
 def _capabilities() -> dict:
@@ -122,7 +131,15 @@ def _capabilities() -> dict:
         "candidate_schema_version": CANDIDATE_SCHEMA_VERSION,
         "supported_candidate_schema_versions": [CANDIDATE_SCHEMA_VERSION],
         "candidate_contract_version": CANDIDATE_CONTRACT_VERSION,
-        "capabilities": ["content_provider_pfd", "service_hierarchy_v2", CANDIDATE_SCHEMA_VERSION],
+        "capture_envelope_schema_version": CAPTURE_ENVELOPE_SCHEMA_VERSION,
+        "supported_capture_envelope_schema_versions": [CAPTURE_ENVELOPE_SCHEMA_VERSION],
+        "capture_canonicalization_version": CAPTURE_CANONICALIZATION_VERSION,
+        "supported_capture_canonicalization_versions": [CAPTURE_CANONICALIZATION_VERSION],
+        "capture_root_id_version": CAPTURE_ROOT_IDENTITY_VERSION,
+        "supported_capture_root_id_versions": [CAPTURE_ROOT_IDENTITY_VERSION],
+        "capabilities": ["content_provider_pfd", "service_hierarchy_v2", CANDIDATE_SCHEMA_VERSION,
+                         CAPTURE_ENVELOPE_SCHEMA_VERSION, CAPTURE_CANONICALIZATION_VERSION,
+                         CAPTURE_ROOT_IDENTITY_VERSION],
     }
 
 
@@ -135,6 +152,10 @@ def _transport_metadata() -> dict:
         "generation": 3,
         "service_instance_id": "service-1",
         "payload_schema_version": RAW_SCHEMA_VERSION,
+        "capture_sequence": 2,
+        "capture_envelope_schema_version": CAPTURE_ENVELOPE_SCHEMA_VERSION,
+        "capture_canonicalization_version": CAPTURE_CANONICALIZATION_VERSION,
+        "capture_root_id_version": CAPTURE_ROOT_IDENTITY_VERSION,
         "helper_build_identity": identity,
     }
     return {"header": deepcopy(record), "control": deepcopy(record)}

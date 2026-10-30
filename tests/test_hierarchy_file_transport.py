@@ -33,6 +33,11 @@ from talkback_lib.reliable_hierarchy_schema import (
     CANDIDATE_CONTRACT_VERSION,
     CANDIDATE_SCHEMA_VERSION,
     RAW_SCHEMA_VERSION,
+    capture_canonical_sha256,
+    capture_root_id,
+    CAPTURE_ENVELOPE_SCHEMA_VERSION,
+    CAPTURE_CANONICALIZATION_VERSION,
+    CAPTURE_ROOT_IDENTITY_VERSION,
 )
 
 
@@ -92,35 +97,69 @@ def _candidate(text: str = "상태 🌱\n줄") -> dict:
 def _payload(request_id: str, node: dict | None = None) -> bytes:
     root = node or _node()
     candidate = _candidate()
-    return json.dumps(
-        {
-            "reqId": request_id,
-            "success": True,
-            "schemaVersion": RAW_SCHEMA_VERSION,
-            "platformApiLevel": 34,
+    value = {
+        "reqId": request_id,
+        "success": True,
+        "schemaVersion": RAW_SCHEMA_VERSION,
+        "platformApiLevel": 34,
+        "traversalRootRef": "windows[0].root",
+        "traversalRootWindowId": 1,
+        "nodeCount": 1,
+        "nodes": [root],
+        "windows": [{"id": 1, "root": root}],
+        "traversalCandidates": {
+            "schema_version": CANDIDATE_SCHEMA_VERSION,
+            "candidate_contract_version": CANDIDATE_CONTRACT_VERSION,
+            "algorithmVersion": "2.76.3",
+            "analyzerVersion": "1.11.1",
+            "profileId": "oneconnect-traversal-policy",
+            "profileVersion": "1.0.0",
+            "completion": {"status": "COMPLETE", "complete": True, "candidate_count": 1},
             "traversalRootRef": "windows[0].root",
             "traversalRootWindowId": 1,
-            "nodeCount": 1,
-            "nodes": [root],
-            "windows": [{"id": 1, "root": root}],
-            "traversalCandidates": {
-                "schema_version": CANDIDATE_SCHEMA_VERSION,
-                "candidate_contract_version": CANDIDATE_CONTRACT_VERSION,
-                "algorithmVersion": "2.76.3",
-                "analyzerVersion": "1.11.1",
-                "profileId": "oneconnect-traversal-policy",
-                "profileVersion": "1.0.0",
-                "completion": {"status": "COMPLETE", "complete": True, "candidate_count": 1},
-                "traversalRootRef": "windows[0].root",
-                "traversalRootWindowId": 1,
-                "canScrollDown": False,
-                "scrollAxisContract": "axis-v1",
-                "candidates": [candidate],
-            },
+            "canScrollDown": False,
+            "scrollAxisContract": "axis-v1",
+            "candidates": [candidate],
         },
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ).encode("utf-8")
+    }
+    root_digest = capture_canonical_sha256(root)
+    envelope = {
+        "schema_version": CAPTURE_ENVELOPE_SCHEMA_VERSION,
+        "canonicalization": CAPTURE_CANONICALIZATION_VERSION,
+        "request_id": request_id,
+        "process_epoch": "process-epoch-1",
+        "generation": 1,
+        "service_instance_id": "service-uuid",
+        "capture_sequence": 1,
+        "root_ref": "windows[0].root",
+        "root_digest": root_digest,
+    }
+    projection = value["traversalCandidates"]
+    projection["source_root_digest"] = root_digest
+    projection["rootCaptureId"] = capture_root_id(envelope)
+    projection["candidate_digest"] = capture_canonical_sha256(projection)
+    envelope["candidate_digest"] = projection["candidate_digest"]
+    value["captureEnvelope"] = envelope
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def _capabilities() -> dict:
+    return {
+        "payload_schema_version": PAYLOAD_SCHEMA,
+        "supported_payload_schema_versions": [PAYLOAD_SCHEMA],
+        "candidate_schema_version": CANDIDATE_SCHEMA_VERSION,
+        "supported_candidate_schema_versions": [CANDIDATE_SCHEMA_VERSION],
+        "candidate_contract_version": CANDIDATE_CONTRACT_VERSION,
+        "capture_envelope_schema_version": CAPTURE_ENVELOPE_SCHEMA_VERSION,
+        "supported_capture_envelope_schema_versions": [CAPTURE_ENVELOPE_SCHEMA_VERSION],
+        "capture_canonicalization_version": CAPTURE_CANONICALIZATION_VERSION,
+        "supported_capture_canonicalization_versions": [CAPTURE_CANONICALIZATION_VERSION],
+        "capture_root_id_version": CAPTURE_ROOT_IDENTITY_VERSION,
+        "supported_capture_root_id_versions": [CAPTURE_ROOT_IDENTITY_VERSION],
+        "capabilities": ["content_provider_pfd", "service_hierarchy_v2", CANDIDATE_SCHEMA_VERSION,
+                         CAPTURE_ENVELOPE_SCHEMA_VERSION, CAPTURE_CANONICALIZATION_VERSION,
+                         CAPTURE_ROOT_IDENTITY_VERSION],
+    }
 
 
 def _identity() -> dict[str, str]:
@@ -146,6 +185,10 @@ def _artifact_control(request_id: str, nonce: str, identity: dict[str, str], pay
         "service_instance_id": identity["service_instance_id"],
         "helper_build_identity": {k: v for k, v in identity.items() if k != "service_instance_id"},
         "payload_schema_version": PAYLOAD_SCHEMA,
+        "capture_sequence": 1,
+        "capture_envelope_schema_version": CAPTURE_ENVELOPE_SCHEMA_VERSION,
+        "capture_canonicalization_version": CAPTURE_CANONICALIZATION_VERSION,
+        "capture_root_id_version": CAPTURE_ROOT_IDENTITY_VERSION,
         "payload_bytes": len(payload),
         "payload_sha256": sha256_hex(payload),
         "created_elapsed_realtime_ns": created_ns,
@@ -163,6 +206,10 @@ def _artifact_control(request_id: str, nonce: str, identity: dict[str, str], pay
         "service_instance_id": identity["service_instance_id"],
         "helper_build_identity": header["helper_build_identity"],
         "payload_schema_version": PAYLOAD_SCHEMA,
+        "capture_sequence": 1,
+        "capture_envelope_schema_version": CAPTURE_ENVELOPE_SCHEMA_VERSION,
+        "capture_canonicalization_version": CAPTURE_CANONICALIZATION_VERSION,
+        "capture_root_id_version": CAPTURE_ROOT_IDENTITY_VERSION,
         "payload_complete": True,
         "completed": True,
         "payload_bytes": len(payload),
@@ -191,6 +238,7 @@ class HierarchyEnvelopeTests(unittest.TestCase):
             expected_identity=expected,
             expected_request_id=request_id,
             expected_client_nonce=nonce,
+            capabilities=_capabilities(),
         )
         self.assertEqual(payload, decoded.payload_bytes)
         self.assertIn("🌱".encode("utf-8"), decoded.payload_bytes)
@@ -413,8 +461,16 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
                     "candidate_schema_version": CANDIDATE_SCHEMA_VERSION,
                     "supported_candidate_schema_versions": [CANDIDATE_SCHEMA_VERSION],
                     "candidate_contract_version": CANDIDATE_CONTRACT_VERSION,
+                    "capture_envelope_schema_version": CAPTURE_ENVELOPE_SCHEMA_VERSION,
+                    "supported_capture_envelope_schema_versions": [CAPTURE_ENVELOPE_SCHEMA_VERSION],
+                    "capture_canonicalization_version": CAPTURE_CANONICALIZATION_VERSION,
+                    "supported_capture_canonicalization_versions": [CAPTURE_CANONICALIZATION_VERSION],
+                    "capture_root_id_version": CAPTURE_ROOT_IDENTITY_VERSION,
+                    "supported_capture_root_id_versions": [CAPTURE_ROOT_IDENTITY_VERSION],
                     "max_payload_bytes": MAX_PAYLOAD_BYTES,
-                    "capabilities": ["content_provider_pfd", "service_hierarchy_v2", CANDIDATE_SCHEMA_VERSION],
+                    "capabilities": ["content_provider_pfd", "service_hierarchy_v2", CANDIDATE_SCHEMA_VERSION,
+                                     CAPTURE_ENVELOPE_SCHEMA_VERSION, CAPTURE_CANONICALIZATION_VERSION,
+                                     CAPTURE_ROOT_IDENTITY_VERSION],
                 }
             request_id = pairs["requestId"]
             nonce = pairs.get("clientNonce", "")
@@ -430,6 +486,10 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
                 "service_instance_id": identity["service_instance_id"],
                 "helper_build_identity": helper_control,
                 "payload_schema_version": PAYLOAD_SCHEMA,
+                "capture_sequence": 1,
+                "capture_envelope_schema_version": CAPTURE_ENVELOPE_SCHEMA_VERSION,
+                "capture_canonicalization_version": CAPTURE_CANONICALIZATION_VERSION,
+                "capture_root_id_version": CAPTURE_ROOT_IDENTITY_VERSION,
                 "completed": True,
                 "payload_complete": True,
                 "payload_bytes": len(payload_bytes),
@@ -511,6 +571,9 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
                     key: value for key, value in identity.items() if key != "service_instance_id"
                 },
                 "payload_schema_version": PAYLOAD_SCHEMA,
+                "capture_envelope_schema_version": CAPTURE_ENVELOPE_SCHEMA_VERSION,
+                "capture_canonicalization_version": CAPTURE_CANONICALIZATION_VERSION,
+                "capture_root_id_version": CAPTURE_ROOT_IDENTITY_VERSION,
             }
             if action.endswith("CAPABILITIES"):
                 shared.update(
@@ -523,8 +586,16 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
                     candidate_schema_version=CANDIDATE_SCHEMA_VERSION,
                     supported_candidate_schema_versions=[CANDIDATE_SCHEMA_VERSION],
                     candidate_contract_version=CANDIDATE_CONTRACT_VERSION,
+                    capture_envelope_schema_version=CAPTURE_ENVELOPE_SCHEMA_VERSION,
+                    supported_capture_envelope_schema_versions=[CAPTURE_ENVELOPE_SCHEMA_VERSION],
+                    capture_canonicalization_version=CAPTURE_CANONICALIZATION_VERSION,
+                    supported_capture_canonicalization_versions=[CAPTURE_CANONICALIZATION_VERSION],
+                    capture_root_id_version=CAPTURE_ROOT_IDENTITY_VERSION,
+                    supported_capture_root_id_versions=[CAPTURE_ROOT_IDENTITY_VERSION],
                     max_payload_bytes=MAX_PAYLOAD_BYTES,
-                    capabilities=["content_provider_pfd", "service_hierarchy_v2", CANDIDATE_SCHEMA_VERSION],
+                    capabilities=["content_provider_pfd", "service_hierarchy_v2", CANDIDATE_SCHEMA_VERSION,
+                                  CAPTURE_ENVELOPE_SCHEMA_VERSION, CAPTURE_CANONICALIZATION_VERSION,
+                                  CAPTURE_ROOT_IDENTITY_VERSION],
                 )
             elif action.endswith("START"):
                 shared.update(
@@ -626,14 +697,28 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
                 "request_id": request_id,
                 "client_nonce": client_nonce,
                 "query_nonce": pairs["queryNonce"],
+                "process_epoch": "process-epoch-1",
+                "generation": 7,
+                "completed": True,
             }
             return f'Broadcast completed: result=1, data="{encode_control(response)}"'
 
         client._broadcast = broadcast
-        client._cancel_hierarchy_transfer(None, request_id, client_nonce, 1.0)
+        client._cancel_hierarchy_transfer(None, request_id, client_nonce, 1.0,
+                                          expected_process_epoch="process-epoch-1", expected_generation=7)
         self.assertEqual(request_id, observed["requestId"])
         self.assertEqual(client_nonce, observed["clientNonce"])
+        self.assertEqual("process-epoch-1", observed["expectedProcessEpoch"])
+        self.assertEqual("7", observed["expectedGeneration"])
+        self.assertEqual("CANCELLED", client.last_hierarchy_cleanup_diagnostic["status"])
         self.assertRegex(observed["queryNonce"], r"^[0-9a-f]{32}$")
+
+    def test_cancel_without_confirmed_start_binding_fails_closed(self):
+        client = self._client()
+        client._broadcast = lambda *_args, **_kwargs: self.fail("unbound cancel must not be sent")
+        client._cancel_hierarchy_transfer(None, "d" * 32, "e" * 32, 1.0)
+        self.assertEqual("SKIPPED", client.last_hierarchy_cleanup_diagnostic["status"])
+        self.assertEqual("CLEANUP_BINDING_UNAVAILABLE", client.last_hierarchy_cleanup_diagnostic["error_code"])
 
     def test_default_mode_is_reliable_and_auto_prechecks_build_identity(self):
         client = self._client()
@@ -701,6 +786,240 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             client.dump_hierarchy(transport_mode="SOME_UNKNOWN_MODE")
 
+
+
+class BuildIdentityPrecheckDiagnosticTests(unittest.TestCase):
+    SERVICE = "raw-service-id-sentinel"
+    NONCE = "raw-nonce-sentinel"
+    PII = "private-window-title-sentinel"
+
+    def _projection(self, ping_build="b" * 64, cap_build="b" * 64):
+        from talkback_lib.exact_node_protocol import PROTOCOL_VERSION as helper_protocol
+        fields = {
+            "build_id": ping_build, "git_commit": "c" * 40, "input_digest": "d" * 64,
+            "source_state": "CLEAN", "build_variant": "debug",
+        }
+        cap_fields = dict(fields)
+        cap_fields["build_id"] = cap_build
+        return {
+            "sources": {
+                "PING": {
+                    "available": True, "build_identity": fields,
+                    "schema_protocol_fields": {
+                        "schema_version": "1", "helper_protocol_version": helper_protocol,
+                        "version_name": "1.0", "version_code": 1, "gradle_version": "9.0.0",
+                    },
+                    "service_identity_present": True,
+                },
+                "CAPABILITIES": {
+                    "available": True, "build_identity": cap_fields,
+                    "schema_protocol_fields": {
+                        "control_schema": CONTROL_SCHEMA, "protocol_version": PROTOCOL_VERSION,
+                        "payload_schema_version": RAW_SCHEMA_VERSION,
+                        "candidate_schema_version": CANDIDATE_SCHEMA_VERSION,
+                        "candidate_contract_version": CANDIDATE_CONTRACT_VERSION,
+                    },
+                    "generation": 3, "service_identity_present": True,
+                    "service_instance_id": self.SERVICE, "nonce": self.NONCE, "raw_payload": self.PII,
+                },
+            },
+            "field_comparisons": {
+                "build_id": "MATCH" if ping_build == cap_build else "MISMATCH",
+                "git_commit": "MATCH", "input_digest": "MATCH", "source_state": "MATCH",
+                "build_variant": "MATCH", "service_instance_id": "MATCH",
+            },
+            "unexpected": self.PII,
+        }
+
+    def _context(self, *, build_id="b" * 64, git_commit="c" * 40, input_digest="d" * 64,
+                 projection=None):
+        from talkback_lib.exact_node_protocol import PROTOCOL_VERSION as helper_protocol
+        return {
+            "source_projection": projection or self._projection(),
+            "expected_local_manifest": {
+                "build_id": build_id, "git_commit": git_commit, "input_digest": input_digest,
+                "source_state": "CLEAN", "build_variant": "debug", "gradle_version": "9.0.0",
+                "version_name": "1.0", "version_code": 1, "java_version": "private",
+                "helper_input_files": ["private/path"],
+            },
+            "expected_schemas": {
+                "helper_build_identity_schema": "1", "helper_protocol": helper_protocol,
+                "control_schema": CONTROL_SCHEMA, "transport_protocol": PROTOCOL_VERSION,
+                "raw_hierarchy_schema": RAW_SCHEMA_VERSION, "candidate_schema": CANDIDATE_SCHEMA_VERSION,
+                "candidate_contract": CANDIDATE_CONTRACT_VERSION, "extra": self.PII,
+            },
+        }
+
+    def _value(self, **changes):
+        value = {
+            "status": "EXACT_MATCH", "compatibility_status": "EXACT_MATCH", "execution_allowed": True,
+            "reason": "EXACT_BUILD_PROVENANCE_MATCH",
+            "expected_helper_build_id": "b" * 64, "helper_build_id": "b" * 64,
+            "expected_git_commit": "c" * 40, "helper_git_commit": "c" * 40,
+            "expected_helper_input_digest": "d" * 64, "helper_input_digest": "d" * 64,
+            "helper_service_instance_id": self.SERVICE,
+            "request_nonce": self.NONCE, "raw_payload": self.PII,
+            "arbitrary_exception_text": self.PII,
+        }
+        value.update(changes)
+        return value
+
+    def test_matching_return_and_sink_failure_preserve_gate_behavior(self):
+        value = self._value()
+        context = self._context()
+        baseline = validate_expected_build_precheck(value)
+        records = []
+        with_sink = validate_expected_build_precheck(
+            value, diagnostic_sink=records.append, diagnostic_context=context
+        )
+
+        def failing_serialization_sink(record):
+            json.dumps({"record": record, "unsupported": object()})
+
+        with_failing_sink = validate_expected_build_precheck(
+            value, diagnostic_sink=failing_serialization_sink, diagnostic_context=context
+        )
+        self.assertEqual(baseline, with_sink)
+        self.assertEqual(baseline, with_failing_sink)
+        record = records[0]
+        self.assertEqual("PASS", record["decision"])
+        self.assertEqual("EXACT_MATCH", record["precheck_status"])
+        self.assertEqual("EXACT_BUILD_PROVENANCE_MATCH", record["precheck_reason"])
+        self.assertEqual("MATCH", record["field_comparisons"]["source_state"])
+        self.assertEqual("MATCH", record["field_comparisons"]["build_variant"])
+        self.assertEqual("MATCH", record["field_comparisons"]["version_name"])
+        self.assertTrue(all(outcome == "MATCH" for outcome in record["schema_comparisons"].values()))
+
+    def test_rejection_behavior_is_identical_with_disabled_working_and_failing_sinks(self):
+        value = self._value(
+            status="REBUILD_REQUIRED", compatibility_status="REBUILD_REQUIRED", execution_allowed=False,
+            reason="HELPER_VERSION_MISMATCH", expected_helper_build_id="a" * 64,
+        )
+        context = self._context(build_id="a" * 64)
+        def outcome(sink):
+            try:
+                validate_expected_build_precheck(value, diagnostic_sink=sink, diagnostic_context=context)
+            except HierarchyTransportError as error:
+                return type(error), error.reason
+            self.fail("rejected precheck unexpectedly passed")
+
+        disabled = outcome(None)
+        records = []
+        enabled = outcome(records.append)
+        def failing_sink(_record):
+            raise OSError("private sink failure")
+        failed_sink = outcome(failing_sink)
+        self.assertEqual(disabled, enabled)
+        self.assertEqual(disabled, failed_sink)
+        self.assertEqual((HierarchyTransportError, "BUILD_IDENTITY_COMPATIBILITY_REQUIRED"), disabled)
+        self.assertEqual("HELPER_VERSION_MISMATCH", records[0]["precheck_reason"])
+
+    def test_one_and_multiple_mismatches_keep_required_error_and_underlying_reason(self):
+        cases = (
+            ("a" * 64, "b" * 64, "c" * 40, "c" * 40, "d" * 64, "d" * 64, {"build_id"}),
+            ("a" * 64, "b" * 64, "e" * 40, "c" * 40, "f" * 64, "d" * 64,
+             {"build_id", "git_commit", "input_digest"}),
+        )
+        for expected_build, observed_build, expected_git, observed_git, expected_digest, observed_digest, mismatch in cases:
+            with self.subTest(mismatch=mismatch):
+                value = self._value(
+                    status="REBUILD_REQUIRED", compatibility_status="REBUILD_REQUIRED", execution_allowed=False,
+                    reason="HELPER_VERSION_MISMATCH",
+                    expected_helper_build_id=expected_build, helper_build_id=observed_build,
+                    expected_git_commit=expected_git, helper_git_commit=observed_git,
+                    expected_helper_input_digest=expected_digest, helper_input_digest=observed_digest,
+                )
+                context = self._context(
+                    build_id=expected_build, git_commit=expected_git, input_digest=expected_digest
+                )
+                records = []
+                with self.assertRaises(HierarchyTransportError) as caught:
+                    validate_expected_build_precheck(
+                        value, diagnostic_sink=records.append, diagnostic_context=context
+                    )
+                self.assertEqual("BUILD_IDENTITY_COMPATIBILITY_REQUIRED", caught.exception.reason)
+                record = records[0]
+                self.assertEqual("BUILD_IDENTITY_COMPATIBILITY_REQUIRED", record["generic_code"])
+                self.assertEqual("BUILD_IDENTITY_COMPATIBILITY_REQUIRED", record["transport_error_code"])
+                self.assertEqual("REBUILD_REQUIRED", record["precheck_status"])
+                self.assertEqual("HELPER_VERSION_MISMATCH", record["precheck_reason"])
+                actual = {key for key, result in record["field_comparisons"].items() if result == "MISMATCH"}
+                self.assertEqual(mismatch, actual)
+
+    def test_missing_input_is_unknown_and_marks_unallocated_ids_unavailable(self):
+        records = []
+        with self.assertRaises(HierarchyTransportError) as caught:
+            validate_expected_build_precheck(None, diagnostic_sink=records.append)
+        self.assertEqual("BUILD_IDENTITY_COMPATIBILITY_REQUIRED", caught.exception.reason)
+        record = records[0]
+        self.assertEqual("UNKNOWN", record["precheck_status"])
+        self.assertIsNone(record["precheck_reason"])
+        self.assertEqual({}, record["expected_identity"])
+        self.assertEqual({}, record["observed_identity"])
+        self.assertFalse(record["request_identity"]["request_id_available"])
+        self.assertFalse(record["request_identity"]["capture_sequence_available"])
+
+    def test_sidecar_reject_leaves_client_authority_and_visit_state_unchanged(self):
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        from talkback_lib import A11yAdbClient
+        from tb_runner.target_attempt_ledger import TargetAttemptLedger
+
+        with tempfile.TemporaryDirectory(prefix="phase6d-precheck-") as temp:
+            client = A11yAdbClient(start_monitor=False)
+            ledger = TargetAttemptLedger(Path(temp) / "run.xlsx")
+            ledger.entries = {"existing": {"state": "MATCHED", "workbook_rows": [3]}}
+            client._target_attempt_ledger = ledger
+            client._hierarchy_capture_sequence = 17
+            client._last_hierarchy_capabilities = {"capture_sequence": 17, "authority_marker": "before"}
+            client._last_hierarchy_transport_metadata = {"capture_sequence": 17, "authority_marker": "before"}
+            client.last_hierarchy_metadata = {"captureSequence": 17, "captureAuthority": {"key": "before"}}
+            client.last_hierarchy_cleanup_diagnostic = {"status": "KEEP_BEFORE"}
+            snapshot = object()
+            client._last_traversal_candidate_snapshot = snapshot
+            before = {
+                "capture_sequence": client._hierarchy_capture_sequence,
+                "capabilities": dict(client._last_hierarchy_capabilities),
+                "transport_metadata": dict(client._last_hierarchy_transport_metadata),
+                "hierarchy_metadata": json.loads(json.dumps(client.last_hierarchy_metadata)),
+                "cleanup": dict(client.last_hierarchy_cleanup_diagnostic),
+                "ledger_entries": json.loads(json.dumps(ledger.entries)),
+            }
+            client._hierarchy_transfer_control = lambda *_args, **_kwargs: self.fail("rejected precheck dispatched")
+            value = self._value(
+                status="REBUILD_REQUIRED", compatibility_status="REBUILD_REQUIRED", execution_allowed=False,
+                reason="HELPER_INPUT_DIGEST_MISMATCH", expected_helper_input_digest="f" * 64,
+            )
+            context = self._context(input_digest="f" * 64)
+            with mock.patch("talkback_lib.uuid.uuid4") as uuid4:
+                with self.assertRaises(HierarchyTransportError) as caught:
+                    client._dump_hierarchy_file_pfd(
+                        dev=None, wait_seconds=1.0, expected_helper_build_identity=value,
+                        diagnostic_context=context,
+                    )
+            self.assertEqual("BUILD_IDENTITY_COMPATIBILITY_REQUIRED", caught.exception.reason)
+            uuid4.assert_not_called()
+            self.assertEqual(before["capture_sequence"], client._hierarchy_capture_sequence)
+            self.assertEqual(before["capabilities"], client._last_hierarchy_capabilities)
+            self.assertEqual(before["transport_metadata"], client._last_hierarchy_transport_metadata)
+            self.assertEqual(before["hierarchy_metadata"], client.last_hierarchy_metadata)
+            self.assertEqual(before["cleanup"], client.last_hierarchy_cleanup_diagnostic)
+            self.assertIs(snapshot, client._last_traversal_candidate_snapshot)
+            self.assertEqual(before["ledger_entries"], ledger.entries)
+
+            sidecar = ledger.path.with_suffix(".build_identity_precheck.jsonl")
+            serialized = sidecar.read_text(encoding="utf-8")
+            record = json.loads(serialized)
+            for secret in (self.SERVICE, self.NONCE, self.PII, "private/path"):
+                self.assertNotIn(secret, serialized)
+            self.assertEqual("HELPER_INPUT_DIGEST_MISMATCH", record["precheck_reason"])
+            self.assertFalse(record["request_identity"]["request_id_available"])
+            self.assertFalse(record["request_identity"]["capture_sequence_available"])
+            self.assertEqual("MISMATCH", record["field_comparisons"]["input_digest"])
+            self.assertEqual("MATCH", record["schema_comparisons"]["candidate_contract"])
+            self.assertNotIn("visit_credit", record)
+            self.assertNotIn("dispatch_authorized", record)
 
 if __name__ == "__main__":
     unittest.main()

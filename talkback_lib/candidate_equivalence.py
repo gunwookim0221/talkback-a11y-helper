@@ -12,6 +12,9 @@ from .reliable_hierarchy_schema import (
     CANDIDATE_CONTRACT_VERSION,
     CANDIDATE_SCHEMA_VERSION,
     RAW_SCHEMA_VERSION,
+    CAPTURE_ENVELOPE_SCHEMA_VERSION,
+    CAPTURE_CANONICALIZATION_VERSION,
+    CAPTURE_ROOT_IDENTITY_VERSION,
     ReliableHierarchySchemaError,
     decode_reliable_hierarchy_payload,
     legacy_dump_tree_response,
@@ -219,10 +222,19 @@ def _capabilities() -> dict[str, Any]:
         "candidate_schema_version": CANDIDATE_SCHEMA_VERSION,
         "supported_candidate_schema_versions": [CANDIDATE_SCHEMA_VERSION],
         "candidate_contract_version": CANDIDATE_CONTRACT_VERSION,
+        "capture_envelope_schema_version": CAPTURE_ENVELOPE_SCHEMA_VERSION,
+        "supported_capture_envelope_schema_versions": [CAPTURE_ENVELOPE_SCHEMA_VERSION],
+        "capture_canonicalization_version": CAPTURE_CANONICALIZATION_VERSION,
+        "supported_capture_canonicalization_versions": [CAPTURE_CANONICALIZATION_VERSION],
+        "capture_root_id_version": CAPTURE_ROOT_IDENTITY_VERSION,
+        "supported_capture_root_id_versions": [CAPTURE_ROOT_IDENTITY_VERSION],
         "capabilities": [
             "content_provider_pfd",
             "service_hierarchy_v2",
             CANDIDATE_SCHEMA_VERSION,
+            CAPTURE_ENVELOPE_SCHEMA_VERSION,
+            CAPTURE_CANONICALIZATION_VERSION,
+            CAPTURE_ROOT_IDENTITY_VERSION,
         ],
     }
 
@@ -299,7 +311,14 @@ def run_candidate_equivalence(
         try:
             if not isinstance(payload, Mapping) or not isinstance(legacy, Mapping):
                 raise ValueError("C4_PAIR_BODY_MISSING")
-            decoded = decode_reliable_hierarchy_payload(payload, capabilities=_capabilities())
+            transport_metadata = pair.get("capture_transport_metadata")
+            if not isinstance(transport_metadata, Mapping):
+                raise ValueError("C4_PAIR_CAPTURE_TRANSPORT_METADATA_MISSING")
+            decoded = decode_reliable_hierarchy_payload(
+                payload,
+                capabilities=_capabilities(),
+                transport_metadata=transport_metadata,
+            )
             v2_compat = legacy_dump_tree_response(decoded)
         except (ReliableHierarchySchemaError, ValueError, TypeError) as exc:
             decode_error = str(exc)

@@ -317,11 +317,25 @@ def test_helper_input_digest_scope_excludes_host_tests_docs_and_reports():
     assert not any(path.startswith(("talkback_lib", "tb_runner", "tests", "docs", "out")) for path in _HELPER_BUILD_INPUTS)
 
 
-def test_bridge_performs_read_only_ping_then_correlated_schema_capability_check():
+def test_bridge_performs_read_only_ping_then_correlated_schema_capability_check(monkeypatch):
     from pathlib import Path
+    import talkback_lib.exact_node_protocol as exact_node_protocol
 
     root = Path(__file__).resolve().parents[1]
-    expected = compute_repo_helper_build_identity(root)
+    # Pin an explicitly clean helper-input manifest; this test runs in a
+    # workspace whose Android helper inputs may intentionally be dirty.
+    expected = {
+        "build_id": _build_id(EXPECTED_COMMIT),
+        "git_commit": EXPECTED_COMMIT,
+        "helper_input_digest": INPUT_DIGEST,
+        "source_state": "CLEAN",
+        "build_variant": "debug",
+        "gradle_version": GRADLE_VERSION,
+        "version_name": "1.0",
+        "version_code": 1,
+    }
+    monkeypatch.setattr(exact_node_protocol, "compute_repo_helper_build_identity",
+                        lambda _root, **_kwargs: dict(expected))
     installed_commit = "f" * 40
     digest = expected["helper_input_digest"]
     ping = _ping(commit=installed_commit, digest=digest)
@@ -363,3 +377,154 @@ def test_bridge_performs_read_only_ping_then_correlated_schema_capability_check(
     query_extras = observed["capability_query"][1]
     assert query_extras[:2] == ["--es", "queryNonce"]
     assert len(query_extras[2]) == 32
+
+
+def test_repo_helper_precheck_accepts_dirty_checkout_when_inputs_match_approved_helper(monkeypatch, tmp_path):
+    import talkback_lib.exact_node_protocol as exact_node_protocol
+
+    dirty_identity = {
+        "build_id": _build_id(EXPECTED_COMMIT),
+        "git_commit": EXPECTED_COMMIT,
+        "helper_input_digest": INPUT_DIGEST,
+        "source_state": "DIRTY",
+        "build_variant": "debug",
+        "gradle_version": GRADLE_VERSION,
+        "version_name": "1.0",
+        "version_code": 1,
+    }
+    monkeypatch.setattr(exact_node_protocol, "compute_repo_helper_build_identity",
+                        lambda _root, **_kwargs: dict(dirty_identity))
+    result = exact_node_protocol.precheck_repo_helper_build_identity(
+        tmp_path, _ping(), capabilities=_capabilities(),
+    )
+
+    assert result.status == HelperIdentityStatus.COMPATIBLE_SAME_HELPER_INPUT
+    assert result.reason == "GIT_COMMIT_DIFFERENT_BUT_HELPER_INPUT_COMPATIBLE"
+    assert result.expected_helper_input_digest == INPUT_DIGEST
+    assert helper_compatibility_allows_execution(result)
+
+
+def test_repo_helper_precheck_still_rejects_dirty_inputs_that_differ_from_installed(monkeypatch, tmp_path):
+    import talkback_lib.exact_node_protocol as exact_node_protocol
+
+    dirty_identity = {
+        "build_id": _build_id(EXPECTED_COMMIT),
+        "git_commit": EXPECTED_COMMIT,
+        "helper_input_digest": "b" * 64,
+        "source_state": "DIRTY",
+        "build_variant": "debug",
+        "gradle_version": GRADLE_VERSION,
+        "version_name": "1.0",
+        "version_code": 1,
+    }
+    monkeypatch.setattr(exact_node_protocol, "compute_repo_helper_build_identity",
+                        lambda _root, **_kwargs: dict(dirty_identity))
+    result = exact_node_protocol.precheck_repo_helper_build_identity(
+        tmp_path, _ping(), capabilities=_capabilities(),
+    )
+
+    assert result.status == HelperIdentityStatus.REBUILD_REQUIRED
+    assert result.reason == "HELPER_INPUT_DIGEST_MISMATCH"
+    assert not helper_compatibility_allows_execution(result)
+
+
+def test_bridge_precheck_diagnostics_are_opt_in_and_compare_manifest_and_schemas(monkeypatch, tmp_path):
+    import json
+    import talkback_lib.exact_node_protocol as exact_node_protocol
+    import talkback_lib.helper_bridge as helper_bridge_module
+    from talkback_lib.exact_node_protocol import PROTOCOL_VERSION as helper_protocol
+    from talkback_lib.hierarchy_file_transport import (
+        HierarchyTransportError, validate_expected_build_precheck,
+    )
+
+    expected = {
+        "build_id": _build_id(EXPECTED_COMMIT), "git_commit": EXPECTED_COMMIT,
+        "helper_input_digest": INPUT_DIGEST, "source_state": "CLEAN", "build_variant": "debug",
+        "gradle_version": GRADLE_VERSION, "version_name": "1.0", "version_code": 1,
+    }
+    monkeypatch.setattr(exact_node_protocol, "compute_repo_helper_build_identity",
+                        lambda _root, **_kwargs: dict(expected))
+    monkeypatch.setattr(helper_bridge_module, "compute_repo_helper_build_identity",
+                        lambda _root, **_kwargs: dict(expected))
+    ping = _ping(commit=INSTALLED_COMMIT, digest=INPUT_DIGEST)
+    capabilities = _capabilities(commit=INSTALLED_COMMIT, digest=INPUT_DIGEST)
+
+    class FakeClient:
+        def clear_logcat(self, dev=None):
+            return None
+
+        def _broadcast(self, dev, action, extras):
+            return "read-only-ping-dispatched"
+
+        def _read_log_result(self, dev, prefix, req_id, wait_seconds):
+            return {**ping, "reqId": req_id}
+
+        def _hierarchy_transfer_control(self, dev, action, extras, *, request_id, remaining_seconds):
+            query_nonce = extras[extras.index("--es") + 2]
+            return {**capabilities, "query_nonce": query_nonce}
+
+    bridge = HelperBridge(FakeClient())
+    baseline = bridge.precheck_helper_build_identity(repo_root=tmp_path)
+    assert "_diagnostic_identity_projection" not in baseline
+    assert "_expected_local_manifest" not in baseline
+
+    contexts = []
+    observed = bridge.precheck_helper_build_identity(
+        repo_root=tmp_path, diagnostic_observer=contexts.append
+    )
+    assert observed == baseline
+    assert "_diagnostic_identity_projection" not in observed
+    context = contexts[0]
+    assert context["expected_local_manifest"]["build_id"] == expected["build_id"]
+    assert context["expected_local_manifest"]["source_state"] == "CLEAN"
+    assert context["expected_local_manifest"]["build_variant"] == "debug"
+    assert context["expected_local_manifest"]["gradle_version"] == GRADLE_VERSION
+    assert context["expected_schemas"]["helper_build_identity_schema"] == "1"
+    assert context["expected_schemas"]["helper_protocol"] == helper_protocol
+    record = []
+    validate_expected_build_precheck(observed, diagnostic_sink=record.append, diagnostic_context=context)
+    diagnostic = record[0]
+    assert diagnostic["manifest_comparisons"]["PING"]["input_digest"] == "MATCH"
+    assert diagnostic["manifest_comparisons"]["PING"]["source_state"] == "MATCH"
+    assert diagnostic["manifest_comparisons"]["PING"]["build_variant"] == "MATCH"
+    assert diagnostic["manifest_comparisons"]["PING"]["version_name"] == "MATCH"
+    assert all(value == "MATCH" for value in diagnostic["schema_comparisons"].values())
+
+    ping = _ping(commit=INSTALLED_COMMIT, digest=INPUT_DIGEST, versionName="9.9")
+    capabilities = _capabilities(commit="e" * 40, digest="b" * 64)
+    capabilities["service_instance_id"] = "capability-private-service-id"
+    capabilities["candidate_contract_version"] = "future-contract.v9"
+    contexts = []
+    rejected = bridge.precheck_helper_build_identity(
+        repo_root=tmp_path, diagnostic_observer=contexts.append
+    )
+    assert "_diagnostic_identity_projection" not in rejected
+    records = []
+    with pytest.raises(HierarchyTransportError):
+        validate_expected_build_precheck(
+            rejected, diagnostic_sink=records.append, diagnostic_context=contexts[0]
+        )
+    diagnostic = records[0]
+    assert diagnostic["manifest_comparisons"]["PING"]["version_name"] == "MISMATCH"
+    assert diagnostic["schema_comparisons"]["candidate_contract"] == "MISMATCH"
+    assert diagnostic["schema_comparisons"]["control_schema"] == "MATCH"
+    assert diagnostic["source_projection"]["field_comparisons"]["service_instance_id"] == "MISMATCH"
+    projected = json.dumps(diagnostic)
+    assert "capability-private-service-id" not in projected
+    assert "query_nonce" not in projected
+    assert "private control detail" not in projected
+
+    class MissingCapabilitiesClient(FakeClient):
+        def _hierarchy_transfer_control(self, dev, action, extras, *, request_id, remaining_seconds):
+            raise OSError("private control detail")
+
+    contexts = []
+    missing = HelperBridge(MissingCapabilitiesClient()).precheck_helper_build_identity(
+        repo_root=tmp_path, diagnostic_observer=contexts.append
+    )
+    assert "_diagnostic_identity_projection" not in missing
+    missing_capabilities = contexts[0]["source_projection"]["sources"]["CAPABILITIES"]
+    assert missing_capabilities["available"] is False
+    assert "generation" not in missing_capabilities
+    assert "service_identity_present" not in missing_capabilities
+    assert "private control detail" not in json.dumps(contexts[0])

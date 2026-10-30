@@ -46,7 +46,7 @@ class HierarchyPayloadTransferTest {
         val payload: ByteArray,
     )
 
-    private fun beginAndPublish(payload: ByteArray = samplePayload()): Ready {
+    private fun beginAndPublish(payload: ByteArray? = null): Ready {
         val store = HierarchyPayloadStore(
             temporaryFolder.newFolder(),
             UUID.randomUUID().toString(),
@@ -58,11 +58,14 @@ class HierarchyPayloadTransferTest {
         assertEquals("ACCEPTED", accepted.getString("status"))
         val handle = HierarchyPayloadStore.RequestHandle(requestId, clientNonce, accepted.getLong("generation"))
         assertTrue(store.markCollecting(handle))
-        val ready = store.publish(handle, payload)
-        return Ready(store, handle, ready, payload)
+        val sequence = store.reserveCaptureSequence(handle)
+        assertNotNull(sequence)
+        val actualPayload = payload ?: samplePayload(store.processEpoch, handle.generation, sequence!!)
+        val ready = store.publish(handle, actualPayload)
+        return Ready(store, handle, ready, actualPayload)
     }
 
-    private fun samplePayload(): ByteArray {
+    private fun samplePayload(processEpoch: String, generation: Long, captureSequence: Long): ByteArray {
         val node = JSONObject()
             .put("text", "안녕하세요 🌿\nline")
             .put("windowId", 1)
@@ -89,6 +92,37 @@ class HierarchyPayloadTransferTest {
             .put("actionableDescendantClassName", JSONObject.NULL)
             .put("actionableDescendantContentDescription", JSONObject.NULL)
         val traversalRootRef = "windows[0].root"
+        val rootDigest = CaptureCanonicalJson.sha256(node)
+        val rootCaptureId = ReliableHierarchyCandidateContract.rootCaptureId(
+            requestId, processEpoch, generation, serviceId, captureSequence, traversalRootRef, rootDigest,
+        )
+        val candidates = JSONObject()
+            .put("schema_version", ReliableHierarchyCandidateContract.SCHEMA_VERSION)
+            .put("candidate_contract_version", ReliableHierarchyCandidateContract.CONTRACT_VERSION)
+            .put("algorithmVersion", A11yNavigator.NAVIGATOR_ALGORITHM_VERSION)
+            .put("analyzerVersion", A11yTraversalAnalyzer.VERSION)
+            .put("profileId", ReliableHierarchyCandidateContract.PROFILE_ID)
+            .put("profileVersion", ReliableHierarchyCandidateContract.PROFILE_VERSION)
+            .put("completion", JSONObject().put("status", "COMPLETE").put("complete", true).put("candidate_count", 1))
+            .put("traversalRootRef", traversalRootRef)
+            .put("traversalRootWindowId", 1)
+            .put("canScrollDown", false)
+            .put("scrollAxisContract", "axis-v1")
+            .put("source_root_digest", rootDigest)
+            .put("rootCaptureId", rootCaptureId)
+            .put("candidates", JSONArray().put(candidate))
+        val candidateDigest = CaptureCanonicalJson.sha256(candidates)
+        val captureEnvelope = JSONObject()
+            .put("schema_version", HierarchyPayloadActions.CAPTURE_ENVELOPE_SCHEMA)
+            .put("canonicalization", CaptureCanonicalJson.VERSION)
+            .put("request_id", requestId)
+            .put("process_epoch", processEpoch)
+            .put("generation", generation)
+            .put("service_instance_id", serviceId)
+            .put("capture_sequence", captureSequence)
+            .put("root_ref", traversalRootRef)
+            .put("root_digest", rootDigest)
+            .put("candidate_digest", candidateDigest)
         return JSONObject()
             .put("reqId", requestId)
             .put("success", true)
@@ -99,19 +133,8 @@ class HierarchyPayloadTransferTest {
             .put("nodeCount", 1)
             .put("nodes", JSONArray().put(node))
             .put("windows", JSONArray().put(JSONObject().put("id", 1).put("root", node)))
-            .put("traversalCandidates", JSONObject()
-                .put("schema_version", ReliableHierarchyCandidateContract.SCHEMA_VERSION)
-                .put("candidate_contract_version", ReliableHierarchyCandidateContract.CONTRACT_VERSION)
-                .put("algorithmVersion", A11yNavigator.NAVIGATOR_ALGORITHM_VERSION)
-                .put("analyzerVersion", A11yTraversalAnalyzer.VERSION)
-                .put("profileId", ReliableHierarchyCandidateContract.PROFILE_ID)
-                .put("profileVersion", ReliableHierarchyCandidateContract.PROFILE_VERSION)
-                .put("completion", JSONObject().put("status", "COMPLETE").put("complete", true).put("candidate_count", 1))
-                .put("traversalRootRef", traversalRootRef)
-                .put("traversalRootWindowId", 1)
-                .put("canScrollDown", false)
-                .put("scrollAxisContract", "axis-v1")
-                .put("candidates", JSONArray().put(candidate)))
+            .put("traversalCandidates", candidates)
+            .put("captureEnvelope", captureEnvelope)
             .toString()
             .toByteArray(StandardCharsets.UTF_8)
     }
@@ -127,6 +150,9 @@ class HierarchyPayloadTransferTest {
         assertEquals(clientNonce, response.getString("client_nonce"))
         assertEquals(serviceId, response.getString("service_instance_id"))
         assertEquals(1, response.getLong("generation"))
+        assertEquals(1, response.getLong("capture_sequence"))
+        assertEquals(HierarchyPayloadActions.CAPTURE_ENVELOPE_SCHEMA, response.getString("capture_envelope_schema_version"))
+        assertEquals(CaptureCanonicalJson.VERSION, response.getString("capture_canonicalization_version"))
         assertEquals(ready.payload.size, response.getInt("payload_bytes"))
         assertEquals(HierarchyPayloadEnvelope.sha256(ready.payload), response.getString("payload_sha256"))
         assertEquals(HierarchyPayloadActions.PAYLOAD_SCHEMA, response.getString("payload_schema_version"))
@@ -145,6 +171,22 @@ class HierarchyPayloadTransferTest {
         assertEquals(HierarchyPayloadActions.PAYLOAD_SCHEMA, payload.getString("schemaVersion"))
         assertTrue(payload.has("traversalCandidates"))
         assertEquals(payload.getString("traversalRootRef"), payload.getJSONObject("traversalCandidates").getString("traversalRootRef"))
+    }
+
+    @Test
+    fun publicationFailsClosedWithoutProducerCaptureSequence() {
+        val store = HierarchyPayloadStore(
+            temporaryFolder.newFolder(), UUID.randomUUID().toString(),
+            elapsedRealtimeMs = { 100L }, helperIdentity = helperIdentity,
+        )
+        store.serviceConnected(serviceId)
+        val accepted = store.begin(requestId, clientNonce, initialQueryNonce, buildId, gitCommit, serviceId)
+        val handle = HierarchyPayloadStore.RequestHandle(requestId, clientNonce, accepted.getLong("generation"))
+        assertTrue(store.markCollecting(handle))
+        val result = store.publish(handle, samplePayload(store.processEpoch, handle.generation, 1L))
+        assertEquals("FAILED", result.getString("status"))
+        assertEquals("CAPTURE_SEQUENCE_MISSING", result.getString("error_code"))
+        assertFalse(result.getBoolean("payload_complete"))
     }
 
     @Test
@@ -232,9 +274,9 @@ class HierarchyPayloadTransferTest {
         val ready = beginAndPublish()
         ready.store.status(requestId, clientNonce, "7".repeat(32))
         val freshAckNonce = "8".repeat(32)
-        val rejected = ready.store.acknowledge(requestId, clientNonce, freshAckNonce, "0".repeat(64))
+        val rejected = ready.store.acknowledge(requestId, clientNonce, freshAckNonce, "0".repeat(64), ready.store.processEpoch, ready.response.getLong("generation"))
         assertEquals("ACK_IDENTITY_MISMATCH", rejected.getString("error_code"))
-        val accepted = ready.store.acknowledge(requestId, clientNonce, freshAckNonce, ready.response.getString("payload_sha256"))
+        val accepted = ready.store.acknowledge(requestId, clientNonce, freshAckNonce, ready.response.getString("payload_sha256"), ready.store.processEpoch, ready.response.getLong("generation"))
         assertEquals("ACKED", accepted.getString("status"))
         assertEquals(clientNonce, accepted.getString("client_nonce"))
         assertEquals(freshAckNonce, accepted.getString("query_nonce"))
@@ -246,7 +288,7 @@ class HierarchyPayloadTransferTest {
         val ready = beginAndPublish()
         val uri = Uri.parse(ready.response.getString("payload_uri"))
         assertNotNull(ready.store.resolveReadyFile(uri))
-        val cancelled = ready.store.cancel(requestId, clientNonce, "9".repeat(32))
+        val cancelled = ready.store.cancel(requestId, clientNonce, "9".repeat(32), ready.store.processEpoch, ready.response.getLong("generation"))
         assertEquals("CANCELLED", cancelled.getString("status"))
         assertEquals("HOST_CANCELLED", cancelled.getString("error_code"))
         assertNull(ready.store.resolveReadyFile(uri))
@@ -285,12 +327,18 @@ class HierarchyPayloadTransferTest {
         assertEquals("service-hierarchy-v1", caps.getString("diagnostic_schema_version"))
         assertEquals(ReliableHierarchyCandidateContract.SCHEMA_VERSION, caps.getString("candidate_schema_version"))
         assertEquals(ReliableHierarchyCandidateContract.CONTRACT_VERSION, caps.getString("candidate_contract_version"))
+        assertEquals(HierarchyPayloadActions.CAPTURE_ENVELOPE_SCHEMA, caps.getString("capture_envelope_schema_version"))
+        assertEquals(CaptureCanonicalJson.VERSION, caps.getString("capture_canonicalization_version"))
+        assertEquals(ReliableHierarchyCandidateContract.ROOT_CAPTURE_ID_VERSION, caps.getString("capture_root_id_version"))
         assertEquals("service-hierarchy-v2", caps.getJSONArray("supported_payload_schema_versions").getString(0))
         assertEquals("service-hierarchy-v1", caps.getJSONArray("diagnostic_payload_schema_versions").getString(0))
         assertEquals(ReliableHierarchyCandidateContract.SCHEMA_VERSION, caps.getJSONArray("supported_candidate_schema_versions").getString(0))
         val advertised = caps.getJSONArray("capabilities")
         assertTrue((0 until advertised.length()).any { advertised.getString(it) == "service_hierarchy_v2" })
         assertTrue((0 until advertised.length()).any { advertised.getString(it) == ReliableHierarchyCandidateContract.SCHEMA_VERSION })
+        assertTrue((0 until advertised.length()).any {
+            advertised.getString(it) == ReliableHierarchyCandidateContract.ROOT_CAPTURE_ID_VERSION
+        })
     }
 
     @Test
