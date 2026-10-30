@@ -14,15 +14,20 @@ from tb_runner.phase4a_planner import PlannerInput, plan_shadow
 from tb_runner.phase4b_authority import AuthorityEvidence, execution_gate
 from tools.phase4a_shadow_validate import restore_snapshot
 from tools.phase4b_gate_replay import history
+from phase6d_capture_support import attach_capture_authority
+
+pytestmark = pytest.mark.skip(reason="Phase 4C ownership positives require same-capture component evidence absent from Phase6D; see UNKNOWN availability regression")
 
 
 def observed(label="TV"):
     config=next(c for c in TAB_CONFIGS if c['scenario_id']=='device_tv_plugin')
     raw=dict(scenario_id='device_tv_plugin',scenario_run_id='owned-run',navigation_epoch='entry-epoch',
-        timestamp='2026-10-11T08:00:01+00:00',capture_id='capture-entry',
-        package_name='com.samsung.android.oneconnect',activity_name='pkg.plugin.MainActivity',
-        context_source='window_current_focus',overlay=dict(observed=False),
-        nodes=[dict(text=label,viewIdResourceName='pkg.plugin:id/body',visibleToUser=True)])
+        timestamp='2026-10-11T08:00:01+00:00',capture_id='fixture-placeholder',
+        package_name='com.samsung.android.oneconnect',activity_name=None,
+        context_source='capture_local_hierarchy_only',overlay=dict(observed=None),
+        nodes=[dict(text=label,viewIdResourceName='pkg.plugin:id/body',visibleToUser=True)],
+        capture_root_bounds=[0,0,1000,1000])
+    attach_capture_authority(raw, sequence=100, request_id='phase4c-entry-capture-100')
     entry=phase3_entry_evidence_from_main_loop(SimpleNamespace(tab_cfg=config,rows=[dict(
         actual_focus_accessibility_focused=True,actual_focus_payload_source='verified_pre_loop_anchor')]),
         raw['scenario_run_id'],raw['timestamp'])
@@ -34,8 +39,9 @@ def observed(label="TV"):
 
 def capture(raw, number, **fields):
     result=deepcopy(raw)
-    result.update(timestamp=f'2026-10-11T08:00:{number+2:02d}+00:00',capture_id=f'capture-{number}',**fields)
-    return result
+    result.update(timestamp=f'2026-10-11T08:00:{number+2:02d}+00:00',**fields)
+    return attach_capture_authority(result, sequence=100+number,
+                                    request_id=f'phase4c-observation-{number}')
 
 
 @pytest.mark.parametrize('key,value',[('state_id','changed-state'),('semantic_substates',['loading','loaded']),

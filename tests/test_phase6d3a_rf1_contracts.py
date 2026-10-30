@@ -12,6 +12,7 @@ from talkback_lib.native_dispatch_evidence import (
     native_dispatch_evidence,
     native_dispatch_operation,
 )
+from tb_runner.phase3_context import resolve_phase3_context
 from tb_runner.redirect_evidence import (
     CanonicalTargetIdentity,
     EvidenceStateReference,
@@ -47,9 +48,15 @@ def _observation_fixture():
     raw.update({key: graph_context[key] for key in (
         "package_name", "activity_name", "context_source", "navigation_context",
         "selected_tab", "observation_coverage")})
+    # Rebind the exact root after fixture edits. The envelope proves hierarchy
+    # capture only; it intentionally carries no Activity/component proof.
+    from phase6d_capture_support import attach_capture_authority
+    raw = attach_capture_authority(raw, production=True, sequence=901,
+                                   request_id="rf1-capture-local-root")
     clock = EvidenceClock(scope_id="rf1-observation-scope")
     observation = clock.finish_observation(clock.begin_observation())
-    raw["_exploration_observation"] = observation
+    from phase6d_capture_support import bind_observation_marker
+    bind_observation_marker(raw, observation)
     graph_id = build_graph_state_identity(raw).state_id
     discovery_id = planner_input.snapshot.state_id
     frame = ProductionEvidenceFrame(
@@ -68,7 +75,7 @@ def _observation_fixture():
             "discovery_state_scope_v1", discovery_id, observation["observation_id"],
             observation["observation_sequence"], observation["scope_id"],
             observation["action_epoch"], observation["context_revision"]),
-        plugin_context={"status": "VERIFIED_PLUGIN_CONTEXT", "metadata": {"tab": "Life"}},
+        plugin_context=resolve_phase3_context(raw),
         substate=plan_shadow(planner_input).to_dict().get("semantic_substates", []),
         lifecycle_status="CLEAR", helper_status="READY",
         overlay_status="CLEAR", recovery_status="CLEAR", transition_status="CLEAR")
@@ -81,7 +88,8 @@ def _observation_fixture():
     assert graph_id != discovery_id  # separate state namespaces/producers
     result = ProductionRedirectProofProvider().build_target_proof_set(
         frame, planner_input, raw, authority_evidence=authority)
-    assert result.build_status == "COMPLETE", result.reason
+    assert result.build_status == "UNKNOWN", result.reason
+    assert result.reason == "CAPTURE_COMPONENT_UNKNOWN"
     return planner_input, raw, frame, result
 
 
@@ -105,27 +113,32 @@ def _ready_bundle():
                                  "target_identity": result.production_target.to_dict()})
 
 
-def test_actual_production_provider_builds_complete_read_only_proofs_without_permit():
+def test_component_unknown_capture_cannot_build_redirect_proofs_or_ready():
     bundle = _ready_bundle()
     assessment = evaluate_redirect_readiness(bundle)
-    assert assessment.status == "READY"
+    assert bundle.frame.plugin_context["status"] == "UNRESOLVED_CONTEXT"
+    assert bundle.proof_set.proof_complete is False
+    assert dict(bundle.proof_set.source_refs) == {}
+    assert assessment.status == "UNKNOWN"
+    assert "PLUGIN_CONTEXT_UNKNOWN" in assessment.reason_codes
     assert assessment.execution_authority == "NONE"
     assert assessment.phase5_permit_issued is False
-    assert bundle.proof_set.assessment_kind == "PHASE5A_READ_ONLY_ASSESSMENT"
-    assert bundle.proof_set.source_refs["planner"] == "phase4a_planner.plan_shadow"
-    assert bundle.proof_set.source_refs["phase4_gate"].startswith(
-        "phase4b_authority.execution_gate:")
-    assert bundle.proof_set.source_refs["binding"].startswith(
-        "phase4b_target_binding.resolve_focus_target:")
-    assert bundle.proof_set.source_refs["safety_assessment"].startswith(
-        "phase5a_safety.SafetySession.assess:")
-    assert "authorize_focus_target" not in " ".join(bundle.proof_set.source_refs.values())
-    assert bundle.frontier_target.identity_domain == "production_scenario_scope_v1"
-    assert bundle.proof_set.target_identity.identity_domain == "discovery_state_scope_v1"
-    assert bundle.frame.graph_state_ref.state_id != bundle.frame.discovery_state_ref.state_id
     stamp = redirect_revalidation_stamp(bundle, assessment)
-    assert stamp.readiness_status == "READY"
+    assert stamp.readiness_status == "UNKNOWN"
     assert stamp.permit is False
+
+
+def test_forged_verified_frame_cannot_override_component_unknown_capture():
+    planner_input, raw, frame, _ = _observation_fixture()
+    forged = replace(frame, plugin_context={
+        "status": "VERIFIED_PLUGIN_CONTEXT",
+        "proof_capture_id": raw["capture_id"],
+    })
+    result = ProductionRedirectProofProvider().build_target_proof_set(
+        forged, planner_input, raw)
+    assert result.build_status == "UNKNOWN"
+    assert result.reason == "CAPTURE_COMPONENT_UNKNOWN"
+    assert result.proof_set.proof_complete is False
 
 
 def test_provider_missing_phase4_input_stays_unknown_and_does_not_invent_ready():
@@ -134,7 +147,8 @@ def test_provider_missing_phase4_input_stays_unknown_and_does_not_invent_ready()
         frame, planner_input, raw)
     assert result.proof_set.phase4_gate_status == "UNKNOWN"
     assert result.proof_set.proof_complete is False
-    assert result.proof_set.safety_assessment_status == "ALLOWED"
+    assert result.proof_set.safety_assessment_status == "UNKNOWN"
+    assert result.reason == "CAPTURE_COMPONENT_UNKNOWN"
 
 
 def test_provider_rejects_misaligned_observation_provenance():
@@ -286,13 +300,14 @@ def test_identity_bridge_status_is_fail_closed(status, expected):
     assert assessment.status == expected
 
 
-def test_identity_proof_disagreement_blocks_readiness():
+def test_component_unknown_cannot_be_promoted_by_target_identity_mutation():
     bundle = _ready_bundle()
     changed = replace(bundle.proof_set.target_identity, bounds="900,900,999,999")
     proof = replace(bundle.proof_set, target_identity=changed)
     assessment = evaluate_redirect_readiness(replace(bundle, proof_set=proof))
-    assert assessment.status == "BLOCKED"
-    assert "PROOF_TARGET_DISAGREEMENT" in assessment.reason_codes
+    assert assessment.status == "UNKNOWN"
+    assert assessment.execution_authority == "NONE"
+    assert assessment.phase5_permit_issued is False
 
 
 @pytest.mark.parametrize("mutate", [

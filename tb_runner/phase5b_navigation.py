@@ -574,6 +574,7 @@ class SafeNavigationSession:
         allowed = _HIERARCHY_EVIDENCE_EXTRAS | {
             "queryNonce", "requestId", "clientNonce", "expectedBuildId",
             "expectedGitCommit", "expectedServiceInstanceId", "payloadSha256",
+            "expectedProcessEpoch", "expectedGeneration",
         }
         if set(extras) - allowed or not _HEX32.fullmatch(extras.get("queryNonce", "")):
             return {"operation": operation, "valid": False}
@@ -585,7 +586,12 @@ class SafeNavigationSession:
             "ACK": {"requestId", "clientNonce", "payloadSha256", "queryNonce"},
             "CANCEL": {"requestId", "clientNonce", "queryNonce"},
         }[operation]
-        if set(extras) - (_HIERARCHY_EVIDENCE_EXTRAS | required) or not required.issubset(extras):
+        binding = {"expectedProcessEpoch", "expectedGeneration"}
+        supplied_binding = set(extras) & binding
+        if (supplied_binding and (operation not in {"ACK", "CANCEL"} or supplied_binding != binding
+                or not re.fullmatch(r"[1-9][0-9]*", extras.get("expectedGeneration", "")))):
+            return {"operation": operation, "valid": False}
+        if set(extras) - (_HIERARCHY_EVIDENCE_EXTRAS | required | (binding if supplied_binding else set())) or not required.issubset(extras):
             return {"operation": operation, "valid": False}
         if operation != "CAPABILITIES":
             if not _HEX32.fullmatch(extras.get("requestId", "")):
@@ -643,6 +649,10 @@ class SafeNavigationSession:
             if commit:
                 request["status_seen"] = True
             return parsed
+        if operation in {"ACK", "CANCEL"} and "expectedGeneration" in extras and request["payload_generation"] is not None:
+            if (extras["expectedGeneration"] != str(request["payload_generation"])
+                    or extras["expectedProcessEpoch"] != request["payload_process_epoch"]):
+                return {"operation": operation, "valid": False}
         if operation == "ACK":
             if (not request["payload_read"] or request["ack_sent"] or request["cancel_sent"]
                     or extras.get("payloadSha256") != request["payload_sha256"]):

@@ -452,6 +452,13 @@ def controlled_collect(*, client, dev, scenario, step, raw, recommendation, deci
                                     "PLANNER_NO_SAFE_ACTION" if decision.reason == "NO_SAFE_PLANNER_ACTION" else
                                     "PLANNER_BLOCKED_BY_GATE")
         audit["actual_execution_mode"] = decision.mode
+        if decision.reason == "SAFETY_BLOCKED":
+            audit.update(fallback_used=False, fallback_reason="UNKNOWN_OVERLAY_FAIL_CLOSED",
+                         production_fallback_action="", planner_executed=False)
+            row = collect(**{**collect_kwargs, "move": False})
+            if isinstance(row, dict):
+                row["move_result"] = "SAFETY_BLOCKED_UNKNOWN_OVERLAY"
+            return attach_reconciliation_lineage(row)
         return fallback(decision.reason)
     chosen = recommendation.to_dict()
     from tb_runner.redirect_evidence import record_existing_proof

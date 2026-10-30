@@ -29,6 +29,7 @@ from tb_runner.diagnostics import is_global_nav_row
 from tb_runner import scroll_reliability
 from talkback_lib.window_lifecycle import (
     capture_window_lifecycle,
+    capture_entry_window_diagnostic,
     configure_window_lifecycle,
     get_talkback_restart_event,
     set_window_lifecycle_step,
@@ -528,13 +529,19 @@ def _capture_phase6d3a_production_observation(*, client: Any, dev: str,
     else:
         capture_error = ""
     marker = clock.finish_observation(token) if clock is not None and token is not None else {}
+    from talkback_lib.reliable_hierarchy_schema import validate_capture_authority
+    authority = validate_capture_authority(raw.get("capture_authority")) if isinstance(raw, dict) else None
+    capture_id = authority.capture_key if authority is not None else ""
     aligned = bool(
         clock is not None and marker and clock.current(marker)
         and isinstance(raw, dict) and raw.get("snapshot_coherent") is True
-        and raw.get("capture_id")
-        and all(raw.get(key) == raw.get("capture_id") for key in (
-            "hierarchy_capture_id", "focus_capture_id", "geometry_capture_id",
-        ))
+        and authority is not None and raw.get("capture_id") == capture_id
+        and raw.get("package_name") == authority.hierarchy_package_name
+        and raw.get("traversal_root_ref") == authority.root_ref
+        and raw.get("traversal_root_window_id") == authority.hierarchy_window_id
+        and raw.get("hierarchy_capture_id") == capture_id
+        and raw.get("focus_capture_id") in {None, capture_id}
+        and raw.get("geometry_capture_id") in {None, capture_id}
     )
     if not isinstance(raw, dict):
         row["state_graph_observation"] = {
@@ -559,6 +566,8 @@ def _capture_phase6d3a_production_observation(*, client: Any, dev: str,
     if not isinstance(proof, Mapping) or proof.get("scenario_run_id") != run_id:
         proof = owner.get("plugin_context_evidence")
     proof = deepcopy(dict(proof)) if isinstance(proof, Mapping) else {}
+    from tb_runner.plugin_entry_provenance import evidence_invocation_identity
+    raw.update(evidence_invocation_identity(client, scenario_id))
     raw.update(
         scenario_id=scenario_id,
         scenario_run_id=run_id,
@@ -587,6 +596,11 @@ def _capture_phase6d3a_production_observation(*, client: Any, dev: str,
             )
             raw["phase6d3a_entity_root_provenance"] = deepcopy(provenance)
             row["phase6d3a_entity_root_provenance"] = deepcopy(provenance)
+            _phase6d3a_attach_entry_diagnostics(client, row)
+            _phase6d3a_emit_entry_diagnostics(
+                getattr(client, "evidence_runtime", None),
+                row.get("phase6d3a_entry_diagnostics"), "RESULTING_ROOT_DIAGNOSTIC_UPDATED",
+            )
             owner["entity_root_provenance"] = deepcopy(provenance)
             client._phase6d3a_redirect_context = owner
     except Exception as exc:
@@ -620,11 +634,12 @@ def _capture_phase6d3a_production_observation(*, client: Any, dev: str,
         "scenario_run_id": run_id,
         "step_index": int(row.get("step_index", 0) or 0),
         "capture_id": capture_id,
+        "capture_authority": authority.to_dict() if authority is not None else None,
         "snapshot_coherent": raw.get("snapshot_coherent") is True,
         "navigation_epoch": navigation_epoch,
-        "hierarchy_capture_id": str(raw.get("hierarchy_capture_id") or capture_id),
-        "focus_capture_id": str(raw.get("focus_capture_id") or capture_id),
-        "geometry_capture_id": str(raw.get("geometry_capture_id") or capture_id),
+        "hierarchy_capture_id": raw.get("hierarchy_capture_id"),
+        "focus_capture_id": raw.get("focus_capture_id"),
+        "geometry_capture_id": raw.get("geometry_capture_id"),
         "observation": deepcopy(marker),
         "capture_complete": aligned,
         "coverage_source": str(raw.get("coverage_source") or "unknown"),
@@ -3693,8 +3708,13 @@ def _canonical_hierarchy_content(value: Mapping[str, Any]) -> str:
 def _capture_device_plugin_start_observation(
     client: A11yAdbClient,
     dev: str,
+    *,
+    acquisition_stage: str = "device_plugin_start",
 ) -> tuple[dict[str, Any] | None, str]:
     """Capture foreground, package authority, and candidates from one request."""
+    stage = re.sub(
+        r"[^A-Za-z0-9_.-]", "_", str(acquisition_stage or "device_plugin_start").strip()
+    )[:80] or "device_plugin_start"
     from talkback_lib import TraversalCandidateSnapshot
     from talkback_lib.reliable_hierarchy_schema import (
         ReliableHierarchyPayload,
@@ -3712,7 +3732,18 @@ def _capture_device_plugin_start_observation(
     try:
         snapshot = capture_fn(dev=dev)
     except Exception as exc:
-        log(f"[DEVICE_PLUGIN_START][capture] failed reason='{type(exc).__name__}'")
+        transport_reason = re.sub(
+            r"[^A-Za-z0-9_.:-]", "_", str(getattr(exc, "reason", "") or "UNKNOWN")
+        )[:96] or "UNKNOWN"
+        request_id = re.sub(
+            r"[^A-Za-z0-9_.:-]", "_", str(getattr(exc, "request_id", "") or "UNKNOWN")
+        )[:96] or "UNKNOWN"
+        log(
+            f"[DEVICE_PLUGIN_START][capture] failed stage='{stage}' "
+            f"error_type='{type(exc).__name__}' transport_status='ERROR' "
+            f"transport_reason='{transport_reason}' request_id='{request_id}' "
+            "capture_id='UNKNOWN' response_status='UNKNOWN'"
+        )
         return None, "hierarchy_unavailable"
     if not isinstance(snapshot, TraversalCandidateSnapshot):
         return None, "unbound_traversal_candidate_snapshot"
@@ -3790,6 +3821,12 @@ def _capture_device_plugin_start_observation(
     foreground_after = _read_smartthings_foreground_package(client, dev)
     if foreground_after != foreground_before:
         return None, "foreground_changed_during_capture"
+    log(
+        f"[DEVICE_PLUGIN_START][capture] observed stage='{stage}' "
+        "transport_status='OK' response_status='CAPTURED_COMPLETE' "
+        f"request_id='{request_id}' capture_id='{capture_id}' "
+        f"capture_sequence={capture_sequence} package='{screen_package}'"
+    )
     return {
         "nodes": list(snapshot.candidates),
         "screen_package": screen_package,
@@ -3842,7 +3879,9 @@ def _prepare_device_card_plugin_start_state(
 ) -> tuple[bool, str]:
     """Normalize known SmartThings plugin details before standard card entry."""
     scenario_id = str(tab_cfg.get("scenario_id", "") or "")
-    observation, observation_reason = _capture_device_plugin_start_observation(client, dev)
+    observation, observation_reason = _capture_device_plugin_start_observation(
+        client, dev, acquisition_stage="plugin_start.initial"
+    )
     if observation is None:
         reason = observation_reason
         log(
@@ -3894,7 +3933,9 @@ def _prepare_device_card_plugin_start_state(
     if not recovered:
         return False, "recovery_failed"
 
-    recovered_observation, recovered_reason = _capture_device_plugin_start_observation(client, dev)
+    recovered_observation, recovered_reason = _capture_device_plugin_start_observation(
+        client, dev, acquisition_stage="plugin_start.post_recovery"
+    )
     if recovered_observation is None:
         return False, f"post_recovery_observation_failed:{recovered_reason}"
     recovered_nodes = recovered_observation["nodes"]
@@ -4655,7 +4696,9 @@ def recover_to_device_start_state(
     last_reason = "global_nav_not_visible"
     back_count = 0
     for attempt in range(0, max_back_count + 1):
-        observation, observation_reason = _capture_device_plugin_start_observation(client, dev)
+        observation, observation_reason = _capture_device_plugin_start_observation(
+            client, dev, acquisition_stage=f"device_reset.gate_attempt_{attempt + 1}"
+        )
         if observation is None:
             last_reason = observation_reason
             log(
@@ -4738,6 +4781,13 @@ def recover_to_device_start_state(
             )
             break
         back_sent = _send_back(client, dev)
+        runner_call_result = "RETURNED" if back_sent else "FAILED_OR_UNAVAILABLE"
+        log(
+            f"[DEVICE_RESET][back_action] scenario='{scenario_id}' attempt={attempt + 1} "
+            "recovery_target='devices_tab' action_type='INPUT_BACK' "
+            f"runner_call_result='{runner_call_result}' operation_id='UNKNOWN' "
+            "native_receipt_status='UNAVAILABLE'"
+        )
         if not back_sent:
             last_reason = "back_failed"
             break
@@ -6736,7 +6786,117 @@ def _node_matches_transition_pattern(node: Any, patterns: dict[str, str]) -> tup
     return False, ""
 
 
-def _confirm_click_focused_transition(
+def _phase6d3a_transition_diagnostic_timestamp() -> str:
+    try:
+        return datetime.now(timezone.utc).isoformat(timespec="microseconds")
+    except Exception:
+        return "UNKNOWN"
+
+
+def _phase6d3a_transition_diagnostic_snapshot(client: Any) -> Any:
+    try:
+        return getattr(client, "_last_traversal_candidate_snapshot", None)
+    except Exception:
+        return None
+
+
+def _phase6d3a_transition_local_diagnostic(
+    client: Any, event: str, *, nodes: Any, acquisition_origin: str,
+    snapshot_before: Any = None, started_at: str = "UNKNOWN",
+    error: Exception | None = None, baseline_nodes: Any = None,
+    classifier: Any = None, poll_index: int | None = None,
+) -> None:
+    """Observe existing local operands only; never acquire, publish, or authorize."""
+    try:
+        tracker = getattr(client, "_phase6d3a_entity_root_tracker", None)
+        if tracker is None:
+            return
+        from tb_runner.plugin_entry_provenance import source_capture_evidence
+        from tb_runner.entry_safety import hierarchy_digest, _walk
+
+        snapshot = getattr(client, "_last_traversal_candidate_snapshot", None)
+        decoded = getattr(snapshot, "decoded", None)
+        capture = source_capture_evidence(client, nodes)
+        authority = capture.get("capture_authority") or {}
+        source = getattr(tracker, "source_capture", {})
+        source = source if isinstance(source, Mapping) else {}
+        action = (getattr(tracker, "provenance", None) or {}).get("entry_operation", {})
+        action = action if isinstance(action, Mapping) else {}
+        node_list = nodes if isinstance(nodes, list) else []
+        baseline = baseline_nodes if isinstance(baseline_nodes, list) else None
+        source_digest = hierarchy_digest(baseline) if baseline is not None else None
+        current_digest = hierarchy_digest(node_list)
+        resources = [str(node.get("viewIdResourceName") or "").lower()
+                     for node, _ in _walk(node_list)]
+        rejections = []
+        if error is not None:
+            rejections.append("ACQUISITION_EXCEPTION")
+        if snapshot is None:
+            rejections.append("NO_PUBLISHED_CANDIDATE_SNAPSHOT")
+        elif snapshot is snapshot_before:
+            rejections.append("PUBLISHED_SNAPSHOT_NOT_REPLACED")
+        if not authority:
+            rejections.append("SEALED_CAPTURE_AUTHORITY_UNAVAILABLE")
+        if capture.get("capture_complete") is not True:
+            rejections.append("INPUT_NODES_NOT_BOUND_TO_COMPLETE_SEALED_CAPTURE")
+        if source.get("hierarchy_capture_id") and capture.get("hierarchy_capture_id") == source.get("hierarchy_capture_id"):
+            rejections.append("REFERENCE_SOURCE_CAPTURE_REUSED")
+        transfer = getattr(client, "_last_hierarchy_transport_metadata", None)
+        transfer = transfer if isinstance(transfer, Mapping) else {}
+        transfer_identity = {}
+        for part in ("header", "control"):
+            value = transfer.get(part)
+            value = value if isinstance(value, Mapping) else {}
+            transfer_identity[part] = {key: value.get(key) for key in (
+                "request_id", "generation", "capture_sequence", "service_instance_id", "process_epoch",
+            )}
+        tracker.record_diagnostic(event, {
+            "diagnostic_only": True, "authority": "NONE",
+            "acquisition_origin": acquisition_origin, "poll_index": poll_index,
+            "started_at": started_at,
+            "finished_at": _phase6d3a_transition_diagnostic_timestamp(),
+            "acquisition_error": ({
+                "type": type(error).__name__,
+                "reason": str(getattr(error, "reason", "UNKNOWN"))[:160],
+                "request_id": str(getattr(error, "request_id", "")) or None,
+            } if error is not None else None),
+            "node_list_status": "AVAILABLE" if isinstance(nodes, list) else "UNKNOWN",
+            "node_count": len(node_list) if isinstance(nodes, list) else None,
+            "publication": {
+                "snapshot_available": snapshot is not None,
+                "snapshot_replaced": snapshot is not None and snapshot is not snapshot_before,
+                "snapshot_python_identity": hex(id(snapshot)) if snapshot is not None else None,
+                "snapshot_python_identity_scope": "PROCESS_LOCAL_DIAGNOSTIC_NOT_CAPTURE_ID",
+                "decoded_request_id": getattr(decoded, "request_id", None),
+                "decoded_capability_verified": getattr(decoded, "capability_verified", None),
+            },
+            "capture": capture, "transport_identity": transfer_identity,
+            "reference_source_capture_id": source.get("hierarchy_capture_id"),
+            "reference_source_request_id": source.get("hierarchy_request_id"),
+            "entry_operation_id": action.get("operation_id"),
+            "entry_operation_started_at": action.get("operation_started_at"),
+            "entry_operation_finished_at": action.get("operation_finished_at"),
+            "comparison": {
+                "baseline_node_status": "AVAILABLE" if baseline is not None else "UNKNOWN",
+                "baseline_node_count": len(baseline) if baseline is not None else None,
+                "baseline_digest": source_digest, "poll_digest": current_digest,
+                "same_as_local_baseline": current_digest == source_digest if source_digest is not None else None,
+                "roots_nonempty": bool(node_list),
+                "has_bottom_navigation": any("bottom_navigation" in rid for rid in resources),
+                "has_service_cards": any("servicecard" in rid for rid in resources),
+                "activity_changed_argument": False if isinstance(classifier, Mapping) else None,
+                "target_title_present_argument": True if isinstance(classifier, Mapping) else None,
+                "classifier": dict(classifier) if isinstance(classifier, Mapping) else None,
+            },
+            "resulting_root_candidate": authority or None,
+            "resulting_root_rejection_reasons": rejections,
+            "currentness_status": "UNKNOWN_NOT_ESTABLISHED_BY_DIAGNOSTICS",
+        })
+    except Exception:
+        pass
+
+
+def _confirm_click_focused_transition_impl(
     client: A11yAdbClient,
     dev: str,
     tab_cfg: dict[str, Any],
@@ -6755,11 +6915,22 @@ def _confirm_click_focused_transition(
     if not has_expected_signal:
         return True, "no_expected_signal_configured"
     dump_tree_fn = getattr(client, "dump_tree", None)
+    baseline_snapshot_before = _phase6d3a_transition_diagnostic_snapshot(client)
+    baseline_started_at = _phase6d3a_transition_diagnostic_timestamp()
+    baseline_error = None
+    baseline_origin = "CALLER_ARGUMENT"
     if not baseline_nodes and callable(dump_tree_fn):
+        baseline_origin = "IMPLEMENTATION_LOCAL_DUMP_AFTER_VERIFIER_ENTRY"
         try:
             baseline_nodes = dump_tree_fn(dev=dev)
-        except Exception:
+        except Exception as exc:
+            baseline_error = exc
             baseline_nodes = []
+    _phase6d3a_transition_local_diagnostic(
+        client, "transition_impl_baseline", nodes=baseline_nodes,
+        acquisition_origin=baseline_origin, snapshot_before=baseline_snapshot_before,
+        started_at=baseline_started_at, error=baseline_error, baseline_nodes=baseline_nodes,
+    )
     baseline_signature = _make_dump_signature(baseline_nodes)
     if not baseline_window_focus:
         baseline_window_focus = _extract_window_focus_line(client, dev)
@@ -6776,20 +6947,32 @@ def _confirm_click_focused_transition(
     for poll_idx in range(max_poll_count):
         probe_index = poll_idx + 1
         current_nodes: list[dict[str, Any]] = []
+        poll_snapshot_before = _phase6d3a_transition_diagnostic_snapshot(client)
+        poll_started_at = _phase6d3a_transition_diagnostic_timestamp()
+        poll_error = None
+        classifier_result = None
         if callable(dump_tree_fn):
             try:
                 current_nodes = dump_tree_fn(dev=dev)
-            except Exception:
+            except Exception as exc:
+                poll_error = exc
                 current_nodes = []
         source_list_context = False
         if entry_safety_enforced and tab_cfg.get("screen_context_mode") == "new_screen":
             from tb_runner.entry_safety import classify_post_open, hierarchy_digest
 
-            source_list_context = classify_post_open(
+            classifier_result = classify_post_open(
                 current_nodes,
                 source_digest=hierarchy_digest(baseline_nodes or []),
                 target_title_present=True,
-            )["state"] == "SOURCE_LIST_CONTEXT"
+            )
+            source_list_context = classifier_result["state"] == "SOURCE_LIST_CONTEXT"
+        _phase6d3a_transition_local_diagnostic(
+            client, "transition_impl_poll", nodes=current_nodes,
+            acquisition_origin="EXISTING_DUMP_TREE_POLL", snapshot_before=poll_snapshot_before,
+            started_at=poll_started_at, error=poll_error, baseline_nodes=baseline_nodes,
+            classifier=classifier_result, poll_index=probe_index,
+        )
         energy_signature_seen = False
         air_list_screen_evidence = _collect_air_list_screen_evidence(current_nodes) if strict_life_air_care_mode else {}
         has_air_text = False
@@ -6977,6 +7160,390 @@ def _confirm_click_focused_transition(
     if saw_focus_change:
         return True, "window_focus_changed"
     return False, "none"
+
+
+def _phase6d3a_capture_completeness_diagnostic(capture: Any) -> dict[str, Any]:
+    '''Return observed boolean completeness without collapsing missing into false.'''
+    if not isinstance(capture, Mapping):
+        return {
+            "status": "UNKNOWN",
+            "value": None,
+            "unavailable_reason": "CAPTURE_RECORD_UNAVAILABLE",
+        }
+    if "capture_complete" not in capture:
+        return {
+            "status": "UNKNOWN",
+            "value": None,
+            "unavailable_reason": "FIELD_NOT_RECORDED",
+        }
+    value = capture.get("capture_complete")
+    if type(value) is not bool:
+        return {
+            "status": "UNKNOWN",
+            "value": None,
+            "unavailable_reason": "INVALID_FIELD_TYPE",
+        }
+    return {
+        "status": "OBSERVED",
+        "value": value,
+        "unavailable_reason": None,
+    }
+
+
+def _phase6d3a_hierarchy_capture_diagnostic(
+    capture: Mapping[str, Any] | None, *, status: str | None = None,
+) -> dict[str, Any]:
+    evidence = capture if isinstance(capture, Mapping) else {}
+    authority = evidence.get("capture_authority")
+    authority = authority if isinstance(authority, Mapping) else {}
+    complete = evidence.get("capture_complete") is True
+    if status is None:
+        status = ("CAPTURED_COMPLETE" if complete else
+                  "AUTHORITY_VALID_CANDIDATES_UNPROVEN" if authority else
+                  "UNAVAILABLE_NO_VALID_CAPTURE_AUTHORITY")
+    root = None
+    if authority:
+        root = {
+            "root_ref": authority.get("root_ref"),
+            "window_id": authority.get("hierarchy_window_id"),
+            "digest": authority.get("root_digest"),
+            "class_name": authority.get("hierarchy_root_class_name"),
+            "source_node_id": authority.get("hierarchy_root_source_node_id"),
+            "bounds": deepcopy(authority.get("hierarchy_root_bounds")),
+        }
+    return {
+        "capture_status": status,
+        "request_id": authority.get("request_id") if authority else None,
+        "capture_id": authority.get("capture_key") if authority else None,
+        "capture_sequence": authority.get("capture_sequence") if authority else None,
+        "process_epoch": authority.get("process_epoch") if authority else None,
+        "generation": authority.get("generation") if authority else None,
+        "service_instance_id": authority.get("service_instance_id") if authority else None,
+        "package_name": authority.get("hierarchy_package_name") if authority else None,
+        "package_unavailable_reason": (
+            None if authority and authority.get("hierarchy_package_name")
+            else "NOT_EXPOSED_BY_HIERARCHY_CAPTURE_AUTHORITY"
+        ),
+        "activity_component": None,
+        "activity_unavailable_reason": "NOT_EXPOSED_BY_HIERARCHY_CAPTURE_AUTHORITY",
+        "root": root,
+    }
+
+
+def _phase6d3a_capture_window_sample(client: Any, dev: Any) -> dict[str, Any]:
+    try:
+        sample = capture_entry_window_diagnostic(client, dev)
+        return dict(sample) if isinstance(sample, Mapping) else {
+            "diagnostic_only": True, "sample_status": "UNKNOWN",
+        }
+    except Exception as exc:
+        return {
+            "diagnostic_only": True, "sample_status": "UNKNOWN",
+            "error_type": type(exc).__name__,
+        }
+
+
+def _phase6d3a_observed_context(
+    capture: Mapping[str, Any] | None, window_sample: Mapping[str, Any] | None,
+    navigation_epoch: Any,
+) -> dict[str, Any]:
+    """Serialize already observed state for RCA without producing authority."""
+    unknown = "UNKNOWN"
+    hierarchy = _phase6d3a_hierarchy_capture_diagnostic(capture)
+    authority = capture.get("capture_authority") if isinstance(capture, Mapping) else None
+    authority = authority if isinstance(authority, Mapping) else {}
+    sample = window_sample if isinstance(window_sample, Mapping) else {}
+    root = hierarchy.get("root")
+    root = deepcopy(root) if isinstance(root, Mapping) else unknown
+    hierarchy_package = authority.get("hierarchy_package_name")
+    foreground_package = sample.get("foreground_package")
+    package = hierarchy_package or foreground_package or unknown
+    foreground_activity = sample.get("foreground_activity_component") or unknown
+    focused_window = sample.get("focused_window_component") or unknown
+    window_id = root.get("window_id", unknown) if isinstance(root, Mapping) else unknown
+    known_context = any(value != unknown for value in (
+        package, foreground_activity, focused_window,
+    ))
+    return {
+        "diagnostic_only": True,
+        "capture_status": hierarchy.get("capture_status", unknown),
+        "package": package,
+        "hierarchy_package": hierarchy_package or unknown,
+        "foreground_package": foreground_package or unknown,
+        "window": {
+            "window_id": window_id,
+            "focused_window_component": focused_window,
+            "sample_status": sample.get("sample_status") or unknown,
+        },
+        "activity_component": foreground_activity,
+        "root": root,
+        "navigation_epoch": (navigation_epoch if type(navigation_epoch) is int else unknown),
+        "currentness_status": "UNKNOWN_NOT_ESTABLISHED",
+        "context": {
+            "status": "OBSERVED_DIAGNOSTIC_ONLY" if known_context else unknown,
+            "package": package,
+            "activity_component": foreground_activity,
+            "focused_window_component": focused_window,
+            "authority": "NONE",
+        },
+    }
+
+
+def _phase6d3a_unknown_observation() -> dict[str, Any]:
+    unknown = "UNKNOWN"
+    return {
+        "diagnostic_only": True,
+        "capture_status": unknown,
+        "package": unknown,
+        "hierarchy_package": unknown,
+        "foreground_package": unknown,
+        "window": {
+            "window_id": unknown,
+            "focused_window_component": unknown,
+            "sample_status": unknown,
+        },
+        "activity_component": unknown,
+        "root": unknown,
+        "navigation_epoch": unknown,
+        "currentness_status": "UNKNOWN_NOT_ESTABLISHED",
+        "context": {
+            "status": unknown,
+            "package": unknown,
+            "activity_component": unknown,
+            "focused_window_component": unknown,
+            "authority": "NONE",
+        },
+    }
+
+
+def _phase6d3a_input_tap_operation_diagnostic(operation: Any) -> dict[str, Any] | str:
+    if not isinstance(operation, Mapping):
+        return "UNKNOWN"
+    result = deepcopy(dict(operation))
+    for key in ("operation_id", "action_type", "dispatch_status", "native_receipt_status",
+                "dispatch_result_status", "operation_started_at", "operation_finished_at"):
+        if not result.get(key):
+            result[key] = "UNKNOWN"
+    if not isinstance(result.get("native_receipt"), Mapping):
+        result["native_receipt"] = "UNKNOWN"
+    return result
+
+
+def _confirm_click_focused_transition(
+    client: A11yAdbClient,
+    dev: str,
+    tab_cfg: dict[str, Any],
+    *,
+    transition_fast_path: bool,
+    baseline_nodes: list[dict[str, Any]] | None = None,
+    baseline_window_focus: str = "",
+) -> tuple[bool, str]:
+    snapshot_before_transition = getattr(client, "_last_traversal_candidate_snapshot", None)
+    transition_started_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+    result = _confirm_click_focused_transition_impl(
+        client, dev, tab_cfg, transition_fast_path=transition_fast_path,
+        baseline_nodes=baseline_nodes, baseline_window_focus=baseline_window_focus,
+    )
+    transition_finished_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+    try:
+        tracker = getattr(client, "_phase6d3a_entity_root_tracker", None)
+        provenance = getattr(tracker, "provenance", None)
+        action = provenance.get("entry_operation", {}) if isinstance(provenance, Mapping) else {}
+        operation_id = str(action.get("operation_id") or "")
+        if tracker is None or not operation_id:
+            return result
+        prior_events = getattr(tracker, "diagnostic_events", [])
+        already_sampled = any(
+            isinstance(event, Mapping)
+            and event.get("event") == "post_tap_transition"
+            and isinstance(event.get("payload"), Mapping)
+            and event["payload"].get("operation_id") == operation_id
+            for event in prior_events
+        )
+        if already_sampled:
+            return result
+        from tb_runner.plugin_entry_provenance import (
+            scroll_target_inventory, source_capture_evidence, tap_dispatch_receipt_confirmation,
+        )
+        source = getattr(tracker, "source_capture", {})
+        source = source if isinstance(source, Mapping) else {}
+        source_authority = source.get("capture_authority", {})
+        source_authority = source_authority if isinstance(source_authority, Mapping) else {}
+        snapshot = getattr(client, "_last_traversal_candidate_snapshot", None)
+        snapshot_replaced = snapshot is not None and snapshot is not snapshot_before_transition
+        candidates = getattr(snapshot, "candidates", ()) if snapshot_replaced else ()
+        candidate_nodes = [dict(node) for node in candidates if isinstance(node, Mapping)]
+        candidate_capture = (
+            source_capture_evidence(client, candidate_nodes) if snapshot_replaced else {}
+        )
+        candidate_authority = candidate_capture.get("capture_authority", {})
+        source_capture_id = str(source.get("hierarchy_capture_id") or "")
+        candidate_capture_id = str(candidate_capture.get("hierarchy_capture_id") or "")
+        post_tap_capture_proven = bool(
+            snapshot_replaced
+            and candidate_capture.get("capture_complete") is True
+            and isinstance(candidate_authority, Mapping)
+            and source_capture_id
+            and candidate_capture_id
+            and candidate_capture_id != source_capture_id
+        )
+        current_capture = candidate_capture if post_tap_capture_proven else {}
+        current_authority = current_capture.get("capture_authority", {})
+        current_authority = current_authority if isinstance(current_authority, Mapping) else {}
+        post_nodes = candidate_nodes if post_tap_capture_proven else []
+        post_tap_capture_status = (
+            "CAPTURED_AFTER_INPUT_TAP" if post_tap_capture_proven else "UNAVAILABLE_UNPROVEN"
+        )
+        sample = _phase6d3a_capture_window_sample(client, dev)
+        baseline = baseline_nodes if isinstance(baseline_nodes, list) else []
+        compare_available = bool(baseline and post_nodes)
+        same_as_baseline = (
+            _make_dump_signature(baseline) == _make_dump_signature(post_nodes)
+            if compare_available else None
+        )
+        baseline_node_status = (
+            "AVAILABLE" if baseline else "EMPTY" if isinstance(baseline_nodes, list) else "UNKNOWN"
+        )
+        baseline_node_reason = (
+            "NONE" if baseline_node_status == "AVAILABLE"
+            else "BASELINE_NODE_LIST_EMPTY" if baseline_node_status == "EMPTY"
+            else (
+                "BASELINE_NODES_ARGUMENT_NOT_PROVIDED_TO_DIAGNOSTIC_WRAPPER"
+                if baseline_nodes is None else "BASELINE_NODES_ARGUMENT_NOT_A_LIST"
+            )
+        )
+        baseline_capture_completeness = _phase6d3a_capture_completeness_diagnostic(source)
+        baseline_capture_binding = {
+            "status": "OBSERVED" if source.get("hierarchy_capture_id") else "UNKNOWN",
+            "capture_id": str(source.get("hierarchy_capture_id") or "") or None,
+            "request_id": str(source.get("hierarchy_request_id") or "") or None,
+            "capture_sequence": source.get("hierarchy_capture_sequence"),
+            "captured_at": str(source.get("captured_at") or "") or None,
+            "capture_complete": baseline_capture_completeness["value"],
+            "capture_complete_status": baseline_capture_completeness["status"],
+            "capture_complete_unavailable_reason": baseline_capture_completeness["unavailable_reason"],
+            "root_ref": source_authority.get("root_ref"),
+            "root_digest": source_authority.get("root_digest"),
+            "relationship_to_baseline_nodes": "REFERENCE_ONLY_SOURCE_RELATION_NOT_PROVEN",
+        }
+        post_tap_node_status = (
+            "AVAILABLE" if post_nodes else "EMPTY" if post_tap_capture_proven else "UNAVAILABLE_UNPROVEN"
+        )
+        if compare_available:
+            comparison_unavailable_reason = "NONE"
+        elif baseline_node_status == "UNKNOWN":
+            comparison_unavailable_reason = "BASELINE_NODE_LIST_UNKNOWN"
+        elif baseline_node_status == "EMPTY":
+            comparison_unavailable_reason = "BASELINE_NODE_LIST_EMPTY"
+        elif not post_tap_capture_proven:
+            comparison_unavailable_reason = "POST_TAP_CAPTURE_UNAVAILABLE_UNPROVEN"
+        else:
+            comparison_unavailable_reason = "POST_TAP_NODE_LIST_EMPTY"
+        transition_skipped = str(result[1] or "") == "no_expected_signal_configured"
+        transition_confirmed = bool(result[0]) and not transition_skipped
+        transition_verification_status = (
+            "SKIPPED_NOT_CONFIGURED" if transition_skipped
+            else "CONFIRMED" if transition_confirmed else "NOT_CONFIRMED"
+        )
+        pre_observation = action.get("pre_observation")
+        if not isinstance(pre_observation, Mapping):
+            pre_observation = _phase6d3a_observed_context(
+                source, None, action.get("navigation_epoch_before"),
+            )
+        post_observation = _phase6d3a_observed_context(
+            current_capture, sample, getattr(tracker, "navigation_epoch", None),
+        )
+        selected_entity = provenance.get("selected_entity", {}) if isinstance(provenance, Mapping) else {}
+        selected_entity = selected_entity if isinstance(selected_entity, Mapping) else {}
+        candidate_operation_correlated = bool(
+            selected_entity.get("status") == "OBSERVED"
+            and operation_id
+            and selected_entity.get("source_hierarchy_capture_id")
+            and selected_entity.get("source_hierarchy_capture_id")
+            == action.get("source_hierarchy_capture_id")
+        )
+        tap_correlation_status = (
+            "CANDIDATE_OPERATION_CORRELATED" if candidate_operation_correlated else "UNKNOWN"
+        )
+        tracker.record_diagnostic("post_tap_transition", {
+            "transition_confirmed": transition_confirmed,
+            "transition_verification_status": transition_verification_status,
+            "transition_signal": str(result[1] or "")[:128],
+            "transition_classifier_result": transition_verification_status,
+            "transition_classifier_reason": str(result[1] or "UNKNOWN")[:128],
+            "operation_id": operation_id,
+            "candidate_input_tap": {
+                "status": tap_correlation_status,
+                "correlation_scope": "CANDIDATE_TO_OPERATION_ONLY",
+                "dispatch_receipt_confirmation": tap_dispatch_receipt_confirmation(
+                    action, candidate_operation_correlated=candidate_operation_correlated,
+                ),
+                "candidate": {
+                    "node_locator_sha256": selected_entity.get("node_locator_sha256") or "UNKNOWN",
+                    "source_capture_id": selected_entity.get("source_hierarchy_capture_id") or "UNKNOWN",
+                    "resource_id": selected_entity.get("resource_id") or "UNKNOWN",
+                    "bounds": selected_entity.get("bounds") or "UNKNOWN",
+                },
+                "operation": _phase6d3a_input_tap_operation_diagnostic(action),
+            },
+            "pre_observation": deepcopy(dict(pre_observation)),
+            "post_observation": post_observation,
+            "transition_started_at": transition_started_at,
+            "transition_finished_at": transition_finished_at,
+            "source_hierarchy_capture": _phase6d3a_hierarchy_capture_diagnostic(source),
+            "post_tap_hierarchy_capture": _phase6d3a_hierarchy_capture_diagnostic(
+                current_capture,
+                status=(post_tap_capture_status if post_tap_capture_proven else "UNAVAILABLE_UNPROVEN"),
+            ),
+            "source_list_context": {
+                "comparison_available": compare_available,
+                "same_as_baseline": same_as_baseline,
+                "baseline_node_status": baseline_node_status,
+                "baseline_node_count": len(baseline) if isinstance(baseline_nodes, list) else "UNKNOWN",
+                "baseline_node_reason": baseline_node_reason,
+                "baseline_source_capture_binding": baseline_capture_binding,
+                "post_tap_node_status": post_tap_node_status,
+                "post_tap_candidate_node_count": len(candidate_nodes) if snapshot_replaced else "UNKNOWN",
+                "post_tap_nodes_used_for_comparison": len(post_nodes),
+                "post_tap_capture_proven": bool(post_tap_capture_proven),
+                "comparison_unavailable_reason": comparison_unavailable_reason,
+                "source_capture_id": str(source.get("hierarchy_capture_id") or ""),
+                "source_capture_time": str(source.get("captured_at") or "") or None,
+                "tap_operation_started_at": str(action.get("operation_started_at") or "") or None,
+                "tap_operation_finished_at": str(action.get("operation_finished_at") or "") or "UNKNOWN",
+                "tap_operation_time_status": (
+                    "OBSERVED" if action.get("operation_started_at")
+                    else "UNAVAILABLE_NOT_RECORDED"
+                ),
+                "transition_started_at": transition_started_at,
+                "transition_finished_at": transition_finished_at,
+                "post_tap_capture_id": (
+                    str(current_capture.get("hierarchy_capture_id") or "")
+                    if post_tap_capture_proven else None
+                ),
+                "post_tap_capture_status": post_tap_capture_status,
+                "post_tap_capture_complete": bool(
+                    post_tap_capture_proven and current_capture.get("capture_complete") is True
+                ),
+                "post_tap_capture_observed_at": str(current_capture.get("captured_at") or "") or "UNKNOWN",
+                "currentness_status": "UNKNOWN_NOT_ESTABLISHED",
+            },
+            "plugin_context_transition": {
+                "source_package": str(source_authority.get("hierarchy_package_name") or ""),
+                "post_tap_hierarchy_package": str(current_authority.get("hierarchy_package_name") or ""),
+                "foreground_package": str(sample.get("foreground_package") or ""),
+                "foreground_activity_component": str(sample.get("foreground_activity_component") or ""),
+                "focused_window_component": str(sample.get("focused_window_component") or ""),
+                "window_sample_status": str(sample.get("sample_status") or "UNKNOWN"),
+                "navigation_epoch": getattr(tracker, "navigation_epoch", None),
+            },
+            "scroll_target_inventory": scroll_target_inventory(post_nodes),
+            "window_sample": sample,
+        })
+    except Exception:
+        # Diagnostics are observational and cannot alter the established result.
+        pass
+    return result
 
 
 def _resolve_screen_context_mode(tab_cfg: dict[str, Any]) -> str:
@@ -7937,6 +8504,125 @@ def _candidate_center(candidate: dict[str, Any]) -> tuple[int, int] | None:
     return (left + right) // 2, (top + bottom) // 2
 
 
+def _tap_device_candidate_with_diagnostic(
+    client: Any, dev: str, candidate: Mapping[str, Any], tap_fn: Callable[..., Any],
+    *, x: int, y: int, reason: str,
+) -> bool:
+    try:
+        tracker = getattr(client, "_phase6d3a_entity_root_tracker", None)
+    except Exception:
+        return bool(tap_fn(dev=dev, x=x, y=y))
+    if tracker is None:
+        return bool(tap_fn(dev=dev, x=x, y=y))
+
+    try:
+        source_capture = getattr(tracker, "source_capture", {})
+    except Exception:
+        source_capture = {}
+    source_capture = source_capture if isinstance(source_capture, Mapping) else {}
+    try:
+        navigation_epoch_before = getattr(tracker, "navigation_epoch", None)
+    except Exception:
+        navigation_epoch_before = None
+    try:
+        pre_window_sample = _phase6d3a_capture_window_sample(client, dev)
+        pre_observation = _phase6d3a_observed_context(
+            source_capture, pre_window_sample, navigation_epoch_before,
+        )
+    except Exception:
+        pre_observation = _phase6d3a_unknown_observation()
+    try:
+        store = getattr(getattr(client, "_adb_device", None), "native_dispatch_receipts", None)
+    except Exception:
+        store = None
+    operation_id = ""
+    checkpoint = None
+    succeeded = False
+    action_invoked = False
+    dispatch_error: BaseException | None = None
+    try:
+        operation_started_at = datetime.now(timezone.utc).isoformat()
+    except Exception:
+        operation_started_at = "UNKNOWN"
+    operation_finished_at: str | None = None
+    try:
+        try:
+            from talkback_lib.native_dispatch_evidence import native_dispatch_checkpoint, native_dispatch_operation
+
+            with native_dispatch_operation() as operation_id:
+                checkpoint = native_dispatch_checkpoint(store, operation_id=operation_id)
+                action_invoked = True
+                try:
+                    succeeded = bool(tap_fn(dev=dev, x=x, y=y))
+                except BaseException as exc:
+                    dispatch_error = exc
+                    raise
+        except BaseException:
+            if dispatch_error is not None:
+                raise dispatch_error
+            if not action_invoked:
+                # Instrumentation setup is optional; preserve the original tap path.
+                action_invoked = True
+                try:
+                    succeeded = bool(tap_fn(dev=dev, x=x, y=y))
+                except BaseException as exc:
+                    dispatch_error = exc
+                    raise
+            # A context-manager teardown failure after the tap does not replace
+            # the already observed action result.
+    except BaseException as exc:
+        dispatch_error = exc
+        raise
+    finally:
+        operation_finished_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        try:
+            from tb_runner.plugin_entry_provenance import entry_operation_evidence
+
+            operation = entry_operation_evidence(
+                operation_id=operation_id, checkpoint=checkpoint, store=store,
+                dispatch_succeeded=succeeded and dispatch_error is None,
+                tap_point=(x, y), selected_bounds=candidate.get("bounds"),
+                source_capture=source_capture,
+                navigation_event_kind=str(getattr(tracker, "last_navigation_event", {}).get("kind") or ""),
+                operation_started_at=operation_started_at,
+                operation_finished_at=operation_finished_at,
+            )
+            operation["navigation_epoch_before"] = (
+                navigation_epoch_before if type(navigation_epoch_before) is int else "UNKNOWN"
+            )
+            navigation_epoch_after = getattr(tracker, "navigation_epoch", None)
+            operation["navigation_epoch_after_tap"] = (
+                navigation_epoch_after if type(navigation_epoch_after) is int else "UNKNOWN"
+            )
+            operation["pre_observation"] = pre_observation
+            node = candidate.get("node") if isinstance(candidate.get("node"), Mapping) else {}
+            resource_id = str(candidate.get("rid") or node.get("viewIdResourceName")
+                              or node.get("resourceId") or "")[:256]
+            label = str(candidate.get("stable_label") or candidate.get("label") or "")[:160]
+            bounds = str(candidate.get("bounds") or "")[:96]
+            tracker.record_diagnostic("entry_input_tap", {
+                "selection_reason": str(reason or "UNKNOWN")[:96],
+                "candidate": {
+                    "status": "OBSERVED" if resource_id or label or bounds else "UNKNOWN",
+                    "label": label or "UNKNOWN",
+                    "resource_id": resource_id or "UNKNOWN",
+                    "bounds": bounds or "UNKNOWN",
+                    "source_capture_id": str(source_capture.get("hierarchy_capture_id") or "UNKNOWN"),
+                },
+                "coordinates": {"x": x, "y": y, "inside_candidate_bounds": operation.get(
+                    "point_inside_selected_bounds", "UNKNOWN",
+                )},
+                "operation": _phase6d3a_input_tap_operation_diagnostic(operation),
+                "operation_id": operation.get("operation_id") or "UNKNOWN",
+                "result_status": operation.get("dispatch_result_status") or "UNKNOWN",
+                "pre_observation": pre_observation,
+            })
+        except Exception:
+            # The diagnostic receipt is best-effort; preserve the existing tap result.
+            pass
+    return succeeded
+
+
 def _tap_device_candidate_center(client: A11yAdbClient, dev: str, candidate: dict[str, Any], *, reason: str) -> bool:
     center = _candidate_center(candidate)
     if center is None:
@@ -7949,10 +8635,14 @@ def _tap_device_candidate_center(client: A11yAdbClient, dev: str, candidate: dic
     )
     tap_xy_adb = getattr(client, "tap_xy_adb", None)
     if callable(tap_xy_adb):
-        return bool(tap_xy_adb(dev=dev, x=x, y=y))
+        return _tap_device_candidate_with_diagnostic(
+            client, dev, candidate, tap_xy_adb, x=x, y=y, reason=reason,
+        )
     touch_point = getattr(client, "touch_point", None)
     if callable(touch_point):
-        return bool(touch_point(dev=dev, x=x, y=y))
+        return _tap_device_candidate_with_diagnostic(
+            client, dev, candidate, touch_point, x=x, y=y, reason=reason,
+        )
     return False
 
 
@@ -8016,20 +8706,62 @@ def _tap_device_card_with_provenance(
     *, x: int, y: int, selected_bounds: Any, source_nodes: Any,
 ) -> bool:
     """Run the existing tap and append its native receipt to the selected node."""
-    tracker = getattr(client, "_phase6d3a_entity_root_tracker", None)
+    try:
+        tracker = getattr(client, "_phase6d3a_entity_root_tracker", None)
+    except Exception:
+        return bool(tap_fn(dev=dev, x=x, y=y))
     if tracker is None:
         return bool(tap_fn(dev=dev, x=x, y=y))
-    from talkback_lib.native_dispatch_evidence import native_dispatch_checkpoint, native_dispatch_operation
+    try:
+        from talkback_lib.native_dispatch_evidence import native_dispatch_checkpoint, native_dispatch_operation
+    except Exception:
+        return bool(tap_fn(dev=dev, x=x, y=y))
 
-    store = getattr(getattr(client, "_adb_device", None), "native_dispatch_receipts", None)
+    try:
+        store = getattr(getattr(client, "_adb_device", None), "native_dispatch_receipts", None)
+    except Exception:
+        store = None
     operation = ""
     checkpoint = None
     succeeded = False
+    action_invoked = False
     dispatch_error: BaseException | None = None
-    operation_started_at = datetime.now(timezone.utc).isoformat()
     try:
-        with native_dispatch_operation() as operation:
-            checkpoint = native_dispatch_checkpoint(store, operation_id=operation)
+        operation_started_at = datetime.now(timezone.utc).isoformat()
+    except Exception:
+        operation_started_at = "UNKNOWN"
+    try:
+        navigation_epoch_before = getattr(tracker, "navigation_epoch", None)
+    except Exception:
+        navigation_epoch_before = None
+    try:
+        pre_window_sample = _phase6d3a_capture_window_sample(client, dev)
+        pre_observation = _phase6d3a_observed_context(
+            getattr(tracker, "source_capture", {}), pre_window_sample, navigation_epoch_before,
+        )
+    except Exception:
+        pre_observation = _phase6d3a_unknown_observation()
+    try:
+        try:
+            with native_dispatch_operation() as operation:
+                try:
+                    checkpoint = native_dispatch_checkpoint(store, operation_id=operation)
+                except Exception:
+                    # Receipt instrumentation is diagnostic-only; dispatch still proceeds.
+                    checkpoint = None
+                action_invoked = True
+                try:
+                    succeeded = bool(tap_fn(dev=dev, x=x, y=y))
+                except BaseException as exc:
+                    dispatch_error = exc
+                    raise
+        except Exception as exc:
+            if action_invoked:
+                dispatch_error = dispatch_error or exc
+                raise
+            # Native instrumentation setup failed before the action: preserve
+            # the original single tap rather than suppressing it.
+            action_invoked = True
             succeeded = bool(tap_fn(dev=dev, x=x, y=y))
     except BaseException as exc:
         dispatch_error = exc
@@ -8039,6 +8771,7 @@ def _tap_device_card_with_provenance(
             try:
                 from tb_runner.plugin_entry_provenance import entry_operation_evidence
 
+                operation_finished_at = datetime.now(timezone.utc).isoformat()
                 operation_evidence = entry_operation_evidence(
                     operation_id=operation,
                     checkpoint=checkpoint,
@@ -8049,10 +8782,41 @@ def _tap_device_card_with_provenance(
                     source_capture=tracker.source_capture,
                     navigation_event_kind=str(tracker.last_navigation_event.get("kind") or ""),
                     operation_started_at=operation_started_at,
+                    operation_finished_at=operation_finished_at,
                 )
+                operation_evidence["navigation_epoch_before"] = (
+                    navigation_epoch_before if type(navigation_epoch_before) is int else "UNKNOWN"
+                )
+                navigation_epoch_after = getattr(tracker, "navigation_epoch", None)
+                operation_evidence["navigation_epoch_after_tap"] = (
+                    navigation_epoch_after if type(navigation_epoch_after) is int else "UNKNOWN"
+                )
+                operation_evidence["pre_observation"] = pre_observation
                 provenance = tracker.record_selected_card(
                     card, tracker.source_capture, source_nodes, operation_evidence,
                 )
+                selected = provenance.get("selected_entity", {}) if isinstance(provenance, Mapping) else {}
+                selected = selected if isinstance(selected, Mapping) else {}
+                tracker.record_diagnostic("entry_input_tap", {
+                    "selection_reason": "plugin_card",
+                    "candidate": {
+                        "status": selected.get("status") or "UNKNOWN",
+                        "node_locator_sha256": selected.get("node_locator_sha256") or "UNKNOWN",
+                        "source_capture_id": selected.get("source_hierarchy_capture_id") or "UNKNOWN",
+                        "resource_id": selected.get("resource_id") or "UNKNOWN",
+                        "bounds": selected.get("bounds") or "UNKNOWN",
+                    },
+                    "coordinates": {
+                        "tap_point": deepcopy(operation_evidence.get("tap_point") or "UNKNOWN"),
+                        "inside_candidate_bounds": operation_evidence.get(
+                            "point_inside_selected_bounds", "UNKNOWN",
+                        ),
+                    },
+                    "operation": _phase6d3a_input_tap_operation_diagnostic(operation_evidence),
+                    "operation_id": operation_evidence.get("operation_id") or "UNKNOWN",
+                    "result_status": operation_evidence.get("dispatch_result_status") or "UNKNOWN",
+                    "pre_observation": pre_observation,
+                })
                 summary = getattr(client, "last_start_open_summary", None)
                 if isinstance(summary, dict):
                     summary["entity_root_provenance"] = deepcopy(provenance)
@@ -8843,7 +9607,7 @@ def _scroll_device_list_for_card_search(
     return True, nodes_after, "device_list_scrolled", signature_changed
 
 
-def _ensure_all_devices_location_selected(
+def _ensure_all_devices_location_selected_impl(
     client: A11yAdbClient,
     dev: str,
     nodes: list[dict[str, Any]],
@@ -8935,6 +9699,409 @@ def _ensure_all_devices_location_selected(
     return False, nodes, "all_devices_selection_verify_failed"
 
 
+def _ensure_all_devices_location_selected(
+    client: A11yAdbClient,
+    dev: str,
+    nodes: list[dict[str, Any]],
+    dump_tree_fn: Any,
+    *,
+    step_wait_seconds: float,
+) -> tuple[bool, list[dict[str, Any]], str]:
+    try:
+        started_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+    except Exception:
+        started_at = "UNKNOWN"
+    try:
+        started_ns = time.monotonic_ns()
+    except Exception:
+        started_ns = None
+    try:
+        tracker = getattr(client, "_phase6d3a_entity_root_tracker", None)
+    except Exception:
+        tracker = None
+    diagnostic_start = 0
+    pre_capture = {}
+    navigation_epoch_before = None
+    if tracker is not None:
+        try:
+            diagnostic_start = len(getattr(tracker, "diagnostic_events", []))
+        except Exception:
+            diagnostic_start = 0
+        try:
+            pre_capture = deepcopy(getattr(tracker, "source_capture", {}))
+        except Exception:
+            # An unavailable diagnostic snapshot must not suppress selection.
+            pre_capture = {}
+        try:
+            navigation_epoch_before = getattr(tracker, "navigation_epoch", None)
+        except Exception:
+            navigation_epoch_before = None
+    _phase6d3a_transition_local_diagnostic(
+        client, "all_devices_impl_input", nodes=nodes,
+        acquisition_origin="CALLER_LOOKUP_INPUT_NO_NEW_ACQUISITION",
+    )
+    lookup_input_inventory = {"diagnostic_only": True, "status": "UNKNOWN"}
+    if tracker is not None:
+        try:
+            capture_authority = (
+                pre_capture.get("capture_authority")
+                if isinstance(pre_capture, Mapping) else None
+            )
+            capture_authority = capture_authority if isinstance(capture_authority, Mapping) else {}
+            lookup_state = (
+                device_tab_logic.detect_selected_device_location(nodes)
+                if isinstance(nodes, list) else {}
+            )
+            lookup_candidate = lookup_state.get("candidate")
+            lookup_candidate = lookup_candidate if isinstance(lookup_candidate, Mapping) else None
+            context_verified = getattr(client, "last_device_tab_context_verified", None)
+            input_capture_completeness = _phase6d3a_capture_completeness_diagnostic(pre_capture)
+            lookup_input_inventory = {
+                "diagnostic_only": True,
+                "hierarchy_nodes": {
+                    "status": (
+                        "AVAILABLE" if isinstance(nodes, list) and nodes
+                        else "EMPTY" if isinstance(nodes, list) else "UNAVAILABLE_NOT_A_LIST"
+                    ),
+                    "count": len(nodes) if isinstance(nodes, list) else "UNKNOWN",
+                },
+                "source_capture_binding": {
+                    "status": "OBSERVED" if pre_capture.get("hierarchy_capture_id") else "UNKNOWN",
+                    "capture_id": str(pre_capture.get("hierarchy_capture_id") or "") or None,
+                    "request_id": str(pre_capture.get("hierarchy_request_id") or "") or None,
+                    "capture_sequence": pre_capture.get("hierarchy_capture_sequence"),
+                    "captured_at": str(pre_capture.get("captured_at") or "") or None,
+                    "capture_complete": input_capture_completeness["value"],
+                    "capture_complete_status": input_capture_completeness["status"],
+                    "capture_complete_unavailable_reason": input_capture_completeness["unavailable_reason"],
+                    "root_ref": capture_authority.get("root_ref"),
+                    "root_digest": capture_authority.get("root_digest"),
+                    "relationship_to_lookup_nodes": "REFERENCE_ONLY_NODE_RELATION_NOT_PROVEN",
+                },
+                "hierarchy_lookup_mirror": {
+                    "status": "OBSERVED" if isinstance(nodes, list) else "UNAVAILABLE_NOT_A_LIST",
+                    "scope": "INPUT_NODES_ONLY_DIAGNOSTIC_MIRROR",
+                    "selected": lookup_state.get("selected", "UNKNOWN"),
+                    "reason": str(lookup_state.get("reason") or "UNKNOWN")[:128],
+                    "candidate_status": "AVAILABLE" if lookup_candidate else "NOT_FOUND",
+                    "candidate": ({
+                        "label": str(lookup_candidate.get("label") or "")[:128] or "UNKNOWN",
+                        "resource_id": str(
+                            lookup_candidate.get("resource_id") or lookup_candidate.get("rid") or ""
+                        )[:192] or "UNKNOWN",
+                        "bounds": str(lookup_candidate.get("bounds") or "")[:96] or "UNKNOWN",
+                        "class_name": str(lookup_candidate.get("class_name") or "")[:128] or "UNKNOWN",
+                    } if lookup_candidate else None),
+                    "device_tab_root_signature": (
+                        _has_device_tab_root_signature(nodes) if isinstance(nodes, list) else "UNKNOWN"
+                    ),
+                },
+                "device_tab_context_verified": (
+                    context_verified if isinstance(context_verified, bool) else "UNKNOWN"
+                ),
+                "dump_tree_available": callable(dump_tree_fn),
+                "step_wait_seconds": (
+                    step_wait_seconds if type(step_wait_seconds) in (int, float) else "UNKNOWN"
+                ),
+            }
+        except Exception as exc:
+            lookup_input_inventory = {
+                "diagnostic_only": True,
+                "status": "UNAVAILABLE_DIAGNOSTIC_ERROR",
+                "error_type": type(exc).__name__,
+            }
+    result = None
+    try:
+        result = _ensure_all_devices_location_selected_impl(
+            client, dev, nodes, dump_tree_fn, step_wait_seconds=step_wait_seconds,
+        )
+    finally:
+        try:
+            finished_ns = time.monotonic_ns()
+            finished_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        except Exception:
+            finished_ns = None
+            finished_at = "UNKNOWN"
+
+        def label_visible(candidate_nodes: Any) -> bool:
+            if not isinstance(candidate_nodes, list):
+                return False
+            return any(
+                "all devices" in _node_label_blob(node).lower()
+                or "모든 기기" in _node_label_blob(node)
+                for node in candidate_nodes if isinstance(node, Mapping)
+            )
+
+        if tracker is not None:
+            try:
+                after_nodes = result[1] if isinstance(result, tuple) and len(result) > 1 else []
+                selected = bool(result[0]) if isinstance(result, tuple) and result else False
+                reason = str(result[2] or "") if isinstance(result, tuple) and len(result) > 2 else "UNKNOWN"
+                events = getattr(tracker, "diagnostic_events", [])
+                tap_event = next((event for event in reversed(events[diagnostic_start:])
+                                  if isinstance(event, Mapping)
+                                  and event.get("event") == "entry_input_tap"
+                                  and isinstance(event.get("payload"), Mapping)
+                                  and event["payload"].get("selection_reason") == "select_all_devices"), None)
+                tap_payload = tap_event.get("payload", {}) if isinstance(tap_event, Mapping) else {}
+                post_capture = getattr(tracker, "source_capture", {})
+                if isinstance(after_nodes, list) and after_nodes:
+                    try:
+                        from tb_runner.plugin_entry_provenance import source_capture_evidence
+
+                        post_capture = source_capture_evidence(client, after_nodes)
+                    except Exception:
+                        post_capture = {}
+                post_capture = post_capture if isinstance(post_capture, Mapping) else {}
+                pre_observation = tap_payload.get("pre_observation")
+                if not isinstance(pre_observation, Mapping):
+                    pre_observation = _phase6d3a_observed_context(
+                        pre_capture if isinstance(pre_capture, Mapping) else {}, None,
+                        navigation_epoch_before,
+                    )
+                post_sample = (_phase6d3a_capture_window_sample(client, dev)
+                               if isinstance(tap_event, Mapping) else {})
+                post_observation = _phase6d3a_observed_context(
+                    post_capture, post_sample,
+                    getattr(tracker, "navigation_epoch", None),
+                )
+                tap_diagnostic = deepcopy(dict(tap_payload)) if isinstance(tap_event, Mapping) else {
+                    "status": "UNKNOWN", "candidate": "UNKNOWN", "coordinates": "UNKNOWN",
+                    "operation": "UNKNOWN", "result_status": "UNKNOWN",
+                }
+                operation = _phase6d3a_input_tap_operation_diagnostic(
+                    tap_diagnostic.get("operation") if isinstance(tap_diagnostic, Mapping) else None,
+                )
+                if isinstance(tap_diagnostic, dict):
+                    tap_diagnostic["operation"] = operation
+                operation = operation if isinstance(operation, Mapping) else {}
+                source_list_context = {
+                    "status": "OBSERVED" if tap_event else "UNKNOWN",
+                    "started_at": started_at,
+                    "finished_at": finished_at,
+                    "source_capture_id": (pre_capture.get("hierarchy_capture_id")
+                                           if isinstance(pre_capture, Mapping) else None) or "UNKNOWN",
+                    "source_capture_observed_at": (pre_capture.get("captured_at")
+                                                    if isinstance(pre_capture, Mapping) else None) or "UNKNOWN",
+                    "post_capture_id": post_capture.get("hierarchy_capture_id") or "UNKNOWN",
+                    "post_capture_observed_at": post_capture.get("captured_at") or "UNKNOWN",
+                    "tap_operation_started_at": operation.get("operation_started_at") or "UNKNOWN",
+                    "tap_operation_finished_at": operation.get("operation_finished_at") or "UNKNOWN",
+                    "transition_currentness_status": "UNKNOWN_NOT_ESTABLISHED",
+                }
+                tracker.record_diagnostic("all_devices_location_selection", {
+                    "lookup_input_inventory": lookup_input_inventory,
+                    "started_at": started_at,
+                    "finished_at": finished_at,
+                    "elapsed_ms": (round(max(0, finished_ns - started_ns) / 1_000_000, 3)
+                                   if type(finished_ns) is int and type(started_ns) is int else "UNKNOWN"),
+                    "before_node_count": len(nodes) if isinstance(nodes, list) else 0,
+                    "before_all_devices_label_visible": label_visible(nodes),
+                    "after_node_count": len(after_nodes) if isinstance(after_nodes, list) else 0,
+                    "after_all_devices_label_visible": label_visible(after_nodes),
+                    "selected": selected,
+                    "decision": "VERIFIED_SELECTED" if selected else "NOT_VERIFIED",
+                    "result_status": "OBSERVED" if isinstance(result, tuple) and len(result) > 2 else "UNKNOWN",
+                    "reason": reason[:256],
+                    "input_tap": tap_diagnostic,
+                    "source_list_context": source_list_context,
+                    "pre_observation": deepcopy(dict(pre_observation)),
+                    "post_observation": post_observation,
+                })
+            except Exception:
+                pass
+    return result
+
+
+def _phase6d3a_entry_scroll_capture(client: Any, nodes: Any) -> dict[str, Any]:
+    try:
+        from tb_runner.plugin_entry_provenance import source_capture_evidence, scroll_target_inventory
+
+        if not isinstance(nodes, list) or not nodes:
+            return {
+                "hierarchy_capture": _phase6d3a_hierarchy_capture_diagnostic(
+                    None, status="UNAVAILABLE_NO_CAPTURED_NODES",
+                ),
+                "scroll_targets": [],
+            }
+        capture = source_capture_evidence(client, nodes)
+        return {
+            "hierarchy_capture": _phase6d3a_hierarchy_capture_diagnostic(capture),
+            "scroll_targets": scroll_target_inventory(nodes),
+        }
+    except Exception as exc:
+        return {
+            "hierarchy_capture": _phase6d3a_hierarchy_capture_diagnostic(
+                None, status=f"UNAVAILABLE_DIAGNOSTIC_ERROR:{type(exc).__name__}",
+            ),
+            "scroll_targets": [],
+        }
+
+
+def _phase6d3a_entry_recovery_target_selection_inputs(
+    *,
+    nodes: Any,
+    source_capture: Any,
+    location_state: Any,
+    top_anchor_labels: Any,
+    max_swipes_configured: Any,
+    top_evidence_observations: Any = None,
+) -> dict[str, Any]:
+    '''Describe existing recovery selection operands without creating authority.'''
+    try:
+        if isinstance(top_anchor_labels, str):
+            labels = [top_anchor_labels[:128]] if top_anchor_labels.strip() else []
+            labels_status = "OBSERVED"
+        elif isinstance(top_anchor_labels, (list, tuple)):
+            labels = [str(label)[:128] for label in top_anchor_labels[:16] if str(label).strip()]
+            labels_status = "OBSERVED"
+        else:
+            labels = []
+            labels_status = "UNAVAILABLE_NOT_CONFIGURED"
+        state = location_state if isinstance(location_state, Mapping) else {}
+        candidate = state.get("candidate")
+        candidate = candidate if isinstance(candidate, Mapping) else None
+        capture = source_capture if isinstance(source_capture, Mapping) else {}
+        hierarchy = capture.get("hierarchy_capture")
+        hierarchy = hierarchy if isinstance(hierarchy, Mapping) else {}
+        scroll_targets = capture.get("scroll_targets")
+        candidate_summary = None
+        if candidate:
+            candidate_summary = {
+                "label": str(candidate.get("label") or "")[:128] or "UNKNOWN",
+                "resource_id": str(candidate.get("resource_id") or candidate.get("rid") or "")[:192]
+                or "UNKNOWN",
+                "bounds": str(candidate.get("bounds") or "")[:96] or "UNKNOWN",
+                "identity_source": str(candidate.get("identity_source") or "")[:96] or "UNKNOWN",
+            }
+        max_swipes = (
+            max_swipes_configured
+            if type(max_swipes_configured) in (str, int, float, bool)
+            else "UNKNOWN"
+        )
+        observations = top_evidence_observations if isinstance(top_evidence_observations, list) else []
+        hierarchy_root = hierarchy.get("root")
+        hierarchy_root = hierarchy_root if isinstance(hierarchy_root, Mapping) else {}
+        return {
+            "diagnostic_only": True,
+            "status": "OBSERVED_INPUTS",
+            "selection_source": "top_anchor_stable_labels",
+            "requested_stable_labels_status": labels_status,
+            "requested_stable_labels": labels,
+            "initial_hierarchy_nodes": {
+                "status": (
+                    "AVAILABLE" if isinstance(nodes, list) and nodes
+                    else "EMPTY" if isinstance(nodes, list) else "UNAVAILABLE_NOT_A_LIST"
+                ),
+                "count": len(nodes) if isinstance(nodes, list) else "UNKNOWN",
+                "capture": {
+                    "status": hierarchy.get("capture_status") or "UNKNOWN",
+                    "capture_id": hierarchy.get("capture_id"),
+                    "request_id": hierarchy.get("request_id"),
+                    "root_ref": hierarchy_root.get("root_ref"),
+                },
+            },
+            "initial_device_location": {
+                "selected": state.get("selected", "UNKNOWN"),
+                "reason": str(state.get("reason") or "UNKNOWN")[:128],
+                "candidate_status": "AVAILABLE" if candidate else "NOT_FOUND",
+                "candidate": candidate_summary,
+            },
+            "scroll_configuration": {
+                "max_swipes_configured": max_swipes,
+                "default_max_swipes": 5,
+                "pause_seconds": 0.6,
+                "device_list_normalization": True,
+            },
+            "top_evidence_observations": observations,
+            "existing_scroll_target_inventory_count": (
+                len(scroll_targets) if isinstance(scroll_targets, list) else "UNKNOWN"
+            ),
+        }
+    except Exception as exc:
+        return {
+            "diagnostic_only": True,
+            "status": "UNAVAILABLE_DIAGNOSTIC_ERROR",
+            "error_type": type(exc).__name__,
+        }
+
+
+def _phase6d3a_record_entry_recovery_scroll(
+    client: Any, *, started_at: str, finished_at: str, decision: str,
+    reason: str, result: Any, before: Mapping[str, Any], after: Mapping[str, Any],
+    target_selection_inputs: Mapping[str, Any] | None = None,
+) -> None:
+    try:
+        tracker = getattr(client, "_phase6d3a_entity_root_tracker", None)
+        if tracker is None:
+            return
+        result_summary: dict[str, Any] = {}
+        if isinstance(result, Mapping):
+            for key, value in list(result.items())[:32]:
+                if isinstance(value, (str, bool, int, float)) or value is None:
+                    result_summary[str(key)[:64]] = value[:256] if isinstance(value, str) else value
+        result_fields = (
+            "reached_top", "reason", "evidence", "attempts",
+            "anchor", "anchor_resource_id", "anchor_bounds",
+        )
+        target_result = {
+            key: result_summary.get(key, "UNKNOWN") for key in result_fields
+        } if isinstance(result, Mapping) else {
+            "status": "UNAVAILABLE_NO_SCROLL_RESULT",
+        }
+        target_identity_fields = ("anchor", "anchor_resource_id", "anchor_bounds")
+        resolved_target = {
+            key: result_summary[key][:256]
+            for key in target_identity_fields
+            if isinstance(result_summary.get(key), str) and result_summary[key].strip()
+        }
+        resolved_target_source = "SCROLL_RESULT" if resolved_target else "UNKNOWN"
+        if not resolved_target and isinstance(target_selection_inputs, Mapping):
+            observations = target_selection_inputs.get("top_evidence_observations")
+            if isinstance(observations, list):
+                for observation in reversed(observations):
+                    if not isinstance(observation, Mapping):
+                        continue
+                    observed_target = {
+                        key: observation[key][:256]
+                        for key in target_identity_fields
+                        if isinstance(observation.get(key), str) and observation[key].strip()
+                    }
+                    if observed_target:
+                        resolved_target = observed_target
+                        resolved_target_source = "TOP_EVIDENCE_CALLBACK"
+                        break
+        target_identity_available = bool(resolved_target)
+        tracker.record_diagnostic("entry_recovery_scroll", {
+            "target_selection": {
+                "status": (
+                    str(target_selection_inputs.get("status") or "OBSERVED_INPUTS")
+                    if isinstance(target_selection_inputs, Mapping) else "UNKNOWN_INPUTS"
+                ),
+                "inputs": (
+                    deepcopy(dict(target_selection_inputs))
+                    if isinstance(target_selection_inputs, Mapping) else None
+                ),
+                "scroll_result": target_result,
+                "resolved_target_status": (
+                    "OBSERVED" if target_identity_available
+                    else "NOT_RETURNED_BY_SCROLL_RESULT"
+                ),
+                "resolved_target_source": resolved_target_source,
+                "resolved_target": resolved_target if target_identity_available else None,
+            },
+            "started_at": str(started_at or "")[:64],
+            "finished_at": str(finished_at or "")[:64],
+            "decision": str(decision or "UNKNOWN")[:64],
+            "reason": str(reason or "")[:256],
+            "result": result_summary if isinstance(result, Mapping) else None,
+            "before": deepcopy(dict(before)) if isinstance(before, Mapping) else {},
+            "after": deepcopy(dict(after)) if isinstance(after, Mapping) else {},
+        })
+    except Exception:
+        return
+
+
 def _run_enter_device_card_plugin(
     client: A11yAdbClient,
     dev: str,
@@ -9005,6 +10172,7 @@ def _run_enter_device_card_plugin(
                     dev=dev,
                     tab_cfg=tab_cfg,
                     transition_fast_path=transition_fast_path,
+                    baseline_nodes=initial_nodes,
                 )
                 setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
                 setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
@@ -9020,17 +10188,41 @@ def _run_enter_device_card_plugin(
                 "[DEVICE_ENTRY][visible_target] direct_entry=false "
                 f"reason='devices_context_unverified:{initial_location_state.get('reason', 'unknown')}'"
             )
+        before_scroll_capture = _phase6d3a_entry_scroll_capture(client, initial_nodes)
         top_anchor_labels = step.get(
             "top_anchor_stable_labels",
             device_tab_logic.DEFAULT_DEVICE_LIST_TOP_ANCHOR_LABELS,
         )
         top_evidence_nodes: list[dict[str, Any]] = []
+        top_evidence_observations: list[dict[str, Any]] = []
 
         def _capture_top_evidence(current_nodes: list[dict[str, Any]]) -> dict[str, Any]:
             if isinstance(current_nodes, list):
                 top_evidence_nodes[:] = current_nodes
-            return device_tab_logic.verify_device_list_top(current_nodes, top_anchor_labels)
+            evidence = device_tab_logic.verify_device_list_top(current_nodes, top_anchor_labels)
+            try:
+                if isinstance(evidence, Mapping):
+                    top_evidence_observations.append({
+                        key: evidence.get(key)
+                        for key in ("ok", "reason", "anchor", "anchor_resource_id", "anchor_bounds")
+                    })
+                else:
+                    top_evidence_observations.append({
+                        "status": "UNAVAILABLE_NOT_A_MAPPING",
+                    })
+            except Exception:
+                pass
+            return evidence
 
+        recovery_target_selection_inputs = _phase6d3a_entry_recovery_target_selection_inputs(
+            nodes=initial_nodes,
+            source_capture=before_scroll_capture,
+            location_state=initial_location_state,
+            top_anchor_labels=top_anchor_labels,
+            max_swipes_configured=step.get("scroll_to_top_max_swipes", 5),
+            top_evidence_observations=top_evidence_observations,
+        )
+        scroll_started_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
         try:
             top_result = scroll_to_top_fn(
                 dev=dev,
@@ -9040,8 +10232,18 @@ def _run_enter_device_card_plugin(
                 device_list_normalization=True,
             )
         except Exception as exc:
+            scroll_finished_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+            after_scroll_capture = _phase6d3a_entry_scroll_capture(client, top_evidence_nodes)
+            _phase6d3a_record_entry_recovery_scroll(
+                client, started_at=scroll_started_at, finished_at=scroll_finished_at,
+                decision="FAILED_EXCEPTION", reason=type(exc).__name__, result=None,
+                before=before_scroll_capture, after=after_scroll_capture,
+                target_selection_inputs=recovery_target_selection_inputs,
+            )
             log(f"[DEVICE_ENTRY][normalize] scroll_to_top_failed reason='{exc}'")
             return False, "device_list_top_normalization_failed"
+        scroll_finished_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        after_scroll_capture = _phase6d3a_entry_scroll_capture(client, top_evidence_nodes)
         if not isinstance(top_result, dict) or not bool(top_result.get("reached_top")):
             reason = str((top_result or {}).get("reason") or "unknown") if isinstance(top_result, dict) else "invalid_result"
             if _can_handoff_unverified_device_top_to_forward_search(
@@ -9053,9 +10255,28 @@ def _run_enter_device_card_plugin(
                     "handoff='bounded_forward_search' "
                     f"reason='{reason}' evidence='{top_result.get('evidence', '')}'"
                 )
+                _phase6d3a_record_entry_recovery_scroll(
+                    client, started_at=scroll_started_at, finished_at=scroll_finished_at,
+                    decision="HANDOFF_BOUNDED_FORWARD_SEARCH", reason=reason, result=top_result,
+                    before=before_scroll_capture, after=after_scroll_capture,
+                    target_selection_inputs=recovery_target_selection_inputs,
+                )
             else:
                 log(f"[DEVICE_ENTRY][normalize] scroll_to_top_unverified reason='{reason}'")
+                _phase6d3a_record_entry_recovery_scroll(
+                    client, started_at=scroll_started_at, finished_at=scroll_finished_at,
+                    decision="ABORT_UNVERIFIED", reason=reason, result=top_result,
+                    before=before_scroll_capture, after=after_scroll_capture,
+                    target_selection_inputs=recovery_target_selection_inputs,
+                )
                 return False, f"device_list_top_unverified:{reason}"
+        else:
+            _phase6d3a_record_entry_recovery_scroll(
+                client, started_at=scroll_started_at, finished_at=scroll_finished_at,
+                decision="VERIFIED_TOP", reason="reached_top", result=top_result,
+                before=before_scroll_capture, after=after_scroll_capture,
+                target_selection_inputs=recovery_target_selection_inputs,
+            )
 
         search_seed_nodes = top_evidence_nodes or initial_nodes
     else:
@@ -9149,6 +10370,7 @@ def _run_enter_device_card_plugin(
                 dev=dev,
                 tab_cfg=tab_cfg,
                 transition_fast_path=transition_fast_path,
+                baseline_nodes=nodes,
             )
             setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
             setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
@@ -9186,6 +10408,7 @@ def _run_enter_device_card_plugin(
                 dev=dev,
                 tab_cfg=tab_cfg,
                 transition_fast_path=transition_fast_path,
+                baseline_nodes=nodes,
             )
             setattr(client, "last_post_click_transition_same_screen", not confirm_ok)
             setattr(client, "last_post_click_transition_signal", str(confirm_signal or ""))
@@ -19374,6 +20597,13 @@ def _phase6d3a_initialize_redirect_context(*, client: Any, dev: str,
                 entity_root_provenance=deepcopy(provenance), device_capture_performed=False)
 
 
+def _phase6d3a_scenario_run_id(scenario_id: str, rows: Any, output_path: str) -> str:
+    """Use the same run ID rule before entry and again in the main loop."""
+    run_id = next((str(item.get("scenario_run_id")) for item in rows
+                   if isinstance(item, Mapping) and item.get("scenario_run_id")), "")
+    return run_id or (str(scenario_id or "") + ":" + Path(output_path).stem)
+
+
 def _phase6d3a_reset_run_state(*, client: Any, run_id: str) -> None:
     """Reset only redirect-owned counters when a new scenario run starts."""
     controller = getattr(client, "_phase6d3a_redirect_controller", None)
@@ -19406,6 +20636,8 @@ def _phase6d3a_capture_current(*, client: Any, dev: str, tab_cfg: Mapping[str, A
     token = clock.begin_observation() if clock is not None else None
     raw = capture_observation(client, dev, scenario_id=scenario_id, step=step_idx,
                               scenario_run_id=run_id)
+    from tb_runner.plugin_entry_provenance import evidence_invocation_identity
+    raw.update(evidence_invocation_identity(client, scenario_id))
     if clock is not None and token is not None:
         raw["_exploration_observation"] = clock.finish_observation(token)
     try:
@@ -19448,6 +20680,41 @@ def _phase6d3a_capture_current(*, client: Any, dev: str, tab_cfg: Mapping[str, A
         phase3_plugin_context_evidence=deepcopy(context_owner.get("plugin_context_evidence") or {}),
         navigation_epoch=context_owner.get("navigation_epoch"),
     )
+    from talkback_lib.reliable_hierarchy_schema import validate_capture_authority
+    authority = validate_capture_authority(raw.get("capture_authority"))
+    marker = raw.get("_exploration_observation")
+    capture_id = authority.capture_key if authority is not None else ""
+    capture_current = bool(
+        clock is not None and isinstance(marker, Mapping) and clock.current(marker)
+        and raw.get("snapshot_coherent") is True and authority is not None
+        and raw.get("capture_id") == capture_id
+        and raw.get("package_name") == authority.hierarchy_package_name
+        and raw.get("traversal_root_ref") == authority.root_ref
+        and raw.get("traversal_root_window_id") == authority.hierarchy_window_id
+        and raw.get("hierarchy_capture_id") == capture_id
+        and raw.get("focus_capture_id") in {None, capture_id}
+        and raw.get("geometry_capture_id") in {None, capture_id}
+    )
+    envelope = {
+        "schema_version": "phase6-production-observation-v1",
+        "scenario_id": scenario_id, "scenario_run_id": run_id,
+        "step_index": step_idx, "capture_id": capture_id,
+        "capture_authority": authority.to_dict() if authority is not None else None,
+        "snapshot_coherent": raw.get("snapshot_coherent") is True,
+        "navigation_epoch": raw.get("navigation_epoch"),
+        "hierarchy_capture_id": raw.get("hierarchy_capture_id"),
+        "focus_capture_id": raw.get("focus_capture_id"),
+        "geometry_capture_id": raw.get("geometry_capture_id"),
+        "observation": deepcopy(marker) if isinstance(marker, Mapping) else {},
+        "capture_complete": capture_current,
+        "coverage_source": str(raw.get("coverage_source") or "unknown"),
+        "coverage": str(raw.get("observation_coverage") or "UNOBSERVED"),
+        "hierarchy_complete": raw.get("hierarchy_complete") is True,
+        "hierarchy_request_id": str(raw.get("hierarchy_request_id") or ""),
+        "captured_at": str(raw.get("timestamp") or ""),
+    }
+    raw["production_observation_envelope"] = envelope
+    raw["production_observation_current"] = capture_current
     state = getattr(client, "_phase6d3a_main_loop_state", None)
     phase_ctx = getattr(client, "_phase6d3a_phase_context", None)
     if state is None or phase_ctx is None:
@@ -20086,14 +21353,25 @@ def _phase6d3a_shadow_readiness(*, record: Any, inventory_record: Any,
         raw["scenario_run_id"] = run_id or row.get("scenario_run_id")
         raw["_exploration_observation"] = deepcopy(dict(observation))
         raw["capture_id"] = (row.get("capture_id") or observation.get("observation_id"))
-        entry = row.get("phase3_entry_evidence") or owner.get("entry_evidence")
-        if isinstance(entry, Mapping):
-            raw["phase3_entry_evidence"] = deepcopy(dict(entry))
-        plugin_proof = row.get("phase3_plugin_context_evidence") or owner.get("plugin_context_evidence")
-        if isinstance(plugin_proof, Mapping) and plugin_proof:
-            raw["phase3_plugin_context_evidence"] = deepcopy(dict(plugin_proof))
+        if "phase3_entry_evidence" in row:
+            entry = row["phase3_entry_evidence"]
+            raw["phase3_entry_evidence"] = deepcopy(dict(entry)) if isinstance(entry, Mapping) else entry
+        elif "entry_evidence" in owner:
+            entry = owner["entry_evidence"]
+            raw["phase3_entry_evidence"] = deepcopy(dict(entry)) if isinstance(entry, Mapping) else entry
+        plugin_proof_explicit = ("phase3_plugin_context_evidence" in row
+                                 or "plugin_context_evidence" in owner)
+        if "phase3_plugin_context_evidence" in row:
+            plugin_proof = row["phase3_plugin_context_evidence"]
+            raw["phase3_plugin_context_evidence"] = (
+                deepcopy(dict(plugin_proof)) if isinstance(plugin_proof, Mapping) else plugin_proof)
+        elif "plugin_context_evidence" in owner:
+            plugin_proof = owner["plugin_context_evidence"]
+            raw["phase3_plugin_context_evidence"] = (
+                deepcopy(dict(plugin_proof)) if isinstance(plugin_proof, Mapping) else plugin_proof)
         raw["navigation_epoch"] = owner.get("navigation_epoch") or row.get("navigation_epoch")
-        if not isinstance(raw.get("phase3_plugin_context_evidence"), Mapping):
+        if (not plugin_proof_explicit
+                and not isinstance(raw.get("phase3_plugin_context_evidence"), Mapping)):
             summary = getattr(client, "last_start_open_summary", {}) if client is not None else {}
             if isinstance(summary, Mapping) and summary:
                 try:
@@ -20111,9 +21389,14 @@ def _phase6d3a_shadow_readiness(*, record: Any, inventory_record: Any,
         except Exception:
             plugin_context = None
 
-        overlay = raw.get("overlay") if isinstance(raw.get("overlay"), Mapping) else {}
-        overlay_observed = overlay.get("observed")
-        overlay_status = "CLEAR" if overlay_observed is False else "BLOCKED" if overlay_observed is True else None
+        overlay_sources = [value for value in (row.get("overlay"), raw.get("overlay"))
+                          if isinstance(value, Mapping)]
+        if any(value.get("observed") is True for value in overlay_sources):
+            overlay_status = "BLOCKED"
+        elif overlay_sources and all(value.get("observed") is False for value in overlay_sources):
+            overlay_status = "CLEAR"
+        else:
+            overlay_status = None
 
         lifecycle_status, lifecycle_evidence = _phase6d3a_lifecycle_for_decision(
             client=client, scenario_id=scenario_id, row_step=row.get("step_index"),
@@ -20199,6 +21482,13 @@ def _phase6d3a_shadow_readiness(*, record: Any, inventory_record: Any,
                         and lifecycle_status in {"CLEAR", "BLOCKED"}
                         and helper_status is not None
                         and recovery_status is not None and transition_status is not None):
+                    from tb_runner.plugin_entry_provenance import root_authority_is_current
+                    causal_root_current = (
+                        isinstance(plugin_context, Mapping)
+                        and plugin_context.get("root_authority") == "ENTRY_TRANSACTION_RESOLVED"
+                        and root_authority_is_current(
+                            raw.get("phase6d3a_entity_root_provenance"), raw)
+                    )
                     authority = authority_evidence_type(
                         enabled=True, fresh=current_evidence,
                         recovery_clear=recovery_status == "CLEAR",
@@ -20206,6 +21496,7 @@ def _phase6d3a_shadow_readiness(*, record: Any, inventory_record: Any,
                         transport_clear=helper_status == "READY",
                         focus_coherent=coherent_focus_fn(raw),
                         plugin_context_required=True,
+                        root_authority_resolved=causal_root_current,
                         structural_scope_proven=bool(graph_state_id),
                         geometry_in_viewport=geometry_in_viewport_fn(raw, recommendation))
         except Exception:
@@ -20497,6 +21788,7 @@ def _phase6d3a_intercept_focus_step(*, original_collect, collect_kwargs: Mapping
 
 def _phase6d3a_record_production_reconciliation(*, client: Any, row: dict[str, Any]) -> None:
     """Close redirect outcome metrics only from production reconciliation fields."""
+    _phase6d3a_attach_entry_diagnostics(client, row)
     audit = row.get("phase6d3a_redirect") if isinstance(row, dict) else None
     if not isinstance(audit, dict) or audit.get("mode") != "ACTIVE":
         return
@@ -21167,6 +22459,78 @@ def _apply_content_terminal_phase(client, dev, state, row, phase_ctx, step_idx, 
         return True, "content_error"
 
 
+def _seed_initial_frontier_shadow_observation(
+    *, client: Any, dev: str, state: MainLoopState, tab_cfg: dict[str, Any],
+    scenario_run_id: str,
+) -> bool:
+    """Seed step-zero with one current read-only observation for PRE_DECISION.
+
+    The first decision has no prior traversal result to supply a capture. Reuse
+    the production observation and inventory hooks so that its cursor is bound
+    to the same current hierarchy and evidence-clock marker as later steps.
+    """
+    runtime = getattr(client, "_phase6c2_frontier_shadow_runtime", None)
+    anchor = state.previous_step_row if isinstance(state.previous_step_row, dict) else None
+    if runtime is None or anchor is None:
+        return False
+    try:
+        if int(anchor.get("step_index", 0) or 0) != 0:
+            return False
+    except (TypeError, ValueError):
+        return False
+    if isinstance(anchor.get("state_graph_observation"), Mapping):
+        return False
+    scenario_id = str(tab_cfg.get("scenario_id") or "")
+    if anchor.get("scenario_id") not in (None, "", scenario_id):
+        return False
+    if anchor.get("scenario_run_id") not in (None, "", scenario_run_id):
+        return False
+    anchor["scenario_id"] = scenario_id
+    anchor["scenario_run_id"] = scenario_run_id
+
+    observation = _capture_phase6d3a_production_observation(
+        client=client, dev=dev, row=anchor,
+    )
+    if not isinstance(observation, Mapping) or observation.get("production_observation_current") is not True:
+        log("[FRONTIER_SHADOW][initial_observation] step=0 status='UNRESOLVED' action='fail_closed'")
+        return False
+    nodes = observation.get("nodes")
+    nodes = nodes if isinstance(nodes, list) else []
+    projection_complete = False
+    candidates: list[dict[str, Any]] = []
+    try:
+        content, bottom, _meta = _collect_step_candidate_priority_groups(
+            nodes, scenario_id=scenario_id,
+            consumed_cluster_signatures=set(),
+            consumed_cluster_logical_signatures=set(),
+        )
+        candidates = [*content, *bottom]
+        projection_complete = True
+    except Exception as exc:
+        log(f"[FRONTIER_SHADOW][initial_inventory] step=0 reason='{type(exc).__name__}' action='fail_closed'")
+    _capture_frontier_shadow_inventory(
+        client=client, row=anchor, candidates=candidates,
+        scenario_id=scenario_id, raw_nodes=nodes,
+        projection_complete=projection_complete,
+    )
+    cached = getattr(runtime, "_latest_inventory", None)
+    ref = cached.get("observation_ref") if isinstance(cached, Mapping) else None
+    ref = ref if isinstance(ref, Mapping) else {}
+    cursor = ref.get("focus_cursor") if isinstance(ref.get("focus_cursor"), Mapping) else {}
+    linked = bool(
+        isinstance(cached, Mapping)
+        and cached.get("source_step") == 0
+        and ref.get("production_capture_id") == anchor.get("capture_id")
+        and cursor.get("confirmed") is True
+    )
+    seed_status = "LINKED" if linked else "UNRESOLVED"
+    log(
+        f"[FRONTIER_SHADOW][initial_observation] step=0 status='{seed_status}' "
+        f"capture_id='{str(anchor.get('capture_id') or 'none')}'"
+    )
+    return linked
+
+
 def _main_loop_phase(
     client: A11yAdbClient,
     dev: str,
@@ -21180,10 +22544,8 @@ def _main_loop_phase(
     start_step_index = max(1, int(getattr(phase_ctx, "start_step_index", 1) or 1))
     graph_mode = str(os.environ.get("TB_STATE_GRAPH_MODE", "OFF") or "OFF").strip().upper()
     redirect_mode = "OFF"
-    scenario_run_id = next((str(item.get("scenario_run_id")) for item in phase_ctx.rows
-                            if isinstance(item, dict) and item.get("scenario_run_id")), "")
-    if not scenario_run_id:
-        scenario_run_id = str(tab_cfg.get("scenario_id", "") or "") + ":" + Path(phase_ctx.output_path).stem
+    scenario_run_id = _phase6d3a_scenario_run_id(
+        str(tab_cfg.get("scenario_id", "") or ""), phase_ctx.rows, phase_ctx.output_path)
     try:
         # Phase 6C2 shares the Phase 6B environment gate and remains absent in
         # OFF mode. Import/initialization failures are diagnostic only.
@@ -21259,6 +22621,11 @@ def _main_loop_phase(
     if not hasattr(state, "reliability_metrics"):
         state.reliability_metrics = TraversalMetrics()
     state.local_tab_revisit_guard_state = LocalTabRevisitGuardState()
+    if graph_mode == "SHADOW" and start_step_index == 1:
+        _seed_initial_frontier_shadow_observation(
+            client=client, dev=dev, state=state, tab_cfg=tab_cfg,
+            scenario_run_id=scenario_run_id,
+        )
     for step_idx in range(start_step_index, tab_cfg["max_steps"] + 1):
         hard_stop = getattr(client, "_phase5c_hard_stop_state", None)
         if hard_stop is not None and hard_stop.latched:
@@ -23036,6 +24403,129 @@ def _emit_scenario_terminal_event(evidence_runtime, payload, hard_stop=None):
             raise
 
 
+def _phase6d3a_attach_entry_diagnostics(client: Any, row: dict[str, Any] | None = None):
+    """Attach observational entry evidence to a durable row without affecting gates."""
+    try:
+        tracker = getattr(client, "_phase6d3a_entity_root_tracker", None)
+        snapshot = getattr(tracker, "diagnostic_snapshot", None)
+        if not callable(snapshot):
+            return None
+        diagnostics = snapshot()
+        summary = getattr(client, "last_start_open_summary", {})
+        summary = summary if isinstance(summary, Mapping) else {}
+        recovery = getattr(client, "last_recoverable_precondition", {})
+        recovery_fields = (
+            "outcome", "initial_outcome", "detected", "attempted", "attempt_count",
+            "action_dispatched", "reason", "detection_basis", "error_resource_ids",
+            "action_resource_id",
+        )
+        recovery_summary = {}
+        if isinstance(recovery, Mapping):
+            for key in recovery_fields:
+                if key not in recovery:
+                    continue
+                value = recovery[key]
+                if key in {"reason", "action_resource_id", "detection_basis", "outcome", "initial_outcome"}:
+                    recovery_summary[key] = str(value or "")[:256]
+                elif key == "error_resource_ids" and isinstance(value, list):
+                    recovery_summary[key] = [str(item)[:128] for item in value[:16]]
+                elif isinstance(value, (bool, int)) or value is None:
+                    recovery_summary[key] = value
+        target = getattr(client, "last_recoverable_precondition_target", None)
+        if isinstance(target, Mapping):
+            target_node = target.get("node") if isinstance(target.get("node"), Mapping) else target
+            target_resource_id = str(
+                target.get("resource_id") or target.get("rid")
+                or target_node.get("viewIdResourceName") or target_node.get("resourceId") or ""
+            )[:256]
+            recovery_target = {
+                "status": "OBSERVED",
+                "resource_id": target_resource_id or "UNKNOWN",
+                "class_name": str(target.get("class_name") or target_node.get("className") or "")[:192] or "UNKNOWN",
+                "bounds": str(target.get("bounds") or target_node.get("boundsInScreen")
+                               or target_node.get("bounds") or "")[:96] or "UNKNOWN",
+            }
+        else:
+            recovery_target = {
+                "status": "UNKNOWN", "resource_id": "UNKNOWN",
+                "class_name": "UNKNOWN", "bounds": "UNKNOWN",
+            }
+        attempt_result = getattr(client, "last_recoverable_precondition_attempt_result", {})
+        if not isinstance(attempt_result, Mapping) or not attempt_result:
+            attempt_result = recovery if isinstance(recovery, Mapping) else {}
+        if isinstance(attempt_result, Mapping) and attempt_result:
+            result_fields = (
+                "outcome", "initial_outcome", "detected", "attempted", "attempt_count",
+                "reason", "action_dispatched", "action_resource_id",
+            )
+            recovery_result = {"status": "OBSERVED"}
+            for key in result_fields:
+                if key not in attempt_result:
+                    continue
+                value = attempt_result[key]
+                if isinstance(value, str):
+                    recovery_result[key] = value[:256]
+                elif isinstance(value, (bool, int, float)) or value is None:
+                    recovery_result[key] = value
+            for key in ("initial_observation", "final_snapshot"):
+                observation = attempt_result.get(key)
+                if not isinstance(observation, Mapping):
+                    continue
+                summary_observation = {}
+                for field in ("target_present", "target_visible", "target_resource_id"):
+                    if field in observation:
+                        value = observation[field]
+                        summary_observation[field] = value[:256] if isinstance(value, str) else value
+                errors = observation.get("error_resource_ids")
+                if isinstance(errors, list):
+                    summary_observation["error_resource_ids"] = [str(item)[:128] for item in errors[:16]]
+                recovery_result[key] = summary_observation
+            for key in ("outcome", "reason"):
+                if not recovery_result.get(key):
+                    recovery_result[key] = "UNKNOWN"
+            for key in ("attempted", "attempt_count", "action_dispatched"):
+                if key not in recovery_result:
+                    recovery_result[key] = "UNKNOWN"
+        else:
+            recovery_result = {"status": "UNKNOWN", "outcome": "UNKNOWN", "reason": "UNKNOWN"}
+        diagnostics["recovery_decision"] = {
+            "start_state_verified": summary.get("start_state_verified"),
+            "start_state_status": "OBSERVED" if "start_state_verified" in summary else "UNKNOWN",
+            "start_state_reason": str(summary.get("start_state_recovery_reason") or "")[:256],
+            "recoverable_precondition": recovery_summary,
+            "recovery_target": recovery_target,
+            "recovery_result": recovery_result,
+        }
+        if isinstance(row, dict):
+            row["phase6d3a_entry_diagnostics"] = deepcopy(diagnostics)
+        return diagnostics
+    except Exception:
+        return None
+
+
+def _phase6d3a_emit_entry_diagnostics(
+    evidence_runtime: Any, diagnostics: Mapping[str, Any] | None, terminal_reason: str,
+) -> bool:
+    if (not isinstance(diagnostics, Mapping)
+            or not bool(getattr(evidence_runtime, "is_enabled", False))):
+        return False
+    try:
+        evidence_runtime.emit(
+            "PHASE6D3A_ENTRY_DIAGNOSTICS",
+            producer="runner",
+            phase="scenario_start",
+            payload={
+                "diagnostic_only": True,
+                "schema_version": diagnostics.get("schema_version"),
+                "terminal_reason": str(terminal_reason or "")[:256],
+                "diagnostics": deepcopy(dict(diagnostics)),
+            },
+        )
+        return True
+    except Exception:
+        return False
+
+
 def _collect_tab_rows_inner(
     client: A11yAdbClient,
     dev: str,
@@ -23056,12 +24546,18 @@ def _collect_tab_rows_inner(
     evidence_runtime = getattr(client, "evidence_runtime", None)
     if bool(getattr(evidence_runtime, "is_enabled", False)):
         try:
-            evidence_runtime.start_scenario(
+            scenario_tx_id = evidence_runtime.start_scenario(
                 scenario_id,
                 plugin_family=str(tab_cfg.get("plugin_family", "") or tab_cfg.get("scenario_type", "") or ""),
             )
+            setattr(client, "_active_evidence_scenario_id", scenario_id)
+            setattr(client, "_active_evidence_scenario_tx_id", str(scenario_tx_id or ""))
         except Exception:
-            pass
+            setattr(client, "_active_evidence_scenario_id", "")
+            setattr(client, "_active_evidence_scenario_tx_id", "")
+    else:
+        setattr(client, "_active_evidence_scenario_id", "")
+        setattr(client, "_active_evidence_scenario_tx_id", "")
     crash_attempt = _crash_guard_attempt_for_tab_cfg(tab_cfg)
     _reset_crash_guard_latch(client, scenario_id=scenario_id, attempt=crash_attempt)
     setattr(
@@ -23093,16 +24589,39 @@ def _collect_tab_rows_inner(
     )
     checkpoint_every = _get_positive_int(checkpoint_save_every, CHECKPOINT_SAVE_EVERY_STEPS)
 
-    start_result = _run_start_pipeline(
-        client,
-        dev,
-        tab_cfg,
-        output_base_dir=output_base_dir,
-        main_step_wait_seconds=main_step_wait_seconds,
-        main_announcement_wait_seconds=main_announcement_wait_seconds,
-        main_announcement_idle_wait_seconds=main_announcement_idle_wait_seconds,
-        main_announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
-    )
+    try:
+        start_result = _run_start_pipeline(
+            client,
+            dev,
+            tab_cfg,
+            output_base_dir=output_base_dir,
+            main_step_wait_seconds=main_step_wait_seconds,
+            main_announcement_wait_seconds=main_announcement_wait_seconds,
+            main_announcement_idle_wait_seconds=main_announcement_idle_wait_seconds,
+            main_announcement_max_extra_wait_seconds=main_announcement_max_extra_wait_seconds,
+        )
+    except Exception as exc:
+        # Persist only existing diagnostics; do not acquire, retry, or change failure.
+        exception_diagnostics = _phase6d3a_attach_entry_diagnostics(client)
+        _phase6d3a_emit_entry_diagnostics(
+            evidence_runtime, exception_diagnostics, "START_PIPELINE_EXCEPTION",
+        )
+        if bool(getattr(evidence_runtime, "is_enabled", False)):
+            try:
+                evidence_runtime.emit(
+                    "PHASE6D3A_START_PIPELINE_EXCEPTION", producer="runner",
+                    phase="scenario_start", payload={
+                        "diagnostic_only": True, "error_type": type(exc).__name__,
+                        "error_detail": str(exc)[:256], "traversal_started": False,
+                        "action_authority": "UNKNOWN", "visit_credit": "UNKNOWN",
+                    },
+                )
+            except Exception:
+                pass
+        raise
+    entry_diagnostics = _phase6d3a_attach_entry_diagnostics(client)
+    if not start_result.needs_open_failed_row:
+        _phase6d3a_emit_entry_diagnostics(evidence_runtime, entry_diagnostics, "START_PIPELINE_COMPLETE")
     if start_result.needs_open_failed_row:
         if start_result.failure_reason == "talkback_restarted":
             terminal_status = "INCOMPLETE_ERROR"
@@ -23115,6 +24634,8 @@ def _collect_tab_rows_inner(
             stop_reason=start_result.failure_reason or "tab_or_anchor_failed",
             status=terminal_status,
         )
+        if entry_diagnostics is not None:
+            failed_row["phase6d3a_entry_diagnostics"] = deepcopy(entry_diagnostics)
         if start_result.failure_reason == "talkback_restarted":
             failed_row["entry_contract_detail"] = start_result.entry_contract_detail
             setattr(
@@ -23156,6 +24677,9 @@ def _collect_tab_rows_inner(
                     if anchor_failure
                     else "SCENARIO_OPEN_FAILED"
                 )
+                _phase6d3a_emit_entry_diagnostics(
+                    evidence_runtime, entry_diagnostics, failure,
+                )
                 evidence_runtime.emit(
                     "SCENARIO_TERMINAL",
                     producer="runner",
@@ -23175,6 +24699,8 @@ def _collect_tab_rows_inner(
                 stop_reason=_ENTRY_REASON_SPECIAL_STATE_HANDLED,
                 status="SPECIAL_STATE_HANDLED",
             )
+            if entry_diagnostics is not None:
+                handled_row["phase6d3a_entry_diagnostics"] = deepcopy(entry_diagnostics)
             handled_row["entry_contract_detail"] = start_result.entry_contract_detail or "onboarding_back_exit"
             handled_row["special_state_detected"] = bool(start_result.special_state_detected)
             handled_row["special_state_kind"] = str(start_result.special_state_kind or "onboarding_or_empty_state")
@@ -23198,6 +24724,8 @@ def _collect_tab_rows_inner(
 
     anchor_row = start_result.start_row
     anchor_row = _annotate_report_row_context(anchor_row, tab_cfg)
+    if entry_diagnostics is not None:
+        anchor_row["phase6d3a_entry_diagnostics"] = deepcopy(entry_diagnostics)
     anchor_node = anchor_row.get("actual_focus_node")
     if not isinstance(anchor_node, dict):
         anchor_node = anchor_row.get("focus_node")
@@ -23402,7 +24930,10 @@ def _collect_tab_rows_impl(
                     install_navigation_observer,
                 )
 
-                provenance_tracker = PluginEntryProvenanceTracker(scenario_id=scenario_id)
+                provenance_tracker = PluginEntryProvenanceTracker(
+                    scenario_id=scenario_id,
+                    scenario_run_id=_phase6d3a_scenario_run_id(scenario_id, (), output_path),
+                )
                 client._phase6d3a_entity_root_tracker = provenance_tracker
                 navigation_scope = install_navigation_observer(client, provenance_tracker)
             except Exception as exc:

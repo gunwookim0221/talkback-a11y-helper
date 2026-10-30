@@ -4,10 +4,15 @@ import json
 import pytest
 
 from tb_runner.canonical_json import canonical_sha256
-from tb_runner.state_observation import build_state_observation
+from tb_runner.state_observation import build_state_observation as _build_state_observation
 from tb_runner.state_equality import VerifiedScrollEvidence
 from tb_runner.state_registry import REGISTRY_SCHEMA, StateRegistry
-from state_model_fixtures import node, observation, scroll_pair
+from phase6d_capture_support import add_full_screen_hierarchy_modal
+from state_model_fixtures import node, observation, scroll_pair, recapture
+
+
+def build_state_observation(raw):
+    return _build_state_observation(recapture(deepcopy(raw)))
 
 
 def observe(registry, raw, proof=None):
@@ -81,7 +86,7 @@ def test_roots_create_separate_states_and_home_reentry_reuses():
 def test_overlay_creates_interaction_state_and_records_base_relation():
     registry = StateRegistry()
     a,b = observation(),observation()
-    b["overlay"] = {"kind":"dialog","observed":True,"nodes":[node("dialog","Permission")]}
+    add_full_screen_hierarchy_modal(b, sequence=2, request_id="registry-modal-capture")
     base = observe(registry,a)
     dialog = observe(registry,b)
     assert dialog.status == "CREATED" and dialog.state_id != base.state_id
@@ -119,9 +124,9 @@ def test_unknown_collision_does_not_merge_or_create_and_is_retained():
     assert len(registry.to_dict()["observations"]) == 2
 
 
-def test_insufficient_first_observation_does_not_invent_state():
+def test_unobserved_first_hierarchy_does_not_invent_state():
     registry = StateRegistry()
-    result = observe(registry,observation(activity_name=None))
+    result = observe(registry,observation(nodes=[]))
     assert result.status == "UNRESOLVED" and result.state_id is None
     assert registry.state_count == 0 and registry.observation_count == 1
 
@@ -159,7 +164,9 @@ def test_save_load_roundtrip_and_restart_then_reuse(tmp_path):
     restored.save(path)
     assert path.read_bytes() == before
     assert observe(restored,a).state_id == home.state_id
-    assert restored.state_count == 2 and restored.unresolved_count == 1
+    # Missing Activity is diagnostic-only; an exact hierarchy root still reuses
+    # the same capture-local state without asserting plugin/component identity.
+    assert restored.state_count == 2 and restored.unresolved_count == 0
 
 
 def test_deterministic_input_replay_and_export_is_independent():

@@ -3,11 +3,15 @@ from copy import deepcopy
 
 import pytest
 
-from state_model_fixtures import node, observation
+from state_model_fixtures import node, observation, recapture
 from tb_runner.state_equality import evaluate_state_equality
-from tb_runner.state_observation import build_state_observation
+from tb_runner.state_observation import build_state_observation as _build_state_observation
 from tb_runner.state_registry import StateRegistry
 from tools.camera_alert_diagnostic import parent_comparison, xml_camera_evidence
+
+
+def build_state_observation(raw):
+    return _build_state_observation(recapture(deepcopy(raw)))
 
 
 def image_observation(**values):

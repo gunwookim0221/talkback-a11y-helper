@@ -5,6 +5,7 @@ the current observed screen. It never initiates navigation or drives traversal.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime
 import re
 from typing import Any, Mapping
@@ -182,7 +183,7 @@ def _profile_match(scenario_id: str, raw: Mapping[str, Any], labels: list[str],
         return False
     if not activity_match and not resource_match:
         return False
-    if activity and source not in {"window_current_focus", "activity_resumed"}:
+    if activity and source != "helper_tree_component":
         return False
     if not _body_matches(config, labels):
         return False
@@ -217,111 +218,61 @@ def _entry_is_current(raw: Mapping[str, Any], config: Mapping[str, Any]) -> tupl
 
 
 def resolve_phase3_context(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """Resolve only a current observed root tab or evidence-backed plugin body."""
+    """Keep context unknown until a producer can bind trusted component evidence."""
+    from talkback_lib.reliable_hierarchy_schema import validate_capture_authority
+    authority = validate_capture_authority(raw.get("capture_authority"))
+    if authority is None or raw.get("capture_id") != authority.capture_key:
+        return dict(status="UNRESOLVED_CONTEXT", context_type=None, context_id=None,
+                    context_source="capture_authority_missing", confidence="NONE", verified=False,
+                    observed_signals=[], reasons=["CAPTURE_AUTHORITY_MISSING"])
+    if raw.get("hierarchy_capture_id") != authority.capture_key:
+        return dict(status="UNRESOLVED_CONTEXT", context_type=None, context_id=None,
+                    context_source="capture_authority_mismatch", confidence="NONE", verified=False,
+                    observed_signals=[], reasons=["CAPTURE_AUTHORITY_MISMATCH"])
+    if (raw.get("package_name") != authority.hierarchy_package_name
+            or raw.get("traversal_root_ref") != authority.root_ref
+            or raw.get("traversal_root_window_id") != authority.hierarchy_window_id):
+        return dict(status="UNRESOLVED_CONTEXT", context_type=None, context_id=None,
+                    context_source="capture_root_mismatch", confidence="NONE", verified=False,
+                    observed_signals=[], reasons=["CAPTURE_ROOT_PACKAGE_WINDOW_MISMATCH"])
+    # The producer binds exact root/package/window bytes only. This does not
+    # establish Activity identity or screen-transition continuity. Configured
+    # destination conflicts remain actionable diagnostics, but never VERIFIED.
     scenario_id = str(raw.get("scenario_id") or "")
-    selected, selected_source = _selected_tab(raw)
-    package = str(raw.get("package_name") or "").strip()
-    activity = str(raw.get("activity_name") or "").strip()
-    context_source = str(raw.get("context_source") or "").strip()
-    labels, resource_ids = _labels_and_ids(raw)
-
     config = _scenario_config(scenario_id)
-    if config and config.get("screen_context_mode") == "new_screen" and (
-            raw.get("phase3_plugin_context_evidence") is not None or scenario_id not in _PLUGIN_IDS):
+    if config and config.get("screen_context_mode") == "new_screen":
         from tb_runner.plugin_context_contract import generic_plugin_context
-        current, reason = _entry_is_current(raw, config)
-        # Use the existing configured root-tab contract, never the plugin name.
+        current, entry_reason = _entry_is_current(raw, config)
+        selected, _selected_source = _selected_tab(raw)
         expected_tab = next((name for name in ("home", "devices", "life", "routines", "menu")
                              if name in str(config.get("tab_name", "")).casefold()), None)
-        return generic_plugin_context(raw, config, entry_current=current, entry_reason=reason,
-                                      labels=labels, body_matches=_body_matches, selected=selected,
-                                      expected_tab=expected_tab, timestamp=_timestamp,
-                                      matched_profiles=[s for s in _PLUGIN_IDS
-                                          if _profile_match(s, raw, labels, resource_ids)])
-
-    if scenario_id in _ROOT_IDS:
-        expected = _ROOT_IDS[scenario_id]
-        root_body = any(re.search(pattern, rid, re.IGNORECASE)
-                        for pattern in _ROOT_MARKERS[expected] for rid in resource_ids)
-        observed_window = (package == "com.samsung.android.oneconnect" and activity.endswith("SCMainActivity")
-                           and context_source in {"window_current_focus", "activity_resumed"})
-        if selected == expected and root_body and (observed_window or not activity):
-            return dict(status="VERIFIED_ROOT_CONTEXT", context_type="root_tab", context_id=expected,
-                        context_source="observed_selected_tab+observed_root_body" +
-                            ("+window_activity" if observed_window else ""), confidence="HIGH", verified=True,
-                        observed_signals=[selected_source, "observed_root_body"] +
-                            (["observed_window_activity"] if observed_window else []), reasons=[])
-        if selected and selected != expected:
-            return dict(status="WRONG_CONTEXT", context_type="root_tab", context_id=None,
-                        context_source="observed_selected_tab", confidence="NONE", verified=False,
-                        observed_signals=[selected_source], reasons=["SELECTED_TAB_MISMATCH"])
-        return dict(status="PARTIAL_CONTEXT", context_type="root_tab", context_id=None,
-                    context_source="incomplete_runtime_context", confidence="LOW", verified=False,
-                    observed_signals=[value for value in (selected_source, context_source) if value],
-                    reasons=["ROOT_TAB_EVIDENCE_INCOMPLETE"])
-
-    if scenario_id not in _PLUGIN_IDS:
-        if selected and package and activity and context_source in {"window_current_focus", "activity_resumed"}:
-            return dict(status="VERIFIED_ROOT_CONTEXT", context_type="root_tab", context_id=selected,
-                        context_source="observed_selected_tab+window_activity", confidence="HIGH", verified=True,
-                        observed_signals=[selected_source, "observed_window_activity"], reasons=[])
-        return dict(status="UNRESOLVED_CONTEXT", context_type=None, context_id=None,
-                    context_source="insufficient_runtime_evidence", confidence="NONE", verified=False,
-                    observed_signals=[], reasons=["NO_VERIFIED_CONTEXT_CONTRACT"])
-
-    kind, context_id, expected_tab, _activity_pattern, resource_pattern = _PLUGIN_IDS[scenario_id]
-    config = _scenario_config(scenario_id)
-    assert config is not None
-    evidence_ok, evidence_reason = _entry_is_current(raw, config)
-    if selected and selected != expected_tab:
-        return dict(status="WRONG_CONTEXT", context_type=kind, context_id=None,
-                    context_source="observed_selected_tab", confidence="NONE", verified=False,
-                    observed_signals=[selected_source], reasons=["SELECTED_TAB_MISMATCH"])
-
-    target_body = _body_matches(config, labels)
-    body_scenarios = _body_match_scenarios(labels)
-    if len(body_scenarios) > 1:
-        return dict(status="CONTRADICTORY_CONTEXT", context_type=kind, context_id=None,
-                    context_source="conflicting_plugin_body_evidence", confidence="NONE", verified=False,
-                    observed_signals=["multiple_plugin_body_contracts"], reasons=["MULTIPLE_PLUGIN_BODY_MATCHES"])
-    matched_profiles = [candidate for candidate in _PLUGIN_IDS
-                        if _profile_match(candidate, raw, labels, resource_ids)]
-    if len(matched_profiles) > 1:
-        return dict(status="CONTRADICTORY_CONTEXT", context_type=kind, context_id=None,
-                    context_source="conflicting_plugin_body_evidence", confidence="NONE", verified=False,
-                    observed_signals=["multiple_plugin_body_contracts"], reasons=["MULTIPLE_PLUGIN_CONTEXT_MATCHES"])
-    if target_body and evidence_ok and matched_profiles == [scenario_id]:
-        activity_match = bool(activity and re.search(_PLUGIN_IDS[scenario_id][3], activity, re.IGNORECASE))
-        resource_match = bool(resource_pattern and any(re.search(resource_pattern, rid, re.IGNORECASE)
-                                                       for rid in resource_ids))
-        signals = ["production_entry_boundary", "context_verify_body"]
-        if activity_match:
-            signals.append("observed_activity")
-        if resource_match:
-            signals.append("plugin_resource_identity")
-        return dict(status="VERIFIED_PLUGIN_CONTEXT", context_type=kind, context_id=context_id,
-                    context_source="+".join(signals), confidence="HIGH", verified=True,
-                    observed_signals=signals,
-                    reasons=[])
-
-    if target_body and matched_profiles and scenario_id not in matched_profiles:
-        status, reason = "WRONG_CONTEXT", "OBSERVED_BODY_BELONGS_TO_DIFFERENT_PLUGIN"
-    elif not evidence_ok:
-        status, reason = "UNRESOLVED_CONTEXT", evidence_reason
-    elif not target_body:
-        # A known different plugin screen is contradictory; a sparse capture is partial.
-        other_component = any(
-            candidate != scenario_id and _profile_match(candidate, raw, labels, resource_ids)
-            for candidate in _PLUGIN_IDS)
-        status, reason = (("WRONG_CONTEXT", "OBSERVED_BODY_BELONGS_TO_DIFFERENT_PLUGIN")
-                          if other_component else ("PARTIAL_CONTEXT", "PLUGIN_BODY_EVIDENCE_MISSING"))
-    elif not matched_profiles:
-        status, reason = "PARTIAL_CONTEXT", "PLUGIN_COMPONENT_OR_RESOURCE_IDENTITY_MISSING"
-    else:
-        status, reason = "UNRESOLVED_CONTEXT", "PLUGIN_CONTEXT_NOT_UNIQUE"
-    return dict(status=status, context_type=kind, context_id=None,
-                context_source="insufficient_or_contradictory_runtime_evidence", confidence="NONE",
-                verified=False, observed_signals=[value for value, present in
-                    (("observed_selected_tab", selected is not None), ("observed_activity", bool(activity)),
-                     ("observed_body_text", target_body), ("production_entry_boundary", evidence_ok)) if present],
-                reasons=[reason])
+        labels, resource_ids = _labels_and_ids(raw)
+        result = generic_plugin_context(
+            raw, config, entry_current=current, entry_reason=entry_reason,
+            labels=labels, body_matches=_body_matches, selected=selected,
+            expected_tab=expected_tab, timestamp=_timestamp,
+            matched_profiles=[candidate for candidate in _PLUGIN_IDS
+                              if _profile_match(candidate, raw, labels, resource_ids)],
+        )
+        if result.get("status") == "CONTRADICTORY_CONTEXT":
+            return result
+    context = dict(status="UNRESOLVED_CONTEXT", context_type=None, context_id=None,
+                   context_source="capture_local_hierarchy_only", confidence="NONE", verified=False,
+                   semantic_component_identity="UNKNOWN", root_authority="UNKNOWN",
+                   observed_signals=["capture_root_package_window"],
+                   destination_evidence=(result.get("destination_evidence") if config and
+                                         config.get("screen_context_mode") == "new_screen" else None),
+                   reasons=["CAPTURE_COMPONENT_UNKNOWN"])
+    from tb_runner.plugin_entry_provenance import root_authority_is_current
+    provenance = raw.get("phase6d3a_entity_root_provenance")
+    if root_authority_is_current(provenance, raw):
+        root_provenance = provenance if isinstance(provenance, Mapping) else {}
+        context.update(
+            root_authority=root_provenance.get("root_authority", "UNKNOWN"),
+            root_authority_evidence=deepcopy(root_provenance.get("root_authority_evidence") or {}),
+            scenario_run_id=raw.get("scenario_run_id"),
+            proof_capture_id=authority.capture_key,
+            observation_id=((raw.get("_exploration_observation") or {}).get("observation_id")
+                            if isinstance(raw.get("_exploration_observation"), Mapping) else None),
+        )
+    return context

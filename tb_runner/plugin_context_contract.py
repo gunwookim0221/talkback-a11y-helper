@@ -146,13 +146,15 @@ def navigation_epoch_guard(client, invalidate, *, navigation_observer=None):
 
 def plugin_context_evidence(entry: Mapping[str, Any], raw: Mapping[str, Any],
                             summary: Mapping[str, Any], navigation_epoch: str) -> dict[str, Any]:
-    """Called at the normal production main-loop boundary, after start succeeds.
-
-    The existing start summary proves post-open verification. Entry provenance,
-    contract digest, actual anchor, current component and epoch remain separate
-    requirements. A replay must reconstruct the summary from native entry logs.
-    """
-    if not navigation_epoch or not isinstance(summary, Mapping):
+    """Record capture-bound entry diagnostics without asserting Activity context."""
+    from talkback_lib.reliable_hierarchy_schema import validate_capture_authority
+    authority = validate_capture_authority(raw.get("capture_authority"))
+    if (not navigation_epoch or not isinstance(summary, Mapping) or authority is None
+            or raw.get("capture_id") != authority.capture_key
+            or raw.get("hierarchy_capture_id") != authority.capture_key
+            or raw.get("package_name") != authority.hierarchy_package_name
+            or raw.get("traversal_root_ref") != authority.root_ref
+            or raw.get("traversal_root_window_id") != authority.hierarchy_window_id):
         return {}
     if (summary.get("open_completed") is not True
             or summary.get("entry_contract_reason") != "success_verified"
@@ -161,21 +163,20 @@ def plugin_context_evidence(entry: Mapping[str, Any], raw: Mapping[str, Any],
             or entry.get("entry_anchor_source") != "verified_pre_loop_anchor"):
         return {}
     entity_root_provenance = raw.get("phase6d3a_entity_root_provenance")
-    return dict(schema_version="generic-plugin-context-v1", source="production_post_open_main_loop",
-                scenario_id=entry.get("scenario_id"), scenario_run_id=entry.get("scenario_run_id"),
+    return dict(schema_version="generic-plugin-entry-observation-v1",
+                source="production_post_open_main_loop",
+                scenario_id=entry.get("scenario_id"),
+                scenario_run_id=entry.get("scenario_run_id"),
                 entry_contract_digest=entry.get("entry_contract_digest"),
-                # This is a contract correlation key only. Runtime entity
-                # identity is carried separately by entity_root_provenance.
                 context_contract_id=entry.get("entry_contract_digest"),
-                # Compatibility alias for existing Phase4C/Phase5 evidence
-                # consumers. It remains a config-contract key only and is
-                # never consulted by the entity-to-root link resolver.
                 destination_identity=entry.get("entry_contract_digest"),
                 navigation_epoch=navigation_epoch, captured_at=raw.get("timestamp"),
-                package_name=raw.get("package_name"), activity_name=raw.get("activity_name"),
-                component_source=raw.get("context_source"), body_resource_ids=body_resources(raw),
-                post_open_verified=True, post_open_summary=dict(summary),
-                proof_capture_id=raw.get("capture_id"),
+                package_name=authority.hierarchy_package_name,
+                hierarchy_window_id=authority.hierarchy_window_id,
+                body_resource_ids=body_resources(raw),
+                post_open_observed=True, post_open_summary=dict(summary),
+                proof_capture_id=authority.capture_key,
+                capture_authority=authority.to_dict(),
                 entity_root_provenance=(deepcopy(dict(entity_root_provenance))
                                         if isinstance(entity_root_provenance, Mapping) else None))
 
@@ -183,96 +184,51 @@ def plugin_context_evidence(entry: Mapping[str, Any], raw: Mapping[str, Any],
 def generic_plugin_context(raw, config, *, entry_current, entry_reason, labels,
                            body_matches, selected, expected_tab, timestamp,
                            matched_profiles=()):
-    """Resolve an owned proof against current observations; never infer by name."""
-    proof = raw.get("phase3_plugin_context_evidence")
-    destination_evidence: dict[str, Any] = {"lexical_hints": [], "structural_evidence": []}
-    def contract_id(value):
-        if not isinstance(value, Mapping):
-            return None
-        # Older persisted v1 evidence used this field name for the same
-        # contract digest; it was never an entity identity.
-        return value.get("context_contract_id", value.get("destination_identity"))
-    def result(status, reason, signals=()):
-        return dict(status=status, context_tier=("PARTIAL_PLUGIN_CONTEXT" if status == "PARTIAL_CONTEXT" else status),
-                    context_type="plugin", context_id=(contract_id(proof)
-                        if status == "VERIFIED_PLUGIN_CONTEXT" and isinstance(proof, Mapping) else None),
-                    context_source="generic_production_entry+post_open+current_runtime",
-                    confidence="HIGH" if status == "VERIFIED_PLUGIN_CONTEXT" else "LOW",
-                    verified=status == "VERIFIED_PLUGIN_CONTEXT", observed_signals=list(signals),
-                    destination_evidence=deepcopy(destination_evidence),
-                    reasons=[reason] if reason else [])
-    if not entry_current:
-        return result("UNRESOLVED_CONTEXT", entry_reason)
-    if not isinstance(proof, Mapping):
-        return result("UNRESOLVED_CONTEXT", "MISSING_GENERIC_PLUGIN_CONTEXT_PROOF")
-    entry = raw.get("phase3_entry_evidence", {})
-    summary = proof.get("post_open_summary", {})
-    current_time, proof_time = timestamp(raw.get("timestamp")), timestamp(proof.get("captured_at"))
-    if (proof.get("schema_version") != "generic-plugin-context-v1"
-            or proof.get("source") != "production_post_open_main_loop"
-            or proof.get("scenario_id") != raw.get("scenario_id")
-            or proof.get("scenario_run_id") != raw.get("scenario_run_id")
-            or not raw.get("navigation_epoch")
-            or proof.get("navigation_epoch") != raw.get("navigation_epoch")
-            or contract_id(proof) != entry.get("entry_contract_digest")
-            or proof.get("entry_contract_digest") != entry.get("entry_contract_digest")
-            or not proof.get("proof_capture_id")
-            or not current_time or not proof_time or proof_time > current_time
-            or proof.get("post_open_verified") is not True
-            or summary.get("open_completed") is not True
-            or summary.get("entry_contract_reason") != "success_verified"
-            or summary.get("entry_contract_detail") != "plugin_open_verified"
-            or entry.get("entry_anchor_accessibility_focused") is not True
-            or entry.get("entry_anchor_source") != "verified_pre_loop_anchor"):
-        return result("UNRESOLVED_CONTEXT", "STALE_OR_UNOWNED_GENERIC_PLUGIN_PROOF")
-    if selected and selected != expected_tab:
-        return result("CONTRADICTORY_CONTEXT", "SELECTED_TAB_MISMATCH")
-    package, activity = raw.get("package_name"), raw.get("activity_name")
-    if (package and package != proof.get("package_name")) or (activity and activity != proof.get("activity_name")):
-        return result("CONTRADICTORY_CONTEXT", "PLUGIN_COMPONENT_CHANGED")
-    if activity and str(activity).endswith("SCMainActivity"):
-        return result("CONTRADICTORY_CONTEXT", "ROOT_SCREEN_IS_NOT_PLUGIN_BODY")
-    # Contradictions use configured destination markers, not a plugin-name table.
-    from tb_runner.scenario_config import TAB_CONFIGS
-    target_body = body_matches(config, labels)
-    other_destination_ids = []
-    lexical_hints = []
-    structural_evidence = []
-    for other_config in TAB_CONFIGS:
-        if (other_config.get("screen_context_mode") != "new_screen"
-                or other_config.get("scenario_id") == raw.get("scenario_id")
-                or not body_matches(other_config, labels)):
-            continue
-        evidence = _destination_marker_evidence(other_config, raw, labels)
-        if evidence["lexical_hints"]:
-            lexical_hints.extend(evidence["lexical_hints"])
-        if evidence["structural_evidence"]:
-            structural_evidence.extend(evidence["structural_evidence"])
-            other_destination_ids.append(other_config["scenario_id"])
-    profiled_others = [s for s in matched_profiles if s != raw.get("scenario_id")]
-    other_destination_ids.extend(profiled_others)
-    destination_evidence = dict(
-        lexical_hints=lexical_hints,
-        structural_evidence=structural_evidence,
-        strict_profile_matches=profiled_others,
-    )
-    if len(matched_profiles) > 1:
-        return result("CONTRADICTORY_CONTEXT", "MULTIPLE_PLUGIN_CONTEXT_MATCHES", matched_profiles)
-    if other_destination_ids:
-        return result("CONTRADICTORY_CONTEXT", "OTHER_CONFIGURED_DESTINATION_BODY", other_destination_ids)
-    trusted = (package == "com.samsung.android.oneconnect" and package == proof.get("package_name")
-               and bool(activity) and activity == proof.get("activity_name")
-               and raw.get("context_source") in {"window_current_focus", "activity_resumed"}
-               and proof.get("component_source") in {"window_current_focus", "activity_resumed"})
-    shared = bool(set(body_resources(raw)) & set(proof.get("body_resource_ids") or []))
-    signals = ["owned_production_entry", "production_post_open_verified", "navigation_epoch"]
-    if trusted: signals.append("current_bound_component")
-    if shared: signals.append("current_entry_body_resource")
-    if target_body: signals.append("configured_destination_body")
-    if trusted and shared and target_body:
-        return result("VERIFIED_PLUGIN_CONTEXT", "", signals)
-    # Incomplete noncontradictory evidence permits only independently gated
-    # structural actions. The Phase 4 gate retains every focus/geometry check.
-    if not trusted:
-        return result("UNRESOLVED_CONTEXT", "CURRENT_PLUGIN_COMPONENT_UNPROVEN", signals)
-    return result("PARTIAL_CONTEXT", "PLUGIN_BODY_EVIDENCE_INCOMPLETE", signals)
+    """Keep configured destination contradictions while context stays UNKNOWN."""
+    from talkback_lib.reliable_hierarchy_schema import validate_capture_authority
+    authority = validate_capture_authority(raw.get("capture_authority"))
+    if authority is None:
+        reason = "CAPTURE_AUTHORITY_MISSING"
+    elif (raw.get("capture_id") != authority.capture_key
+          or raw.get("hierarchy_capture_id") != authority.capture_key
+          or raw.get("package_name") != authority.hierarchy_package_name
+          or raw.get("traversal_root_ref") != authority.root_ref
+          or raw.get("traversal_root_window_id") != authority.hierarchy_window_id):
+        reason = "CAPTURE_AUTHORITY_MISMATCH"
+    else:
+        reason = "CAPTURE_COMPONENT_UNKNOWN"
+
+    destination_evidence: dict[str, Any] = {
+        "lexical_hints": [], "structural_evidence": [], "strict_profile_matches": []}
+    contradictions: list[str] = []
+    if authority is not None and reason == "CAPTURE_COMPONENT_UNKNOWN":
+        from tb_runner.scenario_config import TAB_CONFIGS
+        lexical: list[dict[str, Any]] = []
+        structural: list[dict[str, Any]] = []
+        for other_config in TAB_CONFIGS:
+            if (other_config.get("screen_context_mode") != "new_screen"
+                    or other_config.get("scenario_id") == raw.get("scenario_id")
+                    or not body_matches(other_config, labels)):
+                continue
+            evidence = _destination_marker_evidence(other_config, raw, labels)
+            lexical.extend(evidence["lexical_hints"])
+            if evidence["structural_evidence"]:
+                structural.extend(evidence["structural_evidence"])
+                contradictions.append(str(other_config.get("scenario_id") or ""))
+        profiled_others = sorted({str(item) for item in matched_profiles
+                                  if item != raw.get("scenario_id")})
+        contradictions.extend(profiled_others)
+        destination_evidence = dict(lexical_hints=lexical,
+                                    structural_evidence=structural,
+                                    strict_profile_matches=profiled_others)
+        if len(set(matched_profiles)) > 1:
+            reason = "MULTIPLE_PLUGIN_CONTEXT_MATCHES"
+        elif contradictions:
+            reason = "OTHER_CONFIGURED_DESTINATION_BODY"
+
+    status = "CONTRADICTORY_CONTEXT" if reason in {
+        "MULTIPLE_PLUGIN_CONTEXT_MATCHES", "OTHER_CONFIGURED_DESTINATION_BODY"} else "UNRESOLVED_CONTEXT"
+    return dict(status=status, context_tier=status, context_type="plugin", context_id=None,
+                context_source="capture_local_hierarchy_only", confidence="NONE", verified=False,
+                observed_signals=[], destination_evidence=destination_evidence,
+                reasons=[reason] if reason else [])

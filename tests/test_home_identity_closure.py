@@ -3,21 +3,30 @@ from copy import deepcopy
 
 import pytest
 
-from state_model_fixtures import node, observation
-from tb_runner.discovery_candidates import build_discovery_snapshot
+from state_model_fixtures import node, observation, recapture
+from phase6d_capture_support import add_full_screen_hierarchy_modal
+from tb_runner.discovery_candidates import build_discovery_snapshot as _build_discovery_snapshot
 from tb_runner.canonical_json import canonical_sha256
 from tb_runner.state_equality import LEGACY_MATCHING_POLICY, MATCHING_POLICY, evaluate_state_equality
-from tb_runner.state_observation import build_state_observation
+from tb_runner.state_observation import build_state_observation as _build_state_observation
 from tb_runner.state_registry import StateRegistry
 from tb_runner.transition_observation import TransitionObserver
 from tools.home_identity_closure import pair_diff, summarize
+
+
+def build_state_observation(raw):
+    return _build_state_observation(recapture(deepcopy(raw)))
+
+
+def build_discovery_snapshot(raw, *args, **kwargs):
+    return _build_discovery_snapshot(recapture(deepcopy(raw)), *args, **kwargs)
 
 
 def timestamp_observation(label, resource="pkg:id/update_metadata"):
     raw=observation()
     raw["nodes"].append(node(resource,label,className="android.widget.TextView",focusable=False,clickable=False,
                              bounds="0,400,500,450"))
-    return raw
+    return recapture(raw)
 
 
 def verdict(a,b):
@@ -86,7 +95,7 @@ def test_partial_observation_stays_ambiguous():
 
 def test_overlay_is_distinct():
     a=timestamp_observation("Last updated: 10/05 4:46 AM"); b=deepcopy(a)
-    b["overlay"]=dict(kind="dialog",observed=True,nodes=[node("pkg:id/permission","Allow?")])
+    add_full_screen_hierarchy_modal(b, sequence=2, request_id="home-overlay-capture")
     assert verdict(a,b)=="DIFFERENT"
 
 
@@ -165,15 +174,17 @@ def _bundle(raw,registry,index):
     return dict(index=index,observation=build_state_observation(raw).to_dict(),snapshot=snap.to_dict())
 
 
-def test_pair_diff_identifies_unresolved_binding_as_candidate_hash_cause():
-    raw=observation(activity_name=None); registry=StateRegistry("unresolved")
-    a=_bundle(raw,registry,1); raw=deepcopy(raw);raw["timestamp"]="later"
-    b=_bundle(raw,registry,2); pair=pair_diff(a,b)
-    assert pair["differences"]["CANDIDATE_SET"] is True
+def test_activity_diagnostic_does_not_change_exact_tree_candidate_identity():
+    raw=observation(activity_name=None); registry=StateRegistry("capture-local")
+    a=_bundle(raw,registry,1)
+    changed=deepcopy(raw); changed["timestamp"]="later"
+    changed["activity_name"]="pkg.later.DiagnosticActivity"
+    b=_bundle(changed,registry,2); pair=pair_diff(a,b)
+    assert pair["differences"]["CANDIDATE_SET"] is False
     assert pair["candidate_physical_delta"]=={"REMOVED":[],"ADDED":[]}
-    assert pair["equality"]["verdict"]=="AMBIGUOUS"
+    assert pair["equality"]["verdict"]=="SAME"
     metrics=summarize([a,b],[pair])
-    assert metrics["HOME_UNRESOLVED_COUNT"]==2
+    assert metrics["HOME_UNRESOLVED_COUNT"]==0
     assert metrics["HOME_UNSAFE_MERGE_COUNT"]==0
 
 

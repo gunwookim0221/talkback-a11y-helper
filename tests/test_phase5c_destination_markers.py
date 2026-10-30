@@ -1,6 +1,9 @@
 from copy import deepcopy
 from types import SimpleNamespace
 
+import pytest
+
+from phase6d_capture_support import attach_capture_authority
 from tb_runner.dynamic_context import DestinationOwnership, destination_ownership_rejection_diagnostic
 from tb_runner.phase3_context import phase3_entry_evidence_from_main_loop, resolve_phase3_context
 from tb_runner.plugin_context_contract import plugin_context_evidence
@@ -14,13 +17,15 @@ def air_observation(nodes):
         timestamp="2026-10-13T00:57:22.983000+00:00", capture_id="air-capture",
         package_name="com.samsung.android.oneconnect",
         activity_name="com.samsung.android.oneconnect.webplugin.WebPluginActivity",
-        context_source="window_current_focus", window_evidence={"window_count": 1}, nodes=nodes)
+        context_source="helper_tree_component", window_evidence={"window_count": 1}, nodes=nodes)
     entry = phase3_entry_evidence_from_main_loop(
         SimpleNamespace(tab_cfg=config, rows=[dict(actual_focus_accessibility_focused=True,
             actual_focus_payload_source="verified_pre_loop_anchor")]), raw["scenario_run_id"], raw["timestamp"])
     raw["phase3_entry_evidence"] = entry
     summary = dict(open_completed=True, entry_contract_reason="success_verified",
                    entry_contract_detail="plugin_open_verified")
+    raw["hierarchy_capture_id"] = raw["capture_id"]
+    attach_capture_authority(raw)
     raw["phase3_plugin_context_evidence"] = plugin_context_evidence(entry, raw, summary, raw["navigation_epoch"])
     return raw
 
@@ -36,10 +41,12 @@ def test_air_care_incidental_other_plugin_name_is_lexical_only():
         viewIdResourceName="no_devices", className="android.widget.TextView",
         clickable=False, focusable=False, visibleToUser=True)])
     result = resolve_phase3_context(raw)
-    assert result["status"] == "VERIFIED_PLUGIN_CONTEXT"
+    assert result["status"] == "UNRESOLVED_CONTEXT"
+    assert result["reasons"] == ["CAPTURE_COMPONENT_UNKNOWN"]
     assert not result["destination_evidence"]["structural_evidence"]
     assert any(h["alias"] == "Air purifier" for h in result["destination_evidence"]["lexical_hints"])
-    DestinationOwnership(raw)
+    with pytest.raises(ValueError, match="Trusted normal plugin entry required"):
+        DestinationOwnership(raw)
 
 
 def test_instructional_label_that_equals_alias_without_heading_role_is_not_identity():
@@ -47,7 +54,7 @@ def test_instructional_label_that_equals_alias_without_heading_role_is_not_ident
         text="Air purifier", viewIdResourceName="no_devices",
         className="android.widget.TextView", visibleToUser=True)])
     result = resolve_phase3_context(raw)
-    assert result["status"] == "VERIFIED_PLUGIN_CONTEXT"
+    assert result["status"] == "UNRESOLVED_CONTEXT"
     assert not result["destination_evidence"]["structural_evidence"]
 
 
@@ -81,23 +88,23 @@ def test_multiple_structural_destination_signals_remain_contradictory():
     assert len(result["destination_evidence"]["structural_evidence"]) >= 2
 
 
-def test_same_lexical_phrase_keeps_valid_air_care_ownership():
+def test_same_lexical_phrase_does_not_create_ownership_without_component_authority():
     raw = air_observation(air_body() + [dict(
         text="Add an air purifier to your room", className="android.widget.TextView", visibleToUser=True)])
     original = deepcopy(raw)
-    owner = DestinationOwnership(raw)
-    assert owner.scenario == "life_air_care_plugin"
-    assert owner.freshness == "FRESH_VERIFIED"
+    assert resolve_phase3_context(raw)["status"] == "UNRESOLVED_CONTEXT"
+    with pytest.raises(ValueError, match="Trusted normal plugin entry required"):
+        DestinationOwnership(raw)
     assert raw == original
 
 
-def test_verified_entry_and_consistent_current_destination_create_owner():
+def test_valid_entry_and_body_do_not_create_ownership_without_activity_continuity():
     raw = air_observation(air_body())
     result = resolve_phase3_context(raw)
-    owner = DestinationOwnership(raw)
-    assert result["verified"] is True
-    assert owner.destination == raw["phase3_entry_evidence"]["entry_contract_digest"]
-    assert owner.events[0]["kind"] == "DESTINATION_ESTABLISHED"
+    assert result["status"] == "UNRESOLVED_CONTEXT"
+    assert result["verified"] is False
+    with pytest.raises(ValueError, match="Trusted normal plugin entry required"):
+        DestinationOwnership(raw)
 
 
 def test_rejection_diagnostic_contains_context_and_marker_provenance_before_raise():

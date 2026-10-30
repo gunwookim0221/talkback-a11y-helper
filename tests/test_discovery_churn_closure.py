@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from state_model_fixtures import node, observation, scroll_pair
+from state_model_fixtures import node, observation, scroll_pair, recapture
 from tb_runner.canonical_json import canonical_json
 from tb_runner.discovery_candidates import build_discovery_snapshot, collect_audit_inventory
 from tb_runner.state_observation import build_state_observation
@@ -12,6 +12,7 @@ from tools.state_discovery_churn_diagnostic import ChurnEvidenceRecorder, descri
 
 
 def bundle(raw, registry=None, **kwargs):
+    raw = recapture(deepcopy(raw))
     obs=build_state_observation(raw)
     snap=build_discovery_snapshot(raw,registry if registry is not None else StateRegistry('churn-test'),**kwargs)
     return dict(record_id=obs.observation_id,raw_observation=deepcopy(raw),state_observation=obs.to_dict(),snapshot=snap.to_dict()),obs,snap
@@ -90,8 +91,8 @@ def test_real_enabled_availability_change_is_not_hidden():
     assert before['eligibility']['availability']=='AVAILABLE' and after['eligibility']['availability']=='DISABLED'
 
 
-def test_ambiguous_state_never_unsafe_binds():
-    raw=observation();raw['activity_name']=None
+def test_unobserved_capture_never_unsafe_binds():
+    raw=observation(nodes=[])
     document,_,snap=bundle(raw)
     assert snap.state_id is None and all(c.state_id is None for c in snap.candidates)
     assert document['snapshot']['binding_status']=='UNRESOLVED'

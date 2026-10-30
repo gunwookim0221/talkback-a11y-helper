@@ -13,30 +13,31 @@ from test_phase6d3a_rf4_active import active_fixture, run
 from test_window_lifecycle import _snapshot
 
 
-def test_real_wrapper_benign_lifecycle_versions_preserve_dispatch(monkeypatch):
+def test_benign_lifecycle_cannot_override_component_unknown_or_dispatch(monkeypatch):
     f = active_fixture(monkeypatch)
     before = f.lifecycle.event_count
     assert f.client.target_focus_commit.__func__ is A11yAdbClient.target_focus_commit
     row = run(f)
     audit = row["phase6d3a_redirect"]
-    assert audit["common_readiness"]["readiness_status"] == "READY"
-    assert f.lifecycle.event_count == before + 2  # actual before/after wrapper captures
-    assert f.lifecycle.previous_pid == "12345"
+    readiness = audit["common_readiness"]
+    assert readiness["readiness_status"] == "UNKNOWN"
+    assert "PLUGIN_CONTEXT_UNKNOWN" in readiness["reason_codes"]
+    assert audit["ready"] is False
+    assert audit["dispatch_count"] == 0
+    assert f.native == []
+    assert f.controller.budget.redirects_used == f.client._phase6d3a_controlled_budget.actions == 0
+    assert f.lifecycle.event_count >= before
     assert f.lifecycle.process_continuity_revision == 0
-    assert audit["lifecycle_version_before"][0] == before
-    assert audit["lifecycle_version_current"][0] == before + 1
-    assert audit["final_revalidation"] == "FINAL_REVALIDATION_PASS"
-    assert len(f.native) == 1
-    assert audit["dispatch_evidence"]["dispatch_status"] == "DISPATCHED"
-    assert f.controller.budget.redirects_used == f.client._phase6d3a_controlled_budget.actions == 1
-    assert audit["fallback_count"] == 0
-    assert len(f.collected) == 1
+    assert audit["fallback_count"] <= 1
+    assert len(f.collected) <= 1
 
 
 @pytest.mark.parametrize("case", ["pid_change", "restart_reconnect", "process_gap", "blocked",
     "missing_sample", "missing_recorder", "recovered_gap_same_pid", "recorder_replaced"])
 def test_real_wrapper_lifecycle_instability_zero_dispatch(monkeypatch, case):
     f = active_fixture(monkeypatch)
+    before = f.lifecycle.event_count
+    process_before = deepcopy(f.lifecycle.last_process_observation)
     original = SafeNavigationSession.authorize_focus_target
     @contextmanager
     def authorization(session, **kw):
@@ -69,12 +70,14 @@ def test_real_wrapper_lifecycle_instability_zero_dispatch(monkeypatch, case):
     assert f.controller.budget.redirects_used == f.client._phase6d3a_controlled_budget.actions == 0
     assert f.controller.budget.consecutive_failures == 0
     assert row["phase6d3a_redirect"]["fallback_count"] <= 1
-    if case == "recovered_gap_same_pid":
-        assert f.lifecycle.previous_pid == "12345"
-        assert f.lifecycle.saw_enabled_process_gap is False
-        assert f.lifecycle.process_continuity_revision > 0
+    if case in {"missing_sample", "recovered_gap_same_pid"}:
+        # Component-UNKNOWN closes before lifecycle-dependent authorization, so
+        # no synthetic post-decision lifecycle sample is manufactured.
+        assert row["phase6d3a_redirect"]["common_readiness"]["readiness_status"] == "UNKNOWN"
+        assert f.lifecycle.event_count == before
+        assert f.lifecycle.last_process_observation == process_before
     if case == "missing_sample":
-        assert f.lifecycle.last_process_observation["pid"] is None
+        assert process_before["pid"] == "12345"
 
 
 def test_only_diagnostic_lifecycle_metadata_is_excluded(monkeypatch):

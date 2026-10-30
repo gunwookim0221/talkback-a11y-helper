@@ -2985,7 +2985,7 @@ def _device_plugin_detail_nodes(label="Navigate up"):
 def _stub_device_start_observations(monkeypatch, client, states):
     pending = iter(states)
 
-    def _capture(_client, _dev):
+    def _capture(_client, _dev, **_kwargs):
         try:
             nodes = next(pending)
         except StopIteration:
@@ -20041,3 +20041,78 @@ def test_real_main_loop_state_traversal_diagnostics_history_is_preserved(monkeyp
     assert diagnostics.recovered_visits == 4
     assert diagnostics.indeterminate_count >= 3
     assert progress is not None and visit is not None
+
+
+def test_phase6d_capture_authority_requires_current_action_clock_and_never_backfills_ids(monkeypatch):
+    from talkback_lib.exploration_evidence_clock import EvidenceClock
+    from phase6d_capture_support import attach_capture_authority
+    from talkback_lib.reliable_hierarchy_schema import validate_capture_authority
+
+    authority_fields = attach_capture_authority({
+        "nodes": [{"boundsInScreen": "0,0,100,100", "visibleToUser": True}],
+        "package_name": "com.example", "capture_root_bounds": [0, 0, 100, 100],
+    })["capture_authority"]
+    authority = validate_capture_authority(authority_fields)
+    assert authority is not None
+    clock = EvidenceClock()
+    client = SimpleNamespace(
+        _adb_device=SimpleNamespace(shadow_evidence_clock=clock),
+        _phase6d_exploration_shadow_runtime=object(),
+        last_hierarchy_metadata={"reqId": "stale-mutable-metadata", "captureSequence": 99},
+    )
+    def observation(*_args, **_kwargs):
+        return {
+            "nodes": [{"boundsInScreen": "0,0,100,100", "visibleToUser": True}],
+            "package_name": "com.example", "activity_name": None,
+            "capture_id": authority.capture_key, "capture_authority": authority.to_dict(),
+            "hierarchy_capture_id": authority.capture_key,
+            "hierarchy_capture_sequence": authority.capture_sequence,
+            "traversal_root_ref": authority.root_ref,
+            "traversal_root_window_id": authority.hierarchy_window_id,
+            "focus_capture_id": None, "geometry_capture_id": authority.capture_key,
+            "snapshot_coherent": True, "focus_node": {},
+            "capture_root_bounds": [0, 0, 100, 100],
+            "observation_coverage": "OBSERVED_FULL", "coverage_source": "reliable_service_hierarchy",
+            "hierarchy_complete": True, "hierarchy_request_id": authority.request_id,
+            "timestamp": "2026-10-25T00:00:00+00:00",
+        }
+    monkeypatch.setattr("tools.state_fingerprint_diagnostic.capture_observation", observation)
+    row = {"scenario_id": "home", "scenario_run_id": "run-1", "step_index": 0}
+    captured = collection_flow._capture_phase6d3a_production_observation(client=client, dev="serial", row=row)
+    assert captured is not None
+    assert captured["production_observation_current"] is True
+    assert captured["hierarchy_capture_id"] == authority.capture_key
+    assert captured["focus_capture_id"] is None
+    assert captured["production_observation_envelope"]["focus_capture_id"] is None
+    assert captured["capture_authority"] == authority.to_dict()
+
+    for mismatch_field, mismatch_value in (("package_name", "other.package"),
+                                           ("traversal_root_ref", "windows[1].root"),
+                                           ("traversal_root_window_id", 2)):
+        mismatch_clock = EvidenceClock()
+        client._adb_device.shadow_evidence_clock = mismatch_clock
+        def mismatched_observation(*_args, _field=mismatch_field, _value=mismatch_value, **_kwargs):
+            value = observation()
+            value[_field] = _value
+            return value
+        monkeypatch.setattr("tools.state_fingerprint_diagnostic.capture_observation", mismatched_observation)
+        mismatch_row = {"scenario_id": "home", "scenario_run_id": "run-1", "step_index": 0}
+        assert collection_flow._capture_phase6d3a_production_observation(
+            client=client, dev="serial", row=mismatch_row,
+        ) is None
+        assert mismatch_row["production_observation_capture_status"] == "UNALIGNED"
+
+    clock_with_action = EvidenceClock()
+    client._adb_device.shadow_evidence_clock = clock_with_action
+    def observation_with_concurrent_action(*_args, **_kwargs):
+        value = observation()
+        clock_with_action.action_epoch += 1
+        return value
+    monkeypatch.setattr("tools.state_fingerprint_diagnostic.capture_observation", observation_with_concurrent_action)
+    row = {"scenario_id": "home", "scenario_run_id": "run-1", "step_index": 0}
+    assert collection_flow._capture_phase6d3a_production_observation(
+        client=client, dev="serial", row=row,
+    ) is None
+    assert row["production_observation_capture_status"] == "UNALIGNED"
+    assert row["production_observation_envelope"]["capture_complete"] is False
+    assert row["production_observation_envelope"]["focus_capture_id"] is None

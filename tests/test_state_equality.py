@@ -4,9 +4,14 @@ import json
 import pytest
 
 from tb_runner.canonical_json import canonical_sha256
-from tb_runner.state_observation import StateObservation, build_state_observation, fingerprint_from_dict
+from tb_runner.state_observation import StateObservation, build_state_observation as _build_state_observation, fingerprint_from_dict
 from tb_runner.state_equality import EqualityVerdict, StateIdentity, VerifiedScrollEvidence, evaluate_state_equality
-from state_model_fixtures import node, observation, scroll_pair
+from phase6d_capture_support import add_full_screen_hierarchy_modal
+from state_model_fixtures import node, observation, scroll_pair, recapture
+
+
+def build_state_observation(raw):
+    return _build_state_observation(recapture(deepcopy(raw)))
 
 
 def compare(a, b, evidence=None):
@@ -70,7 +75,7 @@ def test_scroll_evidence_cannot_link_unrelated_capture_or_changed_semantics():
 @pytest.mark.parametrize("kind", ["dialog", "popup", "bottom_sheet", "permission_overlay"])
 def test_overlay_is_distinct_interaction_on_same_base(kind):
     a, b = observation(), observation()
-    b["overlay"] = dict(kind=kind, observed=True, nodes=[node("pkg:id/dialog", "Permission")])
+    add_full_screen_hierarchy_modal(b, kind=kind, sequence=2, request_id=f"overlay-{kind}")
     result = compare(a, b)
     assert result.verdict == EqualityVerdict.DIFFERENT
     assert result.base_state_equal is True and result.overlay_equal is False
@@ -139,12 +144,22 @@ def test_coarse_core_and_whole_fingerprint_collision_is_reproduced_and_not_merge
     assert evaluate_state_equality(oa, ob).verdict == EqualityVerdict.AMBIGUOUS
 
 
-@pytest.mark.parametrize("field,value", [("package_name", None), ("activity_name", None),
-                                        ("navigation_context", None), ("nodes", []), ("display_bounds", None)])
-def test_insufficient_identical_observation_is_ambiguous(field, value):
+@pytest.mark.parametrize("field,value", [("package_name", None), ("nodes", [])])
+def test_incomplete_capture_identity_is_ambiguous(field, value):
     raw = observation(**{field: value})
     assert compare(raw, raw).verdict == EqualityVerdict.AMBIGUOUS
     assert compare(raw, raw).logical_state_equal is None
+
+
+@pytest.mark.parametrize("field,value", [("navigation_context", None), ("display_bounds", None)])
+def test_display_or_legacy_context_diagnostics_do_not_erase_exact_tree_identity(field, value):
+    raw = observation(**{field: value})
+    assert compare(raw, raw).verdict == EqualityVerdict.SAME
+
+
+def test_missing_activity_is_diagnostic_when_exact_tree_authority_matches():
+    a, b = observation(), observation(activity_name=None)
+    assert compare(a, b).verdict == EqualityVerdict.SAME
 
 
 def test_partial_full_and_partial_subset_are_not_blindly_same():

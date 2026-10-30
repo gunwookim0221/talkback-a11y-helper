@@ -106,6 +106,16 @@ def canonical_action_request_id(row: Mapping[str, Any], action_type: Any = None)
     return _text(row.get(key))
 
 
+def _valid_capture_authority(raw: Mapping[str, Any], envelope: Mapping[str, Any], capture_id: str) -> bool:
+    from talkback_lib.reliable_hierarchy_schema import validate_capture_authority
+    authority = validate_capture_authority(raw.get("capture_authority"))
+    return bool(authority is not None and authority.capture_key == capture_id
+                and raw.get("package_name") == authority.hierarchy_package_name
+                and raw.get("traversal_root_ref") == authority.root_ref
+                and raw.get("traversal_root_window_id") == authority.hierarchy_window_id
+                and envelope.get("capture_authority") == authority.to_dict())
+
+
 def snapshot_focus_cursor(row: Mapping[str, Any], raw: Mapping[str, Any]) -> dict[str, Any]:
     """Build a current cursor only from strict focus linked to this snapshot.
 
@@ -131,12 +141,11 @@ def snapshot_focus_cursor(row: Mapping[str, Any], raw: Mapping[str, Any]) -> dic
         and isinstance(marker, Mapping)
         and dict(marker) == row.get("_exploration_observation")
         and dict(marker) == envelope.get("observation")
-        and all(_text(envelope.get(key)) == capture_id for key in (
-            "hierarchy_capture_id", "focus_capture_id", "geometry_capture_id",
-        ))
-        and all(_text(raw.get(key)) == capture_id for key in (
-            "hierarchy_capture_id", "focus_capture_id", "geometry_capture_id",
-        ))
+        and _text(envelope.get("hierarchy_capture_id")) == capture_id
+        and _text(raw.get("hierarchy_capture_id")) == capture_id
+        and all(envelope.get(key) in (None, capture_id) and raw.get(key) == envelope.get(key)
+                for key in ("focus_capture_id", "geometry_capture_id"))
+        and _valid_capture_authority(raw, envelope, capture_id)
     ):
         return {"instance_id": "", "confirmed": False}
 

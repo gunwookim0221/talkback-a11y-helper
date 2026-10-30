@@ -20,6 +20,7 @@ class AuthorityEvidence:
     transport_clear: bool | None = None
     focus_coherent: bool | None = None
     plugin_context_required: bool = False
+    root_authority_resolved: bool = False
     scroll_container_proven: bool | None = None
     structural_scope_proven: bool | None = None
     geometry_in_viewport: bool | None = None
@@ -59,11 +60,20 @@ def execution_gate(original: PlannerInput, recommendation: ShadowRecommendation,
                          (evidence.focus_coherent, "INDETERMINATE_FOCUS")):
         if flag is not True:
             return deny(reason)
-    if current.safety_blocked or current.pending_transition:
+    if current.safety_blocked:
+        return deny("SAFETY_BLOCKED")
+    if current.pending_transition:
         return deny("RECOVERY_CONFLICT")
-    if current.context_status not in {"VERIFIED_ROOT_CONTEXT", "VERIFIED_PLUGIN_CONTEXT", "PARTIAL_CONTEXT"}:
+    causal_root_current = (
+        current.context_status == "UNRESOLVED_CONTEXT"
+        and evidence.root_authority_resolved is True
+    )
+    if (current.context_status not in {"VERIFIED_ROOT_CONTEXT", "VERIFIED_PLUGIN_CONTEXT", "PARTIAL_CONTEXT"}
+            and not causal_root_current):
         return deny("CONTEXT_INSUFFICIENT")
-    if evidence.plugin_context_required and current.context_status != "VERIFIED_PLUGIN_CONTEXT":
+    if (evidence.plugin_context_required
+            and current.context_status != "VERIFIED_PLUGIN_CONTEXT"
+            and not causal_root_current):
         return deny("UNVERIFIED_PLUGIN_ASSUMPTION")
     old, now = original.snapshot.to_dict(), current.snapshot.to_dict()
     if original.history.scenario_id != current.history.scenario_id:

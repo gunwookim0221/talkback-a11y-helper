@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from phase6d_capture_support import attach_capture_authority
 from tb_runner import frontier_shadow as fs
 from tb_runner.frontier_scheduler import build_frontier_id
 
@@ -304,7 +305,7 @@ def test_reconciliation_inventory_adapter_uses_existing_candidates_without_io(mo
     observation = {
         "scenario_id": "home_main", "package_name": "com.samsung.android.oneconnect",
         "activity_name": "com.samsung.android.oneconnect.ui.scmain.SCMainActivity",
-        "context_source": "window_current_focus", "navigation_context": {"bottom_tab": "home"},
+        "context_source": "helper_tree_component", "navigation_context": {"bottom_tab": "home"},
         "selected_tab": {"name": "home", "verified": True, "source": "service_hierarchy_selected"},
         "display_bounds": [0, 0, 1000, 1000], "observation_coverage": "OBSERVED_FULL",
         "focus_node": {"viewIdResourceName": "app:id/focus", "className": "android.widget.Button",
@@ -316,6 +317,7 @@ def test_reconciliation_inventory_adapter_uses_existing_candidates_without_io(mo
              "boundsInScreen": "[10,200][200,260]", "focusable": True, "visibleToUser": True},
         ],
     }
+    attach_capture_authority(observation, production=True)
     monkeypatch.setattr(state_graph, "_raw_observation_from_row", lambda _row: deepcopy(observation))
     runtime = fs.FrontierShadowRuntime("run", "home_main")
     candidate_row = {
@@ -332,6 +334,33 @@ def test_reconciliation_inventory_adapter_uses_existing_candidates_without_io(mo
     assert runtime._latest_inventory["inventory_complete"] is True
     assert len(runtime._latest_inventory["candidates"]) == 1
     assert runtime._latest_inventory["candidates"][0]["target_binding_status"] == "UNKNOWN"
+
+
+def test_frontier_authority_accepts_decoder_token_and_rejects_self_hashed_mapping():
+    from talkback_lib.reliable_hierarchy_schema import capture_canonical_sha256
+
+    raw = attach_capture_authority({
+        "scenario_id": "home_main", "package_name": "com.samsung.android.oneconnect",
+        "capture_root_bounds": [0, 0, 1000, 1000], "nodes": [],
+    }, production=True)
+    envelope = raw["production_observation_envelope"]
+    assert fs._valid_capture_authority(raw, envelope, raw["capture_id"])
+
+    forged = deepcopy(raw["capture_authority"])
+    forged.pop("validation_seal", None)
+    core_fields = (
+        "schema_version", "canonicalization", "request_id", "process_epoch",
+        "generation", "service_instance_id", "capture_sequence", "root_ref",
+        "root_digest", "candidate_digest", "hierarchy_package_name", "hierarchy_window_id",
+        "hierarchy_root_class_name", "hierarchy_root_source_node_id", "hierarchy_root_bounds",
+    )
+    forged["capture_key"] = capture_canonical_sha256(
+        {key: forged[key] for key in core_fields})
+    forged["validation_seal"] = capture_canonical_sha256(forged)
+    raw["capture_authority"] = forged
+    envelope["capture_authority"] = deepcopy(forged)
+
+    assert not fs._valid_capture_authority(raw, envelope, raw["capture_id"])
 
 
 def test_off_runtime_does_not_evaluate_or_write_artifact(tmp_path):

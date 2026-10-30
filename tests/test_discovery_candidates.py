@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from state_model_fixtures import node, observation, scroll_pair
+from state_model_fixtures import node, observation, scroll_pair, recapture
 from tb_runner import completeness, scroll_reliability
 from tb_runner.canonical_json import canonical_json
 from tb_runner.discovery_candidates import (
@@ -20,7 +20,8 @@ def rows(snapshot,kind=None):
 
 
 def snapshot(raw=None,registry=None,**kwargs):
-    return build_discovery_snapshot(raw or observation(),registry if registry is not None else StateRegistry("test-discovery"),**kwargs)
+    value = recapture(deepcopy(raw or observation()))
+    return build_discovery_snapshot(value,registry if registry is not None else StateRegistry("test-discovery"),**kwargs)
 
 
 def nav_observation(root="home"):
@@ -149,7 +150,7 @@ def test_disabled_control_availability_and_unlabeled_actionable():
 
 
 @pytest.mark.parametrize('kind',['activity','context','popup','collision','empty'])
-def test_ambiguous_state_never_binds_candidates_to_existing_state(kind):
+def test_capture_identity_binds_only_resolvable_state_without_auto_activation(kind):
     raw=observation();registry=StateRegistry('test-discovery');first=snapshot(raw,registry)
     other=deepcopy(raw)
     if kind=='activity':other['activity_name']=None
@@ -158,10 +159,25 @@ def test_ambiguous_state_never_binds_candidates_to_existing_state(kind):
     elif kind=='collision':other['nodes'][0]['text']='Unknown subpage'
     elif kind=='empty':other['nodes']=[]
     result=snapshot(other,registry)
-    assert result.state_id is None
-    assert all(c.state_id is None for c in result.candidates)
-    assert result.to_dict()['binding_status']=='UNRESOLVED'
-    assert registry.state_count==1
+    document=result.to_dict()
+    if kind=='activity':
+        assert result.state_id == first.state_id
+        assert document['binding_status']=='RESOLVED'
+        assert registry.state_count==1
+    elif kind=='context':
+        assert result.state_id is not None and result.state_id != first.state_id
+        assert document['binding_status']=='RESOLVED'
+        assert registry.state_count==2
+    else:
+        assert result.state_id is None
+        assert all(c.state_id is None for c in result.candidates)
+        assert document['binding_status']=='UNRESOLVED'
+        assert registry.state_count==1
+    assert document['safety_contract']=='HINT_ONLY_NO_AUTO_ACTIVATION'
+    assert document['action_executed'] is False
+    assert document['visit_credit']==0
+    assert all(c['eligibility']['auto_activation_allowed'] is False for c in document['candidates'])
+    assert all(c['physical_visit_credited'] is False for c in document['candidates'])
 
 
 def test_fingerprint_without_secondary_has_no_definitive_action_set():
@@ -227,6 +243,8 @@ def test_audit_producer_is_read_only_and_requires_current_target_and_state():
     assert inventory==saved and raw==saved_raw
     assert any('AUDIT_EXPECTED' in c['source'] for c in rows(result))
     assert {r['reason'] for r in result.to_dict()['excluded']} >= {'STATE_SCOPE_MISMATCH','NOT_CURRENT_OBSERVATION'}
+    assert result.to_dict()['visit_credit']==0
+    assert result.to_dict()['action_executed'] is False
 
 
 def test_existing_v7_producer_is_reused_without_a_device_or_ledger(monkeypatch):

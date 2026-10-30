@@ -58,7 +58,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-exact-a-1",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 1,
+              "root_ref": "windows[0].root",
+              "root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+              "candidate_digest": "33c68d0921c366d677053da9aa7770ed029df7f331b1524ff16cadc9a6ee4134",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "2eb4f5c4204b0f78bee7d7722e534fa9c762f8a4147026768206f37a121874cf"
+            },
+            "capture_id": "2eb4f5c4204b0f78bee7d7722e534fa9c762f8a4147026768206f37a121874cf",
+            "hierarchy_request_id": "state-replay-exact-a-1",
+            "hierarchy_capture_id": "2eb4f5c4204b0f78bee7d7722e534fa9c762f8a4147026768206f37a121874cf",
+            "hierarchy_snapshot_id": "2eb4f5c4204b0f78bee7d7722e534fa9c762f8a4147026768206f37a121874cf",
+            "hierarchy_capture_sequence": 1,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "hierarchy_candidate_digest": "33c68d0921c366d677053da9aa7770ed029df7f331b1524ff16cadc9a6ee4134",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         },
         {
@@ -111,7 +211,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-exact-b-2",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 2,
+              "root_ref": "windows[0].root",
+              "root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+              "candidate_digest": "a7eb48146c52a34bfc58576c06282bf1ff09f82e777633f61732d50cde8a615c",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "d51c7375889ebe3bcaaddebcdda8bfd1e2d59a4183da5c1872dc669a3cfeef89"
+            },
+            "capture_id": "d51c7375889ebe3bcaaddebcdda8bfd1e2d59a4183da5c1872dc669a3cfeef89",
+            "hierarchy_request_id": "state-replay-exact-b-2",
+            "hierarchy_capture_id": "d51c7375889ebe3bcaaddebcdda8bfd1e2d59a4183da5c1872dc669a3cfeef89",
+            "hierarchy_snapshot_id": "d51c7375889ebe3bcaaddebcdda8bfd1e2d59a4183da5c1872dc669a3cfeef89",
+            "hierarchy_capture_sequence": 2,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "hierarchy_candidate_digest": "a7eb48146c52a34bfc58576c06282bf1ff09f82e777633f61732d50cde8a615c",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         }
       ],
@@ -187,7 +387,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-focus-a-3",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 3,
+              "root_ref": "windows[0].root",
+              "root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+              "candidate_digest": "8478d96901b1af92e914404f22797cb9edf62816f7742dbf09b8c5a69f9842bb",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "6dd9c6a0528b5aa91ac3105f20e3d9ae5d9cd3807d4403e3a5b61dd5f8810da4"
+            },
+            "capture_id": "6dd9c6a0528b5aa91ac3105f20e3d9ae5d9cd3807d4403e3a5b61dd5f8810da4",
+            "hierarchy_request_id": "state-replay-focus-a-3",
+            "hierarchy_capture_id": "6dd9c6a0528b5aa91ac3105f20e3d9ae5d9cd3807d4403e3a5b61dd5f8810da4",
+            "hierarchy_snapshot_id": "6dd9c6a0528b5aa91ac3105f20e3d9ae5d9cd3807d4403e3a5b61dd5f8810da4",
+            "hierarchy_capture_sequence": 3,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "hierarchy_candidate_digest": "8478d96901b1af92e914404f22797cb9edf62816f7742dbf09b8c5a69f9842bb",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         },
         {
@@ -242,6 +542,107 @@
             "step": 0,
             "source": "reviewed_synthetic_fixture",
             "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-focus-b-4",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 4,
+              "root_ref": "windows[0].root",
+              "root_digest": "9cd1b5f14992ddcde07640e6c72b71071dc47f374a795f62e721b30378c823b1",
+              "candidate_digest": "7382f383433fb01ded565a1a1bcfe437364714555e782de80e985ded56e0c786",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "a672ca487fa8c6953ae28fc61d3f03e8226fc2cd146d050d59e7c97cedd3395a"
+            },
+            "capture_id": "a672ca487fa8c6953ae28fc61d3f03e8226fc2cd146d050d59e7c97cedd3395a",
+            "hierarchy_request_id": "state-replay-focus-b-4",
+            "hierarchy_capture_id": "a672ca487fa8c6953ae28fc61d3f03e8226fc2cd146d050d59e7c97cedd3395a",
+            "hierarchy_snapshot_id": "a672ca487fa8c6953ae28fc61d3f03e8226fc2cd146d050d59e7c97cedd3395a",
+            "hierarchy_capture_sequence": 4,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "9cd1b5f14992ddcde07640e6c72b71071dc47f374a795f62e721b30378c823b1",
+            "hierarchy_candidate_digest": "7382f383433fb01ded565a1a1bcfe437364714555e782de80e985ded56e0c786",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "9cd1b5f14992ddcde07640e6c72b71071dc47f374a795f62e721b30378c823b1",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false,
+                  "accessibilityFocused": true
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null,
             "focus_node": {
               "viewIdResourceName": "pkg:id/card",
               "text": "Device",
@@ -331,7 +732,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-home-devices-a-5",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 5,
+              "root_ref": "windows[0].root",
+              "root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+              "candidate_digest": "91e1c644e7aba12336435eab82ea08a0e35df260f55c5297312a774c6be3943e",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "56a4d2abe5fc553a164800a86e518102c89fa274c8cb39d5a8be5f1f4541a3f3"
+            },
+            "capture_id": "56a4d2abe5fc553a164800a86e518102c89fa274c8cb39d5a8be5f1f4541a3f3",
+            "hierarchy_request_id": "state-replay-home-devices-a-5",
+            "hierarchy_capture_id": "56a4d2abe5fc553a164800a86e518102c89fa274c8cb39d5a8be5f1f4541a3f3",
+            "hierarchy_snapshot_id": "56a4d2abe5fc553a164800a86e518102c89fa274c8cb39d5a8be5f1f4541a3f3",
+            "hierarchy_capture_sequence": 5,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "hierarchy_candidate_digest": "91e1c644e7aba12336435eab82ea08a0e35df260f55c5297312a774c6be3943e",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         },
         {
@@ -384,7 +885,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-home-devices-b-6",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 6,
+              "root_ref": "windows[0].root",
+              "root_digest": "0053ffc3cdecbda2bc289f311ff34ced08574f3211645b3a84692cf62ab281a0",
+              "candidate_digest": "0a3fc05371749c6587e7603b51554384445498c9fb7fe3911f5d990c4f155424",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "7a20806a6b1b7d7a770eb84bd0cc7ed9f3c951975826eaf06e8a8d677899d9d2"
+            },
+            "capture_id": "7a20806a6b1b7d7a770eb84bd0cc7ed9f3c951975826eaf06e8a8d677899d9d2",
+            "hierarchy_request_id": "state-replay-home-devices-b-6",
+            "hierarchy_capture_id": "7a20806a6b1b7d7a770eb84bd0cc7ed9f3c951975826eaf06e8a8d677899d9d2",
+            "hierarchy_snapshot_id": "7a20806a6b1b7d7a770eb84bd0cc7ed9f3c951975826eaf06e8a8d677899d9d2",
+            "hierarchy_capture_sequence": 6,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "0053ffc3cdecbda2bc289f311ff34ced08574f3211645b3a84692cf62ab281a0",
+            "hierarchy_candidate_digest": "0a3fc05371749c6587e7603b51554384445498c9fb7fe3911f5d990c4f155424",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "0053ffc3cdecbda2bc289f311ff34ced08574f3211645b3a84692cf62ab281a0",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_devices",
+                  "text": "devices",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         }
       ],
@@ -459,7 +1060,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-home-life-a-7",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 7,
+              "root_ref": "windows[0].root",
+              "root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+              "candidate_digest": "af36cdb02e19472acedd395466e08a15dc9305bc996e67e5d59ee8d41e819c89",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "1d77a36d432ab4800917af596de3d8fcd6c459874f2e2239788f8857616604fc"
+            },
+            "capture_id": "1d77a36d432ab4800917af596de3d8fcd6c459874f2e2239788f8857616604fc",
+            "hierarchy_request_id": "state-replay-home-life-a-7",
+            "hierarchy_capture_id": "1d77a36d432ab4800917af596de3d8fcd6c459874f2e2239788f8857616604fc",
+            "hierarchy_snapshot_id": "1d77a36d432ab4800917af596de3d8fcd6c459874f2e2239788f8857616604fc",
+            "hierarchy_capture_sequence": 7,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "hierarchy_candidate_digest": "af36cdb02e19472acedd395466e08a15dc9305bc996e67e5d59ee8d41e819c89",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         },
         {
@@ -512,7 +1213,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-home-life-b-8",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 8,
+              "root_ref": "windows[0].root",
+              "root_digest": "0bfa784504f40a28d5a334299f59ad63423f87a93b736f63806a3482af92fdac",
+              "candidate_digest": "9ba9044f636e6f06a500f8a3e695f19b11beb27276070ce533d29828f3405d44",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "c4e9089a60d229b363633ae4089d03c058cd6568467a127e7923b9070ddfcf05"
+            },
+            "capture_id": "c4e9089a60d229b363633ae4089d03c058cd6568467a127e7923b9070ddfcf05",
+            "hierarchy_request_id": "state-replay-home-life-b-8",
+            "hierarchy_capture_id": "c4e9089a60d229b363633ae4089d03c058cd6568467a127e7923b9070ddfcf05",
+            "hierarchy_snapshot_id": "c4e9089a60d229b363633ae4089d03c058cd6568467a127e7923b9070ddfcf05",
+            "hierarchy_capture_sequence": 8,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "0bfa784504f40a28d5a334299f59ad63423f87a93b736f63806a3482af92fdac",
+            "hierarchy_candidate_digest": "9ba9044f636e6f06a500f8a3e695f19b11beb27276070ce533d29828f3405d44",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "0bfa784504f40a28d5a334299f59ad63423f87a93b736f63806a3482af92fdac",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_services",
+                  "text": "life",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         }
       ],
@@ -588,6 +1389,106 @@
             "step": 0,
             "source": "reviewed_synthetic_fixture",
             "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-scroll-a-11",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 11,
+              "root_ref": "windows[0].root",
+              "root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+              "candidate_digest": "95931f46bee45af48f5719412e825e39e8b5f10a47aa6ce1e8d265da02454c9b",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "47bbc11c28ba347b27352c1f4609c788c249bfca38a7ddf1346c284ab0f28b7c"
+            },
+            "capture_id": "47bbc11c28ba347b27352c1f4609c788c249bfca38a7ddf1346c284ab0f28b7c",
+            "hierarchy_request_id": "state-replay-scroll-a-11",
+            "hierarchy_capture_id": "47bbc11c28ba347b27352c1f4609c788c249bfca38a7ddf1346c284ab0f28b7c",
+            "hierarchy_snapshot_id": "47bbc11c28ba347b27352c1f4609c788c249bfca38a7ddf1346c284ab0f28b7c",
+            "hierarchy_capture_sequence": 11,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "hierarchy_candidate_digest": "95931f46bee45af48f5719412e825e39e8b5f10a47aa6ce1e8d265da02454c9b",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null,
             "capability": {
               "status": "SCROLL_CAPABLE",
               "source": "helper_metadata",
@@ -689,6 +1590,106 @@
             "step": 1,
             "source": "reviewed_synthetic_fixture",
             "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-scroll-b-12",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 12,
+              "root_ref": "windows[0].root",
+              "root_digest": "3657743fc31bb0a24becc7a9df6a852c026debd9eb294796d0ba2091d2344cb8",
+              "candidate_digest": "b45deab6ac940dae3c20c67289272c150c124b6084f6b48d77e4a45b4a960d0d",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "76dd684a1252412e36126fe6b2dbda203751c2706eb6252c55422c9460ee316c"
+            },
+            "capture_id": "76dd684a1252412e36126fe6b2dbda203751c2706eb6252c55422c9460ee316c",
+            "hierarchy_request_id": "state-replay-scroll-b-12",
+            "hierarchy_capture_id": "76dd684a1252412e36126fe6b2dbda203751c2706eb6252c55422c9460ee316c",
+            "hierarchy_snapshot_id": "76dd684a1252412e36126fe6b2dbda203751c2706eb6252c55422c9460ee316c",
+            "hierarchy_capture_sequence": 12,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "3657743fc31bb0a24becc7a9df6a852c026debd9eb294796d0ba2091d2344cb8",
+            "hierarchy_candidate_digest": "b45deab6ac940dae3c20c67289272c150c124b6084f6b48d77e4a45b4a960d0d",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "3657743fc31bb0a24becc7a9df6a852c026debd9eb294796d0ba2091d2344cb8",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,300,500,400",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null,
             "capability": {
               "status": "SCROLL_CAPABLE",
               "source": "helper_metadata",
@@ -758,10 +1759,10 @@
         {
           "evidence": {
             "action_success": true,
-            "after_observation_id": "51d4125216e02448a2b3f79e327fa740d31e0d027fc0f3b343ba7a3a917de664",
+            "after_observation_id": "eeac7b515aeacdd239864f79ec8e5ed6d69d9da99d09554744d998fc27eaff75",
             "after_viewport_signature": "5dd805ae60f060e2a5f8f9eefee4f5a3d0fd20c650a31254406c6aa70eec27b3",
             "axis": "VERTICAL",
-            "before_observation_id": "324b42b0c5d8e8369ef7f2d2c92cf60a1b787a983220d8f8194796c148d13a2a",
+            "before_observation_id": "17c63da1b730e4e5bda994b72df8050066e0ddc9b5084652be9d6a8a2fd4421c",
             "before_viewport_signature": "7a5fc9e7ccc72ce64a8e8114b481c4277822ed5e2d26c6cd9a091284c5ebd6da",
             "container_path": "0.1",
             "kind": "VERIFIED_SCROLL",
@@ -830,6 +1831,106 @@
             "step": 0,
             "source": "reviewed_synthetic_fixture",
             "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-unlinked-viewport-a-13",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 13,
+              "root_ref": "windows[0].root",
+              "root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+              "candidate_digest": "3a01ba0324f65c0dccbe7873398fea69b914f8f5c7dd8a033c5cf294dc2b703c",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "534f2a8cb55fc74f46721ee4e3db94b956cd8fe422f14dd2daa3ae9b8596990d"
+            },
+            "capture_id": "534f2a8cb55fc74f46721ee4e3db94b956cd8fe422f14dd2daa3ae9b8596990d",
+            "hierarchy_request_id": "state-replay-unlinked-viewport-a-13",
+            "hierarchy_capture_id": "534f2a8cb55fc74f46721ee4e3db94b956cd8fe422f14dd2daa3ae9b8596990d",
+            "hierarchy_snapshot_id": "534f2a8cb55fc74f46721ee4e3db94b956cd8fe422f14dd2daa3ae9b8596990d",
+            "hierarchy_capture_sequence": 13,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "hierarchy_candidate_digest": "3a01ba0324f65c0dccbe7873398fea69b914f8f5c7dd8a033c5cf294dc2b703c",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null,
             "capability": {
               "status": "SCROLL_CAPABLE",
               "source": "helper_metadata",
@@ -931,6 +2032,106 @@
             "step": 1,
             "source": "reviewed_synthetic_fixture",
             "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-unlinked-viewport-b-14",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 14,
+              "root_ref": "windows[0].root",
+              "root_digest": "3657743fc31bb0a24becc7a9df6a852c026debd9eb294796d0ba2091d2344cb8",
+              "candidate_digest": "3f6d32f9e581d8cbfaa99886e788c98d8be8a192b60dc79b8ab89b4bf78b3c4a",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "17c037f55203dd0a8b2c58afb10094c2a6cbcc6a24e7fab7ec0020fd144b2268"
+            },
+            "capture_id": "17c037f55203dd0a8b2c58afb10094c2a6cbcc6a24e7fab7ec0020fd144b2268",
+            "hierarchy_request_id": "state-replay-unlinked-viewport-b-14",
+            "hierarchy_capture_id": "17c037f55203dd0a8b2c58afb10094c2a6cbcc6a24e7fab7ec0020fd144b2268",
+            "hierarchy_snapshot_id": "17c037f55203dd0a8b2c58afb10094c2a6cbcc6a24e7fab7ec0020fd144b2268",
+            "hierarchy_capture_sequence": 14,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "3657743fc31bb0a24becc7a9df6a852c026debd9eb294796d0ba2091d2344cb8",
+            "hierarchy_candidate_digest": "3f6d32f9e581d8cbfaa99886e788c98d8be8a192b60dc79b8ab89b4bf78b3c4a",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "3657743fc31bb0a24becc7a9df6a852c026debd9eb294796d0ba2091d2344cb8",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,300,500,400",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null,
             "capability": {
               "status": "SCROLL_CAPABLE",
               "source": "helper_metadata",
@@ -1053,7 +2254,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-overlay-a-15",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 15,
+              "root_ref": "windows[0].root",
+              "root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+              "candidate_digest": "8897be4978e6d1dee94df0dfe7719d9c13fe971c03932bf695bc2e08e466f74a",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "546859bbd48ade689baf6e990339d4093054b667101752994809a4c1c5f5aab7"
+            },
+            "capture_id": "546859bbd48ade689baf6e990339d4093054b667101752994809a4c1c5f5aab7",
+            "hierarchy_request_id": "state-replay-overlay-a-15",
+            "hierarchy_capture_id": "546859bbd48ade689baf6e990339d4093054b667101752994809a4c1c5f5aab7",
+            "hierarchy_snapshot_id": "546859bbd48ade689baf6e990339d4093054b667101752994809a4c1c5f5aab7",
+            "hierarchy_capture_sequence": 15,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "hierarchy_candidate_digest": "8897be4978e6d1dee94df0dfe7719d9c13fe971c03932bf695bc2e08e466f74a",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         },
         {
@@ -1107,6 +2408,106 @@
             "step": 0,
             "source": "reviewed_synthetic_fixture",
             "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-overlay-b-16",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 16,
+              "root_ref": "windows[0].root",
+              "root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+              "candidate_digest": "ede7eb7b9760fecef33c629af9f05716a0cae25b2377d7dd011b9aa16cdadbe6",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "4bd97c588fe1c2c641bdf95d40db76b8b93ba44d29ce69559532089b3a726264"
+            },
+            "capture_id": "4bd97c588fe1c2c641bdf95d40db76b8b93ba44d29ce69559532089b3a726264",
+            "hierarchy_request_id": "state-replay-overlay-b-16",
+            "hierarchy_capture_id": "4bd97c588fe1c2c641bdf95d40db76b8b93ba44d29ce69559532089b3a726264",
+            "hierarchy_snapshot_id": "4bd97c588fe1c2c641bdf95d40db76b8b93ba44d29ce69559532089b3a726264",
+            "hierarchy_capture_sequence": 16,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "hierarchy_candidate_digest": "ede7eb7b9760fecef33c629af9f05716a0cae25b2377d7dd011b9aa16cdadbe6",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null,
             "overlay": {
               "kind": "dialog",
               "observed": true,
@@ -1131,14 +2532,14 @@
       ],
       "expected_groups": {
         "a": "base",
-        "b": "overlay"
+        "b": "base"
       },
       "pairs": [
         {
           "name": "overlay",
           "left": "a",
           "right": "b",
-          "expected": "DIFFERENT",
+          "expected": "SAME",
           "use_continuity": false,
           "viewport_equal": true
         }
@@ -1201,7 +2602,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-temperature-a-17",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 17,
+              "root_ref": "windows[0].root",
+              "root_digest": "851fa578f81fbd17736d1b7b11a983b2982411a7c19fc4a251c91935c26fdacb",
+              "candidate_digest": "ed3e662e11f362026ad8e6c290d2f19dad4483af89c83e4ffc0324eac418afa2",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "34905319da4cf44091054a588f48c07555449b6ad0920c7f3ffd6e0472868487"
+            },
+            "capture_id": "34905319da4cf44091054a588f48c07555449b6ad0920c7f3ffd6e0472868487",
+            "hierarchy_request_id": "state-replay-temperature-a-17",
+            "hierarchy_capture_id": "34905319da4cf44091054a588f48c07555449b6ad0920c7f3ffd6e0472868487",
+            "hierarchy_snapshot_id": "34905319da4cf44091054a588f48c07555449b6ad0920c7f3ffd6e0472868487",
+            "hierarchy_capture_sequence": 17,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "851fa578f81fbd17736d1b7b11a983b2982411a7c19fc4a251c91935c26fdacb",
+            "hierarchy_candidate_digest": "ed3e662e11f362026ad8e6c290d2f19dad4483af89c83e4ffc0324eac418afa2",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "851fa578f81fbd17736d1b7b11a983b2982411a7c19fc4a251c91935c26fdacb",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "23°C",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         },
         {
@@ -1254,7 +2755,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-temperature-b-18",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 18,
+              "root_ref": "windows[0].root",
+              "root_digest": "aaa96259c0eb7bdd4c6e6999732dff53fb01edefad106cda813537afd402a0d4",
+              "candidate_digest": "31468d8f3d08bda229e475f34aab1d95be5227957367b257a55590ca279b5b7f",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "801bfd644a2cdc73b42c8d511ec2dc0c082d8247d89a18bffb61f9737946aad5"
+            },
+            "capture_id": "801bfd644a2cdc73b42c8d511ec2dc0c082d8247d89a18bffb61f9737946aad5",
+            "hierarchy_request_id": "state-replay-temperature-b-18",
+            "hierarchy_capture_id": "801bfd644a2cdc73b42c8d511ec2dc0c082d8247d89a18bffb61f9737946aad5",
+            "hierarchy_snapshot_id": "801bfd644a2cdc73b42c8d511ec2dc0c082d8247d89a18bffb61f9737946aad5",
+            "hierarchy_capture_sequence": 18,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "aaa96259c0eb7bdd4c6e6999732dff53fb01edefad106cda813537afd402a0d4",
+            "hierarchy_candidate_digest": "31468d8f3d08bda229e475f34aab1d95be5227957367b257a55590ca279b5b7f",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "aaa96259c0eb7bdd4c6e6999732dff53fb01edefad106cda813537afd402a0d4",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "24°C",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         }
       ],
@@ -1329,7 +2930,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-battery-a-19",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 19,
+              "root_ref": "windows[0].root",
+              "root_digest": "f9cdd52eca9000f5b466d92478c5db29805ae193817cdd9ccbc93840cd64112f",
+              "candidate_digest": "462dfa67a168f5e33f0a41c8a4114639f4edf303cf4d41dcc464488c0f233a44",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "e3a274107e97fd59a62bd28e2eed8aed3cd8bf2349ad7a3a85c1fb7474e3a3a0"
+            },
+            "capture_id": "e3a274107e97fd59a62bd28e2eed8aed3cd8bf2349ad7a3a85c1fb7474e3a3a0",
+            "hierarchy_request_id": "state-replay-battery-a-19",
+            "hierarchy_capture_id": "e3a274107e97fd59a62bd28e2eed8aed3cd8bf2349ad7a3a85c1fb7474e3a3a0",
+            "hierarchy_snapshot_id": "e3a274107e97fd59a62bd28e2eed8aed3cd8bf2349ad7a3a85c1fb7474e3a3a0",
+            "hierarchy_capture_sequence": 19,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "f9cdd52eca9000f5b466d92478c5db29805ae193817cdd9ccbc93840cd64112f",
+            "hierarchy_candidate_digest": "462dfa67a168f5e33f0a41c8a4114639f4edf303cf4d41dcc464488c0f233a44",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "f9cdd52eca9000f5b466d92478c5db29805ae193817cdd9ccbc93840cd64112f",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "battery 75%",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         },
         {
@@ -1382,7 +3083,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-battery-b-20",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 20,
+              "root_ref": "windows[0].root",
+              "root_digest": "795b80e6bbe7e88a678aa3da590f5d18ba7a8f320e3a816f8606d9360b99fed2",
+              "candidate_digest": "548c668a6b47cec85b303a047a1596421013d34a09f0f0711c47c658bbab36c1",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "a181dcb55e2d7bdc74a514690874442a67874ee572ef6192eae9484f33aa65cb"
+            },
+            "capture_id": "a181dcb55e2d7bdc74a514690874442a67874ee572ef6192eae9484f33aa65cb",
+            "hierarchy_request_id": "state-replay-battery-b-20",
+            "hierarchy_capture_id": "a181dcb55e2d7bdc74a514690874442a67874ee572ef6192eae9484f33aa65cb",
+            "hierarchy_snapshot_id": "a181dcb55e2d7bdc74a514690874442a67874ee572ef6192eae9484f33aa65cb",
+            "hierarchy_capture_sequence": 20,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "795b80e6bbe7e88a678aa3da590f5d18ba7a8f320e3a816f8606d9360b99fed2",
+            "hierarchy_candidate_digest": "548c668a6b47cec85b303a047a1596421013d34a09f0f0711c47c658bbab36c1",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "795b80e6bbe7e88a678aa3da590f5d18ba7a8f320e3a816f8606d9360b99fed2",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "battery 74%",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         }
       ],
@@ -1457,7 +3258,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-clock-a-21",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 21,
+              "root_ref": "windows[0].root",
+              "root_digest": "9d0ef24aa7012948b4121881dd79b3825150f686ef9e9a69ffc6f6db0f69884d",
+              "candidate_digest": "6a4f225fc7310875af6328f9c2a29b933d46f9619583f757ebfaab7be1bfcff0",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "fbf7bf0fac35f3afe8d297860f7d4e090e8cc2dd48977d841cb8474badd1a428"
+            },
+            "capture_id": "fbf7bf0fac35f3afe8d297860f7d4e090e8cc2dd48977d841cb8474badd1a428",
+            "hierarchy_request_id": "state-replay-clock-a-21",
+            "hierarchy_capture_id": "fbf7bf0fac35f3afe8d297860f7d4e090e8cc2dd48977d841cb8474badd1a428",
+            "hierarchy_snapshot_id": "fbf7bf0fac35f3afe8d297860f7d4e090e8cc2dd48977d841cb8474badd1a428",
+            "hierarchy_capture_sequence": 21,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "9d0ef24aa7012948b4121881dd79b3825150f686ef9e9a69ffc6f6db0f69884d",
+            "hierarchy_candidate_digest": "6a4f225fc7310875af6328f9c2a29b933d46f9619583f757ebfaab7be1bfcff0",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "9d0ef24aa7012948b4121881dd79b3825150f686ef9e9a69ffc6f6db0f69884d",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "time 10:31",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         },
         {
@@ -1510,7 +3411,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-clock-b-22",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 22,
+              "root_ref": "windows[0].root",
+              "root_digest": "4c857c86ba07980459c0652fefb2a3befc40e5d89b69f442b5ea6950267fa59c",
+              "candidate_digest": "394c83785adaeb7f08be70d3d155239bd52345073ad5bbcb6e9bb32299af165f",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "e4091ec5f275c0ca87acb1745bdbd048ff4ff79fc3de5fe6815400aaf300abbf"
+            },
+            "capture_id": "e4091ec5f275c0ca87acb1745bdbd048ff4ff79fc3de5fe6815400aaf300abbf",
+            "hierarchy_request_id": "state-replay-clock-b-22",
+            "hierarchy_capture_id": "e4091ec5f275c0ca87acb1745bdbd048ff4ff79fc3de5fe6815400aaf300abbf",
+            "hierarchy_snapshot_id": "e4091ec5f275c0ca87acb1745bdbd048ff4ff79fc3de5fe6815400aaf300abbf",
+            "hierarchy_capture_sequence": 22,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "4c857c86ba07980459c0652fefb2a3befc40e5d89b69f442b5ea6950267fa59c",
+            "hierarchy_candidate_digest": "394c83785adaeb7f08be70d3d155239bd52345073ad5bbcb6e9bb32299af165f",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "4c857c86ba07980459c0652fefb2a3befc40e5d89b69f442b5ea6950267fa59c",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "time 10:32",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         }
       ],
@@ -1585,7 +3586,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-locked-a-23",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 23,
+              "root_ref": "windows[0].root",
+              "root_digest": "113157743195b8350d31c00814df0f83bc0f13d398e62c84a0d5557a3197db65",
+              "candidate_digest": "8ebe883250c1e2cd3463d3839b75c5a6a6cb831bb938623fcec7d846bc1877cb",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "dae4ec5e7b683596a071b2754cf1214de15add4998ece87dd4feb3ebb9e22fcc"
+            },
+            "capture_id": "dae4ec5e7b683596a071b2754cf1214de15add4998ece87dd4feb3ebb9e22fcc",
+            "hierarchy_request_id": "state-replay-locked-a-23",
+            "hierarchy_capture_id": "dae4ec5e7b683596a071b2754cf1214de15add4998ece87dd4feb3ebb9e22fcc",
+            "hierarchy_snapshot_id": "dae4ec5e7b683596a071b2754cf1214de15add4998ece87dd4feb3ebb9e22fcc",
+            "hierarchy_capture_sequence": 23,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "113157743195b8350d31c00814df0f83bc0f13d398e62c84a0d5557a3197db65",
+            "hierarchy_candidate_digest": "8ebe883250c1e2cd3463d3839b75c5a6a6cb831bb938623fcec7d846bc1877cb",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "113157743195b8350d31c00814df0f83bc0f13d398e62c84a0d5557a3197db65",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "locked",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         },
         {
@@ -1638,7 +3739,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-locked-b-24",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 24,
+              "root_ref": "windows[0].root",
+              "root_digest": "e5655fcf7be382ce6ed8eca55d684fe84a530c2bce98e4c6f5cd52cd7bfa1966",
+              "candidate_digest": "52026428db055bbe8e86610ccd5d5f0188b327fac71df8a75ca30ead9effcdb9",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "498199da53afec7c485907f149eedaa545c704979e5828264e8e2705efdf00dc"
+            },
+            "capture_id": "498199da53afec7c485907f149eedaa545c704979e5828264e8e2705efdf00dc",
+            "hierarchy_request_id": "state-replay-locked-b-24",
+            "hierarchy_capture_id": "498199da53afec7c485907f149eedaa545c704979e5828264e8e2705efdf00dc",
+            "hierarchy_snapshot_id": "498199da53afec7c485907f149eedaa545c704979e5828264e8e2705efdf00dc",
+            "hierarchy_capture_sequence": 24,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "e5655fcf7be382ce6ed8eca55d684fe84a530c2bce98e4c6f5cd52cd7bfa1966",
+            "hierarchy_candidate_digest": "52026428db055bbe8e86610ccd5d5f0188b327fac71df8a75ca30ead9effcdb9",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "e5655fcf7be382ce6ed8eca55d684fe84a530c2bce98e4c6f5cd52cd7bfa1966",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "unlocked",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         }
       ],
@@ -1713,7 +3914,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-connected-a-25",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 25,
+              "root_ref": "windows[0].root",
+              "root_digest": "a2f3a80f4dba20e9b27241229d58815f5451282b2486f3aba6d3ad1d4549395c",
+              "candidate_digest": "4360049d577f12ddc6f77b135a9407bbafa8f4dba9640b66dc5bb65a80be867b",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "8f189e7a9be9c6cb358eb46915d503c78bc6c2fc8e656cd8d0590454b282e89d"
+            },
+            "capture_id": "8f189e7a9be9c6cb358eb46915d503c78bc6c2fc8e656cd8d0590454b282e89d",
+            "hierarchy_request_id": "state-replay-connected-a-25",
+            "hierarchy_capture_id": "8f189e7a9be9c6cb358eb46915d503c78bc6c2fc8e656cd8d0590454b282e89d",
+            "hierarchy_snapshot_id": "8f189e7a9be9c6cb358eb46915d503c78bc6c2fc8e656cd8d0590454b282e89d",
+            "hierarchy_capture_sequence": 25,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "a2f3a80f4dba20e9b27241229d58815f5451282b2486f3aba6d3ad1d4549395c",
+            "hierarchy_candidate_digest": "4360049d577f12ddc6f77b135a9407bbafa8f4dba9640b66dc5bb65a80be867b",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "a2f3a80f4dba20e9b27241229d58815f5451282b2486f3aba6d3ad1d4549395c",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "connected",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         },
         {
@@ -1766,7 +4067,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-connected-b-26",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 26,
+              "root_ref": "windows[0].root",
+              "root_digest": "060cf33133a0fa3249978814fd0b88639a6e0e472041c2fa6ab74929b332b53f",
+              "candidate_digest": "e3fcb46d3ad64bbf7fe1c9421e35c1eeb5979130a3cb16ff4a576c0d919aa41b",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "55a7085694c531c5fa8f6732cc49ab6e1ee58bb085fb22661c5f08b9fad5c463"
+            },
+            "capture_id": "55a7085694c531c5fa8f6732cc49ab6e1ee58bb085fb22661c5f08b9fad5c463",
+            "hierarchy_request_id": "state-replay-connected-b-26",
+            "hierarchy_capture_id": "55a7085694c531c5fa8f6732cc49ab6e1ee58bb085fb22661c5f08b9fad5c463",
+            "hierarchy_snapshot_id": "55a7085694c531c5fa8f6732cc49ab6e1ee58bb085fb22661c5f08b9fad5c463",
+            "hierarchy_capture_sequence": 26,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "060cf33133a0fa3249978814fd0b88639a6e0e472041c2fa6ab74929b332b53f",
+            "hierarchy_candidate_digest": "e3fcb46d3ad64bbf7fe1c9421e35c1eeb5979130a3cb16ff4a576c0d919aa41b",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "060cf33133a0fa3249978814fd0b88639a6e0e472041c2fa6ab74929b332b53f",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "disconnected",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         }
       ],
@@ -1841,7 +4242,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-enabled-a-27",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 27,
+              "root_ref": "windows[0].root",
+              "root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+              "candidate_digest": "b3d4e0fc71edb98dd834d4fd67663278b0e9508f336305fe637291e933b696d2",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "d8a77ff7213811bf4f92f6f96efa64da513e85d2863435b60ad9e1d09b751103"
+            },
+            "capture_id": "d8a77ff7213811bf4f92f6f96efa64da513e85d2863435b60ad9e1d09b751103",
+            "hierarchy_request_id": "state-replay-enabled-a-27",
+            "hierarchy_capture_id": "d8a77ff7213811bf4f92f6f96efa64da513e85d2863435b60ad9e1d09b751103",
+            "hierarchy_snapshot_id": "d8a77ff7213811bf4f92f6f96efa64da513e85d2863435b60ad9e1d09b751103",
+            "hierarchy_capture_sequence": 27,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "hierarchy_candidate_digest": "b3d4e0fc71edb98dd834d4fd67663278b0e9508f336305fe637291e933b696d2",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         },
         {
@@ -1894,7 +4395,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-enabled-b-28",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 28,
+              "root_ref": "windows[0].root",
+              "root_digest": "a2dc5929c4ff986662842d0eb3188863265aac03bb66a41436311fe7ed1e22d6",
+              "candidate_digest": "0a8a40f520e20afe8f016f5f01d5c9e83717c993ad261caf3b2e7b9d71a7a09d",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "6f2e46a2d85968cd97b2574c2e452d5a83bffb8da6d083fb6c64e683d9b0701a"
+            },
+            "capture_id": "6f2e46a2d85968cd97b2574c2e452d5a83bffb8da6d083fb6c64e683d9b0701a",
+            "hierarchy_request_id": "state-replay-enabled-b-28",
+            "hierarchy_capture_id": "6f2e46a2d85968cd97b2574c2e452d5a83bffb8da6d083fb6c64e683d9b0701a",
+            "hierarchy_snapshot_id": "6f2e46a2d85968cd97b2574c2e452d5a83bffb8da6d083fb6c64e683d9b0701a",
+            "hierarchy_capture_sequence": 28,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "a2dc5929c4ff986662842d0eb3188863265aac03bb66a41436311fe7ed1e22d6",
+            "hierarchy_candidate_digest": "0a8a40f520e20afe8f016f5f01d5c9e83717c993ad261caf3b2e7b9d71a7a09d",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "a2dc5929c4ff986662842d0eb3188863265aac03bb66a41436311fe7ed1e22d6",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": false,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         }
       ],
@@ -1969,7 +4570,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-checked-a-29",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 29,
+              "root_ref": "windows[0].root",
+              "root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+              "candidate_digest": "ebdaa8976d371bad844548965fd45de40212bbab467647dc9e0e74e918ea9060",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "2f9829b5474a425c72895c173c7a7aa49448e775964810436d45763b42381364"
+            },
+            "capture_id": "2f9829b5474a425c72895c173c7a7aa49448e775964810436d45763b42381364",
+            "hierarchy_request_id": "state-replay-checked-a-29",
+            "hierarchy_capture_id": "2f9829b5474a425c72895c173c7a7aa49448e775964810436d45763b42381364",
+            "hierarchy_snapshot_id": "2f9829b5474a425c72895c173c7a7aa49448e775964810436d45763b42381364",
+            "hierarchy_capture_sequence": 29,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "hierarchy_candidate_digest": "ebdaa8976d371bad844548965fd45de40212bbab467647dc9e0e74e918ea9060",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         },
         {
@@ -2022,7 +4723,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-checked-b-30",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 30,
+              "root_ref": "windows[0].root",
+              "root_digest": "51cb7e0d020f88eb82027b419207ece663ab5ea7fb7dd49dcceb34c7c42ab895",
+              "candidate_digest": "e39710dd11cdfd48b9dc4e6c9663485211aba05cabdc64d04c519a685dcf3f76",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "0a59d19bcb594f040403247cef1ee97e060a4c792845da4f059400d77d52fa26"
+            },
+            "capture_id": "0a59d19bcb594f040403247cef1ee97e060a4c792845da4f059400d77d52fa26",
+            "hierarchy_request_id": "state-replay-checked-b-30",
+            "hierarchy_capture_id": "0a59d19bcb594f040403247cef1ee97e060a4c792845da4f059400d77d52fa26",
+            "hierarchy_snapshot_id": "0a59d19bcb594f040403247cef1ee97e060a4c792845da4f059400d77d52fa26",
+            "hierarchy_capture_sequence": 30,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "51cb7e0d020f88eb82027b419207ece663ab5ea7fb7dd49dcceb34c7c42ab895",
+            "hierarchy_candidate_digest": "e39710dd11cdfd48b9dc4e6c9663485211aba05cabdc64d04c519a685dcf3f76",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "51cb7e0d020f88eb82027b419207ece663ab5ea7fb7dd49dcceb34c7c42ab895",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": true,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         }
       ],
@@ -2097,7 +4898,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-ordering-a-31",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 31,
+              "root_ref": "windows[0].root",
+              "root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+              "candidate_digest": "0bd6b79404be9ecfee5a3c912e9deed94dd8f2ad616711f9af8fca53848c8875",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "e2f4b9367552f6e3b32e163a1287815029199dde3344ac08190422f07b0e6f44"
+            },
+            "capture_id": "e2f4b9367552f6e3b32e163a1287815029199dde3344ac08190422f07b0e6f44",
+            "hierarchy_request_id": "state-replay-ordering-a-31",
+            "hierarchy_capture_id": "e2f4b9367552f6e3b32e163a1287815029199dde3344ac08190422f07b0e6f44",
+            "hierarchy_snapshot_id": "e2f4b9367552f6e3b32e163a1287815029199dde3344ac08190422f07b0e6f44",
+            "hierarchy_capture_sequence": 31,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "hierarchy_candidate_digest": "0bd6b79404be9ecfee5a3c912e9deed94dd8f2ad616711f9af8fca53848c8875",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         },
         {
@@ -2150,7 +5051,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-ordering-b-32",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 32,
+              "root_ref": "windows[0].root",
+              "root_digest": "c43f4ed4cd491450fb5da8f8345d184cc982807819b53d30f6750b6931ede9b5",
+              "candidate_digest": "d0dee7e341abc8937a749c2a8916945dd1b70a196ae10854542449327907837d",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "97e1b6b96858f66b5c369e95c924d4e8cdbf5a78e29eb5c72abb1694211cae43"
+            },
+            "capture_id": "97e1b6b96858f66b5c369e95c924d4e8cdbf5a78e29eb5c72abb1694211cae43",
+            "hierarchy_request_id": "state-replay-ordering-b-32",
+            "hierarchy_capture_id": "97e1b6b96858f66b5c369e95c924d4e8cdbf5a78e29eb5c72abb1694211cae43",
+            "hierarchy_snapshot_id": "97e1b6b96858f66b5c369e95c924d4e8cdbf5a78e29eb5c72abb1694211cae43",
+            "hierarchy_capture_sequence": 32,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "c43f4ed4cd491450fb5da8f8345d184cc982807819b53d30f6750b6931ede9b5",
+            "hierarchy_candidate_digest": "d0dee7e341abc8937a749c2a8916945dd1b70a196ae10854542449327907837d",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "c43f4ed4cd491450fb5da8f8345d184cc982807819b53d30f6750b6931ede9b5",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         }
       ],
@@ -2227,6 +5228,106 @@
             "step": 0,
             "source": "reviewed_synthetic_fixture",
             "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-locale-a-33",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 33,
+              "root_ref": "windows[0].root",
+              "root_digest": "ee52b52818ee24472fafee403e27342703cc19f70690a03b204b4e944a01597f",
+              "candidate_digest": "ff74012f3085628b649426b208d92e9d022e43329c301e7b287b6afc4787ab60",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "51821f8c98ab29090a17af79eeae1adb40e350ae45b3618ede41263cb45c48b1"
+            },
+            "capture_id": "51821f8c98ab29090a17af79eeae1adb40e350ae45b3618ede41263cb45c48b1",
+            "hierarchy_request_id": "state-replay-locale-a-33",
+            "hierarchy_capture_id": "51821f8c98ab29090a17af79eeae1adb40e350ae45b3618ede41263cb45c48b1",
+            "hierarchy_snapshot_id": "51821f8c98ab29090a17af79eeae1adb40e350ae45b3618ede41263cb45c48b1",
+            "hierarchy_capture_sequence": 33,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "ee52b52818ee24472fafee403e27342703cc19f70690a03b204b4e944a01597f",
+            "hierarchy_candidate_digest": "ff74012f3085628b649426b208d92e9d022e43329c301e7b287b6afc4787ab60",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "ee52b52818ee24472fafee403e27342703cc19f70690a03b204b4e944a01597f",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "장치",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "홈",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null,
             "locale": "ko-KR"
           }
         },
@@ -2281,6 +5382,106 @@
             "step": 0,
             "source": "reviewed_synthetic_fixture",
             "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-locale-b-34",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 34,
+              "root_ref": "windows[0].root",
+              "root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+              "candidate_digest": "587f084345aa0d175cbf0ceb74c1ea2cfcad741059cf9968ef43f34a358168e4",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "22ec667acc71306acce15088e97f00003e12a257976deebdc037167927fba1f9"
+            },
+            "capture_id": "22ec667acc71306acce15088e97f00003e12a257976deebdc037167927fba1f9",
+            "hierarchy_request_id": "state-replay-locale-b-34",
+            "hierarchy_capture_id": "22ec667acc71306acce15088e97f00003e12a257976deebdc037167927fba1f9",
+            "hierarchy_snapshot_id": "22ec667acc71306acce15088e97f00003e12a257976deebdc037167927fba1f9",
+            "hierarchy_capture_sequence": 34,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "hierarchy_candidate_digest": "587f084345aa0d175cbf0ceb74c1ea2cfcad741059cf9968ef43f34a358168e4",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null,
             "locale": "en-US"
           }
         }
@@ -2357,7 +5558,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-coarse-collision-a-35",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 35,
+              "root_ref": "windows[0].root",
+              "root_digest": "8a2d37552c193cd2a03bb2b2f60a9342f92d6a90276f367423367eb11bcf0d27",
+              "candidate_digest": "3e0953508af2f456260e89950ebc3c9c1eb4b72b9bb4ae37029105013bc86d3e",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "3dd523b721586bdfa9016956a14d0d1336bc69d470d7da8d6c400bb9a910bf68"
+            },
+            "capture_id": "3dd523b721586bdfa9016956a14d0d1336bc69d470d7da8d6c400bb9a910bf68",
+            "hierarchy_request_id": "state-replay-coarse-collision-a-35",
+            "hierarchy_capture_id": "3dd523b721586bdfa9016956a14d0d1336bc69d470d7da8d6c400bb9a910bf68",
+            "hierarchy_snapshot_id": "3dd523b721586bdfa9016956a14d0d1336bc69d470d7da8d6c400bb9a910bf68",
+            "hierarchy_capture_sequence": 35,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "8a2d37552c193cd2a03bb2b2f60a9342f92d6a90276f367423367eb11bcf0d27",
+            "hierarchy_candidate_digest": "3e0953508af2f456260e89950ebc3c9c1eb4b72b9bb4ae37029105013bc86d3e",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "8a2d37552c193cd2a03bb2b2f60a9342f92d6a90276f367423367eb11bcf0d27",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Settings subpage",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         },
         {
@@ -2410,7 +5711,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-coarse-collision-b-36",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 36,
+              "root_ref": "windows[0].root",
+              "root_digest": "7079e7852e59f63f2c4a99083de36d9d0e7a861e6702786899b98f17916ab6be",
+              "candidate_digest": "e7f1d8276468db33427543f4bf61740f04a735d5a3d304244c04a1b24a649fce",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "71a745801e1651c715b49bd185572438902574e8c7acad5ad0a47a1a9ef50a10"
+            },
+            "capture_id": "71a745801e1651c715b49bd185572438902574e8c7acad5ad0a47a1a9ef50a10",
+            "hierarchy_request_id": "state-replay-coarse-collision-b-36",
+            "hierarchy_capture_id": "71a745801e1651c715b49bd185572438902574e8c7acad5ad0a47a1a9ef50a10",
+            "hierarchy_snapshot_id": "71a745801e1651c715b49bd185572438902574e8c7acad5ad0a47a1a9ef50a10",
+            "hierarchy_capture_sequence": 36,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "7079e7852e59f63f2c4a99083de36d9d0e7a861e6702786899b98f17916ab6be",
+            "hierarchy_candidate_digest": "e7f1d8276468db33427543f4bf61740f04a735d5a3d304244c04a1b24a649fce",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "7079e7852e59f63f2c4a99083de36d9d0e7a861e6702786899b98f17916ab6be",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Details subpage",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         }
       ],
@@ -2439,7 +5840,7 @@
           "key": "a",
           "raw": {
             "package_name": "pkg",
-            "activity_name": null,
+            "activity_name": "pkg.MainActivity",
             "display_bounds": [
               0,
               0,
@@ -2485,7 +5886,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-missing-activity-a-37",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 37,
+              "root_ref": "windows[0].root",
+              "root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+              "candidate_digest": "70c547e6de86224cd97211168b8998da92018459a2ad5c55513bbae293ca4a63",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "0a6b9d3b249ece6fbd87d0e8ef52168da05a11ea1e86fbc0d007cbb06b8f6811"
+            },
+            "capture_id": "0a6b9d3b249ece6fbd87d0e8ef52168da05a11ea1e86fbc0d007cbb06b8f6811",
+            "hierarchy_request_id": "state-replay-missing-activity-a-37",
+            "hierarchy_capture_id": "0a6b9d3b249ece6fbd87d0e8ef52168da05a11ea1e86fbc0d007cbb06b8f6811",
+            "hierarchy_snapshot_id": "0a6b9d3b249ece6fbd87d0e8ef52168da05a11ea1e86fbc0d007cbb06b8f6811",
+            "hierarchy_capture_sequence": 37,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "hierarchy_candidate_digest": "70c547e6de86224cd97211168b8998da92018459a2ad5c55513bbae293ca4a63",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         },
         {
@@ -2538,20 +6039,120 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-missing-activity-b-38",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 38,
+              "root_ref": "windows[0].root",
+              "root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+              "candidate_digest": "bd4fd6a6658e2092efe28cd0ee8449242b63944a59b5d58268516a9aaa8bd8c2",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "7803792b04fdf62ffa43bf9e816dba15ba28e4c8cda813b3c2da5b8b3d842ded"
+            },
+            "capture_id": "7803792b04fdf62ffa43bf9e816dba15ba28e4c8cda813b3c2da5b8b3d842ded",
+            "hierarchy_request_id": "state-replay-missing-activity-b-38",
+            "hierarchy_capture_id": "7803792b04fdf62ffa43bf9e816dba15ba28e4c8cda813b3c2da5b8b3d842ded",
+            "hierarchy_snapshot_id": "7803792b04fdf62ffa43bf9e816dba15ba28e4c8cda813b3c2da5b8b3d842ded",
+            "hierarchy_capture_sequence": 38,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "hierarchy_candidate_digest": "bd4fd6a6658e2092efe28cd0ee8449242b63944a59b5d58268516a9aaa8bd8c2",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         }
       ],
       "expected_groups": {
-        "a": null,
-        "b": null
+        "a": "base",
+        "b": "base"
       },
       "pairs": [
         {
           "name": "missing-activity",
           "left": "a",
           "right": "b",
-          "expected": "AMBIGUOUS",
+          "expected": "SAME",
           "use_continuity": false
         }
       ],
@@ -2613,7 +6214,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-partial-full-a-39",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 39,
+              "root_ref": "windows[0].root",
+              "root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+              "candidate_digest": "c93a002d3f5e46d60d1670d0c7f6b4d0019cb1c996da3a0ca138496b7d4d7c84",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "8008623ad36584466fcadf8c5ed782009151ca97958f8b5ee1d5c871586fe044"
+            },
+            "capture_id": "8008623ad36584466fcadf8c5ed782009151ca97958f8b5ee1d5c871586fe044",
+            "hierarchy_request_id": "state-replay-partial-full-a-39",
+            "hierarchy_capture_id": "8008623ad36584466fcadf8c5ed782009151ca97958f8b5ee1d5c871586fe044",
+            "hierarchy_snapshot_id": "8008623ad36584466fcadf8c5ed782009151ca97958f8b5ee1d5c871586fe044",
+            "hierarchy_capture_sequence": 39,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "hierarchy_candidate_digest": "c93a002d3f5e46d60d1670d0c7f6b4d0019cb1c996da3a0ca138496b7d4d7c84",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         },
         {
@@ -2667,7 +6368,107 @@
             "step": 0,
             "source": "reviewed_synthetic_fixture",
             "context_source": "synthetic_observed_context",
-            "observation_coverage": "OBSERVED_FULL"
+            "observation_coverage": "OBSERVED_FULL",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-partial-full-b-40",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 40,
+              "root_ref": "windows[0].root",
+              "root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+              "candidate_digest": "1dff2db3b8a27727a9c4ad646f751d85f9c06c21f37bbe041634a66ea0e3ede7",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "4e512b0b62dfd7192ab67cfb0289cb06d5c168550f177011d5b9f78a7d823da4"
+            },
+            "capture_id": "4e512b0b62dfd7192ab67cfb0289cb06d5c168550f177011d5b9f78a7d823da4",
+            "hierarchy_request_id": "state-replay-partial-full-b-40",
+            "hierarchy_capture_id": "4e512b0b62dfd7192ab67cfb0289cb06d5c168550f177011d5b9f78a7d823da4",
+            "hierarchy_snapshot_id": "4e512b0b62dfd7192ab67cfb0289cb06d5c168550f177011d5b9f78a7d823da4",
+            "hierarchy_capture_sequence": 40,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "hierarchy_candidate_digest": "1dff2db3b8a27727a9c4ad646f751d85f9c06c21f37bbe041634a66ea0e3ede7",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         }
       ],
@@ -2742,7 +6543,107 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-partial-subset-a-41",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 41,
+              "root_ref": "windows[0].root",
+              "root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+              "candidate_digest": "ba5d9528dac6a9f75481a4762c9bf41d3ea5aebbb8c0809c79142250a738490e",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "cf5658e907ee5e33d6853fe5f048b6c08e93332cf389cb1458390f93563f40c5"
+            },
+            "capture_id": "cf5658e907ee5e33d6853fe5f048b6c08e93332cf389cb1458390f93563f40c5",
+            "hierarchy_request_id": "state-replay-partial-subset-a-41",
+            "hierarchy_capture_id": "cf5658e907ee5e33d6853fe5f048b6c08e93332cf389cb1458390f93563f40c5",
+            "hierarchy_snapshot_id": "cf5658e907ee5e33d6853fe5f048b6c08e93332cf389cb1458390f93563f40c5",
+            "hierarchy_capture_sequence": 41,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "hierarchy_candidate_digest": "ba5d9528dac6a9f75481a4762c9bf41d3ea5aebbb8c0809c79142250a738490e",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "c3b3d21ad4f160cf57a523f68b05d57029dae59861bb3b50d55bb542a6daac57",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/card",
+                  "text": "Device",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,100,500,200",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": false,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                },
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         },
         {
@@ -2782,7 +6683,94 @@
             "scenario_id": "synthetic",
             "step": 0,
             "source": "reviewed_synthetic_fixture",
-            "context_source": "synthetic_observed_context"
+            "context_source": "synthetic_observed_context",
+            "capture_authority": {
+              "schema_version": "phase6d-capture-envelope-v1",
+              "canonicalization": "capture-canonical-json-v1",
+              "request_id": "state-replay-partial-subset-b-42",
+              "process_epoch": "fixture-process-epoch",
+              "generation": 1,
+              "service_instance_id": "fixture-service-instance",
+              "capture_sequence": 42,
+              "root_ref": "windows[0].root",
+              "root_digest": "d8669909440345bb0fa88a38b130589d57a4b0a8b9374513fa74e7e0bcad1fe4",
+              "candidate_digest": "db74314739b8a0551cb0d9d86cda72ae9201a8fd1b2f56a217288870f7d4c486",
+              "hierarchy_package_name": "pkg",
+              "hierarchy_window_id": 1,
+              "hierarchy_root_class_name": "android.view.View",
+              "hierarchy_root_source_node_id": null,
+              "hierarchy_root_bounds": [
+                0,
+                0,
+                1000,
+                1000
+              ],
+              "capture_key": "bbfb3814ff679636a868963b8ed7b01401a8d632a1bf26877d38eb0439544c71"
+            },
+            "capture_id": "bbfb3814ff679636a868963b8ed7b01401a8d632a1bf26877d38eb0439544c71",
+            "hierarchy_request_id": "state-replay-partial-subset-b-42",
+            "hierarchy_capture_id": "bbfb3814ff679636a868963b8ed7b01401a8d632a1bf26877d38eb0439544c71",
+            "hierarchy_snapshot_id": "bbfb3814ff679636a868963b8ed7b01401a8d632a1bf26877d38eb0439544c71",
+            "hierarchy_capture_sequence": 42,
+            "hierarchy_process_epoch": "fixture-process-epoch",
+            "hierarchy_generation": 1,
+            "hierarchy_service_instance_id": "fixture-service-instance",
+            "hierarchy_root_digest": "d8669909440345bb0fa88a38b130589d57a4b0a8b9374513fa74e7e0bcad1fe4",
+            "hierarchy_candidate_digest": "db74314739b8a0551cb0d9d86cda72ae9201a8fd1b2f56a217288870f7d4c486",
+            "hierarchy_root_class_name": "android.view.View",
+            "hierarchy_root_source_node_id": null,
+            "hierarchy_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "capture_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "traversal_root_ref": "windows[0].root",
+            "traversal_root_window_id": 1,
+            "traversal_root_digest": "d8669909440345bb0fa88a38b130589d57a4b0a8b9374513fa74e7e0bcad1fe4",
+            "traversal_root_class_name": "android.view.View",
+            "traversal_root_source_node_id": null,
+            "traversal_root_bounds": [
+              0,
+              0,
+              1000,
+              1000
+            ],
+            "_capture_root_tree": {
+              "packageName": "pkg",
+              "windowId": 1,
+              "className": "android.view.View",
+              "sourceNodeId": null,
+              "boundsInScreen": {
+                "l": 0,
+                "t": 0,
+                "r": 1000,
+                "b": 1000
+              },
+              "children": [
+                {
+                  "viewIdResourceName": "pkg:id/menu_favorites",
+                  "text": "home",
+                  "className": "android.widget.TextView",
+                  "boundsInScreen": "0,900,200,1000",
+                  "visibleToUser": true,
+                  "enabled": true,
+                  "checked": false,
+                  "selected": true,
+                  "clickable": true,
+                  "focusable": true,
+                  "scrollable": false
+                }
+              ]
+            },
+            "focus_capture_id": null,
+            "geometry_capture_id": null
           }
         }
       ],
@@ -2811,12 +6799,12 @@
           "key": "a",
           "fingerprint": {
             "schema_version": "state-fingerprint-v1",
-            "core_signature": "7c2db90d83decc1191771b32838b32ea61cd692810609d33c4642a0bf26358cc",
+            "core_signature": "761987acfd011c3d0c27797ea4bb89d2f632b248a469abe3ee0c1f7f66f4a2c0",
             "viewport_signature": "e2a6e01ac3c3f43131de43cc2e789f6fbdc624d3f1115e85f70bfcdb6b34f3a9",
             "overlay_signature": "edd79abea6af62e7d2d0dd0a3590d2e7fb0987236acb18bcd28540ed6d3fa488",
-            "fingerprint_hash": "22647643c09e17ed3b5b4136572320fc4d02cbe61e676c5d9852ae84cc0fc923",
+            "fingerprint_hash": "cc024efd7c0ac01ba782fc454cc7456076b05b155b65e6e74339db0fe5d0479f",
             "core": {
-              "activity_name": "pkg.MainActivity",
+              "activity_name": null,
               "navigation_context": {
                 "bottom_tab": "home"
               },
@@ -2824,7 +6812,7 @@
               "package_name": "pkg",
               "screen_markers": [],
               "selected_tab": "home",
-              "selected_tab_status": "explicit_verified"
+              "selected_tab_status": "observed_selected_node"
             },
             "viewport": {
               "bounds_strategy": "relative-grid32",
@@ -2891,7 +6879,7 @@
               "semantic_nodes": []
             },
             "transient": {
-              "context_source": "synthetic_observed_context",
+              "context_source": "capture_local_hierarchy_only",
               "focused_element_summary": {
                 "accessibility_focused": null,
                 "bounds": null,
@@ -2901,8 +6889,17 @@
               },
               "invalid_bounds_count": 0,
               "legacy_viewport": null,
-              "missing_fields": [],
+              "missing_fields": [
+                "activity_name"
+              ],
               "notes": [],
+              "overlay_diagnostic": {
+                "candidate_present": null,
+                "classification": null,
+                "kind": null,
+                "modal_evidence": null,
+                "observed": null
+              },
               "overlay_source": "unspecified",
               "positional_instance_ids": [
                 "[\"instance-v1\",\"synthetic\",\"pkg:id/card\",\"bounds\",\"0,100,500,200\"]",
@@ -2935,12 +6932,12 @@
           "key": "b",
           "fingerprint": {
             "schema_version": "state-fingerprint-v1",
-            "core_signature": "7c2db90d83decc1191771b32838b32ea61cd692810609d33c4642a0bf26358cc",
+            "core_signature": "761987acfd011c3d0c27797ea4bb89d2f632b248a469abe3ee0c1f7f66f4a2c0",
             "viewport_signature": "e2a6e01ac3c3f43131de43cc2e789f6fbdc624d3f1115e85f70bfcdb6b34f3a9",
             "overlay_signature": "edd79abea6af62e7d2d0dd0a3590d2e7fb0987236acb18bcd28540ed6d3fa488",
-            "fingerprint_hash": "22647643c09e17ed3b5b4136572320fc4d02cbe61e676c5d9852ae84cc0fc923",
+            "fingerprint_hash": "cc024efd7c0ac01ba782fc454cc7456076b05b155b65e6e74339db0fe5d0479f",
             "core": {
-              "activity_name": "pkg.MainActivity",
+              "activity_name": null,
               "navigation_context": {
                 "bottom_tab": "home"
               },
@@ -2948,7 +6945,7 @@
               "package_name": "pkg",
               "screen_markers": [],
               "selected_tab": "home",
-              "selected_tab_status": "explicit_verified"
+              "selected_tab_status": "observed_selected_node"
             },
             "viewport": {
               "bounds_strategy": "relative-grid32",
@@ -3015,7 +7012,7 @@
               "semantic_nodes": []
             },
             "transient": {
-              "context_source": "synthetic_observed_context",
+              "context_source": "capture_local_hierarchy_only",
               "focused_element_summary": {
                 "accessibility_focused": null,
                 "bounds": null,
@@ -3025,8 +7022,17 @@
               },
               "invalid_bounds_count": 0,
               "legacy_viewport": null,
-              "missing_fields": [],
+              "missing_fields": [
+                "activity_name"
+              ],
               "notes": [],
+              "overlay_diagnostic": {
+                "candidate_present": null,
+                "classification": null,
+                "kind": null,
+                "modal_evidence": null,
+                "observed": null
+              },
               "overlay_source": "unspecified",
               "positional_instance_ids": [
                 "[\"instance-v1\",\"synthetic\",\"pkg:id/card\",\"bounds\",\"0,100,500,200\"]",

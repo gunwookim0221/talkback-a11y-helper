@@ -4,11 +4,16 @@ import json
 
 import pytest
 
-from state_model_fixtures import node, observation, scroll_pair
+from phase6d_capture_support import add_full_screen_hierarchy_modal
+from state_model_fixtures import node, observation, scroll_pair, recapture
 from tb_runner.canonical_json import canonical_json
-from tb_runner.discovery_candidates import build_discovery_snapshot
+from tb_runner.discovery_candidates import build_discovery_snapshot as _build_discovery_snapshot
 from tb_runner.state_registry import StateRegistry
 from tb_runner.transition_observation import ControlledAction, TransitionObserver, write_transition
+
+
+def build_discovery_snapshot(raw, *args, **kwargs):
+    return _build_discovery_snapshot(recapture(deepcopy(raw)), *args, **kwargs)
 
 
 def action(kind="FOCUS_NEXT", occurrence="test:1", **values):
@@ -28,6 +33,7 @@ def focus_pair():
 def observe(a=None, b=None, ack=None, controlled=None, evidence=None, registry=None):
     a = observation() if a is None else a
     b = deepcopy(a) if b is None else b
+    a = recapture(deepcopy(a)); b = recapture(deepcopy(b))
     observer = TransitionObserver(registry if registry is not None else StateRegistry("transition-test"))
     prepared = observer.prepare(a, controlled or action())
     result = observer.complete(prepared, b, command_ack=ack or {"success": True, "status": "moved"}, action_evidence=evidence)
@@ -154,7 +160,7 @@ def nav_raw(root):
     names = ("home", "devices", "life", "routines", "menu")
     raw["nodes"] = [node(), *[node(rid, label, f"{i*200},900,{i*200+200},1000", role="tab", selected=name == root)
         for i, (name, label, rid) in enumerate(zip(names, BOTTOM_TAB_GLOBAL_NAV["labels"], BOTTOM_TAB_GLOBAL_NAV["resource_ids"]))]]
-    return raw
+    return recapture(raw)
 
 
 @pytest.mark.parametrize("success", [True, False])
@@ -179,25 +185,21 @@ def test_phase2_semantic_changes_still_create_distinct_state(mutation):
         a["nodes"][0]["text"] = "Locked"
         b["nodes"][0]["text"] = "Unlocked"
     else:
-        b["overlay"] = dict(kind="dialog", observed=True, nodes=[node("dialog", "Permission")])
+        add_full_screen_hierarchy_modal(b, sequence=2, request_id="transition-modal-capture")
     result = observe(a, b)[2]
     assert result.outcome == "STATE_CHANGED"
     assert result.to_dict()["equality_relation"]["verdict"] == "DIFFERENT"
 
 
-@pytest.mark.parametrize("side", ["source", "result", "both"])
-def test_unresolved_source_result_never_bind_definitively(side):
+def test_component_unknown_keeps_capture_local_state_but_grants_no_visit_credit():
     a, b = observation(), observation()
-    for raw in ([a] if side == "source" else [b] if side == "result" else [a, b]):
-        raw["activity_name"] = None
+    a["activity_name"] = b["activity_name"] = None
     observer, _, result = observe(a, b)
     doc = result.to_dict()
-    assert result.outcome == "AMBIGUOUS_RESULT"
-    assert doc["definitive_state_binding"] is False
-    if side != "result":
-        assert doc["source_state_id"] is None and doc["action_candidate_id"] is None
-    if side != "source":
-        assert doc["resulting_state_id"] is None
+    assert result.outcome == "SAME_STATE"
+    assert doc["definitive_state_binding"] is True
+    assert doc["source_state_id"] == doc["resulting_state_id"]
+    assert doc["visit_credit"] == 0
     assert observer.metrics()["UNSAFE_TRANSITION_BIND_COUNT"] == 0
 
 

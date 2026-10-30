@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from phase6d_capture_support import attach_capture_authority, bind_observation_marker
 from tb_runner.exploration_redirect import ExplorationRedirectController
 
 
@@ -37,7 +38,7 @@ def _production_shaped_shadow_fixture(*, overlay=False):
         scenario_id=scenario_id, scenario_run_id=run_id, step=7,
         timestamp="2026-10-22T01:02:03+09:00", capture_id="rf2-capture-7",
         package_name="com.samsung.android.oneconnect", activity_name="pkg.WebPluginActivity",
-        context_source="window_current_focus", navigation_context=None, selected_tab=None,
+        context_source="helper_tree_component", navigation_context=None, selected_tab=None,
         observation_coverage="OBSERVED_FULL", overlay={"observed": bool(overlay)},
         display_bounds=[0, 0, 1000, 1000],
         nodes=[*raw["nodes"], dict(viewIdResourceName="plugin:body", text="TV",
@@ -63,6 +64,12 @@ def _production_shaped_shadow_fixture(*, overlay=False):
         client=client, dev="offline", phase_ctx=phase_ctx, run_id=run_id)
     raw["phase3_entry_evidence"] = context["phase3_entry_evidence"]
     raw["navigation_epoch"] = context["navigation_epoch"]
+    attach_capture_authority(raw, production=True, sequence=7, request_id="rf2-capture-7")
+    capture_key = raw["capture_id"]
+    raw["focus_capture_id"] = capture_key
+    raw["geometry_capture_id"] = capture_key
+    raw["production_observation_envelope"]["focus_capture_id"] = capture_key
+    raw["production_observation_envelope"]["geometry_capture_id"] = capture_key
     from tb_runner.plugin_context_contract import plugin_context_evidence
     raw["phase3_plugin_context_evidence"] = plugin_context_evidence(
         raw["phase3_entry_evidence"], raw, client.last_start_open_summary,
@@ -103,7 +110,7 @@ def _production_shaped_shadow_fixture(*, overlay=False):
     record["state"] = {**record["state"], "state_id": graph_identity.state_id}
     record["selected_frontier_execution_ready"] = False
     record["selected_frontier_execution_evidence"] = {"status": "BLOCKED"}
-    raw["_exploration_observation"] = deepcopy(record["observation_alignment"])
+    bind_observation_marker(raw, record["observation_alignment"])
 
     row = {
         **{key: deepcopy(raw.get(key)) for key in (
@@ -122,6 +129,9 @@ def _production_shaped_shadow_fixture(*, overlay=False):
         "reconciliation_status": "RESOLVED", "phase3_entry_evidence": deepcopy(context["phase3_entry_evidence"]),
         "phase3_plugin_context_evidence": deepcopy(raw["phase3_plugin_context_evidence"]),
         "capture_id": raw["capture_id"],
+        "production_observation_envelope": deepcopy(raw["production_observation_envelope"]),
+        "production_observation_current": True,
+        "state_graph_observation": deepcopy(raw),
         "navigation_epoch": context["navigation_epoch"],
     }
     state = SimpleNamespace(
@@ -198,7 +208,7 @@ def _run_shadow(fixture, *, collector_delay_seconds=0.0, collector_hook=None, ta
     return result, expected, calls, getattr(fixture.client, "_phase6d3a_last_step_audit", None)
 
 
-def test_production_shaped_shadow_uses_actual_provider_common_bundle_and_evaluator_once():
+def test_production_shaped_shadow_keeps_component_free_capture_fail_closed():
     fixture = _production_shaped_shadow_fixture()
     budget_before = (fixture.client._phase6d3a_controlled_budget.actions,
                      fixture.controller.budget.redirects_used,
@@ -208,14 +218,10 @@ def test_production_shaped_shadow_uses_actual_provider_common_bundle_and_evaluat
 
     assert result == expected
     assert len(calls) == 1
-    assert audit["readiness_status"] == "READY", (audit.get("reason_codes"), audit.get("conditions"),
-        audit.get("proof"), audit.get("readiness_trace"))
-    assert audit["ready"] is True
-    assert audit["proof"]["build_status"] == "COMPLETE"
-    assert audit["proof"]["source_refs"]["planner"] == "phase4a_planner.plan_shadow"
-    assert audit["proof"]["source_refs"]["binding"].startswith(
-        "phase4b_target_binding.resolve_focus_target:")
-    assert audit["identity_bridge"]["status"] == "EXACT_ONE"
+    assert audit["readiness_status"] == "UNKNOWN"
+    assert audit["ready"] is False
+    assert "PLUGIN_CONTEXT_UNKNOWN" in audit["reason_codes"]
+    assert "PROOF_SET_INCOMPLETE" in audit["reason_codes"]
     assert audit["execution_authority"] == "NONE"
     assert audit["phase5_permit_issued"] is False
     assert audit["dispatch_count"] == 0
@@ -224,24 +230,16 @@ def test_production_shaped_shadow_uses_actual_provider_common_bundle_and_evaluat
     assert budget_before == (fixture.client._phase6d3a_controlled_budget.actions,
                              fixture.controller.budget.redirects_used,
                              fixture.controller.budget.consecutive_failures)
-    assert fixture.controller.metrics.counters["SHADOW_READY_COUNT"] == 1
+    assert fixture.controller.metrics.counters["SHADOW_UNKNOWN_COUNT"] == 1
     assert fixture.controller.metrics.counters["SHADOW_RECOMMENDATION_COUNT"] == 1
-    assert fixture.controller.metrics.counters["SHADOW_PROOF_MATCH_COUNT"] == 1
-    assert fixture.controller.metrics.counters["SHADOW_IDENTITY_EXACT_ONE_COUNT"] == 1
-    assert fixture.controller.metrics.counters["SHADOW_PLANNER_ALLOWED_COUNT"] == 1
-    assert fixture.controller.metrics.counters["SHADOW_SAFETY_ALLOWED_COUNT"] == 1
     assert fixture.controller.metrics.counters["SHADOW_FALSE_READY_COUNT"] == 0
     latency = fixture.controller.metrics.latency_summary()
     assert latency["count"] == 1 and latency["p50_ms"] is not None and latency["p95_ms"] is not None
     assert fixture.controller.events[-1]["readiness_trace"]["event_id"] == audit["readiness_trace"]["event_id"]
-    assert audit["readiness_trace"]["proof"]["proof_complete"] is True
     trace = audit["readiness_trace"]
     assert trace["event_id"] == "rf2-readiness:" + ":".join((
         audit["run_id"], audit["decision_id"], audit["observation_id"]))
     assert trace["decision_watermark"] == audit["decision_watermark"]
-    assert trace["frontier"]["priority_class"] == "P0"
-    assert trace["proof"]["source_refs"]["safety_assessment"].startswith(
-        "phase5a_safety.SafetySession.assess:")
     assert trace["conditions"]["lifecycle_status"] == "CLEAR"
     assert trace["conditions"]["lifecycle_evidence"]["process_evidence"] == "STABLE"
     assert trace["frame"]["lifecycle_evidence"]["previous_pid_present"] is True
@@ -308,7 +306,8 @@ def test_old_phase6_ready_flag_is_not_a_second_shadow_authority():
     assert fixture.record["selected_frontier_execution_ready"] is False
     _result, _expected, calls, audit = _run_shadow(fixture)
     assert len(calls) == 1
-    assert audit["readiness_status"] == "READY"
+    assert audit["readiness_status"] == "UNKNOWN"
+    assert "PLUGIN_CONTEXT_UNKNOWN" in audit["reason_codes"]
 
 
 @pytest.mark.parametrize("failure", ["provider", "evaluator", "trace"])
@@ -387,9 +386,10 @@ def test_shadow_diagnostic_failure_preserves_meaningful_production_parity(monkey
     assert shadow_result == off_result == expected
     assert len(shadow_calls) == 1
     if failure == "none":
-        assert audit["status"] == "READY"
-        assert audit["readiness_status"] == "READY"
-        assert audit["ready"] is True
+        assert audit["status"] == "UNKNOWN"
+        assert audit["readiness_status"] == "UNKNOWN"
+        assert "PLUGIN_CONTEXT_UNKNOWN" in audit["reason_codes"]
+        assert audit["ready"] is False
     else:
         assert audit["status"] == "DIAGNOSTIC_ERROR"
         assert audit["readiness_status"] == "UNKNOWN"
@@ -419,7 +419,8 @@ def test_shadow_latency_includes_provider_and_evaluator_and_updates_percentiles(
                         "build_target_proof_set", delayed_provider)
     monkeypatch.setattr(redirect_evidence, "evaluate_redirect_readiness", delayed_evaluator)
     _result, _expected, calls, audit = _run_shadow(fixture)
-    assert len(calls) == 1 and audit["readiness_status"] == "READY"
+    assert len(calls) == 1 and audit["readiness_status"] == "UNKNOWN"
+    assert "PLUGIN_CONTEXT_UNKNOWN" in audit["reason_codes"]
     assert audit["evaluation_duration_ms"] >= 110
     assert audit["readiness_trace"]["evaluation_duration_ms"] == audit["evaluation_duration_ms"]
     latency = fixture.controller.metrics.latency_summary()
@@ -621,7 +622,8 @@ def test_actual_recorder_temporal_lifecycle_merge_preserves_decision_evidence(tr
         assert temporal["lifecycle_pre_decision"]["status"] == "BLOCKED"
         assert temporal["lifecycle_post_collector"]["enabled_process_gap"] is False
         assert temporal["lifecycle_post_collector"]["status"] == "CLEAR"
-    assert audit["ready"] is (transition == "stable")
+    assert audit["ready"] is False
+    assert "PLUGIN_CONTEXT_UNKNOWN" in audit["reason_codes"]
 
 
 def test_production_clock_advance_does_not_rebind_the_original_decision_observation():
@@ -632,7 +634,8 @@ def test_production_clock_advance_does_not_rebind_the_original_decision_observat
                           "com.iotpart.sqe.talkbackhelper.SMART_NEXT", "--es", "reqId", "production-next"])
         f.clock.finish_observation(f.clock.begin_observation())
     audit = _assert_production_parity_and_no_redirect(f, _run_shadow(f, collector_hook=production_advance))
-    assert audit["readiness_status"] == "READY"
+    assert audit["readiness_status"] == "UNKNOWN"
+    assert "PLUGIN_CONTEXT_UNKNOWN" in audit["reason_codes"]
     assert audit["observation_id"] == observation_id
     assert audit["decision_alignment"]["status"] == "MATCH"
 
@@ -712,11 +715,13 @@ def test_rf2r3_helper_raw_temporal_provenance(case, pre_status, post_status, eff
     _assert_production_parity_and_no_redirect(f, outcome)
 
 
-def test_rf2r3_helper_stable_positive_trace():
+def test_rf2r3_helper_stable_trace_does_not_override_unknown_component():
     f = _production_shaped_shadow_fixture()
     result, expected, calls, audit = _run_shadow(f)
     assert result == expected and len(calls) == 1
-    assert audit["readiness_status"] == "READY"
+    assert audit["readiness_status"] == "UNKNOWN"
+    assert "PLUGIN_CONTEXT_UNKNOWN" in audit["reason_codes"]
+    assert audit["ready"] is False
     evidence = audit["conditions"]["helper_evidence"]
     assert evidence["pre_decision"] == evidence["post_collector"]
     assert evidence["pre_status"] == evidence["post_status"] == evidence["effective_status"] == "READY"

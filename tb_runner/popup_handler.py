@@ -208,9 +208,9 @@ def classify_modal_state(row: dict[str, Any], nodes: list[dict[str, Any]] | None
     """Classify overlay semantics from hierarchy/window/accessibility evidence.
 
     Popup-like resource/text is candidate evidence only. Unknown overlay evidence
-    remains conservative. A localized control is cleared only when the active
-    same-activity window, background accessibility and external TalkBack focus
-    all corroborate a non-modal control.
+    remains conservative. A localized control is cleared only when a validated
+    same-capture component matches the active window, background accessibility
+    and external TalkBack focus all corroborate a non-modal control.
     """
     nodes = nodes if nodes is not None else [n for n in _iter_nodes(
         [row.get("focus_node", {}), *(row.get("dump_tree_nodes") or [])]) if _node_visible(n)]
@@ -220,11 +220,11 @@ def classify_modal_state(row: dict[str, Any], nodes: list[dict[str, Any]] | None
     win = row.get("window_evidence") or {}
     focused_type = str(win.get("focused_window_type") or row.get("focused_window_type") or "").upper()
     focused_window = str(win.get("focused_window_component") or row.get("focused_window_component") or "")
-    activity = str(row.get("activity_name") or "")
-    focused_activity_matches = win.get("focused_activity_matches") is True or (
-        row.get("context_source") == "window_current_focus" and bool(activity)
-        and (not focused_window or focused_window == activity
-             or focused_window.endswith("/" + activity.split(".")[-1])))
+    from talkback_lib.reliable_hierarchy_schema import validate_capture_authority
+    authority = validate_capture_authority(row.get("capture_authority"))
+    # WMS Activity/window strings cannot bind a component or clear an overlay.
+    focused_activity_matches = False
+    # Kept for diagnostics only. WMS window types do not establish modal state.
     dialog_window = bool(win.get("focused_window_is_dialog") or row.get("focused_window_is_dialog")
                          or "DIALOG" in focused_type)
     display = _bounds_tuple(row.get("display_bounds"))
@@ -280,8 +280,8 @@ def classify_modal_state(row: dict[str, Any], nodes: list[dict[str, Any]] | None
         actionable_nodes = [n for n in nodes if _node_actionable(n) and node_label(n)]
         if body_labels and actionable_nodes:
             modal_evidence.append("title_body_with_actions")
-    if dialog_window:
-        modal_evidence.append("focused_dialog_window")
+    # WMS dialog/window flags are retained in the returned diagnostic fields,
+    # but they cannot establish modal state for this capture.
     if explicit_background_blocked:
         modal_evidence.append("background_inaccessible")
     if blocking_area_ratio is not None and blocking_area_ratio >= 0.35:
@@ -293,26 +293,18 @@ def classify_modal_state(row: dict[str, Any], nodes: list[dict[str, Any]] | None
     elif focus.get("accessibilityFocused") is True and rects:
         modal_evidence.append("accessibility_focus_inside_overlay")
 
-    if dialog_window or (dialog_nodes and explicit_background_blocked) or (
+    if (dialog_nodes and explicit_background_blocked) or (
             explicit_background_blocked and blocking_area_ratio is not None and blocking_area_ratio >= 0.35):
         classification = "VERIFIED_MODAL"
     elif dialog_nodes or (candidate_area_ratio is not None and candidate_area_ratio >= 0.35
                           and not background_accessible) or (blocking_area_ratio is not None
                           and blocking_area_ratio >= 0.35 and dismiss_action_present and not background_accessible):
         classification = "LIKELY_MODAL"
-    elif (focused_activity_matches and not dialog_window and not dialog_nodes
-          and candidate_area_ratio is not None and candidate_area_ratio <= 0.10
-          and background_accessible and focus_outside):
-        classification = "NON_MODAL_CONTROL"
-    elif not candidate and not dialog_nodes and not dialog_window:
-        window_context_observed = bool(win.get("window_count") or focused_type or focused_window
-                                       or win.get("current_focus_line") or row.get("focused_window_type")
-                                       or row.get("focused_window_component"))
-        ordinary_app_window = focused_type in {"", "BASE_APPLICATION", "APPLICATION", "APPLICATION_STARTING"}
-        if window_context_observed and (not focused_activity_matches or not ordinary_app_window):
-            classification = "AMBIGUOUS_OVERLAY"
-        else:
-            classification = "NON_MODAL_CONTROL"
+    elif not candidate and not dialog_nodes:
+        # Without a tree-derived modal candidate, no observed overlay exists.
+        # Component/window continuity remains unknown and safety-sensitive
+        # actions stay gated by the caller's UNKNOWN handling.
+        classification = "UNKNOWN_COMPONENT_BINDING"
     else:
         classification = "AMBIGUOUS_OVERLAY"
     return dict(classification=classification, candidate_evidence=candidate,

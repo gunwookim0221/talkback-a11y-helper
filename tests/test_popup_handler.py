@@ -336,19 +336,29 @@ def test_non_samsung_popup_without_safe_action_is_noop():
     assert candidate.reason == "no_safe_action"
 
 
-def test_camera_pip_popup_named_subtree_is_non_modal_with_background_and_external_focus():
+def test_camera_pip_without_bound_component_stays_unknown_and_not_clear():
     candidate = popup_handler.detect_popup_candidate(_camera_pip_row())
     assessment = candidate.modal_assessment
 
     assert candidate.detected is False
-    assert candidate.modal_classification == "NON_MODAL_CONTROL"
+    assert candidate.modal_classification == "AMBIGUOUS_OVERLAY"
     assert candidate.candidate_evidence == ["popup_resource"]
-    assert "popup_resource" not in candidate.modal_evidence
-    assert assessment["focused_activity_matches"] is True
+    assert assessment["focused_activity_matches"] is False
     assert assessment["background_accessible"] is True
     assert assessment["background_actionable_count"] >= 3
     assert assessment["accessibility_focus_outside"] is True
     assert assessment["candidate_area_ratio"] < 0.02
+
+
+def test_camera_pip_cannot_be_cleared_by_root_package_window_authority():
+    from phase6d_capture_support import attach_capture_authority
+    row = _camera_pip_row()
+    row["context_source"] = "helper_tree_component"
+    attach_capture_authority(row)
+    candidate = popup_handler.detect_popup_candidate(row)
+
+    assert candidate.modal_classification == "AMBIGUOUS_OVERLAY"
+    assert candidate.modal_assessment["focused_activity_matches"] is False
 
 
 def test_popup_resource_token_alone_never_establishes_modal():
@@ -394,14 +404,14 @@ def test_small_pip_without_window_or_background_proof_stays_ambiguous():
     assert candidate.detected is False
 
 
-def test_dialog_window_type_overrides_small_non_modal_geometry():
+def test_wms_dialog_window_type_does_not_create_verified_modal():
     row = _camera_pip_row()
     row["window_evidence"]["focused_window_type"] = "APPLICATION_ATTACHED_DIALOG"
     row["window_evidence"]["focused_window_is_dialog"] = True
     candidate = popup_handler.detect_popup_candidate(row)
 
-    assert candidate.modal_classification == "VERIFIED_MODAL"
-    assert "focused_dialog_window" in candidate.modal_evidence
+    assert candidate.modal_classification == "AMBIGUOUS_OVERLAY"
+    assert "focused_dialog_window" not in candidate.modal_evidence
 
 
 def test_dialog_root_without_observed_background_state_is_likely_and_stays_blocked():
@@ -421,7 +431,7 @@ def test_input_focus_cannot_substitute_for_accessibility_focus_outside_pip():
     assert candidate.modal_classification == "AMBIGUOUS_OVERLAY"
 
 
-def test_non_candidate_foreground_window_mismatch_stays_ambiguous():
+def test_non_candidate_foreground_window_mismatch_stays_unknown():
     row = {"focus_node": _node("Close", clickable=True), "dump_tree_nodes": [],
            "activity_name": "com.example.MainActivity",
            "window_evidence": {"window_count": 2, "focused_window_component": "com.android.systemui.NotificationShade",
@@ -429,10 +439,10 @@ def test_non_candidate_foreground_window_mismatch_stays_ambiguous():
 
     candidate = popup_handler.detect_popup_candidate(row)
 
-    assert candidate.modal_classification == "AMBIGUOUS_OVERLAY"
+    assert candidate.modal_classification == "UNKNOWN_COMPONENT_BINDING"
 
 
-def test_regular_foreground_app_window_without_popup_candidate_is_non_modal():
+def test_regular_foreground_app_window_without_capture_component_stays_unknown():
     row = {"focus_node": _node("Open", clickable=True), "dump_tree_nodes": [],
            "activity_name": "com.example.MainActivity",
            "window_evidence": {"window_count": 2, "focused_window_component": "com.example.MainActivity",
@@ -440,4 +450,4 @@ def test_regular_foreground_app_window_without_popup_candidate_is_non_modal():
 
     candidate = popup_handler.detect_popup_candidate(row)
 
-    assert candidate.modal_classification == "NON_MODAL_CONTROL"
+    assert candidate.modal_classification == "UNKNOWN_COMPONENT_BINDING"

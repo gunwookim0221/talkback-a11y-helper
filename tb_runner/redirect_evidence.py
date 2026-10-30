@@ -558,6 +558,47 @@ class ProductionEvidenceFrame:
         object.__setattr__(self, "helper_evidence", _freeze_evidence(self.helper_evidence))
 
 
+def _current_causal_root_context(frame: ProductionEvidenceFrame) -> bool:
+    """Accept only a current causal root; semantic component identity stays unknown."""
+    context = frame.plugin_context
+    if not isinstance(context, Mapping):
+        return False
+    proof = context.get("root_authority_evidence")
+    if not isinstance(proof, Mapping):
+        return False
+    source_generation = proof.get("source_generation")
+    result_generation = proof.get("result_generation")
+    source_sequence = proof.get("source_capture_sequence")
+    result_sequence = proof.get("result_capture_sequence")
+    watermark = proof.get("receipt_watermark_before")
+    receipt_sequence = proof.get("receipt_sequence")
+    return bool(
+        context.get("status") == "UNRESOLVED_CONTEXT"
+        and context.get("context_id") is None
+        and context.get("semantic_component_identity") == "UNKNOWN"
+        and context.get("root_authority") == "ENTRY_TRANSACTION_RESOLVED"
+        and context.get("scenario_run_id") == frame.run_id
+        and context.get("observation_id") == frame.observation_id
+        and context.get("proof_capture_id")
+        and proof.get("scenario_run_id") == frame.run_id
+        and proof.get("result_capture_id") == context.get("proof_capture_id")
+        and proof.get("result_capture_status") == "CURRENT_COMPLETE"
+        and proof.get("operation_id")
+        and proof.get("action_type") == "INPUT_TAP"
+        and proof.get("request_id") in (None, "")
+        and proof.get("receipt_store_generation")
+        and type(watermark) is int and type(receipt_sequence) is int
+        and receipt_sequence > watermark
+        and proof.get("source_result_generation_distinct") is True
+        and type(source_generation) is int and type(result_generation) is int
+        and source_generation != result_generation
+        and type(source_sequence) is int and type(result_sequence) is int
+        and result_sequence > source_sequence
+        and proof.get("plugin_body_anchor_verified") is True
+        and proof.get("reason_codes") == []
+    )
+
+
 @dataclass(frozen=True)
 class ProofProvenance:
     run_id: str = ""
@@ -770,7 +811,8 @@ def evaluate_redirect_readiness(bundle: RedirectEvidenceBundle) -> ReadinessAsse
     if plugin_context_status in {"WRONG_CONTEXT", "CONTRADICTORY_CONTEXT", "BLOCKED"}:
         reasons.append("PLUGIN_CONTEXT_BLOCKED")
         blocked = True
-    elif plugin_context_status not in {"VERIFIED_PLUGIN_CONTEXT"}:
+    elif (plugin_context_status not in {"VERIFIED_PLUGIN_CONTEXT"}
+          and not _current_causal_root_context(frame)):
         reasons.append("PLUGIN_CONTEXT_UNKNOWN")
     if not bundle.frontier_id or bundle.frontier_action != "TARGETED_FOCUS":
         reasons.append("SUPPORTED_FRONTIER_UNAVAILABLE")
@@ -923,6 +965,14 @@ class ProductionRedirectProofProvider:
             capture = raw.get("_exploration_observation")
             capture = capture if isinstance(capture, Mapping) else {}
             graph_state_id = build_graph_state_identity(raw).state_id or ""
+            from talkback_lib.reliable_hierarchy_schema import validate_capture_authority
+            from tb_runner.phase3_context import resolve_phase3_context
+            from tb_runner.state_fingerprint import validated_capture_root_tree
+            from tb_runner.plugin_entry_provenance import root_authority_is_current
+            capture_authority = validate_capture_authority(raw.get("capture_authority"))
+            capture_root_tree = validated_capture_root_tree(raw, capture_authority)
+            actual_context = resolve_phase3_context(raw)
+            frame_context = frame.plugin_context
             graph_ref = frame.graph_state_ref
             discovery_ref = frame.discovery_state_ref
             provenance_matches = bool(
@@ -953,6 +1003,38 @@ class ProductionRedirectProofProvider:
             if not provenance_matches:
                 return ProductionProofBuildResult(proof_set=empty_proof,
                     build_status="UNKNOWN", reason="PRODUCTION_OBSERVATION_PROVENANCE_MISMATCH")
+
+            # Exact observation provenance is checked before reporting the
+            # accepted component-UNKNOWN availability limitation. This gate
+            # remains fail-closed for all capture-local trees without a
+            # trusted same-capture component proof.
+            verified_context_is_same_capture = bool(
+                capture_authority is not None and capture_root_tree is not None
+                and actual_context.get("status") == "VERIFIED_PLUGIN_CONTEXT"
+                and actual_context.get("verified") is True
+                and actual_context.get("proof_capture_id") == capture_authority.capture_key
+                and isinstance(frame_context, Mapping)
+                and _status(frame_context.get("status")) == "VERIFIED_PLUGIN_CONTEXT"
+                and frame_context.get("proof_capture_id") == capture_authority.capture_key)
+            causal_context_is_same_capture = bool(
+                capture_authority is not None and capture_root_tree is not None
+                and actual_context.get("status") == "UNRESOLVED_CONTEXT"
+                and _current_causal_root_context(frame)
+                and actual_context.get("root_authority") == "ENTRY_TRANSACTION_RESOLVED"
+                and actual_context.get("semantic_component_identity") == "UNKNOWN"
+                and actual_context.get("proof_capture_id") == capture_authority.capture_key
+                and isinstance(frame_context, Mapping)
+                and _freeze_evidence(actual_context) == _freeze_evidence(frame_context)
+                and root_authority_is_current(
+                    raw.get("phase6d3a_entity_root_provenance"), raw))
+            context_is_same_capture = verified_context_is_same_capture or causal_context_is_same_capture
+            if not context_is_same_capture:
+                reason = ("CAPTURE_COMPONENT_UNKNOWN" if capture_authority is not None
+                          and capture_root_tree is not None
+                          and actual_context.get("status") == "UNRESOLVED_CONTEXT"
+                          else "PLUGIN_CONTEXT_PROVENANCE_MISMATCH")
+                return ProductionProofBuildResult(proof_set=empty_proof,
+                    build_status="UNKNOWN", reason=reason)
 
             recommendation_obj = plan_shadow(planner_input)
             recommendation = recommendation_obj.to_dict()

@@ -1,9 +1,20 @@
 """Reviewed synthetic inputs for Phase 2. Not claims of real UI captures."""
 from copy import deepcopy
+from itertools import count
 
 from tb_runner.scroll_reliability import capability, viewport, transition
 from tb_runner.state_observation import build_state_observation
 from tb_runner.state_equality import VerifiedScrollEvidence
+from phase6d_capture_support import attach_capture_authority
+
+
+_CAPTURE_SEQUENCE = count(1)
+
+
+def recapture(raw, *, request_prefix="phase2-fixture-recapture"):
+    sequence = next(_CAPTURE_SEQUENCE)
+    return attach_capture_authority(
+        raw, sequence=sequence, request_id=f"{request_prefix}-{sequence}")
 
 
 def node(rid="pkg:id/card", text="Device", bounds="0,100,500,200", **values):
@@ -22,18 +33,25 @@ def observation(root="home", **values):
                timestamp="2026-10-05T01:00:00+09:00", scenario_id="synthetic", step=0,
                source="reviewed_synthetic_fixture", context_source="synthetic_observed_context")
     raw.update(values)
-    return raw
+    sequence = next(_CAPTURE_SEQUENCE)
+    return attach_capture_authority(raw, sequence=sequence,
+                                   request_id=f"phase2-fixture-capture-{sequence}")
 
 
-def scroll_pair():
+def scroll_pair(sequence_start=1):
     a, b = observation(), observation()
     b["step"] = 1
     b["nodes"][0]["boundsInScreen"] = "0,300,500,400"
     cap = capability([], {"canScrollDown": True}, [dict(className="android.widget.ScrollView",
         path="0.1", boundsInScreen="0,0,1000,1000", scroll_forward_supported=True)])
-    for raw in (a, b):
+    for sequence, raw in enumerate((a, b), start=sequence_start):
         raw["capability"] = deepcopy(cap)
         raw["viewport"] = viewport(raw["nodes"], "synthetic_scroll")
+        # Each synthetic observation carries its own exact root bytes. The
+        # fixture remains component-UNKNOWN; this binds only capture-local tree
+        # and viewport authority required by Phase6D.
+        attach_capture_authority(raw, sequence=sequence,
+                                 request_id=f"scroll-capture-{sequence}")
     result = transition(a["viewport"], b["viewport"], True, cap)
     result.update(capability_before=cap, capability_after=cap)
     oa, ob = build_state_observation(a), build_state_observation(b)
@@ -43,10 +61,19 @@ def scroll_pair():
 def reviewed_replay_suite():
     """Human-specified relation/group oracles; never derived from the evaluator."""
     datasets=[]
+    next_capture_sequence = 1
     def add(name,a,b,verdict,groups=("base","base"),viewport_equal=None,proof=None,bare=False):
+        nonlocal next_capture_sequence
         mode="fingerprint" if bare else "raw"
-        sources=[dict(key=key,**{mode:build_state_observation(raw).fingerprint.to_dict() if bare else raw})
-                 for key,raw in (("a",a),("b",b))]
+        sources=[]
+        for key,raw in (("a",a),("b",b)):
+            captured=deepcopy(raw)
+            sequence=next_capture_sequence
+            next_capture_sequence += 1
+            attach_capture_authority(captured,sequence=sequence,
+                request_id=f"state-replay-{name}-{key}-{sequence}")
+            document=(build_state_observation(captured).fingerprint.to_dict() if bare else captured)
+            sources.append(dict(key=key,**{mode:document}))
         pair=dict(name=name,left="a",right="b",expected=verdict,use_continuity=proof is not None)
         if viewport_equal is not None: pair["viewport_equal"]=viewport_equal
         datasets.append(dict(schema_version="state-replay-manifest-v1",name=name,namespace=name,
@@ -58,11 +85,12 @@ def reviewed_replay_suite():
     add("focus",a,b,"SAME",viewport_equal=True)
     add("home-devices",a,observation("devices"),"DIFFERENT",("home","devices"))
     add("home-life",a,observation("life"),"DIFFERENT",("home","life"))
-    sa,sb,_,proof=scroll_pair()
+    sa,sb,_,proof=scroll_pair(sequence_start=next_capture_sequence)
+    next_capture_sequence += 2
     add("scroll",sa,sb,"SAME",viewport_equal=False,proof=proof)
     add("unlinked-viewport",sa,sb,"AMBIGUOUS",("base",None))
     b=deepcopy(a); b["overlay"]={"kind":"dialog","observed":True,"nodes":[node("dialog","Permission")]}
-    add("overlay",a,b,"DIFFERENT",("base","overlay"),True)
+    add("overlay",a,b,"SAME",("base","base"),True)
     for name,before,after in (("temperature","23°C","24°C"),("battery","battery 75%","battery 74%"),
                               ("clock","time 10:31","time 10:32"),("locked","locked","unlocked"),
                               ("connected","connected","disconnected")):
@@ -82,7 +110,7 @@ def reviewed_replay_suite():
     aa,bb=observation(),observation()
     aa["nodes"][0]["text"],bb["nodes"][0]["text"]="Settings subpage","Details subpage"
     add("coarse-collision",aa,bb,"AMBIGUOUS",("known",None))
-    add("missing-activity",observation(activity_name=None),observation(activity_name=None),"AMBIGUOUS",(None,None))
+    add("missing-activity",observation(),observation(activity_name=None),"SAME",("base","base"))
     add("partial-full",a,observation(observation_coverage="OBSERVED_FULL"),"AMBIGUOUS",("base",None))
     b=deepcopy(a); b["nodes"].pop(0)
     add("partial-subset",a,b,"AMBIGUOUS",("base",None))

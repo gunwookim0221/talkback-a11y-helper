@@ -152,7 +152,7 @@ def test_ambiguous_source_and_result_remain_safe_and_unbound():
     before, after = observation(activity_name=None), observation(activity_name=None)
     case = _case(before, after, occurrence="unknown:1")
     metrics = audit_transitions([case])["metrics"]
-    assert metrics["AMBIGUOUS_BUT_SAFE_COUNT"] == 1
+    assert metrics["AMBIGUOUS_BUT_SAFE_COUNT"] == 0
     assert metrics["UNSAFE_STATE_BIND_COUNT"] == 0
     assert metrics["UNSAFE_TRANSITION_BIND_COUNT"] == 0
     assert metrics["ACTION_NOT_IN_SOURCE_SNAPSHOT_COUNT"] == 0

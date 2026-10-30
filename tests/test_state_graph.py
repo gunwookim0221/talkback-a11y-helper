@@ -1,6 +1,8 @@
 from copy import deepcopy
 import json
 
+from phase6d_capture_support import attach_capture_authority
+
 from tb_runner.state_graph import (
     EdgeLifecycle, GraphLimits, GraphMode, GRAPH_MODE_ENV, REPLAY_SCHEMA_VERSION,
     StateGraphRecorder, VisitObservation, build_graph_state_identity,
@@ -42,10 +44,11 @@ def observation(*, tab="home", focus="first", dynamic_text="Temperature 21°C", 
         "scenario_id": scenario,
         "package_name": PACKAGE,
         "activity_name": ACTIVITY,
-        "context_source": "window_current_focus",
+        "context_source": "helper_tree_component",
         "navigation_context": {"bottom_tab": tab},
         "selected_tab": {"name": tab, "verified": True, "source": "service_hierarchy_selected"},
         "display_bounds": [0, 0, 1000, 1000],
+        "capture_root_bounds": [0, 0, 1000, 1000],
         "nodes": nodes,
         "focus_node": focused,
         "timestamp": timestamp,
@@ -54,7 +57,7 @@ def observation(*, tab="home", focus="first", dynamic_text="Temperature 21°C", 
     }
     if semantic_substate:
         result["semantic_substates"] = [semantic_substate]
-    return result
+    return attach_capture_authority(result, production=True)
 
 
 def evidence(*, focus="CONFIRMED_UNCHANGED", focus_id="candidate-a", visit="NO_VISIT",
@@ -103,11 +106,14 @@ def test_verified_root_substate_change_creates_distinct_state():
     assert build_graph_state_identity(home).state_id != build_graph_state_identity(devices).state_id
 
 
-def test_meaningful_overlay_substate_changes_state_identity():
+def test_activity_and_overlay_diagnostics_do_not_change_state_identity():
     base = observation()
-    modal = observation(overlay={"kind": "dialog", "observed": True,
+    diagnostic = observation(overlay={"kind": "dialog", "observed": True,
+        "classification": "VERIFIED_MODAL", "source": "wms_diagnostic",
         "nodes": [node(f"{PACKAGE}:id/dialog_title", "[200,300][800,400]", "Confirm") ]})
-    assert build_graph_state_identity(base).state_id != build_graph_state_identity(modal).state_id
+    diagnostic["activity_name"] = "pkg.OtherDiagnosticActivity"
+    diagnostic["window_evidence"] = {"focused_window_type": "APPLICATION_ATTACHED_DIALOG"}
+    assert build_graph_state_identity(base).state_id == build_graph_state_identity(diagnostic).state_id
 
 
 def test_meaningful_viewport_structure_changes_state_identity():
@@ -116,11 +122,63 @@ def test_meaningful_viewport_structure_changes_state_identity():
     assert build_graph_state_identity(base).state_id != build_graph_state_identity(moved_viewport).state_id
 
 
-def test_unverified_context_or_viewport_stays_unresolved():
+def test_graph_rejects_self_hashed_capture_mapping_but_accepts_decoder_token():
+    from talkback_lib.reliable_hierarchy_schema import capture_canonical_sha256
+
+    valid = observation()
+    assert build_graph_state_identity(valid).status == "RESOLVED"
+
+    forged = deepcopy(valid)
+    authority = deepcopy(forged["capture_authority"])
+    authority.pop("validation_seal", None)
+    core_fields = (
+        "schema_version", "canonicalization", "request_id", "process_epoch",
+        "generation", "service_instance_id", "capture_sequence", "root_ref",
+        "root_digest", "candidate_digest", "hierarchy_package_name", "hierarchy_window_id",
+        "hierarchy_root_class_name", "hierarchy_root_source_node_id", "hierarchy_root_bounds",
+    )
+    authority["capture_key"] = capture_canonical_sha256(
+        {key: authority[key] for key in core_fields})
+    authority["validation_seal"] = capture_canonical_sha256(authority)
+    forged["capture_authority"] = authority
+    forged["production_observation_envelope"]["capture_authority"] = deepcopy(authority)
+
+    assert build_graph_state_identity(forged).status == "UNRESOLVED"
+
+
+def test_graph_identity_rejects_missing_capture_authority_and_envelope():
     raw = observation()
-    raw.pop("selected_tab")
-    raw.pop("navigation_context")
-    raw["nodes"] = [node("pkg:id/leaf", "[1,1][2,2]", "leaf")]
+    for key in ("capture_authority", "capture_id", "hierarchy_capture_id",
+                "production_observation_envelope", "production_observation_current"):
+        raw.pop(key, None)
+    identity = build_graph_state_identity(raw)
+    assert identity.status == "UNRESOLVED"
+    assert "PRODUCTION_OBSERVATION_NOT_CURRENT_OR_ALIGNED" in identity.reasons
+
+
+def test_authority_root_package_mismatch_blocks_production_graph_identity():
+    raw = observation()
+    raw["package_name"] = "com.attacker.package"
+    identity = build_graph_state_identity(raw)
+    assert identity.status == "UNRESOLVED"
+    assert identity.state_id is None
+    assert "PRODUCTION_OBSERVATION_NOT_CURRENT_OR_ALIGNED" in identity.reasons
+
+
+def test_traversal_root_reference_or_window_mismatch_blocks_graph_identity():
+    for field, value in (("traversal_root_ref", "windows[1].root"),
+                         ("traversal_root_window_id", 999)):
+        raw = observation()
+        raw[field] = value
+        identity = build_graph_state_identity(raw)
+        assert identity.status == "UNRESOLVED"
+        assert identity.state_id is None
+
+
+def test_missing_capture_bound_root_geometry_stays_unresolved():
+    raw = observation()
+    raw["nodes"] = []
+    raw = attach_capture_authority(raw, production=True)
     assert build_graph_state_identity(raw).status == "UNRESOLVED"
 
 
@@ -292,7 +350,11 @@ def test_graph_shadow_reuses_row_snapshot_without_requesting_hierarchy(monkeypat
         raise AssertionError("graph shadow must not request another hierarchy")
 
     monkeypatch.setattr(A11yAdbClient, "get_traversal_candidate_snapshot", forbidden)
-    rows = [{"step_index": 1, "state_graph_observation": observation(),
+    raw = observation()
+    rows = [{"step_index": 1, "state_graph_observation": raw,
+             "capture_id": raw["capture_id"], "scenario_id": raw["scenario_id"],
+             "scenario_run_id": raw["scenario_run_id"],
+             "_exploration_observation": deepcopy(raw["_exploration_observation"]),
              "focus_transition_status": "CONFIRMED_MOVED", "actual_focus_instance_id": "focus-1",
              "visit_record_status": "RECORDED", "reconciled_visit_instance_id": "visit-1"}]
     graph = recorder_from_existing_rows(rows, run_id="existing-snapshot", scenario_id="home_main")
@@ -363,13 +425,17 @@ def test_c7_focus_summary_is_replayed_synthetically_without_claiming_live_state_
     assert report["summary"]["visit_grant_observation_count"] == 16
 
 
-def test_failed_or_unknown_identity_does_not_create_state_from_focus():
+def test_unknown_component_context_keeps_capture_local_identity_and_ignores_focus():
     raw = observation()
     raw.pop("selected_tab")
     raw.pop("navigation_context")
     for item in raw["nodes"]:
         item["selected"] = False
-    recorder = StateGraphRecorder("unresolved-focus")
+    identity = build_graph_state_identity(raw)
+    assert identity.status == "RESOLVED"
+    assert identity.context["status"] == "UNRESOLVED_CONTEXT"
+    assert identity.context["verified"] is False
+    recorder = StateGraphRecorder("capture-local-identity")
     recorder.record(step=1, raw_observation=raw, evidence=evidence(focus="CONFIRMED_MOVED"))
-    assert recorder.to_dict()["summary"]["state_count"] == 0
-    assert recorder.to_dict()["summary"]["unresolved_observation_count"] == 1
+    assert recorder.to_dict()["summary"]["state_count"] == 1
+    assert recorder.to_dict()["observations"][0]["context_evidence"]["verified"] is False

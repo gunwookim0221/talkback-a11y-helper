@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from phase6d_capture_support import attach_capture_authority, bind_observation_marker
 from talkback_lib.exploration_evidence_clock import (
     EvidenceClock, NativeDispatchReceiptStore, dispatch_owner,
 )
@@ -156,9 +157,19 @@ def _real_frontier_discovery_fixture():
     graph_context = graph_observation()
     raw.update({key: graph_context[key] for key in (
         "package_name", "activity_name", "context_source", "navigation_context",
-        "selected_tab", "observation_coverage")})
+        "selected_tab", "observation_coverage", "capture_authority", "capture_id",
+        "hierarchy_capture_id", "capture_root_bounds", "snapshot_coherent",
+        "coverage_source", "hierarchy_complete", "production_observation_envelope",
+        "production_observation_current", "_exploration_observation",
+        "focus_capture_id", "geometry_capture_id")})
     raw.update(scenario_id=scenario, step=8, overlay={"observed": False},
                display_bounds=[0, 0, 1000, 1000])
+    attach_capture_authority(raw, production=True, sequence=8, request_id="redirect-fixture")
+    capture_key = raw["capture_id"]
+    raw["focus_capture_id"] = capture_key
+    raw["geometry_capture_id"] = capture_key
+    raw["production_observation_envelope"]["focus_capture_id"] = capture_key
+    raw["production_observation_envelope"]["geometry_capture_id"] = capture_key
     from tb_runner.state_graph import build_graph_state_identity
     state_id = build_graph_state_identity(raw).state_id
     assert state_id
@@ -183,7 +194,7 @@ def _real_frontier_discovery_fixture():
     record, clock = _scheduler_record(
         target_instance=production["target_identity"]["instance_id"],
         target_identity=production["target_identity"], state_id=state_id)
-    raw["_exploration_observation"] = deepcopy(record["observation_alignment"])
+    bind_observation_marker(raw, record["observation_alignment"])
     client, evidence = _record_actual_proofs(
         raw=raw, clock=clock, observation=record["observation_alignment"],
         state_id=state_id, step=record["step"],
@@ -968,35 +979,6 @@ def test_production_reconciliation_is_only_source_for_redirect_success_and_visit
     assert audit["new_visit_after_redirect"] is True
     assert audit["visit_credit"] == 0
     assert controller.budget.consecutive_failures == 0
-
-
-@pytest.mark.parametrize("case", [
-    "success", "epoch_mismatch", "two_preflight_blocks", "watermark_mismatch", "state_substate_mismatch",
-    "controlled_budget_exhausted", "redirect_budget_exhausted", "no_effect_fallback",
-    "helper_unavailable_prior_request", "post_dispatch_error",
-    "post_dispatch_exception", "fallback_exception",
-])
-def test_active_adapter_enforces_dispatch_and_fallback_contracts(monkeypatch, tmp_path, case):
-    """RF4: replace the legacy READY/capture seam with production evidence."""
-    from test_phase6d3a_rf4_active import (
-        test_active_positive_existing_production_authorities,
-        test_active_negative_zero_native,
-        test_active_exception_accounting_no_duplicate,
-    )
-    negatives = {"epoch_mismatch": "epoch", "two_preflight_blocks": "epoch",
-        "watermark_mismatch": "watermark", "state_substate_mismatch": "substate",
-        "controlled_budget_exhausted": "controlled_budget",
-        "redirect_budget_exhausted": "budget"}
-    exceptions = {"no_effect_fallback": "no_effect", "helper_unavailable_prior_request": "precheck",
-        "post_dispatch_error": "ack_error", "post_dispatch_exception": "observation_exception",
-        "fallback_exception": "fallback"}
-    if case == "success":
-        test_active_positive_existing_production_authorities(monkeypatch)
-    elif case in negatives:
-        test_active_negative_zero_native(monkeypatch, negatives[case])
-    else:
-        test_active_exception_accounting_no_duplicate(monkeypatch, exceptions[case])
-
 
 
 def test_phase5_pre_dispatch_fallback_is_observation_only_and_exactly_once():

@@ -1,6 +1,7 @@
 from copy import deepcopy
 import json
 from types import SimpleNamespace
+from itertools import count
 
 import pytest
 
@@ -44,15 +45,31 @@ def reconcile(row, previous=None, inventory=()):
     return result
 
 
+_CURSOR_SEQUENCE = count(10_000)
+
+
 def cursor(row, n):
-    marker = {"scope_id": "scope", "observation_id": "observation", "action_epoch": 1}
-    common = dict(scenario_id="home_main", scenario_run_id="run", capture_id="capture",
-                  hierarchy_capture_id="capture", focus_capture_id="capture", geometry_capture_id="capture")
-    row.update(common, _exploration_observation=marker)
-    raw = dict(common, _exploration_observation=deepcopy(marker), focus_node=deepcopy(n),
-               production_observation_current=True, snapshot_coherent=True,
-               production_observation_envelope=dict(common, observation=deepcopy(marker),
-                   capture_complete=True, snapshot_coherent=True))
+    from phase6d_capture_support import attach_capture_authority, bind_observation_marker
+
+    sequence = next(_CURSOR_SEQUENCE)
+    marker = {"scope_id": "scope", "observation_id": f"observation-{sequence}",
+              "observation_sequence": sequence, "action_epoch": 1,
+              "observation_epoch": 1, "capture_end_action_epoch": 1,
+              "context_revision": 0, "capture_complete": True}
+    raw = dict(scenario_id="home_main", scenario_run_id="run", package_name="com.samsung.android.oneconnect",
+               nodes=[deepcopy(n)], focus_node=deepcopy(n), observation_coverage="OBSERVED_FULL")
+    attach_capture_authority(raw, production=True, sequence=sequence,
+                             request_id=f"focus-cursor-{sequence}")
+    capture_key = raw["capture_id"]
+    raw["focus_capture_id"] = capture_key
+    raw["geometry_capture_id"] = capture_key
+    raw["production_observation_envelope"]["focus_capture_id"] = capture_key
+    raw["production_observation_envelope"]["geometry_capture_id"] = capture_key
+    bind_observation_marker(raw, marker)
+    common = dict(scenario_id="home_main", scenario_run_id="run", capture_id=capture_key,
+                  hierarchy_capture_id=capture_key, focus_capture_id=capture_key,
+                  geometry_capture_id=capture_key)
+    row.update(common, _exploration_observation=deepcopy(marker))
     return snapshot_focus_cursor(row, raw)
 
 

@@ -155,6 +155,61 @@ def test_post_dispatch_error_after_receipt_rollover_consumes_controlled_budget_o
     assert budget.actions == 1
 
 
+def test_unknown_overlay_suppresses_phase4b_controlled_and_fallback_dispatch(monkeypatch):
+    value_input, raw = value(context="PARTIAL_CONTEXT")
+    value_input = replace(value_input, safety_blocked=True)
+    raw["overlay"] = {"observed": None, "classification": "UNKNOWN_COMPONENT_BINDING"}
+    decision = gate(value_input)
+    assert decision.allowed is False
+    assert decision.reason == "SAFETY_BLOCKED"
+
+    calls = []
+    client = SimpleNamespace(_adb_device=SimpleNamespace(shadow_evidence_clock=None))
+    row = controlled_collect(
+        client=client, dev="synthetic", scenario="synthetic", step=1, raw=raw,
+        recommendation=plan_shadow(value_input), decision=decision, budget=ExecutionBudget(),
+        collect=lambda **kwargs: calls.append(kwargs) or {"scenario_id": "synthetic"},
+        collect_kwargs={"move": True, "direction": "next", "step_index": 1},
+        refresh=lambda: pytest.fail("unknown overlay must not continue or retry"),
+        output_dir="", audit={},
+    )
+    assert calls == [{"move": False, "direction": "next", "step_index": 1}]
+    assert row["move_result"] == "SAFETY_BLOCKED_UNKNOWN_OVERLAY"
+
+
+def test_component_unknown_hierarchy_capture_stays_unknown_and_never_dispatches(monkeypatch):
+    from tb_runner.phase3_context import resolve_phase3_context
+
+    value_input, raw = value(context="UNRESOLVED_CONTEXT")
+    raw["activity_name"] = None
+    raw["window_evidence"] = {"diagnostic_focused_package": raw["package_name"],
+                              "diagnostic_focused_activity": "com.example.LaterActivity",
+                              "focused_window_type": "BASE_APPLICATION"}
+    raw["overlay"] = {"observed": None, "classification": "UNKNOWN_COMPONENT_BINDING"}
+    context = resolve_phase3_context(raw)
+    assert context["status"] == "UNRESOLVED_CONTEXT"
+    assert context["reasons"] == ["CAPTURE_COMPONENT_UNKNOWN"]
+    assert raw["capture_authority"]["capture_key"] == raw["capture_id"]
+    assert raw["capture_authority"].get("component_activity_name") is None
+
+    value_input = replace(value_input, safety_blocked=True)
+    decision = gate(value_input)
+    assert decision.allowed is False
+    assert decision.reason == "SAFETY_BLOCKED"
+    calls = []
+    client = SimpleNamespace(_adb_device=SimpleNamespace(shadow_evidence_clock=None))
+    row = controlled_collect(
+        client=client, dev="synthetic", scenario="synthetic", step=1, raw=raw,
+        recommendation=plan_shadow(value_input), decision=decision, budget=ExecutionBudget(),
+        collect=lambda **kwargs: calls.append(kwargs) or {"scenario_id": "synthetic"},
+        collect_kwargs={"move": True, "direction": "next", "step_index": 1},
+        refresh=lambda: pytest.fail("component-unknown capture must not dispatch or retry"),
+        output_dir="", audit={},
+    )
+    assert calls == [{"move": False, "direction": "next", "step_index": 1}]
+    assert row["move_result"] == "SAFETY_BLOCKED_UNKNOWN_OVERLAY"
+
+
 def test_unknown_native_dispatch_fails_closed_without_budget_or_fallback(monkeypatch):
     _row, audit, calls, budget, _client = execute(
         monkeypatch, ack=True, actual="a", graph_off=True, record_receipt=False)
@@ -472,3 +527,28 @@ def test_scroll_unknown_dispatch_fails_closed_without_fallback_or_budget(monkeyp
     assert budget.actions == 0
     assert budget.fallback_count == 0
     assert budget.degraded is True
+
+
+
+def test_entry_transaction_authority_satisfies_existing_phase4_context_gate():
+    v, _ = value(context="UNRESOLVED_CONTEXT")
+
+    decision = gate(
+        v,
+        evidence=trusted(plugin_context_required=True, root_authority_resolved=True),
+    )
+
+    assert decision.allowed
+    assert decision.mode == "CONTROLLED_TARGET_FOCUS"
+
+
+def test_entry_transaction_authority_does_not_itself_issue_visit_credit():
+    v, _ = value(context="UNRESOLVED_CONTEXT")
+    decision = gate(
+        v,
+        evidence=trusted(plugin_context_required=True, root_authority_resolved=True),
+    )
+
+    assert decision.allowed
+    assert set(decision.to_dict()) == {"allowed", "mode", "reason", "candidate_id"}
+    assert "visit_credit" not in decision.to_dict()

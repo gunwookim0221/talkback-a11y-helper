@@ -25,7 +25,15 @@ def test_reviewed_replay_case(dataset):
 
 def test_reviewed_fixture_file_matches_source_oracles():
     path=Path(__file__).parent/"state_model_data"/"replay_cases.json"
-    assert json.loads(path.read_text(encoding="utf-8"))==reviewed_replay_suite()
+    def durable(value):
+        # CaptureAuthority validation seals are process-local and intentionally
+        # do not survive serialization; compare the durable fixture contract.
+        if isinstance(value, dict):
+            return {key: durable(item) for key, item in value.items() if key != "validation_seal"}
+        if isinstance(value, list):
+            return [durable(item) for item in value]
+        return value
+    assert durable(json.loads(path.read_text(encoding="utf-8")))==durable(reviewed_replay_suite())
 
 
 def test_fingerprint_only_is_ambiguous_and_never_creates_state():
@@ -78,6 +86,11 @@ def test_registry_namespace_mismatch_is_rejected():
 
 def test_new_process_cli_restart_preserves_state_mapping(tmp_path):
     dataset=next(d for d in reviewed_replay_suite()["datasets"] if d["name"]=="scroll")
+    from tb_runner.state_observation import build_state_observation
+    # The capture seal is process-local. The CLI persistence test starts from
+    # already validated immutable observations, never serialized authority maps.
+    for source in dataset["observations"]:
+        source["observation"]=build_state_observation(source.pop("raw")).to_dict()
     manifest=tmp_path/"manifest.json"
     manifest.write_text(json.dumps(dataset,ensure_ascii=False),encoding="utf-8")
     root=Path(__file__).resolve().parents[1]

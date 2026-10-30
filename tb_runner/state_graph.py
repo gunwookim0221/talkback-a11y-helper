@@ -192,15 +192,23 @@ def _identity_from_observation(raw: Mapping[str, Any]) -> GraphIdentityResult:
         context_evidence = {"status": context.get("status"), "verified": context.get("verified") is True,
                             "context_type": context.get("context_type"), "context_id": context.get("context_id"),
                             "reasons": sorted(context.get("reasons") or [])}
-        if context.get("verified") is not True or not context.get("context_id"):
+        from talkback_lib.reliable_hierarchy_schema import validate_capture_authority
+        authority = validate_capture_authority(raw.get("capture_authority"))
+        capture_local_hierarchy = bool(
+            authority is not None
+            and raw.get("capture_id") == authority.capture_key
+            and raw.get("hierarchy_capture_id") == authority.capture_key
+            and context.get("status") == "UNRESOLVED_CONTEXT"
+            and context.get("reasons") == ["CAPTURE_COMPONENT_UNKNOWN"]
+        )
+        if (context.get("verified") is not True or not context.get("context_id")) and not capture_local_hierarchy:
             return GraphIdentityResult(None, "UNRESOLVED", tuple(sorted(
                 str(reason) for reason in (context.get("reasons") or ["UNVERIFIED_LOGICAL_CONTEXT"]))),
                 context=context_evidence)
         observation = build_state_observation(raw)
         problems = set(observation_problems(observation))
-        # The Phase 3 resolver above is the authoritative context proof. Its
-        # verified plugin/root forms need not also have a selected bottom tab.
-        problems.difference_update({"UNVERIFIED_SELECTED_CONTEXT", "UNVERIFIED_PLUGIN_CONTEXT"})
+        # Phase 3 context stays UNKNOWN for root-only captures. Structural graph
+        # identity below is capture-local and does not claim component context.
         if problems:
             return GraphIdentityResult(None, "UNRESOLVED", tuple(sorted(problems)), context=context_evidence)
 
@@ -214,7 +222,6 @@ def _identity_from_observation(raw: Mapping[str, Any]) -> GraphIdentityResult:
         secondary = observation.secondary
         viewport_nodes = [_structural_node(node) for node in secondary.get("nodes", [])]
         markers = [_structural_node(node) for node in secondary.get("markers", [])]
-        overlay_nodes = [_structural_node(node) for node in secondary.get("overlay_nodes", [])]
         substates = [
             {"category": item["category"], "key": item["key"], "value": item["value"]}
             for item in observation.semantic_substates
@@ -227,16 +234,14 @@ def _identity_from_observation(raw: Mapping[str, Any]) -> GraphIdentityResult:
             "environment_partition": secondary.get("environment_partition"),
             "root": {
                 "package_name": core.get("package_name"),
-                "activity_name": core.get("activity_name"),
+                "window_id": authority.hierarchy_window_id if authority is not None else None,
                 "context_type": context.get("context_type"),
                 "context_id": context.get("context_id"),
                 "selected_tab": core.get("selected_tab"),
                 "persistent_markers": sorted(markers, key=canonical_json),
             },
             "substates": sorted(substates, key=lambda item: (item["category"], item["key"])),
-            "overlay": ({"kind": overlay.get("kind"),
-                         "nodes": sorted(overlay_nodes, key=canonical_json)}
-                        if overlay.get("observed") is True else None),
+            # Overlay/WMS diagnostics remain safety evidence and cannot alter state identity.
             "viewport": {
                 "model": "relative-grid32-structural-multiset-v1",
                 "nodes": sorted(viewport_nodes, key=canonical_json),
@@ -248,11 +253,12 @@ def _identity_from_observation(raw: Mapping[str, Any]) -> GraphIdentityResult:
 
 
 def build_graph_state_identity(raw: Mapping[str, Any]) -> GraphIdentityResult:
-    """Build deterministic state identity from verified context and stable structure.
+    """Build identity from a valid capture-local root and stable tree structure.
 
-    Focus, visit/attempt history, timestamps, request IDs, raw labels, and pixel
-    offsets are excluded. Viewport geometry uses the existing relative-grid32
-    projection; without a sufficiently observed viewport, identity is unresolved.
+    Phase3 context can remain UNKNOWN: this identity is scoped by captured
+    package/window/root bytes and never asserts Activity or screen continuity.
+    Focus, visit/attempt history, timestamps, request IDs, labels and pixel
+    offsets are excluded. Without an observed normalized viewport, identity is unresolved.
     """
     if not isinstance(raw, Mapping):
         raise TypeError("graph observation must be a mapping")
@@ -260,23 +266,39 @@ def build_graph_state_identity(raw: Mapping[str, Any]) -> GraphIdentityResult:
 
 
 def _production_observation_envelope_valid(raw: Mapping[str, Any]) -> bool:
-    """Validate an attached production snapshot without joining sibling captures."""
+    """Validate a production snapshot and its immutable Helper capture authority."""
+    from talkback_lib.reliable_hierarchy_schema import validate_capture_authority
+
+    authority = validate_capture_authority(raw.get("capture_authority"))
+    if authority is None:
+        return False
     envelope = raw.get("production_observation_envelope")
     if not isinstance(envelope, Mapping):
-        return True
+        return False
     if envelope.get("schema_version") != "phase6-production-observation-v1":
         return False
     capture_id = str(envelope.get("capture_id") or "")
     scenario_id = str(envelope.get("scenario_id") or "")
     run_id = str(envelope.get("scenario_run_id") or "")
-    if (not capture_id or not scenario_id or not run_id
+    if (not capture_id or capture_id != authority.capture_key or not scenario_id or not run_id
+            or raw.get("package_name") != authority.hierarchy_package_name
+            or raw.get("traversal_root_ref") != authority.root_ref
+            or raw.get("traversal_root_window_id") != authority.hierarchy_window_id
+            or raw.get("hierarchy_request_id") != authority.request_id
+            or raw.get("hierarchy_capture_sequence") != authority.capture_sequence
+            or envelope.get("capture_authority") != authority.to_dict()
             or raw.get("capture_id") != capture_id
             or raw.get("scenario_id") != scenario_id
             or raw.get("scenario_run_id") != run_id):
         return False
-    if any(envelope.get(key) != capture_id for key in (
-            "hierarchy_capture_id", "focus_capture_id", "geometry_capture_id")):
+    if envelope.get("hierarchy_capture_id") != capture_id:
         return False
+    for key in ("focus_capture_id", "geometry_capture_id"):
+        value = envelope.get(key)
+        if value is not None and value != capture_id:
+            return False
+        if raw.get(key) != value:
+            return False
     observation = envelope.get("observation")
     if not isinstance(observation, Mapping):
         return False

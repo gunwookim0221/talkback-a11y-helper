@@ -18,7 +18,8 @@ from tb_runner.label_matcher import canonicalize_label
 from tb_runner.scroll_reliability import flat_nodes
 from tb_runner.state_fingerprint import (
     SCHEMA_VERSION as FINGERPRINT_SCHEMA, NORMALIZATION_VERSION, StateFingerprint,
-    _bounds, _boolean, _label, _semantic_node, build_state_fingerprint, normalize_dynamic_text,
+    _bounds, _boolean, _label, _semantic_node, build_state_fingerprint,
+    hierarchy_overlay_projection, normalize_dynamic_text, validated_capture_root_tree,
 )
 from tb_runner.phase3_context import resolve_phase3_context
 from tb_runner.semantic_substate import (
@@ -133,29 +134,53 @@ class StateObservation:
 
 def build_state_observation(raw: Mapping[str, Any]) -> StateObservation:
     context = resolve_phase3_context(raw)
+    from talkback_lib.reliable_hierarchy_schema import validate_capture_authority
+    authority = validate_capture_authority(raw.get("capture_authority"))
+    capture_root_tree = validated_capture_root_tree(raw, authority)
+    root_is_current = authority is not None and capture_root_tree is not None
+    capture_local_hierarchy = (root_is_current and context.get("status") == "UNRESOLVED_CONTEXT"
+                               and context.get("reasons") == ["CAPTURE_COMPONENT_UNKNOWN"])
     fingerprint_input = raw
-    if context.get("status") == "VERIFIED_PLUGIN_CONTEXT" and context.get("verified") is True:
+    if capture_local_hierarchy:
+        # This marker is assigned only after validating the immutable authority
+        # and matching both hierarchy IDs; callers cannot assert it themselves.
+        fingerprint_input = dict(raw, context_source="capture_local_hierarchy_only")
+    elif context.get("status") == "VERIFIED_PLUGIN_CONTEXT" and context.get("verified") is True:
         fingerprint_input = dict(raw)
         fingerprint_input["navigation_context"] = {
             "plugin": {"type": context["context_type"], "id": context["context_id"]}}
         fingerprint_input["context_source"] = "phase3_plugin_context_verified"
-    elif (context.get("status") == "VERIFIED_ROOT_CONTEXT" and context.get("verified") is True
-          and (not raw.get("package_name") or not raw.get("activity_name"))):
+    elif context.get("status") == "VERIFIED_ROOT_CONTEXT" and context.get("verified") is True:
         fingerprint_input = dict(raw)
         fingerprint_input["navigation_context"] = {"bottom_tab": context["context_id"]}
         fingerprint_input["context_source"] = "phase3_root_context_verified"
     fp = build_state_fingerprint(fingerprint_input)
-    display = _bounds({"bounds": raw.get("display_bounds")})
-    nodes = [n for n in flat_nodes(raw.get("nodes", []))
+    # The tree root is the only viewport normalization source accepted here.
+    display = _bounds({"bounds": authority.hierarchy_root_bounds}) if root_is_current else None
+    # The exact root supplies package/window/geometry authority; preserve
+    # the legacy Phase2 projection of its children as semantic nodes.
+    hierarchy_nodes = (flat_nodes(capture_root_tree.get("children", [])) if root_is_current
+                       else flat_nodes(raw.get("nodes", [])))
+    nodes = [n for n in hierarchy_nodes
              if _boolean(n, ("isVisibleToUser", "visibleToUser", "visible")) is not False]
-    overlay = raw.get("overlay") or {}
-    secondary_nodes = sorted((_secondary_node(n, display) for n in nodes), key=canonical_json)
-    substates = extract_semantic_substates(raw, nodes, display)
+    overlay_source_nodes = list(flat_nodes([capture_root_tree])) if root_is_current else []
+    _overlay_kind, hierarchy_overlay_nodes = hierarchy_overlay_projection(
+        overlay_source_nodes, display if root_is_current else None)
+    overlay_node_ids = {id(node) for node in hierarchy_overlay_nodes}
+    # Preserve the base tree and modal subtree as separate hierarchy-bound
+    # identities, matching the Phase 2 overlay contract.
+    base_nodes = [node for node in nodes if id(node) not in overlay_node_ids]
+    secondary_nodes = sorted((_secondary_node(n, display) for n in base_nodes), key=canonical_json)
+    secondary_overlay_nodes = sorted((_secondary_node(n, display) for n in hierarchy_overlay_nodes),
+                                     key=canonical_json)
+    substates = extract_semantic_substates(raw, base_nodes, display)
     secondary_version = SECONDARY_VERSION if substates else LEGACY_SIDECAR_VERSION
     secondary = dict(version=secondary_version,
         nodes=secondary_nodes,
         markers=sorted((_secondary_node(n, None) for n in flat_nodes(raw.get("core_nodes", []))), key=canonical_json),
-        overlay_nodes=sorted((_secondary_node(n, display) for n in flat_nodes(overlay.get("nodes", []))), key=canonical_json),
+        # Only the same full-screen modal subtree already projected from the
+        # authority-bound tree may participate in overlay identity.
+        overlay_nodes=secondary_overlay_nodes,
         environment_partition=raw.get("environment_partition"),
         locale=raw.get("locale"), source=raw.get("source", "unspecified"))
     if substates:
@@ -176,11 +201,17 @@ def observation_problems(observation: StateObservation) -> tuple[str, ...]:
     verified_plugin = transient.get("context_source") == "phase3_plugin_context_verified"
     verified_root = transient.get("context_source") == "phase3_root_context_verified"
     verified_context = verified_plugin or verified_root
-    required_fields = ("navigation_context",) + (() if verified_context else ("package_name", "activity_name"))
+    # build_state_observation sets this marker only after validating authority
+    # and matching capture IDs; it never means Activity/screen context is VERIFIED.
+    capture_local_hierarchy = bool(core.get("package_name") and
+        transient.get("context_source") == "capture_local_hierarchy_only")
+    required_fields = (("package_name",) if capture_local_hierarchy else
+                       ("navigation_context",) + (() if verified_context else ("package_name", "activity_name")))
     for field in required_fields:
         if not core.get(field):
             problems.append("MISSING_" + field.upper())
-    if not verified_context and (not core.get("selected_tab") or core.get("selected_tab_status") not in {"explicit_verified", "observed_selected_node"}):
+    if (not verified_context and not capture_local_hierarchy
+            and (not core.get("selected_tab") or core.get("selected_tab_status") not in {"explicit_verified", "observed_selected_node"})):
         problems.append("UNVERIFIED_SELECTED_CONTEXT")
     if not viewport.get("semantic_nodes") or observation.coverage == "UNOBSERVED":
         problems.append("UNOBSERVED_VIEWPORT")
@@ -192,6 +223,7 @@ def observation_problems(observation: StateObservation) -> tuple[str, ...]:
         problems.append("CONFLICTING_CONTEXT")
     scenario_id = str(transient.get("scenario_id") or "")
     if scenario_id in {"life_food_plugin", "life_family_care_plugin", "life_find_plugin", "device_smoke_sensor_plugin"} \
-            and not verified_plugin and (core.get("navigation_context") or core.get("selected_tab")):
+            and not verified_plugin and not capture_local_hierarchy \
+            and (core.get("navigation_context") or core.get("selected_tab")):
         problems.append("UNVERIFIED_PLUGIN_CONTEXT")
     return tuple(sorted(problems))

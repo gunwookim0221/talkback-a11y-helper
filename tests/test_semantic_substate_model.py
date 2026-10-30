@@ -11,7 +11,8 @@ from tb_runner.state_equality import EqualityVerdict, evaluate_state_equality
 from tb_runner.state_observation import StateObservation, build_state_observation
 from tb_runner.state_registry import StateRegistry
 from tb_runner.transition_observation import TransitionObserver
-from state_model_fixtures import node, observation
+from phase6d_capture_support import add_full_screen_hierarchy_modal
+from state_model_fixtures import node, observation, recapture
 
 
 CARD = "pkg:id/favorite_device_card_camera"
@@ -33,12 +34,17 @@ def camera_raw(*, root="home", event="NONE", camera_focusable=False, partial=Fal
             evidence={"producer_value": event, "source_node": ALERT if event != "NONE" else CARD},
             provenance={"producer": "test-observed-camera-payload", "source": "fixture"})]
     if partial:
+        # Model an actually partial hierarchy by removing the selected tab from
+        # the tree as well as its legacy route hint.
+        raw["nodes"] = [node for node in raw["nodes"]
+                        if not str(node.get("viewIdResourceName", "")).endswith("menu_favorites")]
         raw["navigation_context"] = None
-    return raw
+    return recapture(raw)
 
 
 def pair(left, right):
-    return evaluate_state_equality(build_state_observation(left), build_state_observation(right))
+    return evaluate_state_equality(build_state_observation(recapture(deepcopy(left))),
+                                   build_state_observation(recapture(deepcopy(right))))
 
 
 @pytest.mark.parametrize("event", ["HUMAN", "MOTION", "PET"])
@@ -80,11 +86,11 @@ def test_partial_home_remains_ambiguous_even_with_same_root_and_substate():
     assert result.logical_state_equal is None
 
 
-@pytest.mark.parametrize("kind", ["dialog", "popup", "permission_sheet", "full_screen_mode"])
+@pytest.mark.parametrize("kind", ["dialog", "popup", "permission_overlay", "full_screen_mode"])
 def test_full_screen_context_overlay_is_not_a_card_semantic_substate(kind):
     a = camera_raw(event="NONE")
     b = deepcopy(a)
-    b["overlay"] = dict(kind=kind, observed=True, nodes=[node("pkg:id/dialog", "Permission")])
+    add_full_screen_hierarchy_modal(b, kind=kind, sequence=2, request_id=f"substate-overlay-{kind}")
     result = pair(a, b)
     assert result.verdict is EqualityVerdict.DIFFERENT
     assert result.base_verdict is EqualityVerdict.SAME
