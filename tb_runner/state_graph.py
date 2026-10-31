@@ -373,7 +373,7 @@ def _phase6e_capture_is_current(raw: Any, expected_marker: Any = None) -> bool:
     )
 
 
-def _phase6e_scroll_owner(raw: Mapping[str, Any], transition: Mapping[str, Any]) -> dict[str, Any]:
+def _phase6e_scroll_owner(raw: Mapping[str, Any], transition: Mapping[str, Any], *, pre_dispatch: bool = False) -> dict[str, Any]:
     """Resolve a scroll target from this capture's hierarchy, never from focus or RID alone."""
     from tb_runner.scroll_reliability import scroll_axis
     from tb_runner.traversal_reliability import normalized_bounds
@@ -440,8 +440,8 @@ def _phase6e_scroll_owner(raw: Mapping[str, Any], transition: Mapping[str, Any])
 
     if mode == "EXPLICIT_CONTAINER":
         if (not requested_path or not requested_bounds
-                or action_result.get("explicitTarget") is not True
-                or result_path != requested_path):
+                or (not pre_dispatch and (action_result.get("explicitTarget") is not True
+                                          or result_path != requested_path))):
             return {"status": "OWNER_TARGET_MISMATCH", "identity": None}
         matches = [item for item in candidates
                    if item[0]["path"] == requested_path and item[0]["bounds"] == requested_bounds]
@@ -471,6 +471,22 @@ def _phase6e_scroll_owner(raw: Mapping[str, Any], transition: Mapping[str, Any])
             "scrollable", "visible", "enabled", "actions",
             "scroll_forward_supported", "scroll_down_supported")},
     }
+
+
+def phase6e_current_scroll_owner(raw: Any, marker: Any) -> dict[str, Any]:
+    """Resolve the exact target verified_scroll would choose from a sealed capture."""
+    if not _phase6e_capture_is_current(raw, marker):
+        return {"status": "SOURCE_CAPTURE_UNVERIFIED", "identity": None}
+    if not build_graph_state_identity(raw).state_id:
+        return {"status": "SOURCE_STATE_UNRESOLVED", "identity": None}
+    capability = raw.get("capability") if isinstance(raw.get("capability"), Mapping) else {}
+    target = capability.get("container")
+    target = target if isinstance(target, Mapping) else {}
+    action_target = {"mode": "ACCESSIBILITY_FALLBACK"}
+    if target.get("path"):
+        action_target = {"mode": "EXPLICIT_CONTAINER", "container_path": str(target["path"]),
+                         "container_bounds": target.get("boundsInScreen")}
+    return _phase6e_scroll_owner(raw, {"action_target": action_target}, pre_dispatch=True)
 
 
 def _phase6e_accessibility_focus(raw: Mapping[str, Any]) -> dict[str, Any]:

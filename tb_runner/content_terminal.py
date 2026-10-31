@@ -207,7 +207,7 @@ class ContentTerminal:
         self.history.append(dict(self.latest))
         return self.latest
 
-    def scroll_opportunity(self):
+    def scroll_opportunity(self, *, current_end=False):
         """Consume verified vertical continuation before a focus plateau stop.
 
         One attempt per observed positional viewport; movement opens a new
@@ -216,13 +216,13 @@ class ContentTerminal:
         """
         e = self.latest
         return bool(e.get("observation_valid") and self.scope_verified
-                    and not e.get("pending_transition") and e.get("viewport_stable")
+                    and not e.get("pending_transition") and (e.get("viewport_stable") or current_end)
                     and e.get("vertical_can_scroll_forward") is True
                     and not e.get("scroll_capability_contradictory")
                     and not e.get("scroll_exhausted")
                     and e.get("scroll_viewport_signature")
                     and e["scroll_viewport_signature"] not in self.scroll_attempted_viewports
-                    and (not e.get("unseen_candidates") or self.no_progress_steps >= 4
+                    and (current_end or not e.get("unseen_candidates") or self.no_progress_steps >= 4
                          or self.no_focus_progress_steps >= 8))
 
     def decision(self):

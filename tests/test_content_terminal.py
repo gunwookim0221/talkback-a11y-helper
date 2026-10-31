@@ -315,7 +315,7 @@ def test_scroll_moved_new_focus_is_visited_and_progress():
     assert t.decision() == ""
 
 
-def test_home_common_phase_scrolls_with_active_unseen(monkeypatch, tmp_path):
+def test_home_common_phase_rejects_unsealed_plateau_capture(monkeypatch, tmp_path):
     from tb_runner import collection_flow as flow
     obs = observation(forward=True)
     t = stable(ContentTerminal("test"), obs, steps=4)
@@ -333,10 +333,8 @@ def test_home_common_phase_scrolls_with_active_unseen(monkeypatch, tmp_path):
     monkeypatch.setattr(flow.scroll_reliability, "verified_scroll", perform)
     row = {}
     stop, reason = flow._apply_content_terminal_phase(client, "device", state, row, ctx, 4, True, "repeat_no_progress")
-    assert len(calls) == 1
-    assert (stop, reason) == (False, "")
-    assert row["scroll_status"] == "SCROLL_MOVED"
-    assert t.latest["no_progress_steps"] == 0
+    assert calls == []
+    assert (stop, reason) == (True, "content_scroll_unverified")
 
 
 @pytest.mark.parametrize("forward", [False, None])

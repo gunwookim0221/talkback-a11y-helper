@@ -508,9 +508,10 @@ def _phase6d_action_request_id(row: Mapping[str, Any], action_type: Any = None) 
 
 
 def _capture_phase6d3a_production_observation(*, client: Any, dev: str,
-                                               row: dict[str, Any]) -> dict[str, Any] | None:
+                                               row: dict[str, Any],
+                                               allow_scroll_gate: bool = False) -> dict[str, Any] | None:
     """Attach one current read-only snapshot for reconciliation and Phase6 consumers."""
-    if (getattr(client, "_phase6c2_frontier_shadow_runtime", None) is None
+    if (not allow_scroll_gate and getattr(client, "_phase6c2_frontier_shadow_runtime", None) is None
             and getattr(client, "_phase6d_exploration_shadow_runtime", None) is None):
         return None
     scenario_id = str(row.get("scenario_id") or "")
@@ -22384,11 +22385,44 @@ def _initialize_content_terminal(client, dev, tab_cfg, state):
     client._content_terminal_trackers = trackers
 
 
+def _phase6e_current_smart_next_end(client, row):
+    """An end result applies only to the latest actual SMART_NEXT dispatch."""
+    from talkback_lib.smart_nav_invocation import current_result
+
+    generation = row.get("smart_nav_invocation_generation")
+    if (row.get("phase6_current_action_type") != "SMART_NEXT"
+            or type(generation) is not int or generation <= 0
+            or row.get("smart_nav_result_generation") != generation
+            or str(row.get("progress_status") or "").strip().upper() != "NO_PROGRESS_UNCHANGED"):
+        return False
+    result = current_result(client, generation)
+    request = str(row.get("smart_nav_req_id") or "").strip()
+    result_request = str(result.get("req_id") or result.get("reqId") or result.get("requestId") or "").strip()
+    if (not request or result_request != request
+            or str(result.get("detail") or "").lower() != "reached_end"):
+        return False
+    store = getattr(getattr(client, "_adb_device", None), "native_dispatch_receipts", None)
+    try:
+        watermark = store.receipt_watermark()
+        receipts = store.receipts_after(max(0, watermark - 1))
+        receipt = receipts[-1] if receipts else {}
+        return bool(receipt.get("receipt_seq") == watermark
+                    and receipt.get("store_generation") == store.generation_id
+                    and receipt.get("action_type") == "SMART_NEXT"
+                    and receipt.get("ownership_status") == "KNOWN"
+                    and receipt.get("request_id") == request)
+    except (AttributeError, TypeError, ValueError):
+        return False
+
+
 def _apply_content_terminal_phase(client, dev, state, row, phase_ctx, step_idx, stop, reason, pending=False):
     from tb_runner.content_terminal import failed_scroll_reason
     tracker = getattr(state, "content_terminal", None)
     if tracker is None:
         return stop, reason
+    temporary_clock_device = None
+    temporary_clock = None
+    previous_clock = None
     try:
         observation = scroll_reliability.capture(client, dev, tracker.scenario_id,
             step_index=step_idx, evidence="content_terminal_evaluation")
@@ -22416,19 +22450,44 @@ def _apply_content_terminal_phase(client, dev, state, row, phase_ctx, step_idx, 
         else:
             selected_reason = tracker.decision()
         runtime_error = bool(stop and reason and termination_status(reason) == "INCOMPLETE_ERROR")
-        if not runtime_error and not selected_reason and tracker.scroll_opportunity():
+        ordinary_opportunity = not selected_reason and tracker.scroll_opportunity()
+        end_opportunity = (not (new_transition and not new_transition.get("action_success"))
+                           and _phase6e_current_smart_next_end(client, row)
+                           and tracker.scroll_opportunity(current_end=True))
+        scroll_ready = False
+        if not runtime_error and (ordinary_opportunity or end_opportunity):
+            # A fresh current capture is required even with shadow recording off.
+            from talkback_lib.adb_device import AdbDevice
+            from talkback_lib.exploration_evidence_clock import EvidenceClock
+            device = getattr(client, "_adb_device", None)
+            if isinstance(device, AdbDevice) and clock_for(client) is None:
+                temporary_clock = EvidenceClock()
+                temporary_clock_device = device
+                previous_clock = device.shadow_evidence_clock
+                device.shadow_evidence_clock = temporary_clock
             source_capture_row = dict(row)
             source_snapshot = _capture_phase6d3a_production_observation(
-                client=client, dev=dev, row=source_capture_row)
+                client=client, dev=dev, row=source_capture_row, allow_scroll_gate=True)
             source_marker = deepcopy(source_capture_row.get("_exploration_observation"))
-            scroll_before = (source_snapshot if isinstance(source_snapshot, Mapping)
-                             and source_snapshot.get("production_observation_current") is True
-                             else observation)
+            from tb_runner.state_graph import phase6e_current_scroll_owner
+            clock = clock_for(client)
+            owner = phase6e_current_scroll_owner(source_snapshot, source_marker)
+            current = clock is not None and clock.current(source_marker)
+            if not ordinary_opportunity and not _phase6e_current_smart_next_end(client, row):
+                selected_reason = tracker.decision()
+            elif not current or owner.get("status") != "RESOLVED":
+                row["phase6e_scroll_gate_status"] = owner.get("status") if current else "SOURCE_CAPTURE_STALE"
+                selected_reason = "content_scroll_unverified"
+            else:
+                row["phase6e_scroll_gate_status"] = "RESOLVED"
+                scroll_ready = True
+        if scroll_ready:
+            scroll_before = source_snapshot
             transition, after = scroll_reliability.verified_scroll(client, dev, tracker.scenario_id, step_idx,
                 before=scroll_before, output_base_dir=phase_ctx.output_base_dir)
             result_capture_row = dict(row)
             result_snapshot = _capture_phase6d3a_production_observation(
-                client=client, dev=dev, row=result_capture_row)
+                client=client, dev=dev, row=result_capture_row, allow_scroll_gate=True)
             result_marker = deepcopy(result_capture_row.get("_exploration_observation"))
             from tb_runner.state_graph import build_phase6e_scroll_evidence
             scroll_evidence = build_phase6e_scroll_evidence(
@@ -22498,6 +22557,10 @@ def _apply_content_terminal_phase(client, dev, state, row, phase_ctx, step_idx, 
         tracker.latest["runtime_error"] = row["content_terminal_error"]
         log(f"[CONTENT_TERMINAL_ERROR] scenario='{tracker.scenario_id}' step={step_idx} error='{exc}'")
         return True, "content_error"
+    finally:
+        if (temporary_clock_device is not None
+                and temporary_clock_device.shadow_evidence_clock is temporary_clock):
+            temporary_clock_device.shadow_evidence_clock = previous_clock
 
 
 def _seed_initial_frontier_shadow_observation(
