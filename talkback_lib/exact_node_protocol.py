@@ -1146,8 +1146,9 @@ def precheck_helper_build_identity(
         return result(HelperIdentityStatus.REBUILD_REQUIRED, "HELPER_BUILD_VARIANT_MISMATCH", build_id=build_id,
                       installed_commit=installed_commit, installed_digest=installed_digest,
                       installed_schemas=installed_schemas)
-    if identity.get("source_state") != "CLEAN":
-        return result(HelperIdentityStatus.REBUILD_REQUIRED, "HELPER_SOURCE_NOT_CLEAN", build_id=build_id,
+    source_state = identity.get("source_state")
+    if source_state not in {"CLEAN", "DIRTY"}:
+        return result(HelperIdentityStatus.UNKNOWN, "BUILD_SOURCE_STATE_INVALID", build_id=build_id,
                       installed_commit=installed_commit, installed_digest=installed_digest,
                       installed_schemas=installed_schemas)
 
@@ -1155,7 +1156,7 @@ def precheck_helper_build_identity(
     # commits remain compatible without accepting inconsistent APK metadata.
     installed_manifest = "\n".join((
         "schema=helper-build-manifest.v1", f"git_commit={installed_commit}", f"input_digest={installed_digest}",
-        "source_state=CLEAN", f"build_variant={identity['build_variant']}",
+        f"source_state={source_state}", f"build_variant={identity['build_variant']}",
         f"version_name={identity['versionName']}", f"version_code={identity['versionCode']}",
         f"gradle_version={expected_gradle_version}",
     ))
@@ -1202,7 +1203,7 @@ def precheck_helper_build_identity(
             or not isinstance(capabilities.get("service_instance_id"), str) or not capabilities.get("service_instance_id")
             or not isinstance(cap_identity, dict)
             or capability_build != build_id or capability_commit != installed_commit
-            or capability_digest != installed_digest or capability_source != "CLEAN"
+            or capability_digest != installed_digest or capability_source != source_state
             or capability_variant != identity.get("build_variant")):
         return result(HelperIdentityStatus.UNKNOWN, "CAPABILITY_IDENTITY_INCONSISTENT", build_id=build_id,
                       installed_commit=installed_commit, installed_digest=installed_digest,

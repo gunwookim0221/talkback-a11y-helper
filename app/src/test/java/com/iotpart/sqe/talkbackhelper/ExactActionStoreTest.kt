@@ -35,9 +35,14 @@ class ExactActionStoreTest {
     @Test fun claimsAndStopSurviveRestartAndReceiptLookupDoesNotReactivate() {
         val name="test-${UUID.randomUUID()}.db"
         var s=ExactActionStore(context,name);val old=s.connect("boot:test")
+        assertEquals(old, s.metadata("connection_epoch"))
+        assertEquals("boot:test", s.metadata("boot_epoch"))
         val r=ExactActionTestData.request(s);s.register(r);s.approve(r,ExactActionContract.checks.associateWith{true});val id=r.getJSONObject("binding").getString("request_id")
         val receipt=s.claim(r,System.currentTimeMillis());assertTrue(receipt.isNotBlank());s.stop("test");s.close()
-        s=ExactActionStore(context,name);assertNotEquals(old,s.connect("boot:test"))
+        s=ExactActionStore(context,name);val reconnected=s.connect("boot:test")
+        assertNotEquals(old,reconnected)
+        assertEquals(reconnected,s.metadata("connection_epoch"))
+        assertEquals("boot:test", s.metadata("boot_epoch"))
         assertTrue(s.claimed(id));assertNull(s.receipt(id));assertEquals("true",s.metadata("stopped"))
         assertThrows(Exception::class.java){s.register(r)}
         assertThrows(Exception::class.java){s.claim(r,System.currentTimeMillis())}

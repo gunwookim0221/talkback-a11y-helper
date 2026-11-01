@@ -13,7 +13,7 @@ class A11yResultTransportTest {
                 val serialized = "{\"reqId\":\"req\",\"data\":\"" + "가".repeat(size / 3) + "\"}"
                 val records = A11yResultTransport.encode(prefix, "req", serialized)
                 assertEquals(records, A11yResultTransport.encode(prefix, "req", serialized))
-                assertTrue(records.all { it.toByteArray(Charsets.UTF_8).size < 2700 })
+                assertTrue(records.all { it.toByteArray(Charsets.UTF_8).size < 4000 })
                 if (records.first().contains("_CHUNK ")) {
                     val decoded = records.map { Base64.getDecoder().decode(it.substringAfter(" payload=")) }
                         .reduce { left, right -> left + right }
@@ -44,7 +44,7 @@ class A11yResultTransportTest {
         val records = A11yResultTransport.encode("TARGET_ACTION_RESULT", "req-2", serialized)
 
         assertTrue(records.size > 1)
-        assertTrue(records.all { it.toByteArray(Charsets.UTF_8).size < 2700 })
+        assertTrue(records.all { it.toByteArray(Charsets.UTF_8).size < 4000 })
         val decoded = records.map { record ->
             val payload = record.substringAfter(" payload=")
             Base64.getDecoder().decode(payload)
@@ -70,5 +70,22 @@ class A11yResultTransportTest {
         assertTrue(decodedChunks.all { it.size <= A11yResultTransport.HIERARCHY_CHUNK_BYTES })
         assertEquals(serialized, decodedChunks.reduce { left, right -> left + right }.toString(Charsets.UTF_8))
         assertTrue(records.all { it.contains("sha256=") })
+    }
+
+    @Test
+    fun defaultResultTransportReducesLogWritesWithoutExceedingRecordBound() {
+        val requestId = "0123456789abcdef0123456789abcdef"
+        val serialized = "{\"reqId\":\"$requestId\",\"data\":\"${"x".repeat(120_000)}\"}"
+        val records = A11yResultTransport.encode("SMART_NAV_RESULT", requestId, serialized)
+        val legacyRecords = A11yResultTransport.encode(
+            "SMART_NAV_RESULT", requestId, serialized, chunkBytes = 1500,
+        )
+
+        assertTrue(records.size < legacyRecords.size)
+        assertTrue(records.all { it.toByteArray(Charsets.UTF_8).size < 4000 })
+        assertTrue(records.all { it.contains("count=${records.size} sha256=") })
+        val decoded = records.map { Base64.getDecoder().decode(it.substringAfter(" payload=")) }
+            .reduce { left, right -> left + right }
+        assertEquals(serialized, decoded.toString(Charsets.UTF_8))
     }
 }

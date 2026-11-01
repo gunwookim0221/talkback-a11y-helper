@@ -123,6 +123,70 @@ def test_missing_chunk_index_is_detected_by_reassembler():
     assert result["missing"] == [len(records) - 1]
 
 
+def test_smart_nav_reassembly_tolerates_out_of_order_and_ignores_stale_request_chunks():
+    current_id = "current-request"
+    stale_id = "stale-request"
+    current = json.dumps({"reqId": current_id, "success": True, "data": "c" * 9000})
+    stale = json.dumps({"reqId": stale_id, "success": True, "data": "s" * 9000})
+    current_records = _chunk_records(current_id, current, prefix="SMART_NAV_RESULT")
+    stale_records = _chunk_records(stale_id, stale, prefix="SMART_NAV_RESULT")
+    mixed = [*reversed(stale_records), *reversed(current_records)]
+
+    result = LogcatReader.reassemble_chunked_payload(
+        "\n".join(mixed), "SMART_NAV_RESULT", current_id
+    )
+
+    assert result == {"state": "complete", "payload": current}
+
+
+def test_smart_nav_reassembly_reports_all_chunks_missing_at_logcat_eof():
+    req_id = "eof-multiple-gaps"
+    payload = json.dumps({"reqId": req_id, "success": True, "data": "x" * 9000})
+    records = _chunk_records(req_id, payload, prefix="SMART_NAV_RESULT")
+    records = [record for index, record in enumerate(records) if index not in {1, 4, len(records) - 1}]
+
+    result = LogcatReader.reassemble_chunked_payload(
+        "\n".join(records), "SMART_NAV_RESULT", req_id
+    )
+
+    assert result["state"] == "incomplete"
+    assert result["reason"] == "missing_chunks"
+    assert result["missing"] == [1, 4, len(_chunk_records(req_id, payload, prefix="SMART_NAV_RESULT")) - 1]
+
+
+def test_smart_nav_reassembly_rejects_total_count_mismatch():
+    req_id = "count-mismatch"
+    records = _chunk_records(
+        req_id,
+        json.dumps({"reqId": req_id, "success": True, "data": "x" * 5000}),
+        prefix="SMART_NAV_RESULT",
+    )
+    assert len(records) > 1
+    records[1] = records[1].replace(f"count={len(records)}", f"count={len(records) + 1}")
+
+    result = LogcatReader.reassemble_chunked_payload(
+        "\n".join(records), "SMART_NAV_RESULT", req_id
+    )
+
+    assert result == {"state": "error", "reason": "inconsistent_chunk_metadata"}
+
+
+def test_smart_nav_json_without_current_request_schema_is_not_accepted(monkeypatch):
+    client = A11yAdbClient(start_monitor=False)
+    payload = json.dumps({"success": True, "status": "moved"})
+    records = _chunk_records("missing-req-schema", payload, prefix="SMART_NAV_RESULT")
+    monkeypatch.setattr(client._logcat_reader, "dump_filtered", lambda dev=None: "\n".join(records))
+
+    result = client._read_log_result(
+        None, "SMART_NAV_RESULT", "missing-req-schema", wait_seconds=0.03, poll_interval_sec=0.01
+    )
+
+    assert result["success"] is False
+    assert result["status"] == "transport_error"
+    assert result["reason"] == "smart_nav_result_wait_timeout"
+    assert result["reqId"] == "missing-req-schema"
+
+
 def test_reassembly_accepts_hierarchy_transport_chunk_size():
     req_id = "hierarchy-large-chunk"
     payload = json.dumps({"reqId": req_id, "success": True, "data": "x" * 8000})

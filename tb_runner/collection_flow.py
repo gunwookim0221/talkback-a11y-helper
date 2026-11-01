@@ -683,11 +683,15 @@ def _apply_focus_reconciliation(
     visit_decision: VisitDecision | None,
 ) -> dict[str, Any] | None:
     """Record command ACK and actual focus outcome as separate traversal facts."""
-    if str(row.get("scenario_type", "content") or "content").strip().lower() == "global_nav":
-        return None
     scenario_id = str(row.get("scenario_id", "") or "").strip()
+    tracker = getattr(state, "content_terminal", None)
+    lifecycle = getattr(tracker, "lifecycle", None) if getattr(tracker, "scenario_id", None) == scenario_id else None
+    visit_aliases = dict(getattr(lifecycle, "aliases", {}) or {})
+    visit_alias_provenance = dict(getattr(lifecycle, "visit_alias_provenance", {}) or {})
     phase6_observation = _capture_phase6d3a_production_observation(
-        client=client, dev=dev, row=row)
+        client=client, dev=dev, row=row,
+        allow_scroll_gate=bool(getattr(state, "production_progress_enabled", False)
+                               and clock_for(client) is not None))
     actual_node = row.get("actual_focus_node")
     if not isinstance(actual_node, dict):
         actual_node = row.get("focus_node")
@@ -729,8 +733,11 @@ def _apply_focus_reconciliation(
                 if progress_decision is not None and progress_decision.gate_applied else None
             ),
             visited_instance_ids_before=set(getattr(metrics, "visited", set()) or set()),
+            visit_identity_aliases=visit_aliases,
+            visit_identity_alias_provenance=visit_alias_provenance,
             consumed_cluster_signatures=set(getattr(state, "consumed_cluster_signatures", set()) or set()),
         )
+        result = _bind_production_reconciliation(client, state, row, result)
         focus_reconciliation.apply_reconciliation_to_row(row, result)
         _record_focus_reconciliation(client, row, result)
         _emit_move_outcome(client, row, result, ack)
@@ -812,6 +819,8 @@ def _apply_focus_reconciliation(
             if progress_decision is not None and progress_decision.gate_applied else None
         ),
         visited_instance_ids_before=set(getattr(metrics, "visited", set()) or set()),
+        visit_identity_aliases=visit_aliases,
+        visit_identity_alias_provenance=visit_alias_provenance,
         consumed_cluster_signatures=set(getattr(state, "consumed_cluster_signatures", set()) or set()),
     )
     row.update({
@@ -821,6 +830,7 @@ def _apply_focus_reconciliation(
         "command_ack_raw_result": ack["raw_result"],
     })
     result["inventory_source"] = inventory_source
+    result = _bind_production_reconciliation(client, state, row, result)
     focus_reconciliation.apply_reconciliation_to_row(row, result)
     observe_reconciliation = getattr(metrics, "observe_reconciliation", None)
     if callable(observe_reconciliation):
@@ -1282,6 +1292,9 @@ class MainLoopState:
     )
     local_tab_state: local_tab_logic.LocalTabState = field(default_factory=local_tab_logic.LocalTabState)
     traversal_diagnostics: TraversalDiagnostics = field(default_factory=TraversalDiagnostics)
+    production_progress_enabled: bool = True
+    production_progress_scope: tuple[str, str, str] | None = None
+    production_progress_receipt: int = 0
     recovery_attempted_candidate_ids: set[str] = field(default_factory=set)
     recovery_hard_failed_candidate_ids: set[str] = field(default_factory=set)
     recovery_visited_candidate_ids: set[str] = field(default_factory=set)
@@ -20148,6 +20161,149 @@ def _skip_prepositioned_optional_expansion(client: A11yAdbClient, tab_cfg: dict[
                               "optional_expansion_skipped", 0, skip)
 
 
+def _production_progress_checkpoint_from_row(client, row, *, step):
+    """Reuse an already-current production capture at an action boundary."""
+    from tb_runner.production_progress import capture_checkpoint
+
+    if not isinstance(row, Mapping):
+        return None
+    raw = row.get("state_graph_observation")
+    marker = row.get("_exploration_observation")
+    envelope = raw.get("production_observation_envelope") if isinstance(raw, Mapping) else None
+    if not isinstance(envelope, Mapping) or type(envelope.get("step_index")) is not int:
+        return None
+    device = getattr(client, "_adb_device", None)
+    return capture_checkpoint(
+        raw, marker, clock=clock_for(client),
+        receipt_store=getattr(device, "native_dispatch_receipts", None),
+        scenario_id=str(row.get("scenario_id") or ""),
+        run_id=str(row.get("scenario_run_id") or ""), step=step,
+        source_step=envelope["step_index"],
+    )
+
+
+def _production_progress_target_checkpoint(client, dev, row, *, scenario_id, step):
+    """Seal a targeted action's own pre-capture, never an earlier action's row."""
+    run_id = str(getattr(client, "_production_progress_run_id", "") or "")
+    if not run_id or clock_for(client) is None:
+        return None
+    source = dict(row)
+    source.update(scenario_id=scenario_id, scenario_run_id=run_id, step_index=step)
+    existing = _production_progress_checkpoint_from_row(client, source, step=step)
+    if existing is not None:
+        return existing
+    raw = _capture_phase6d3a_production_observation(client=client, dev=dev, row=source,
+                                                    allow_scroll_gate=True)
+    if not isinstance(raw, Mapping):
+        return None
+    return _production_progress_checkpoint_from_row(client, source, step=step)
+
+
+def _production_post_scroll_source(capture_row, raw):
+    """Use only the actual focus in the current post-scroll sealed snapshot."""
+    from tb_runner.production_progress import _strict_focus_id
+    from tb_runner.traversal_reliability import snapshot_actual_focus_identity
+
+    if not isinstance(capture_row, Mapping) or not isinstance(raw, Mapping):
+        return None
+    scenario_id = str(capture_row.get("scenario_id") or "")
+    node = raw.get("focus_node")
+    if not isinstance(node, Mapping) or not _strict_focus_id(raw, scenario_id):
+        return None
+    source = dict(capture_row)
+    snapshot_actual_focus_identity(source, dict(node))
+    source["focus_node"] = deepcopy(dict(node))
+    source["focus_view_id"] = source.get("actual_focus_resource_id", "")
+    source["focus_bounds"] = source.get("actual_focus_bounds", "")
+    source["visible_label"] = source.get("actual_focus_visible", "")
+    source["merged_announcement"] = source.get("actual_focus_speech", "")
+    source["row_source"] = "actual_focus"
+    return source
+
+
+def _production_progress_for_row(client, state, row):
+    """Consume one current, operation-bound reconciliation at most once."""
+    from tb_runner.production_progress import classify_focus_progress
+    from talkback_lib.smart_nav_invocation import current_result
+
+    checkpoint = getattr(client, "_production_progress_pending", None)
+    raw = row.get("state_graph_observation")
+    if (row.get("production_observation_capture_status") != "CURRENT"
+            or not isinstance(raw, Mapping)
+            or row.get("capture_id") != raw.get("capture_id")
+            or row.get("production_observation_envelope") != raw.get("production_observation_envelope")
+            or row.get("_exploration_observation") != raw.get("_exploration_observation")):
+        return "UNKNOWN"
+    device = getattr(client, "_adb_device", None)
+    store = getattr(device, "native_dispatch_receipts", None)
+    action = row.get("phase6_current_action_type")
+    request_key = {"SMART_NEXT": "smart_nav_req_id", "TARGETED_FOCUS": "target_focus_request_id",
+                   "CONTROLLED_FOCUS": "controlled_focus_request_id",
+                   "RECOVERY": "recovery_action_request_id"}.get(action, "")
+    request = str(row.get(request_key) or "") if request_key else ""
+    generation = row.get("smart_nav_invocation_generation")
+    invocation = current_result(client, generation) if action == "SMART_NEXT" else None
+    status = classify_focus_progress(
+        checkpoint, raw, row.get("_exploration_observation"),
+        clock=clock_for(client), receipt_store=store, row=row,
+        action_request_id=request, invocation_result=invocation,
+    )
+    return _consume_production_progress(state, checkpoint, store, status)
+
+
+def _bind_production_reconciliation(client, state, row, result):
+    """Bind reconciliation before it may update the production visit ledger."""
+    from talkback_lib.adb_device import AdbDevice
+
+    device = getattr(client, "_adb_device", None)
+    if (not getattr(state, "production_progress_enabled", False)
+            or (not isinstance(device, AdbDevice) and clock_for(client) is None)):
+        return result
+    provisional = dict(row)
+    focus_reconciliation.apply_reconciliation_to_row(provisional, result)
+    status = _production_progress_for_row(client, state, provisional)
+    marker = deepcopy(row.get("_exploration_observation"))
+    client._production_progress_bound = (row, status, marker)
+    row["production_progress_status"] = status
+    if status in {"NEW_VISIT", "STATE_TRANSITION"}:
+        # Commit current positive evidence while it is current. A later action
+        # may invalidate the observation, but cannot undo this verified visit.
+        state.same_count = 0
+    if status != "UNKNOWN":
+        return result
+    # Retain the diagnostic actual identity, but do not grant a visit or
+    # claim a movement/progress when its current operation is unproven.
+    result = dict(result)
+    result.update(focus_transition_status="AMBIGUOUS", physical_visit_confirmed=False,
+                  visit_record_status="UNAVAILABLE", progress_status="UNAVAILABLE",
+                  reconciled_visit_instance_id="", reconciliation_progress=False,
+                  actual_focus_new_to_run=None, selected_candidate_consumed=False,
+                  selected_candidate_state="none", classification="UNVERIFIED_CURRENT_OPERATION")
+    return result
+
+
+def _consume_production_progress(state, checkpoint, store, status):
+    """Accept each source-run receipt only once for the existing counter."""
+    if status == "UNKNOWN" or checkpoint is None:
+        return "UNKNOWN"
+    try:
+        receipt = store.receipts_after(checkpoint.receipt_watermark)[0]
+        sequence = receipt.get("receipt_seq")
+        scope = (checkpoint.run_id, str(checkpoint.marker.get("scope_id") or ""),
+                 checkpoint.receipt_generation)
+        old_scope = getattr(state, "production_progress_scope", None)
+        old_sequence = getattr(state, "production_progress_receipt", 0)
+        if (not all(scope) or (old_scope is not None and old_scope != scope)
+                or type(sequence) is not int or type(old_sequence) is not int
+                or sequence <= old_sequence):
+            return "UNKNOWN"
+        state.production_progress_scope = scope
+        state.production_progress_receipt = sequence
+        return status
+    except Exception:
+        return "UNKNOWN"
+
+
 def _apply_step_collection_phase_impl(
     *,
     state: MainLoopState,
@@ -20168,6 +20324,8 @@ def _apply_step_collection_phase_impl(
         label=str(getattr(state, "forced_local_tab_target_action_label", "") or getattr(state, "forced_local_tab_target_label", "") or ""),
     )
     _ = (scenario_id, log_fn)
+    client._production_progress_pending = None
+    client._production_progress_reconciliation_previous = None
     row = None
     if forced_target:
         capture_window_lifecycle(client, dev, "before", "LOCAL_TAB_ENTRY")
@@ -20198,6 +20356,15 @@ def _apply_step_collection_phase_impl(
         capture_window_lifecycle(client, dev, "before", "SMART_NEXT")
         if get_talkback_restart_event(client):
             return {"scenario_id": scenario_id, "step_index": step_idx, "stop_reason": "talkback_restarted"}
+        source_row = getattr(state, "previous_step_row", None)
+        scroll_source = getattr(client, "_production_progress_post_scroll_source", None)
+        if isinstance(scroll_source, Mapping) and scroll_source.get("step") == step_idx - 1:
+            # Empty is an explicit fail-closed previous focus after a scroll.
+            source_row = scroll_source.get("source") or {}
+            client._production_progress_reconciliation_previous = source_row
+        client._production_progress_post_scroll_source = None
+        client._production_progress_pending = _production_progress_checkpoint_from_row(
+            client, source_row, step=step_idx)
         try:
             row = client.collect_focus_step(
                 dev=dev,
@@ -20270,6 +20437,7 @@ def _apply_stop_evaluation_phase_impl(
     previous_row: dict[str, Any] | None,
     tab_cfg: dict[str, Any],
     progress_decision: ProgressDecision | None = None,
+    client: Any = None,
     should_stop_fn,
     build_inputs_fn,
 ) -> tuple[bool, str, dict[str, Any], dict[str, Any]]:
@@ -20284,7 +20452,23 @@ def _apply_stop_evaluation_phase_impl(
         scenario_cfg=tab_cfg,
     )
     focus_transition_status = str(row.get("focus_transition_status", "") or "").strip().upper()
-    if focus_transition_status in {"CONFIRMED_MOVED", "CONFIRMED_UNCHANGED", "AMBIGUOUS"}:
+    if client is not None and getattr(state, "production_progress_enabled", False):
+        bound = getattr(client, "_production_progress_bound", None)
+        client._production_progress_bound = None
+        status = "UNKNOWN"
+        if (isinstance(bound, tuple) and len(bound) == 3 and bound[0] is row
+                and bound[2] == row.get("_exploration_observation")
+                and clock_for(client) is not None and clock_for(client).current(bound[2])):
+            status = bound[1]
+        row["production_progress_status"] = status
+        actual_progress = status in {"NEW_VISIT", "STATE_TRANSITION", "SCROLL_CHANGE"}
+        stop_kwargs["progress_override"] = {
+            "production_progress_status": status,
+            "physical_progress": (None if status == "UNKNOWN" else actual_progress),
+            "semantic_progress": (None if status == "UNKNOWN" else actual_progress),
+            "source": "current_operation_reconciliation",
+        }
+    elif focus_transition_status in {"CONFIRMED_MOVED", "CONFIRMED_UNCHANGED", "AMBIGUOUS"}:
         actual_progress = bool(
             focus_transition_status == "CONFIRMED_MOVED"
             and str(row.get("progress_status", "") or "").strip().upper() == "PROGRESS"
@@ -20308,6 +20492,7 @@ def _apply_stop_evaluation_phase(
     previous_row: dict[str, Any] | None,
     tab_cfg: dict[str, Any],
     progress_decision: ProgressDecision | None = None,
+    client: Any = None,
 ) -> tuple[bool, str, dict[str, Any], dict[str, Any]]:
     with measure_runtime("stop_decision"):
         return _apply_stop_evaluation_phase_impl(
@@ -20316,12 +20501,39 @@ def _apply_stop_evaluation_phase(
             previous_row=previous_row,
             tab_cfg=tab_cfg,
             progress_decision=progress_decision,
+            client=client,
             should_stop_fn=should_stop,
             build_inputs_fn=_build_stop_evaluation_inputs,
         )
 
 
 _TRAVERSAL_V2_REPEAT_STOP_REASONS = TRAVERSAL_V2_STOP_POLICY.recovery_reasons
+
+
+def _resolve_recovery_stop(*, guarded, prior_reason, stop, reason, recovered,
+                           block_stop, progress_status, dispatched=False):
+    """A repeat stop survives recovery unless that action proves progress."""
+    verified = progress_status in {"NEW_VISIT", "STATE_TRANSITION", "SCROLL_CHANGE"}
+    if guarded and not verified:
+        return True, ("production_progress_unverified"
+                      if dispatched and progress_status != "NO_PROGRESS" else prior_reason)
+    if recovered and stop and reason in _TRAVERSAL_V2_REPEAT_STOP_REASONS:
+        return False, ""
+    if block_stop and not recovered:
+        return False, ""
+    return stop, reason
+
+
+def _guard_secondary_progress_stop(*, guarded, marker, clock, stop, reason):
+    """Do not turn an unverified later action into a completed repeat stop."""
+    if not guarded:
+        return stop, reason
+    current = bool(clock is not None and clock.current(marker))
+    if not stop:
+        return True, "repeat_no_progress" if current else "production_progress_unverified"
+    if not current and termination_status(reason) == "COMPLETED":
+        return True, "production_progress_unverified"
+    return stop, reason
 
 
 def _build_identity_recovery_inventory(
@@ -20461,15 +20673,26 @@ def _attempt_identity_recovery(
         monotonic=time.monotonic,
         action_wait_seconds=_TRANSITION_FAST_ACTION_WAIT_SECONDS,
     )
-    return RecoveryExecutor.execute(
-        client=client,
-        dev=dev,
-        phase_ctx=phase_ctx,
-        state=state,
-        row=row,
-        step_idx=step_idx,
-        services=services,
-    )
+    client._production_progress_pending = None
+    previous_hook = getattr(client, "_production_progress_pre_dispatch", None)
+    client._production_progress_pre_dispatch = lambda **_kwargs: setattr(
+        client, "_production_progress_pending",
+        _production_progress_target_checkpoint(
+            client, dev, row, scenario_id=str(phase_ctx.tab_cfg.get("scenario_id") or ""), step=step_idx))
+    from talkback_lib.native_dispatch_evidence import current_operation_id, native_dispatch_operation
+    try:
+        with native_dispatch_operation(current_operation_id() or None):
+            return RecoveryExecutor.execute(
+                client=client,
+                dev=dev,
+                phase_ctx=phase_ctx,
+                state=state,
+                row=row,
+                step_idx=step_idx,
+                services=services,
+            )
+    finally:
+        client._production_progress_pre_dispatch = previous_hook
 
 
 
@@ -20514,9 +20737,9 @@ def _frontier_shadow_pre_decision(
             and evidence_clock is not None
             and evidence_clock.current(dict(marker))
         )
-        state_id = cached.get("state_id") if cache_current else None
+        state_id = cached.get("state_id") if linked_snapshot else None
         identity_status = "RESOLVED" if state_id else "UNRESOLVED"
-        if not state_id:
+        if linked_snapshot and not state_id:
             state_id, identity_status = _frontier_shadow_state_id(previous)
         cached_cursor = observation_ref.get("focus_cursor")
         cached_cursor = cached_cursor if isinstance(cached_cursor, Mapping) else {}
@@ -20552,13 +20775,14 @@ def _frontier_shadow_pre_decision(
             step=step_idx,
             production_choice=production_choice,
             focus_cursor=focus_cursor,
-            current_inventory=(cached.get("candidates", []) if cache_current else []),
+            current_inventory=(cached.get("candidates", []) if linked_snapshot else []),
             state_id=state_id,
-            inventory_complete=bool(cache_current and cached.get("inventory_complete")),
+            inventory_complete=bool(linked_snapshot and cached.get("inventory_complete")),
             observation_ref={"source_step": previous_step, "state_id": state_id,
                              "state_resolution": identity_status,
-                             "production_capture_id": cached_capture_id or None,
-                             "request_id": str(observation_ref.get("request_id") or "") or None,
+                             "production_capture_id": (cached_capture_id or None) if linked_snapshot else None,
+                             "request_id": (str(observation_ref.get("request_id") or "") or None)
+                                           if linked_snapshot else None,
                              "focus_currentness": "LINKED" if focus_cursor["confirmed"] else "UNRESOLVED"},
         )
     except Exception as exc:
@@ -22483,8 +22707,18 @@ def _apply_content_terminal_phase(client, dev, state, row, phase_ctx, step_idx, 
                 scroll_ready = True
         if scroll_ready:
             scroll_before = source_snapshot
-            transition, after = scroll_reliability.verified_scroll(client, dev, tracker.scenario_id, step_idx,
-                before=scroll_before, output_base_dir=phase_ctx.output_base_dir)
+            from tb_runner.production_progress import capture_checkpoint, classify_scroll_progress
+            from talkback_lib.native_dispatch_evidence import current_operation_id, native_dispatch_operation
+            device = getattr(client, "_adb_device", None)
+            store = getattr(device, "native_dispatch_receipts", None)
+            scroll_checkpoint = capture_checkpoint(
+                source_snapshot, source_marker, clock=clock_for(client), receipt_store=store,
+                scenario_id=tracker.scenario_id, run_id=str(row.get("scenario_run_id") or ""),
+                step=step_idx, require_focus=False)
+            with native_dispatch_operation(current_operation_id() or None):
+                transition, after = scroll_reliability.verified_scroll(client, dev, tracker.scenario_id, step_idx,
+                    before=scroll_before, output_base_dir=phase_ctx.output_base_dir,
+                    resolved_owner=owner)
             result_capture_row = dict(row)
             result_snapshot = _capture_phase6d3a_production_observation(
                 client=client, dev=dev, row=result_capture_row, allow_scroll_gate=True)
@@ -22498,6 +22732,18 @@ def _apply_content_terminal_phase(client, dev, state, row, phase_ctx, step_idx, 
                 result_marker=result_marker if isinstance(result_marker, Mapping) else None,
             )
             row["phase6e_scroll_evidence"] = scroll_evidence
+            scroll_progress = classify_scroll_progress(
+                scroll_checkpoint, result_snapshot, result_marker, clock=clock_for(client),
+                receipt_store=store, transition=transition, owner=owner)
+            if scroll_progress == "SCROLL_CHANGE":
+                scroll_progress = _consume_production_progress(state, scroll_checkpoint, store, scroll_progress)
+                if scroll_progress == "SCROLL_CHANGE":
+                    state.same_count = 0
+                    row["production_progress_status"] = scroll_progress
+            post_scroll_source = (_production_post_scroll_source(result_capture_row, result_snapshot)
+                                  if scroll_progress == "SCROLL_CHANGE" else None)
+            client._production_progress_post_scroll_source = {
+                "step": step_idx, "source": post_scroll_source}
             snapshots = getattr(client, "_phase6e_scroll_snapshots", None)
             if snapshots is None:
                 snapshots = {}
@@ -22507,6 +22753,7 @@ def _apply_content_terminal_phase(client, dev, state, row, phase_ctx, step_idx, 
                 "source_marker": source_marker if isinstance(source_marker, Mapping) else None,
                 "result_observation": deepcopy(result_snapshot) if isinstance(result_snapshot, Mapping) else None,
                 "result_marker": result_marker if isinstance(result_marker, Mapping) else None,
+                "transition": deepcopy(transition),
             }
             log(
                 f"[PHASE6E][scroll_model] scenario='{tracker.scenario_id}' step={step_idx} "
@@ -22524,6 +22771,8 @@ def _apply_content_terminal_phase(client, dev, state, row, phase_ctx, step_idx, 
             evaluation = tracker.observe(after, step_idx,
                 focus_observations=state.reliability_metrics.focus_observations.values(),
                 semantic_ids=semantic_ids, scroll=transition,
+                visit_scroll_evidence=(scroll_evidence if scroll_progress == "SCROLL_CHANGE" else None),
+                scroll_progress_authorized=(scroll_progress == "SCROLL_CHANGE"),
                 focus_sequence_progress=str(row.get("progress_status", "") or "").strip().upper() == "PROGRESS",
                 target_attempt=(
                     {**dict(row.get("target_focus_descriptor", {}) or {}), "status": row.get("target_focus_status", "")}
@@ -22550,6 +22799,18 @@ def _apply_content_terminal_phase(client, dev, state, row, phase_ctx, step_idx, 
             return True, reason
         if stop and reason == "scroll_error":
             return True, selected_reason or "content_error"
+        if (stop and reason in _TRAVERSAL_V2_REPEAT_STOP_REASONS and scroll_ready
+                and scroll_progress == "UNKNOWN"
+                and getattr(state, "production_progress_enabled", False)):
+            return True, "production_progress_unverified"
+        if (scroll_ready and scroll_progress == "UNKNOWN" and selected_reason
+                and termination_status(selected_reason) == "COMPLETED"
+                and getattr(state, "production_progress_enabled", False)):
+            return True, "production_progress_unverified"
+        if (stop and reason in _TRAVERSAL_V2_REPEAT_STOP_REASONS and not selected_reason
+                and getattr(state, "production_progress_enabled", False)
+                and row.get("production_progress_status") != "SCROLL_CHANGE"):
+            return True, reason
         return bool(selected_reason), selected_reason
     except Exception as exc:
         row["content_terminal_error"] = f"{type(exc).__name__}: {exc}"
@@ -22650,6 +22911,14 @@ def _main_loop_phase(
     redirect_mode = "OFF"
     scenario_run_id = _phase6d3a_scenario_run_id(
         str(tab_cfg.get("scenario_id", "") or ""), phase_ctx.rows, phase_ctx.output_path)
+    client._production_progress_run_id = scenario_run_id
+    client._production_progress_pending = None
+    client._production_progress_post_scroll_source = None
+    from talkback_lib.adb_device import AdbDevice
+    from talkback_lib.exploration_evidence_clock import EvidenceClock
+    progress_device = getattr(client, "_adb_device", None)
+    if isinstance(progress_device, AdbDevice) and clock_for(client) is None:
+        progress_device.shadow_evidence_clock = EvidenceClock()
     try:
         # Phase 6C2 shares the Phase 6B environment gate and remains absent in
         # OFF mode. Import/initialization failures are diagnostic only.
@@ -22949,16 +23218,18 @@ def _main_loop_phase(
                 row=row,
                 state=state,
             )
-        if str(tab_cfg.get("scenario_type", "content") or "content").strip().lower() != "global_nav":
-            _apply_focus_reconciliation(
-                client=client,
-                dev=dev,
-                row=row,
-                previous_row=state.previous_step_row,
-                state=state,
-                progress_decision=progress_decision,
-                visit_decision=visit_decision,
-            )
+        row["scenario_run_id"] = scenario_run_id
+        reconciliation_previous = getattr(client, "_production_progress_reconciliation_previous", None)
+        _apply_focus_reconciliation(
+            client=client,
+            dev=dev,
+            row=row,
+            previous_row=(state.previous_step_row if reconciliation_previous is None
+                          else reconciliation_previous),
+            state=state,
+            progress_decision=progress_decision,
+            visit_decision=visit_decision,
+        )
         _frontier_shadow_post_result(
             client=client, decision_id=frontier_shadow_decision_id,
             step_idx=step_idx, previous_row=state.previous_step_row, row=row,
@@ -22990,7 +23261,13 @@ def _main_loop_phase(
             state=state,
             tab_cfg=tab_cfg,
             progress_decision=progress_decision,
+            client=client,
         )
+        production_repeat_stop = bool(
+            getattr(state, "production_progress_enabled", False) and stop
+            and reason == "repeat_no_progress"
+            and row.get("production_progress_status") == "NO_PROGRESS")
+        production_repeat_marker = deepcopy(row.get("_exploration_observation"))
         if crash_detection:
             crash_event_id = str(crash_detection.get("crash_event_id") or "")
             stop = True
@@ -23239,6 +23516,13 @@ def _main_loop_phase(
         elif (row.get("viewport_exhausted_eval_result") is True and row.get("scroll_capability") == "SCROLL_NOT_CAPABLE"
               and row.get("local_tab_block_reason") == "no_unvisited_local_tab"):
             stop, reason = True, "scroll_exhausted"
+        stop, reason = _guard_secondary_progress_stop(
+            guarded=production_repeat_stop, marker=production_repeat_marker,
+            clock=clock_for(client), stop=stop, reason=reason)
+        guarded_recovery_stop = bool(
+            getattr(state, "production_progress_enabled", False) and stop
+            and reason in _TRAVERSAL_V2_REPEAT_STOP_REASONS)
+        guarded_recovery_reason = reason
         recovery_started = time.perf_counter()
         recovery_clock = clock_for(client)
         recovery_epoch_before = recovery_clock.action_epoch if recovery_clock is not None else None
@@ -23296,9 +23580,15 @@ def _main_loop_phase(
                     except Exception:
                         pass
             if recovery_outcome.recovered:
+                pre_recovery_row = row
                 row = recovery_outcome.row
                 progress_decision = recovery_outcome.progress
                 visit_decision = recovery_outcome.visit
+                row["scenario_run_id"] = scenario_run_id
+                if getattr(state, "production_progress_enabled", False):
+                    _apply_focus_reconciliation(
+                        client=client, dev=dev, row=row, previous_row=pre_recovery_row,
+                        state=state, progress_decision=progress_decision, visit_decision=visit_decision)
                 mismatch_reasons, low_confidence_reasons = _apply_row_quality_phase(
                     row=row,
                     state=state,
@@ -23314,10 +23604,13 @@ def _main_loop_phase(
                     state=state,
                     tab_cfg=tab_cfg,
                     progress_decision=progress_decision,
+                    client=client,
                 )
-                if stop and reason in _TRAVERSAL_V2_REPEAT_STOP_REASONS:
-                    stop = False
-                    reason = ""
+                stop, reason = _resolve_recovery_stop(
+                    guarded=guarded_recovery_stop, prior_reason=guarded_recovery_reason,
+                    stop=stop, reason=reason, recovered=True, block_stop=recovery_outcome.block_stop,
+                    progress_status=row.get("production_progress_status"),
+                    dispatched=recovery_dispatch_occurred)
                 cta_descend_applied = False
                 scroll_ready_continue_applied = False
                 local_tab_transition_applied = False
@@ -23328,8 +23621,10 @@ def _main_loop_phase(
                     f"visible='{_truncate_debug_text(str(row.get('visible_label', '') or ''), 96)}'"
                 )
             elif recovery_outcome.block_stop:
-                stop = False
-                reason = ""
+                stop, reason = _resolve_recovery_stop(
+                    guarded=guarded_recovery_stop, prior_reason=guarded_recovery_reason,
+                    stop=stop, reason=reason, recovered=False, block_stop=True,
+                    progress_status="UNKNOWN", dispatched=recovery_dispatch_occurred)
 
         terminal_signal = bool(stop_eval_inputs["terminal_signal"])
         same_like_count = int(stop_eval_inputs["same_like_count"])
@@ -24630,6 +24925,48 @@ def _phase6d3a_emit_entry_diagnostics(
         return False
 
 
+def _phase6e_graph_rows(rows, snapshots, scenario_id):
+    """Preserve scroll observations even when report-row filtering removes a step."""
+    pending = {}
+    if isinstance(snapshots, Mapping):
+        for key, snapshot in snapshots.items():
+            if (not isinstance(key, tuple) or len(key) != 2 or key[0] != scenario_id
+                    or type(key[1]) is not int or key[1] < 0 or not isinstance(snapshot, Mapping)
+                    or not isinstance(snapshot.get("transition"), Mapping)):
+                continue
+            pending[key[1]] = snapshot
+
+    def with_scroll(row, snapshot):
+        result = dict(row)
+        result.update(
+            phase6e_scroll_source_observation=snapshot.get("source_observation"),
+            phase6e_scroll_source_marker=snapshot.get("source_marker"),
+            phase6e_scroll_result_observation=snapshot.get("result_observation"),
+            phase6e_scroll_result_marker=snapshot.get("result_marker"),
+            scroll_transition=snapshot.get("transition"),
+        )
+        return result
+
+    def scroll_only(step):
+        return with_scroll({"step_index": step, "scenario_id": scenario_id,
+                            "phase6e_scroll_only": True}, pending.pop(step))
+
+    graph_rows = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        try:
+            step = int(row.get("step_index", -1))
+        except (TypeError, ValueError):
+            step = -1
+        for missing in sorted(key for key in pending if key < step):
+            graph_rows.append(scroll_only(missing))
+        graph_rows.append(with_scroll(row, pending.pop(step)) if step in pending else dict(row))
+    for missing in sorted(pending):
+        graph_rows.append(scroll_only(missing))
+    return graph_rows
+
+
 def _collect_tab_rows_inner(
     client: A11yAdbClient,
     dev: str,
@@ -24923,24 +25260,7 @@ def _collect_tab_rows_inner(
         if not graph_run_id:
             graph_run_id = graph_scenario_id + ":" + Path(output_path).stem
         scroll_snapshots = getattr(client, "_phase6e_scroll_snapshots", {})
-        graph_rows = []
-        for item in phase_ctx.rows:
-            if not isinstance(item, Mapping):
-                continue
-            graph_row = dict(item)
-            try:
-                graph_step = int(graph_row.get("step_index", -1))
-            except (TypeError, ValueError):
-                graph_step = -1
-            snapshot = scroll_snapshots.get((graph_scenario_id, graph_step)) if isinstance(scroll_snapshots, Mapping) else None
-            if isinstance(snapshot, Mapping):
-                graph_row.update(
-                    phase6e_scroll_source_observation=snapshot.get("source_observation"),
-                    phase6e_scroll_source_marker=snapshot.get("source_marker"),
-                    phase6e_scroll_result_observation=snapshot.get("result_observation"),
-                    phase6e_scroll_result_marker=snapshot.get("result_marker"),
-                )
-            graph_rows.append(graph_row)
+        graph_rows = _phase6e_graph_rows(phase_ctx.rows, scroll_snapshots, graph_scenario_id)
         graph_path = maybe_write_shadow_graph_from_rows(
             rows=graph_rows,
             output_path=output_path,

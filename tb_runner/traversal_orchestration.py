@@ -253,6 +253,13 @@ class RecoveryExecutor:
         if not isinstance(recovery_row, dict):
             state.recovery_hard_failed_candidate_ids.update({candidate.candidate_id, candidate.canonical_key})
         else:
+            from talkback_lib.native_dispatch_evidence import current_operation_id
+            raw_action_result = action_result.get("raw") if isinstance(action_result.get("raw"), dict) else action_result
+            recovery_row["phase6_current_action_type"] = "RECOVERY"
+            recovery_row["recovery_operation_id"] = current_operation_id()
+            recovery_row["recovery_action_request_id"] = str(
+                raw_action_result.get("reqId") or raw_action_result.get("requestId")
+                or raw_action_result.get("request_id") or "")
             recovery_row["tab_name"] = phase_ctx.tab_cfg["tab_name"]
             recovery_row["context_type"] = "main"
             recovery_row["parent_step_index"] = ""

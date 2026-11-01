@@ -117,12 +117,30 @@ object A11yHistoryManager {
         candidate: AccessibilityNodeInfo?,
         eventType: Int
     ): Boolean {
-        if (candidate == null || !isWithinAuthoritativeFocusWindow()) return false
-        val committedBounds = authoritativeCommittedBounds() ?: return false
+        if (candidate == null) return false
         val candidateBounds = Rect().also(candidate::getBoundsInScreen)
+        val candidateIdentity = A11yNavigator.nodeIdentityOf(candidate)
+        val candidateLabel = A11yNavigator.resolvePrimaryLabel(candidate)
+            ?: A11yTraversalAnalyzer.recoverDescendantLabel(candidate)
+            ?: "<no-label>"
+        return shouldIgnorePostCommitResurfacedHeader(
+            candidateBounds = candidateBounds,
+            candidateIdentity = candidateIdentity,
+            candidateLabel = candidateLabel,
+            eventType = eventType
+        )
+    }
+
+    internal fun shouldIgnorePostCommitResurfacedHeader(
+        candidateBounds: Rect,
+        candidateIdentity: String?,
+        candidateLabel: String?,
+        eventType: Int
+    ): Boolean {
+        if (!isWithinAuthoritativeFocusWindow()) return false
+        val committedBounds = authoritativeCommittedBounds() ?: return false
         val sameBounds = candidateBounds == committedBounds
         val committedIdentity = authoritativeCommittedIdentity()
-        val candidateIdentity = A11yNavigator.nodeIdentityOf(candidate)
         val sameIdentity = !committedIdentity.isNullOrBlank() && committedIdentity == candidateIdentity
         if (sameBounds || sameIdentity) return false
 
@@ -134,7 +152,7 @@ object A11yHistoryManager {
         if (shouldIgnore) {
             Log.i(
                 "A11Y_HELPER",
-                "[FOCUS_VERIFY] final_focus_ignored_event reason=already_committed eventType=$eventType candidate=${(A11yNavigator.resolvePrimaryLabel(candidate) ?: A11yTraversalAnalyzer.recoverDescendantLabel(candidate) ?: "<no-label>").replace("\n", " ")} committed=${(authoritativeCommittedLabel() ?: "<no-label>").replace("\n", " ")} committedBounds=${A11yNavigator.formatBoundsForLog(committedBounds)} candidateBounds=${A11yNavigator.formatBoundsForLog(candidateBounds)}"
+                "[FOCUS_VERIFY] final_focus_ignored_event reason=already_committed eventType=$eventType candidate=${(candidateLabel ?: "<no-label>").replace("\n", " ")} committed=${(authoritativeCommittedLabel() ?: "<no-label>").replace("\n", " ")} committedBounds=${A11yNavigator.formatBoundsForLog(committedBounds)} candidateBounds=${A11yNavigator.formatBoundsForLog(candidateBounds)}"
             )
         }
         return shouldIgnore
@@ -163,6 +181,22 @@ object A11yHistoryManager {
         eventPackageName: String?,
         root: AccessibilityNodeInfo?
     ): Boolean {
+        val activeFocusPackage = root
+            ?.let { SmartNextPerf.findFocus(it, AccessibilityNodeInfo.FOCUS_ACCESSIBILITY) }
+            ?.packageName
+            ?.toString()
+        return shouldSuppressPreCommitTransientSystemUiEvent(
+            eventType = eventType,
+            eventPackageName = eventPackageName,
+            activeFocusPackage = activeFocusPackage
+        )
+    }
+
+    internal fun shouldSuppressPreCommitTransientSystemUiEvent(
+        eventType: Int,
+        eventPackageName: String?,
+        activeFocusPackage: String?
+    ): Boolean {
         if (eventPackageName != "com.android.systemui") return false
         if (activeSmartNextTurnId == 0L) return false
         if (hasCommittedFinalFocusForTurn(activeSmartNextTurnId)) return false
@@ -179,8 +213,6 @@ object A11yHistoryManager {
             eventType == android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
         if (!isStrayEventType) return false
 
-        val activeFocusNode = root?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-        val activeFocusPackage = activeFocusNode?.packageName?.toString()
         if (activeFocusPackage != expectedPackageName) {
             return false
         }

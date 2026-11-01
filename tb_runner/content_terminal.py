@@ -25,6 +25,9 @@ def failed_scroll_reason(transition):
     result = transition.get("action_result", {})
     if result.get("error") or result.get("after_dump_error"):
         return "content_error"
+    if (transition.get("status") in {"SCROLL_UNVERIFIED", "SCROLL_BLOCKED"}
+            or transition.get("termination_reason") == "scroll_owner_unverified"):
+        return "content_scroll_unverified"
     if result.get("actionSupported") is False and result.get("actionAttempted") is False:
         return "content_scroll_unverified"
     return "content_error"
@@ -66,7 +69,8 @@ class ContentTerminal:
     lifecycle: CandidateLifecycle = field(default_factory=CandidateLifecycle)
 
     def observe(self, observation, step, focus_observations=(), semantic_ids=(), scroll=None, pending=False,
-                focus_sequence_progress=False, target_attempt=None):
+                focus_sequence_progress=False, target_attempt=None, visit_scroll_evidence=None,
+                scroll_progress_authorized=None):
         previous = set(self.records)
         visible, excluded = set(), {}
         structure, strict = [], []
@@ -111,15 +115,20 @@ class ContentTerminal:
         focus_progress = bool((self.visited - previous_visits) & set(self.records)
                               or self.semantic - previous_semantic)
         focus_sequence_progress = bool(focus_sequence_progress)
-        moved = bool(scroll and scroll.get("status") == "SCROLL_MOVED")
+        unverified_transition = bool(scroll and (
+            scroll.get("status") in {"SCROLL_UNVERIFIED", "SCROLL_BLOCKED"}
+            or scroll.get("target_dispatch_verified") is False))
+        scroll_progress_allowed = scroll_progress_authorized is not False and not unverified_transition
+        discovery_progress = bool(new) and (scroll is None or scroll_progress_allowed)
+        moved = bool(scroll and scroll_progress_allowed and scroll.get("status") == "SCROLL_MOVED")
         if step != self.last_step:
-            self.no_progress_steps = 0 if focus_progress or new or moved or focus_sequence_progress else self.no_progress_steps + 1
+            self.no_progress_steps = 0 if focus_progress or discovery_progress or moved or focus_sequence_progress else self.no_progress_steps + 1
             self.no_focus_progress_steps = 0 if focus_progress or moved or focus_sequence_progress else self.no_focus_progress_steps + 1
             self.last_step = step
-        elif focus_progress or new or moved or focus_sequence_progress:
+        elif focus_progress or discovery_progress or moved or focus_sequence_progress:
             self.no_progress_steps = 0
             self.no_focus_progress_steps = 0
-        if focus_progress or new or moved or focus_sequence_progress:
+        if focus_progress or discovery_progress or moved or focus_sequence_progress:
             self.last_progress_step = step
         if scroll:
             attempted_signature = scroll.get("before", {}).get("stable_signature")
@@ -144,7 +153,8 @@ class ContentTerminal:
         # separate actionable/focusable object received accessibility focus.
         observation_valid=bool(observation.get("nodes")) and observation.get("viewport", {}).get("valid", False)
         reconciliation=self.lifecycle.observe({k:self.records[k] for k in visible},cap,step,
-                                             valid=observation_valid,scope_verified=self.scope_verified)
+                                             valid=observation_valid,scope_verified=self.scope_verified,
+                                             visit_scroll_evidence=visit_scroll_evidence)
         historical_unseen=set(self.records)-self.visited-semantic_readable
         logical_covered=self.lifecycle.covered_targets(self.visited|semantic_readable)
         active=set(self.records)-set(self.lifecycle.aliases)

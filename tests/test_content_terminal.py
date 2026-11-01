@@ -91,6 +91,23 @@ def test_scroll_movement_adds_candidate_and_resets_stability():
     assert not t.latest["viewport_stable"] and t.decision() == ""
 
 
+def test_unverified_scroll_movement_does_not_reset_no_progress_from_new_nodes():
+    t = stable(ContentTerminal("test"), observation(forward=True), steps=4)
+    before_progress_step = t.latest["last_progress_step"]
+    obs = observation([node(bounds="10,160,110,260"),
+                       node(label="New card", bounds="120,160,220,260", rid="app:id/new_card")],
+                      forward=True)
+    transition = scroll(obs, changed=True, new=2)
+    transition.update(status="SCROLL_UNVERIFIED", target_dispatch_verified=False)
+
+    t.observe(obs, 4, scroll=transition, scroll_progress_authorized=False)
+
+    assert t.latest["new_instances"] == 2 and t.latest["remaining_unseen_count"] == 3
+    assert t.latest["no_progress_steps"] == 4
+    assert t.latest["last_progress_step"] == before_progress_step
+    assert t.latest["visited_candidates"] == 0
+
+
 def test_successful_unchanged_scroll_with_forward_true_is_unverified():
     obs = observation(forward=True)
     t = stable(ContentTerminal("test"), obs, [proof()])
@@ -116,14 +133,15 @@ def test_failed_action_is_not_a_stable_scroll_confirmation():
     assert t.latest["stable_scroll_attempts"] == 0 and not t.latest["scroll_exhausted"]
 
 
-@pytest.mark.parametrize("result,reason", [
-    ({"actionSupported": False, "actionAttempted": False}, "content_scroll_unverified"),
-    ({"error": "ADBDisconnected"}, "content_error"),
-    ({"after_dump_error": "TransportError"}, "content_error"),
-    ({"actionSupported": True, "actionAttempted": True}, "content_error"),
+@pytest.mark.parametrize("result,reason,status", [
+    ({"actionSupported": False, "actionAttempted": False}, "content_scroll_unverified", None),
+    ({"actionSupported": True, "actionAttempted": True}, "content_scroll_unverified", "SCROLL_UNVERIFIED"),
+    ({"error": "ADBDisconnected"}, "content_error", None),
+    ({"after_dump_error": "TransportError"}, "content_error", None),
+    ({"actionSupported": True, "actionAttempted": True}, "content_error", None),
 ])
-def test_unsupported_scroll_is_unverified_while_runtime_failure_is_error(result, reason):
-    assert failed_scroll_reason({"action_result": result}) == reason
+def test_unsupported_scroll_is_unverified_while_runtime_failure_is_error(result, reason, status):
+    assert failed_scroll_reason({"action_result": result, "status": status}) == reason
 
 
 def test_cap_before_closure_remains_safety_limit():

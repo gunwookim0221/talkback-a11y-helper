@@ -43,9 +43,22 @@ def test_v4_audit_uses_helper_without_ui_automation(tmp_path):
 def test_scroll_xml_reuses_after_snapshot_without_extra_dump(tmp_path, monkeypatch):
     from tb_runner.scroll_reliability import capability, viewport
     node = {"text": "관측", "boundsInScreen": "0,0,100,100"}
-    before = {"nodes": [node], "capability": capability([], {"canScrollDown": True}), "viewport": viewport([node], "s1")}
+    owner = {"className": "android.widget.ScrollView", "viewIdResourceName": "list",
+             "path": "0.1", "boundsInScreen": "0,0,100,100", "isScrollable": True,
+             "actions": [16908346]}
+    before = {"nodes": [node], "capability": capability([node], {"canScrollDown": True}, [owner]), "viewport": viewport([node], "s1")}
     after = {"nodes": [node], "capability": capability([], {"canScrollDown": False}), "viewport": viewport([node], "s1")}
-    client = SimpleNamespace(scroll=lambda **kwargs: True, last_scroll_result={}, _run=lambda *args, **kwargs: pytest.fail("UiAutomation not allowed"))
+    client = SimpleNamespace(last_scroll_result={}, last_scroll_request_id="",
+                             _run=lambda *args, **kwargs: pytest.fail("UiAutomation not allowed"))
+    def scroll(**kwargs):
+        client.last_scroll_request_id = "scroll-audit"
+        client.last_scroll_result = {
+            "reqId": "scroll-audit", "action": "SCROLL_FORWARD", "direction": "down",
+            "success": True, "actionAttempted": True, "explicitTarget": True,
+            "scrollContainerPath": kwargs["container_path"],
+        }
+        return True
+    client.scroll = scroll
     monkeypatch.setattr(scroll_reliability, "capture", lambda *args, **kwargs: after)
     monkeypatch.setattr(scroll_reliability.time, "sleep", lambda *args: None)
     result, observed = scroll_reliability.verified_scroll(client, "serial", "s1", 3, before, str(tmp_path))

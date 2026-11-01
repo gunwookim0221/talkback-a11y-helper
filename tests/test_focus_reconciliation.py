@@ -57,7 +57,8 @@ def row(rid, label, bounds, *, selected=None, **extra):
     }
 
 
-def reconcile(current, previous=None, inventory=(), expected=None, *, confirmed=True, consumed=()):
+def reconcile(current, previous=None, inventory=(), expected=None, *, confirmed=True, consumed=(),
+              visited=(), visit_aliases=None, visit_alias_provenance=None):
     return reconcile_focus(
         row=current,
         previous_row=previous,
@@ -66,7 +67,9 @@ def reconcile(current, previous=None, inventory=(), expected=None, *, confirmed=
         expected_candidates=expected if expected is not None else inventory,
         physical_visit_confirmed=confirmed,
         planning_consumed=True,
-        visited_instance_ids_before=(),
+        visited_instance_ids_before=visited,
+        visit_identity_aliases=visit_aliases,
+        visit_identity_alias_provenance=visit_alias_provenance,
         consumed_cluster_signatures=consumed,
     )
 
@@ -175,6 +178,109 @@ def test_actual_b_to_c_is_not_duplicate_and_repeated_actual_focus_is():
     repeated = reconcile(row("id.b", "B", "0,100,100,200", selected=c), prior_b, inventory=[b, c])
     assert moved["focus_sequence_changed"] is True
     assert repeated["focus_sequence_changed"] is False
+
+
+def test_verified_scroll_relocation_of_previously_visited_focus_is_deduped():
+    previous = row("id.before", "Before", "0,0,100,50")
+    current_candidate = candidate("id.shared", "Same", "0,46,100,96")
+    current = row("id.shared", "Same", "0,46,100,96", selected=current_candidate)
+    old_id = instance_id({"scenario_id": "devices_main", "view_id": "id.shared", "bounds": "0,0,100,50"})
+    new_id = instance_id({"scenario_id": "devices_main", "view_id": "id.shared", "bounds": "0,46,100,96"})
+
+    result = reconcile(
+        current, previous, inventory=[current_candidate], visited={old_id},
+        visit_aliases={old_id: new_id},
+        visit_alias_provenance={old_id: "VERIFIED_PHASE6E_SCROLL"},
+    )
+
+    assert result["actual_focus_instance_id"] == new_id
+    assert result["focus_transition_status"] == "CONFIRMED_MOVED"
+    assert result["visit_identity_resolution"] == "ALREADY_VISITED"
+    assert result["visit_record_status"] == "ALREADY_VISITED"
+    assert result["progress_status"] == "NO_PROGRESS_DUPLICATE_INSTANCE"
+    assert result["reconciled_visit_instance_id"] == new_id
+    assert result["reconciliation_progress"] is False
+
+
+def test_stable_revisit_remains_duplicate_without_a_relocation_alias():
+    prior_id = instance_id({"scenario_id": "devices_main", "view_id": "id.shared", "bounds": "0,46,100,96"})
+    current_candidate = candidate("id.shared", "Same", "0,46,100,96")
+    current = row("id.shared", "Same", "0,46,100,96", selected=current_candidate)
+    previous = row("id.before", "Before", "0,0,100,50")
+
+    result = reconcile(current, previous, inventory=[current_candidate], visited={prior_id})
+
+    assert result["visit_identity_resolution"] == "ALREADY_VISITED"
+    assert result["visit_record_status"] == "ALREADY_VISITED"
+    assert result["progress_status"] == "NO_PROGRESS_DUPLICATE_INSTANCE"
+
+
+def test_genuinely_distinct_current_focus_stays_a_new_visit():
+    old_id = instance_id({"scenario_id": "devices_main", "view_id": "id.old", "bounds": "0,0,100,50"})
+    new_candidate = candidate("id.new", "Different", "0,46,100,96")
+    current = row("id.new", "Different", "0,46,100,96", selected=new_candidate)
+    previous = row("id.before", "Before", "0,0,100,50")
+
+    result = reconcile(current, previous, inventory=[new_candidate], visited={old_id})
+
+    assert result["visit_identity_resolution"] == "NEW_VISIT"
+    assert result["visit_record_status"] == "RECORDED"
+    assert result["progress_status"] == "PROGRESS"
+    assert result["reconciled_visit_instance_id"] == result["actual_focus_instance_id"]
+
+
+def test_unverified_relocation_alias_fails_closed_without_visit_credit():
+    previous = row("id.before", "Before", "0,0,100,50")
+    current_candidate = candidate("id.shared", "Same", "0,46,100,96")
+    current = row("id.shared", "Same", "0,46,100,96", selected=current_candidate)
+    old_id = instance_id({"scenario_id": "devices_main", "view_id": "id.shared", "bounds": "0,0,100,50"})
+    new_id = instance_id({"scenario_id": "devices_main", "view_id": "id.shared", "bounds": "0,46,100,96"})
+
+    result = reconcile(
+        current, previous, inventory=[current_candidate], visited={old_id},
+        visit_aliases={old_id: new_id},
+        visit_alias_provenance={old_id: "UNVERIFIED_RELOCATION"},
+    )
+
+    assert result["actual_focus_instance_id"] == new_id
+    assert result["visit_identity_resolution"] == "AMBIGUOUS"
+    assert result["visit_record_status"] == "NOT_RECORDED_AMBIGUOUS"
+    assert result["progress_status"] == "NO_PROGRESS_AMBIGUOUS"
+    assert result["reconciled_visit_instance_id"] == ""
+    assert result["reconciliation_progress"] is False
+
+
+def test_collection_reconciliation_uses_same_scenario_verified_scroll_alias(monkeypatch):
+    previous = row("id.before", "Before", "0,0,100,50")
+    current_candidate = candidate("id.shared", "Same", "0,46,100,96")
+    current = row("id.shared", "Same", "0,46,100,96", selected=current_candidate)
+    old_id = instance_id({"scenario_id": "devices_main", "view_id": "id.shared", "bounds": "0,0,100,50"})
+    new_id = instance_id({"scenario_id": "devices_main", "view_id": "id.shared", "bounds": "0,46,100,96"})
+    lifecycle = SimpleNamespace(
+        aliases={old_id: new_id},
+        visit_alias_provenance={old_id: "VERIFIED_PHASE6E_SCROLL"},
+    )
+    state = SimpleNamespace(
+        content_terminal=SimpleNamespace(scenario_id="devices_main", lifecycle=lifecycle),
+        reliability_metrics=TraversalMetrics(visited={old_id}),
+        consumed_cluster_signatures=set(),
+        production_progress_enabled=False,
+    )
+    monkeypatch.setattr(flow, "_capture_phase6d3a_production_observation", lambda **_: None)
+    monkeypatch.setattr(flow, "_capture_frontier_shadow_inventory", lambda **_: None)
+    monkeypatch.setattr(flow, "_record_focus_reconciliation", lambda *args, **kwargs: None)
+    monkeypatch.setattr(flow, "_emit_move_outcome", lambda *args, **kwargs: None)
+
+    result = flow._apply_focus_reconciliation(
+        client=SimpleNamespace(), dev="SERIAL", row=current, previous_row=previous,
+        state=state, progress_decision=None, visit_decision=None,
+    )
+
+    assert result["actual_focus_instance_id"] == new_id
+    assert result["visit_identity_resolution"] == "ALREADY_VISITED"
+    assert current["visit_identity_resolution"] == "ALREADY_VISITED"
+    assert current["visit_record_status"] == "ALREADY_VISITED"
+    assert current["progress_status"] == "NO_PROGRESS_DUPLICATE_INSTANCE"
 
 
 def test_case_b_detects_raw_identity_change_collapsed_to_same_phase0a_id():

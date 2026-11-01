@@ -75,5 +75,7 @@ class A11yCommandReceiverTest {
         assertTrue(identity.has("source_state"))
         assertTrue(identity.has("build_variant"))
         assertTrue(payload.getString("helper_service_instance_id").isNotBlank())
+        assertFalse(payload.has("lifecycle_event"))
+        assertFalse(payload.has("lifecycle_observation"))
     }
 }

@@ -7,10 +7,10 @@ import java.util.Base64
 /** Keeps helper result log records below Android logcat's per-line limit. */
 internal object A11yResultTransport {
     private const val LEGACY_LINE_MAX_BYTES = 2700
-    private const val CHUNK_BYTES = 1500
-    // Hierarchy snapshots are comparatively large; fewer bounded writes reduce
-    // logcat loss risk while keeping each encoded record below Android's limit.
-    const val HIERARCHY_CHUNK_BYTES = 2600
+    // Fewer bounded writes reduce logcat loss risk while keeping each encoded
+    // record below Android's per-entry payload limit.
+    private const val CHUNK_BYTES = 2600
+    const val HIERARCHY_CHUNK_BYTES = CHUNK_BYTES
 
     fun encode(
         prefix: String,

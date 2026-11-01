@@ -26,6 +26,7 @@ from talkback_lib.hierarchy_file_transport import (
     encode_control,
     sha256_hex,
     validate_expected_build_precheck,
+    validate_control_identity,
     validate_prestart_capability_generation,
     validate_request_generation,
 )
@@ -222,6 +223,7 @@ def _artifact_control(request_id: str, nonce: str, identity: dict[str, str], pay
         "build_id": identity["build_id"],
         "git_commit": identity["git_commit"],
         "input_digest": identity["input_digest"],
+        "source_state": identity["source_state"],
         "build_variant": identity["build_variant"],
         "service_instance_id": identity["service_instance_id"],
     }
@@ -244,6 +246,31 @@ class HierarchyEnvelopeTests(unittest.TestCase):
         self.assertIn("🌱".encode("utf-8"), decoded.payload_bytes)
         self.assertEqual(request_id, decoded.payload["reqId"])
         self.assertLessEqual(len(artifact), MAX_ARTIFACT_BYTES)
+
+    def test_dirty_candidate_identity_is_bound_through_control_and_payload(self):
+        identity = _identity()
+        identity["source_state"] = "DIRTY"
+        artifact, control, expected, payload = _artifact_control("7" * 32, "8" * 32, identity)
+
+        decoded = decode_artifact(
+            artifact, control, expected_identity=expected,
+            expected_request_id="7" * 32, expected_client_nonce="8" * 32,
+            capabilities=_capabilities(),
+        )
+        self.assertEqual(payload, decoded.payload_bytes)
+        validate_control_identity(control, expected)
+
+        for field, wrong in (("input_digest", "f" * 64), ("source_state", "CLEAN")):
+            with self.subTest(field=field):
+                changed = dict(control)
+                changed["helper_build_identity"] = dict(control["helper_build_identity"])
+                changed["helper_build_identity"][field] = wrong
+                with self.assertRaises(HierarchyTransportError):
+                    validate_control_identity(changed, expected)
+
+        incomplete = {key: value for key, value in expected.items() if key != "source_state"}
+        with self.assertRaises(HierarchyTransportError):
+            validate_control_identity(control, incomplete)
 
     def test_rejects_truncation_extra_bytes_and_corrupt_footer(self):
         artifact, control, expected, _ = _artifact_control("3" * 32, "4" * 32, _identity())
@@ -419,11 +446,23 @@ class HierarchyControlTests(unittest.TestCase):
             "helper_git_commit": "d" * 40,
             "helper_service_instance_id": "service-id",
             "helper_input_digest": "f" * 64,
+            "installed_metadata": {"source_state": "DIRTY"},
         })
         self.assertEqual("c" * 64, expected["build_id"])
         self.assertEqual("f" * 64, expected["input_digest"])
+        self.assertEqual("DIRTY", expected["source_state"])
         with self.assertRaises(HierarchyTransportError):
             validate_expected_build_precheck({"status": "REBUILD_REQUIRED", "execution_allowed": False})
+
+    def test_missing_source_state_identity_fails_closed(self):
+        with self.assertRaises(HierarchyTransportError) as caught:
+            validate_expected_build_precheck({
+                "status": "EXACT_MATCH", "execution_allowed": True,
+                "helper_build_id": "c" * 64, "helper_git_commit": "d" * 40,
+                "helper_service_instance_id": "service-id", "helper_input_digest": "f" * 64,
+                "installed_metadata": {},
+            })
+        self.assertEqual("BUILD_IDENTITY_PRECHECK_INVALID", caught.exception.reason)
 
 
 class HierarchyClientIntegrationTests(unittest.TestCase):
@@ -436,11 +475,13 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
         client = self._client()
         request_id, nonce = "" , ""
         identity = _identity()
+        identity["source_state"] = "DIRTY"
         artifact, template_ready, expected, payload_bytes = _artifact_control("1" * 32, "2" * 32, identity)
         process_epoch = template_ready["process_epoch"]
         helper_control = template_ready["helper_build_identity"]
         token = "e" * 32
         actions: list[str] = []
+        start_pairs: dict[str, str] = {}
 
         def control_response(action: str, extras: list[str]) -> dict:
             nonlocal request_id, nonce, artifact, expected, payload_bytes
@@ -514,6 +555,9 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
 
         def broadcast(_dev, action, extras=None, *, timeout=30.0):
             actions.append(action)
+            if action.endswith("HIERARCHY_TRANSFER_START"):
+                pairs = {extras[i + 1]: extras[i + 2] for i in range(0, len(extras or []) - 2, 3) if extras[i] == "--es"}
+                start_pairs.update(pairs)
             encoded = encode_control(control_response(action, list(extras or [])))
             return f'Broadcasting: Intent {{}}\nBroadcast completed: result=1, data="{encoded}"'
 
@@ -531,13 +575,54 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
                 "helper_git_commit": identity["git_commit"],
                 "helper_service_instance_id": identity["service_instance_id"],
                 "helper_input_digest": identity["input_digest"],
+                "installed_metadata": {"source_state": identity["source_state"]},
+            },
+            hierarchy_diagnostic_context={
+                "run_id": "trace-run-1",
+                "scenario_id": "trace-scenario-2",
+                "step": 3,
             },
         )
         self.assertEqual(request_id, result["reqId"])
         self.assertEqual("RELIABLE_FILE_PFD", client.last_hierarchy_metadata["transportMode"])
         self.assertTrue(any(action.endswith("HIERARCHY_TRANSFER_START") for action in actions))
+        self.assertEqual(identity["input_digest"], start_pairs["expectedInputDigest"])
+        self.assertEqual("DIRTY", start_pairs["expectedSourceState"])
+        self.assertEqual("trace-run-1", start_pairs["hierarchyDiagnosticRunId"])
+        self.assertEqual("trace-scenario-2", start_pairs["hierarchyDiagnosticScenarioId"])
+        self.assertEqual("3", start_pairs["hierarchyDiagnosticStep"])
         self.assertTrue(any(action.endswith("HIERARCHY_TRANSFER_ACK") for action in actions))
         self.assertFalse(any(action.endswith("DUMP_HIERARCHY") for action in actions))
+        stages = [record["stage"] for record in client.last_hierarchy_transport_diagnostics]
+        self.assertIn("HOST_CONTROL_SEND", stages)
+        self.assertIn("HOST_CONTROL_REPLY_RECEIVED", stages)
+        self.assertIn("HOST_CONTROL_FRAME_PARSED", stages)
+        correlation_events = [record for record in client.last_hierarchy_transport_diagnostics if record["stage"] == "HOST_CONTROL_CORRELATION_VALIDATED"]
+        self.assertTrue(correlation_events)
+        self.assertTrue(all(event["query_nonce"] == event["response_query_nonce"] for event in correlation_events))
+        self.assertIn("HOST_ARTIFACT_SIZE_DIGEST_VALIDATED", stages)
+        self.assertIn("HOST_ARTIFACT_SCHEMA_CURRENTNESS_VALIDATED", stages)
+        self.assertIn("HOST_HIERARCHY_SNAPSHOT_COMPLETE", stages)
+        self.assertTrue(all(record["request_id"] == result["reqId"] for record in client.last_hierarchy_transport_diagnostics))
+        self.assertTrue(all(record["run_id"] == "trace-run-1" for record in client.last_hierarchy_transport_diagnostics))
+
+        from unittest import mock
+        with mock.patch("talkback_lib.time.monotonic_ns", side_effect=OSError("diagnostic clock unavailable")):
+            result_when_trace_fails = client.dump_hierarchy(
+                transport_mode="RELIABLE_FILE_PFD",
+                expected_helper_build_identity={
+                    "status": "COMPATIBLE_SAME_HELPER_INPUT",
+                    "execution_allowed": True,
+                    "helper_build_id": identity["build_id"],
+                    "helper_git_commit": identity["git_commit"],
+                    "helper_service_instance_id": identity["service_instance_id"],
+                    "helper_input_digest": identity["input_digest"],
+                    "installed_metadata": {"source_state": identity["source_state"]},
+                },
+                hierarchy_diagnostic_context={"run_id": "trace-run-1"},
+            )
+        self.assertTrue(result_when_trace_fails["success"])
+        self.assertEqual([], client.last_hierarchy_transport_diagnostics)
 
     def test_reliable_mode_rejects_zero_generation_on_accepted_start(self):
         client = self._client()
@@ -551,6 +636,7 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
             "helper_git_commit": identity["git_commit"],
             "helper_service_instance_id": identity["service_instance_id"],
             "helper_input_digest": identity["input_digest"],
+            "installed_metadata": {"source_state": identity["source_state"]},
         }
 
         def broadcast(_dev, action, extras=None, *, timeout=30.0):
@@ -641,6 +727,7 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
             "helper_git_commit": identity["git_commit"],
             "helper_service_instance_id": identity["service_instance_id"],
             "helper_input_digest": identity["input_digest"],
+            "installed_metadata": {"source_state": identity["source_state"]},
         }
 
         def broadcast(_dev, action, extras=None, *, timeout=30.0):
@@ -858,6 +945,7 @@ class BuildIdentityPrecheckDiagnosticTests(unittest.TestCase):
             "expected_git_commit": "c" * 40, "helper_git_commit": "c" * 40,
             "expected_helper_input_digest": "d" * 64, "helper_input_digest": "d" * 64,
             "helper_service_instance_id": self.SERVICE,
+            "installed_metadata": {"source_state": "CLEAN"},
             "request_nonce": self.NONCE, "raw_payload": self.PII,
             "arbitrary_exception_text": self.PII,
         }

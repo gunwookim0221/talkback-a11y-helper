@@ -48,6 +48,8 @@ internal object HierarchyPayloadActions {
     const val EXTRA_QUERY_NONCE = "queryNonce"
     const val EXTRA_EXPECTED_BUILD_ID = "expectedBuildId"
     const val EXTRA_EXPECTED_GIT_COMMIT = "expectedGitCommit"
+    const val EXTRA_EXPECTED_INPUT_DIGEST = "expectedInputDigest"
+    const val EXTRA_EXPECTED_SOURCE_STATE = "expectedSourceState"
     const val EXTRA_EXPECTED_SERVICE_INSTANCE_ID = "expectedServiceInstanceId"
     const val EXTRA_PAYLOAD_SHA256 = "payloadSha256"
     const val EXTRA_EXPECTED_PROCESS_EPOCH = "expectedProcessEpoch"
@@ -229,6 +231,8 @@ internal class HierarchyPayloadStore(
         queryNonce: String,
         expectedBuildId: String,
         expectedGitCommit: String,
+        expectedInputDigest: String,
+        expectedSourceState: String,
         expectedServiceInstanceId: String,
     ): JSONObject {
         pruneExpired()
@@ -239,8 +243,11 @@ internal class HierarchyPayloadStore(
             return errorResponse(requestId, clientNonce, queryNonce, "IDENTIFIER_INVALID")
         }
         if (records.containsKey(requestId)) return errorResponse(requestId, clientNonce, queryNonce, "DUPLICATE_REQUEST")
-        if (serviceId != expectedServiceInstanceId || helperIdentity.optString("build_id") != expectedBuildId ||
-            helperIdentity.optString("git_commit") != expectedGitCommit || helperIdentity.optString("source_state") != "CLEAN") {
+        if (!expectedInputDigest.matches(Regex("[0-9a-f]{64}")) || expectedSourceState !in setOf("CLEAN", "DIRTY") ||
+            serviceId != expectedServiceInstanceId || helperIdentity.optString("build_id") != expectedBuildId ||
+            helperIdentity.optString("git_commit") != expectedGitCommit ||
+            helperIdentity.optString("input_digest") != expectedInputDigest ||
+            helperIdentity.optString("source_state") != expectedSourceState) {
             return errorResponse(requestId, clientNonce, queryNonce, "IDENTITY_MISMATCH")
         }
         if (activeCollector != null) return errorResponse(requestId, clientNonce, queryNonce, "BUSY")
@@ -718,6 +725,8 @@ internal object HierarchyPayloadRuntime {
     @Volatile private var store: HierarchyPayloadStore? = null
     private var activeServiceInstanceId: String? = null
 
+    internal fun processEpochForDiagnostics(): String = processEpoch
+
     @Synchronized
     fun serviceConnected(context: Context, serviceInstanceId: String) {
         val transferRoot = File(context.noBackupFilesDir, "hierarchy-transfer")
@@ -762,50 +771,84 @@ internal object HierarchyPayloadRuntime {
         queryNonce: String,
         expectedBuildId: String,
         expectedGitCommit: String,
+        expectedInputDigest: String,
+        expectedSourceState: String,
         expectedServiceInstanceId: String,
         service: A11yHelperService,
+        trace: HierarchySnapshotTrace? = null,
     ): JSONObject {
+        trace?.mark("TRANSFER_BEGIN")
         val activeStore = store ?: return errorResponse(requestId, clientNonce, queryNonce, "SERVICE_UNAVAILABLE")
         reapExpired(activeStore)
         val accepted = activeStore.begin(
-            requestId, clientNonce, queryNonce, expectedBuildId, expectedGitCommit, expectedServiceInstanceId,
+            requestId, clientNonce, queryNonce, expectedBuildId, expectedGitCommit, expectedInputDigest,
+            expectedSourceState, expectedServiceInstanceId,
         )
-        if (accepted.optString("status") != "ACCEPTED") return accepted
+        if (accepted.optString("status") != "ACCEPTED") {
+            trace?.mark("TRANSFER_REJECTED", mapOf("status" to accepted.optString("status"), "error_code" to accepted.optString("error_code")))
+            return accepted
+        }
         val handle = HierarchyPayloadStore.RequestHandle(
             requestId,
             clientNonce,
             accepted.optLong("generation", -1L),
         )
         val submissionFailure = submitHierarchyTransfer(transferExecutor, activeStore, handle) {
+                trace?.mark("WORKER_STARTED", mapOf("generation" to handle.generation))
+                var failedStage = "STORE_MARK_COLLECTING"
                 try {
-                    if (!activeStore.markCollecting(handle)) return@submitHierarchyTransfer
+                    if (!activeStore.markCollecting(handle)) {
+                        trace?.mark("WORKER_REJECTED_STALE_HANDLE")
+                        return@submitHierarchyTransfer
+                    }
+                    trace?.mark("STORE_COLLECTING")
                     val producerSequence = activeStore.reserveCaptureSequence(handle)
                         ?: throw IllegalStateException("CAPTURE_SEQUENCE_UNAVAILABLE")
                     if (A11yHelperService.instance !== service || A11yHelperService.serviceInstanceId != expectedServiceInstanceId) {
                         activeStore.fail(handle, "SERVICE_INSTANCE_CHANGED")
+                        trace?.mark("ERROR_STAGE", mapOf("failed_stage" to "SERVICE_IDENTITY_CHECK", "reason" to "SERVICE_INSTANCE_CHANGED"))
                         return@submitHierarchyTransfer
                     }
-                    val capture = service.dumpReliableHierarchy(requestId, activeStore.processEpoch, handle.generation, expectedServiceInstanceId, producerSequence)
+                    failedStage = "SNAPSHOT_CAPTURE"
+                    trace?.mark("SNAPSHOT_CAPTURE_STARTED", mapOf("capture_sequence" to producerSequence))
+                    val capture = service.dumpReliableHierarchy(requestId, activeStore.processEpoch, handle.generation, expectedServiceInstanceId, producerSequence, trace)
+                    trace?.mark("SNAPSHOT_CAPTURE_COMPLETE", mapOf(
+                        "capture_sequence" to producerSequence,
+                        "raw_node_count" to capture.rawNodeCount,
+                        "candidate_count" to capture.candidateCount,
+                        "window_count" to capture.payload.optJSONArray("windows")?.length(),
+                    ))
                     val payloadObject = capture.payload
                     if (!payloadObject.optBoolean("success", false)) {
                         activeStore.fail(handle, payloadObject.optString("reason", "HIERARCHY_ACQUISITION_FAILED"))
+                        trace?.mark("ERROR_STAGE", mapOf("failed_stage" to "SNAPSHOT_RESULT", "reason" to payloadObject.optString("reason")))
                         return@submitHierarchyTransfer
                     }
                     if (!ReliableHierarchyCandidateContract.hasValidRootBinding(payloadObject)) {
                         activeStore.fail(handle, "TRAVERSAL_CANDIDATE_ROOT_BINDING_FAILED")
+                        trace?.mark("ERROR_STAGE", mapOf("failed_stage" to "ROOT_BINDING_VALIDATION", "reason" to "TRAVERSAL_CANDIDATE_ROOT_BINDING_FAILED"))
                         return@submitHierarchyTransfer
                     }
                     if (HierarchyPayloadEnvelope.estimatedJsonUtf8Bytes(payloadObject) > HierarchyPayloadEnvelope.MAX_PAYLOAD_BYTES) {
                         activeStore.fail(handle, "PAYLOAD_TOO_LARGE")
+                        trace?.mark("ERROR_STAGE", mapOf("failed_stage" to "PAYLOAD_SIZE_PREFLIGHT", "reason" to "PAYLOAD_TOO_LARGE"))
                         return@submitHierarchyTransfer
                     }
+                    failedStage = "PAYLOAD_SERIALIZATION"
+                    trace?.mark("PAYLOAD_SERIALIZATION_STARTED")
                     val totalSerializationStarted = System.nanoTime()
                     val bytes = payloadObject.toString().toByteArray(StandardCharsets.UTF_8)
                     val totalSerializationElapsedNanos = System.nanoTime() - totalSerializationStarted
                     if (bytes.size > HierarchyPayloadEnvelope.MAX_PAYLOAD_BYTES) {
                         activeStore.fail(handle, "PAYLOAD_TOO_LARGE")
+                        trace?.mark("ERROR_STAGE", mapOf("failed_stage" to "PAYLOAD_SERIALIZATION", "reason" to "PAYLOAD_TOO_LARGE"))
                         return@submitHierarchyTransfer
                     }
+                    trace?.mark("PAYLOAD_SERIALIZATION_COMPLETE", mapOf(
+                        "payload_bytes" to bytes.size,
+                        "payload_sha256" to HierarchyPayloadEnvelope.sha256(bytes),
+                        "serialization_elapsed_ms" to totalSerializationElapsedNanos / 1_000_000.0,
+                    ))
                     Log.i(
                         "A11Y_HELPER",
                         "[HIERARCHY_CANDIDATE_METRICS] requestId=$requestId " +
@@ -819,13 +862,21 @@ internal object HierarchyPayloadRuntime {
                             "candidateSerializationElapsedMs=${capture.candidateSerializationElapsedNanos / 1_000_000.0} " +
                             "totalSerializationElapsedMs=${totalSerializationElapsedNanos / 1_000_000.0}"
                     )
-                    activeStore.publish(handle, bytes)
+                    failedStage = "STORE_PUBLISH"
+                    trace?.mark("STORE_PUBLISH_STARTED", mapOf("payload_bytes" to bytes.size))
+                    val published = activeStore.publish(handle, bytes)
+                    trace?.mark("STORE_PUBLISH_COMPLETE", mapOf("status" to published.optString("status"), "artifact_bytes" to published.optInt("artifact_bytes", 0)))
                 } catch (error: Throwable) {
+                    trace?.mark("ERROR_STAGE", mapOf("failed_stage" to failedStage, "error_type" to error.javaClass.simpleName, "reason" to error.message?.take(80)))
                     activeStore.fail(handle, if (error.message == "PAYLOAD_TOO_LARGE") "PAYLOAD_TOO_LARGE" else "COLLECTION_FAILED")
                 } finally {
                     activeStore.workerFinished(handle)
                 }
             }
+        trace?.mark(if (submissionFailure == null) "WORKER_SUBMISSION_RETURNED" else "WORKER_SUBMISSION_FAILED", mapOf(
+            "status" to submissionFailure?.optString("status"),
+            "error_code" to submissionFailure?.optString("error_code"),
+        ))
         return submissionFailure ?: accepted
     }
 
@@ -896,9 +947,26 @@ class HierarchyPayloadProvider : ContentProvider() {
                 context?.checkCallingPermission(android.Manifest.permission.DUMP) != PackageManager.PERMISSION_GRANTED)) {
             throw SecurityException("CALLER_NOT_ALLOWED")
         }
-        val file = HierarchyPayloadRuntime.resolve(uri)
-            ?: throw java.io.FileNotFoundException("READY_HIERARCHY_NOT_FOUND")
-        return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        val trace = HierarchySnapshotDiagnostics.create(
+            uri.pathSegments.getOrNull(2).orEmpty(),
+            readCurrentConnectionState = false,
+        )
+        trace.mark("PROVIDER_OPEN_FILE", mapOf("mode" to mode))
+        val file = try {
+            HierarchyPayloadRuntime.resolve(uri)
+                ?: throw java.io.FileNotFoundException("READY_HIERARCHY_NOT_FOUND")
+        } catch (error: Throwable) {
+            trace.mark("ERROR_STAGE", mapOf("failed_stage" to "PROVIDER_RESOLVE", "error_type" to error.javaClass.simpleName))
+            throw error
+        }
+        val descriptor = try {
+            ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        } catch (error: Throwable) {
+            trace.mark("ERROR_STAGE", mapOf("failed_stage" to "PROVIDER_OPEN_DESCRIPTOR", "error_type" to error.javaClass.simpleName))
+            throw error
+        }
+        trace.mark("PROVIDER_FILE_RETURNED", mapOf("file_length" to file.length()))
+        return descriptor
     }
 
     override fun getType(uri: Uri): String = HierarchyPayloadActions.MIME_TYPE

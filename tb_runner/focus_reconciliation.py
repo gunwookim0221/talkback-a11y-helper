@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Mapping
 
+from tb_runner.candidate_lifecycle import classify_visit_identity
 from tb_runner.traversal_reliability import observed_focus_instance, instance_id, normalized, normalized_bounds
 
 
@@ -244,6 +245,8 @@ def reconcile_focus(
     planning_consumed: bool,
     physical_progress_confirmed: bool | None = None,
     visited_instance_ids_before: Iterable[str] = (),
+    visit_identity_aliases: Mapping[str, str] | None = None,
+    visit_identity_alias_provenance: Mapping[str, str] | None = None,
     consumed_cluster_signatures: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Build structured reconciliation facts without changing row semantics."""
@@ -352,13 +355,21 @@ def reconcile_focus(
     selected_matches_actual = bool(selected_id and actual_id and selected_id == actual_id)
     consumed_clusters = {str(item or "").strip() for item in consumed_cluster_signatures if str(item or "").strip()}
     visited_before = set(visited_instance_ids_before)
-    actual_focus_new_to_run = bool(actual_id and actual_id not in visited_before)
+    visit_identity_resolution = classify_visit_identity(
+        actual_id, visited_before, visit_identity_aliases, visit_identity_alias_provenance,
+    )
+    identity_ambiguous = visit_identity_resolution == "AMBIGUOUS"
+    actual_focus_new_to_run = visit_identity_resolution == "NEW_VISIT"
     effective_physical_visit = bool(physical_visit_confirmed and strict)
     if focus_transition_status == "CONFIRMED_MOVED":
         effective_physical_visit = True
     elif focus_transition_status in {"CONFIRMED_UNCHANGED", "AMBIGUOUS"}:
         effective_physical_visit = False
-    if focus_transition_status == "CONFIRMED_MOVED":
+    if identity_ambiguous:
+        effective_physical_visit = False
+        visit_record_status = "NOT_RECORDED_AMBIGUOUS"
+        progress_status = "NO_PROGRESS_AMBIGUOUS"
+    elif focus_transition_status == "CONFIRMED_MOVED":
         visit_record_status = "RECORDED" if actual_focus_new_to_run else "ALREADY_VISITED"
         progress_status = "PROGRESS" if actual_focus_new_to_run else "NO_PROGRESS_DUPLICATE_INSTANCE"
     elif focus_transition_status == "CONFIRMED_UNCHANGED":
@@ -404,7 +415,9 @@ def reconcile_focus(
         "requested_target_label": str(row.get("smart_nav_requested_label", "") or "").strip(),
         "actual_focus_before_id": before_id,
         "actual_focus_instance_id": actual_id,
-        "reconciled_visit_instance_id": actual_id if effective_physical_visit and strict else "",
+        "reconciled_visit_instance_id": (
+            actual_id if effective_physical_visit and strict and not identity_ambiguous else ""
+        ),
         "mapped_candidate_instance_id": matched_id,
         "mapping_confidence": confidence,
         "candidate_in_expected_population": in_expected,
@@ -413,6 +426,7 @@ def reconcile_focus(
         "focus_sequence_changed": sequence_changed,
         "focus_transition_status": focus_transition_status,
         "actual_focus_new_to_run": actual_focus_new_to_run,
+        "visit_identity_resolution": visit_identity_resolution,
         "physical_visit_confirmed": effective_physical_visit,
         "visit_record_status": visit_record_status,
         "progress_status": progress_status,
@@ -423,7 +437,7 @@ def reconcile_focus(
             and sequence_changed and in_expected and actual_focus_new_to_run
         ),
         "planning_consumed": bool(planning_consumed),
-        "selected_candidate_consumed": bool(physical_visit_confirmed and strict and selected_matches_actual and in_expected),
+        "selected_candidate_consumed": bool(effective_physical_visit and selected_matches_actual and in_expected),
         "selected_candidate_state": "focused" if selected_matches_actual else ("selected_but_not_focused" if selected_id else "none"),
         "expected_target_source": "CONTROLLED_TARGET_INTENT" if controlled_intent is not None else "GENERIC_RECONCILIATION",
         "controlled_focus_intent_status": controlled_intent_status,
@@ -452,6 +466,7 @@ def apply_reconciliation_to_row(row: dict[str, Any], result: dict[str, Any]) -> 
         "focus_sequence_changed": bool(result.get("focus_sequence_changed", False)),
         "focus_reconciliation_progress": bool(result.get("reconciliation_progress", False)),
         "visit_record_status": result.get("visit_record_status", "UNAVAILABLE"),
+        "visit_identity_resolution": result.get("visit_identity_resolution", "UNAVAILABLE"),
         "progress_status": result.get("progress_status", "UNAVAILABLE"),
         "selected_candidate_consumed": bool(result.get("selected_candidate_consumed", False)),
         "selected_candidate_state": result.get("selected_candidate_state", "none"),

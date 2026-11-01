@@ -462,6 +462,31 @@ def test_pre_decision_cursor_links_current_snapshot_focus(monkeypatch):
     assert row["actual_focus_node"]["viewIdResourceName"] == f"{PACKAGE}:id/more"
 
 
+def test_pre_decision_does_not_reuse_inventory_invalidated_by_scroll(monkeypatch):
+    raw = _production_raw(focused="sensor")
+    row = _row_for(raw, request_id="pre-scroll-request")
+    runtime = FrontierShadowRuntime(run_id=RUN_ID, scenario_id=SCENARIO)
+    capture_reconciled_inventory(
+        runtime, row=row, candidates=[], scenario_id=SCENARIO,
+        raw_nodes=raw["nodes"], projection_complete=True,
+    )
+    client = SimpleNamespace(_phase6c2_frontier_shadow_runtime=runtime)
+    monkeypatch.setattr(collection_flow, "clock_for", lambda _client: SimpleNamespace(current=lambda _marker: False))
+
+    decision = collection_flow._frontier_shadow_pre_decision(
+        client=client, state=SimpleNamespace(previous_step_row=row), step_idx=4,
+        tab_cfg={"scenario_id": SCENARIO, "scenario_type": "content"},
+    )
+
+    record = runtime._pending[decision]["record"]
+    assert record["state_id"] is None
+    assert record["observation_ref"]["state_resolution"] == "UNRESOLVED"
+    assert record["observation_ref"]["production_capture_id"] is None
+    assert record["observation_ref"]["request_id"] is None
+    assert record["frontier_items"] == []
+    assert record["evidence_complete"] is False
+
+
 def test_initial_pre_decision_seeds_step_zero_from_current_production_capture(monkeypatch):
     raw = _production_raw(focused="sensor")
     raw.update(scenario_id=SCENARIO, scenario_run_id=RUN_ID,

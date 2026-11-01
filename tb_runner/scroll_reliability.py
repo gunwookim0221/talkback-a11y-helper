@@ -233,17 +233,60 @@ def emit(client,event,payload):
             log(f"[SCROLL][evidence_failed] error='{type(exc).__name__}'")
 
 
-def verified_scroll(client,dev,scenario_id,step_idx,before=None,output_base_dir=""):
+def _verified_scroll_target(before, resolved_owner=None):
+    """Return an exact current scroll target or a fail-closed reason."""
+    capability = before.get("capability") if isinstance(before, dict) else None
+    capability = capability if isinstance(capability, dict) else {}
+    if (capability.get("vertical_can_scroll_forward", capability.get("can_scroll_forward")) is not True
+            or capability.get("contradictory") is True):
+        return None, "scroll_opportunity_unverified"
+
+    if resolved_owner is not None:
+        if (not isinstance(resolved_owner, dict) or resolved_owner.get("status") != "RESOLVED"
+                or not str(resolved_owner.get("identity") or "").strip()):
+            return None, "scroll_owner_unresolved"
+        candidate = resolved_owner
+    else:
+        candidate = capability.get("container")
+        if not isinstance(candidate, dict):
+            return None, "scroll_owner_unresolved"
+
+    axis = str(candidate.get("axis") or "").strip().upper()
+    path = str(candidate.get("path") or "").strip()
+    bounds = normalized_bounds(candidate.get("boundsInScreen", candidate.get("bounds")))
+    state = candidate.get("state") if isinstance(candidate.get("state"), dict) else candidate
+    if axis not in {"VERTICAL", "BIDIRECTIONAL"} or not path or not bounds:
+        return None, "scroll_owner_unresolved"
+    if (state.get("scrollable", state.get("isScrollable", True)) is False
+            or state.get("visible", state.get("visibleToUser", True)) is False
+            or state.get("enabled", state.get("isEnabled", True)) is False):
+        return None, "scroll_owner_unresolved"
+    return {"path": path, "bounds": bounds, "axis": axis}, ""
+
+
+def _blocked_scroll_transition(before, scenario_id, reason):
+    capability = before.get("capability") if isinstance(before.get("capability"), dict) else {}
+    view = before.get("viewport") if isinstance(before.get("viewport"), dict) else viewport(
+        before.get("nodes", []), scenario_id)
+    result = transition(view, view, False, capability)
+    result.update(
+        status="SCROLL_BLOCKED",
+        action_state="SCROLL_NOT_DISPATCHED",
+        action_success=False,
+        action_attempted=False,
+        action_target={"mode": "UNRESOLVED_CONTAINER", "container_path": None, "container_bounds": None},
+        action_result={"success": False, "status": "blocked", "reason": reason,
+                       "actionSupported": False, "actionAttempted": False},
+        action_request_id=None,
+        action_result_request_id=None,
+        action_result_correlated=False,
+        termination_reason=reason,
+    )
+    return result
+
+
+def verified_scroll(client,dev,scenario_id,step_idx,before=None,output_base_dir="",resolved_owner=None):
     before=before or capture(client,dev,scenario_id,step_index=step_idx,evidence="verified_scroll_before")
-    target=before["capability"]["container"]
-    emit(client,"SCROLL_ATTEMPTED",dict(scenario_id=scenario_id,step_index=step_idx,capability=before["capability"],viewport=before["viewport"]))
-    action_target = {"mode": "ACCESSIBILITY_FALLBACK", "container_path": None, "container_bounds": None}
-    if target and target.get("path"):
-        action_target = {
-            "mode": "EXPLICIT_CONTAINER",
-            "container_path": str(target["path"]),
-            "container_bounds": normalized_bounds(target.get("boundsInScreen")) or None,
-        }
     # Clear any prior receipt before calling a client wrapper. Production
     # A11yAdbClient also clears these fields at its public dispatch boundary.
     for name, value in (("last_scroll_request_id", ""), ("last_scroll_result", {})):
@@ -252,16 +295,33 @@ def verified_scroll(client,dev,scenario_id,step_idx,before=None,output_base_dir=
                 setattr(client, name, value)
             except (AttributeError, TypeError):
                 pass
+    target, target_error = _verified_scroll_target(before, resolved_owner)
+    if target is None:
+        blocked = _blocked_scroll_transition(before, scenario_id, target_error)
+        log(f"[SCROLL][blocked] scenario='{scenario_id}' step={step_idx} reason='{target_error}' action_dispatched=false")
+        return blocked, before
+
     try:
         parameters = inspect.signature(client.scroll).parameters
         accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters.values())
-        kwargs = dict(dev=dev, direction="down")
-        if target and target.get("path"):
-            kwargs.update(container_path=target["path"],container_bounds=normalized_bounds(target.get("boundsInScreen")))
-        else:
-            kwargs["accessibility_fallback"] = True
-        kwargs = {k:v for k,v in kwargs.items() if accepts_kwargs or k in parameters}
-        ok=client.scroll(**kwargs)
+        accepts_target = accepts_kwargs or {"container_path", "container_bounds"} <= set(parameters)
+    except (TypeError, ValueError, AttributeError):
+        accepts_target = False
+    if not accepts_target:
+        reason = "targeted_scroll_dispatch_unsupported"
+        blocked = _blocked_scroll_transition(before, scenario_id, reason)
+        log(f"[SCROLL][blocked] scenario='{scenario_id}' step={step_idx} reason='{reason}' action_dispatched=false")
+        return blocked, before
+
+    action_target = {
+        "mode": "EXPLICIT_CONTAINER",
+        "container_path": target["path"],
+        "container_bounds": target["bounds"],
+    }
+    emit(client,"SCROLL_ATTEMPTED",dict(scenario_id=scenario_id,step_index=step_idx,
+        capability=before.get("capability", {}),viewport=before.get("viewport", {}),action_target=action_target))
+    try:
+        ok=client.scroll(dev=dev,direction="down",container_path=target["path"],container_bounds=target["bounds"])
         action=deepcopy(getattr(client,"last_scroll_result",{}) or {})
     except Exception as exc:
         ok=False; action=dict(error=type(exc).__name__)
@@ -278,7 +338,47 @@ def verified_scroll(client,dev,scenario_id,step_idx,before=None,output_base_dir=
     except Exception as exc:
         after=dict(nodes=[],capability=capability([],{}),viewport=viewport([],scenario_id))
         action["after_dump_error"]=type(exc).__name__
-    result=transition(before["viewport"],after["viewport"],ok,after["capability"])
+    targeted_result_correlated = bool(
+        action_request_id and action_result_request_id == action_request_id
+        and action.get("action") == "SCROLL_FORWARD"
+        and action.get("direction") == "down"
+        and action.get("actionAttempted") is True
+        and action.get("explicitTarget") is True
+        and str(action.get("scrollContainerPath") or "").strip() == target["path"]
+        and action.get("success") is bool(ok)
+    )
+    owner_result_unverified = bool(
+        (ok or action.get("actionAttempted") is True) and not targeted_result_correlated
+    )
+    result=transition(before["viewport"],after["viewport"],
+                      bool(ok) and not owner_result_unverified,after["capability"])
+    if owner_result_unverified:
+        result.update(
+            status="SCROLL_UNVERIFIED",
+            action_state="SCROLL_ATTEMPTED_UNVERIFIED_OWNER",
+            # Keep the helper's raw response in action_result, but do not let
+            # an unbound fallback count as an accepted scroll operation.
+            action_success=False,
+            observed_action_success=bool(ok),
+            target_dispatch_verified=False,
+            termination_reason="scroll_owner_unverified",
+        )
+        blocker = {
+            "category": "AUTHORITY",
+            "reason": "SCROLL_RESULT_DID_NOT_CONFIRM_EXPLICIT_CURRENT_OWNER",
+            "scenario_id": scenario_id,
+            "step_index": step_idx,
+            "action_request_id": action_request_id or None,
+            "result_request_id": action_result_request_id or None,
+            "requested_container_path": target["path"],
+            "reported_container_path": action.get("scrollContainerPath"),
+            "explicit_target": action.get("explicitTarget"),
+            "action_attempted": action.get("actionAttempted"),
+            "viewport_changed": result.get("viewport_changed"),
+        }
+        log("PHASE6F_ACCEPTANCE_BLOCKER " + json.dumps(blocker, ensure_ascii=False, sort_keys=True))
+    else:
+        result["target_dispatch_verified"] = targeted_result_correlated
     result.update(scenario_id=scenario_id,step_index=step_idx,
                   capability_before=before["capability"],capability_after=after["capability"],
                   action_type="SCROLL_FORWARD", direction="down",
@@ -316,7 +416,7 @@ def verified_scroll(client,dev,scenario_id,step_idx,before=None,output_base_dir=
     result["newly_observed_count"] = len(result["newly_observed"])
     result["reappeared"] = sorted(set(result["new"]) & seen)
     records.append(result)
-    log(f"[SCROLL_TRANSITION] scenario='{scenario_id}' source={before['capability']['source']} status={result['status']} "
+    log(f"[SCROLL_TRANSITION] scenario='{scenario_id}' source={before['capability'].get('source', 'unknown')} status={result['status']} "
         f"before_instances={before['viewport']['count']} after_instances={after['viewport']['count']} "
         f"persisted={result['persisted_count']} new={result['new_count']} disappeared={result['disappeared_count']} viewport_changed={str(result['viewport_changed']).lower()}")
     emit(client,"SCROLL_TRANSITION",result)

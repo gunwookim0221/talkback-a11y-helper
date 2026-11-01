@@ -140,6 +140,9 @@ class A11yCommandReceiver : BroadcastReceiver() {
         val requestId = intent.getStringExtra(HierarchyPayloadActions.EXTRA_REQUEST_ID).orEmpty()
         val clientNonce = intent.getStringExtra(HierarchyPayloadActions.EXTRA_CLIENT_NONCE).orEmpty()
         val queryNonce = intent.getStringExtra(HierarchyPayloadActions.EXTRA_QUERY_NONCE).orEmpty()
+        val trace = HierarchySnapshotDiagnostics.fromIntent(intent, requestId)
+        trace.mark("DEVICE_RECEIVE", mapOf("action" to action, "query_nonce" to queryNonce))
+        trace.mark("HANDLER_ENTER", mapOf("action" to action))
         val response = when (action) {
             HierarchyPayloadActions.CAPABILITIES -> HierarchyPayloadRuntime.capabilities(queryNonce)
             HierarchyPayloadActions.START -> {
@@ -153,10 +156,13 @@ class A11yCommandReceiver : BroadcastReceiver() {
                         queryNonce = queryNonce,
                         expectedBuildId = intent.getStringExtra(HierarchyPayloadActions.EXTRA_EXPECTED_BUILD_ID).orEmpty(),
                         expectedGitCommit = intent.getStringExtra(HierarchyPayloadActions.EXTRA_EXPECTED_GIT_COMMIT).orEmpty(),
+                        expectedInputDigest = intent.getStringExtra(HierarchyPayloadActions.EXTRA_EXPECTED_INPUT_DIGEST).orEmpty(),
+                        expectedSourceState = intent.getStringExtra(HierarchyPayloadActions.EXTRA_EXPECTED_SOURCE_STATE).orEmpty(),
                         expectedServiceInstanceId = intent.getStringExtra(
                             HierarchyPayloadActions.EXTRA_EXPECTED_SERVICE_INSTANCE_ID,
                         ).orEmpty(),
                         service = service,
+                        trace = trace,
                     )
                 }
             }
@@ -177,10 +183,27 @@ class A11yCommandReceiver : BroadcastReceiver() {
             else -> org.json.JSONObject().put("status", "FAILED").put("completed", true)
                 .put("payload_complete", false).put("error_code", "ACTION_UNSUPPORTED")
         }
+        trace.mark("HANDLER_COMPLETE", mapOf(
+            "action" to action,
+            "status" to response.optString("status"),
+            "error_code" to response.optString("error_code").takeIf { it.isNotBlank() },
+        ))
+        if (action == HierarchyPayloadActions.CAPABILITIES) {
+            HelperLifecycleDiagnostics.recordCapabilitiesResponse(
+                requestId = requestId.takeIf { it.isNotBlank() },
+                queryNonce = queryNonce,
+                response = response,
+            )
+        }
         val encoded = HierarchyControlCodec.encode(response)
         val ok = response.optString("status") in setOf("OK", "ACCEPTED", "COLLECTING", "WRITING", "READY", "ACKED", "CANCELLED")
         setResultCode(if (encoded != null && ok) HierarchyPayloadActions.RESULT_OK else HierarchyPayloadActions.RESULT_REJECTED)
         setResultData(encoded)
+        trace.mark("CONTROL_RESULT_SET", mapOf(
+            "action" to action,
+            "encoded_bytes" to (encoded?.length ?: 0),
+            "result_code" to resultCode,
+        ))
         Log.i(
             TAG,
             "[HIERARCHY_TRANSFER] action=$action request_id=${requestId.take(32)} status=${response.optString("status")} " +
@@ -876,11 +899,13 @@ class A11yCommandReceiver : BroadcastReceiver() {
         val reqId = parseReqId(intent)
         val service = A11yHelperService.instance
         if (service == null) {
+            HelperLifecycleDiagnostics.recordPingUnavailable(reqId)
             logFailure("PING_RESULT", reqId, "Accessibility Service is null or not running")
             return
         }
 
         val payload = buildPingPayload(reqId).toString()
+        HelperLifecycleDiagnostics.recordPingResponse(org.json.JSONObject(payload))
         Log.i(TAG, "PING_RESULT $payload")
     }
 

@@ -188,6 +188,7 @@ def test_phase5b_preflight_block_happens_before_action_sent_or_helper_dispatch(c
 
 def test_phase5b_bounds_only_recovery_block_happens_before_action_sent_or_helper_dispatch(client, monkeypatch):
     evidence = []
+    client._production_progress_pre_dispatch = lambda **_kwargs: evidence.append('checkpoint')
     monkeypatch.setattr(client, '_evidence_action_sent', lambda **kw:evidence.append('sent'))
     monkeypatch.setattr(client._helper_bridge, 'request_focus_command',
         lambda *a,**kw:pytest.fail('preflight-blocked bounds focus reached Helper'))
@@ -197,6 +198,23 @@ def test_phase5b_bounds_only_recovery_block_happens_before_action_sent_or_helper
     assert result['dispatch_status'] == 'BLOCKED_BEFORE_DISPATCH'
     assert result['action'] == 'FOCUS_IN_BOUNDS' and result['reqId']
     assert evidence == []
+
+
+@pytest.mark.parametrize('action', ['target', 'recovery'])
+def test_progress_checkpoint_is_after_preflight_and_before_dispatch(client, monkeypatch, action):
+    events = []
+    client._production_progress_pre_dispatch = lambda **_kwargs: events.append('checkpoint')
+    monkeypatch.setattr(client, '_evidence_action_sent', lambda **_kwargs: events.append('sent'))
+    monkeypatch.setattr(client._helper_bridge, 'request_focus_command',
+                        lambda _dev, _action, request, _extras: events.append('dispatch')
+                        or {'reqId': request, 'success': True, 'status': 'TARGET_MATCHED'})
+    if action == 'target':
+        client._phase5b_preflight_target_focus = lambda **_kwargs: events.append('preflight') or True
+        client._target_focus_commit_impl(target={'bounds': '[1,2][3,4]'})
+    else:
+        client._phase5b_preflight_bounds_focus = lambda **_kwargs: events.append('preflight') or True
+        client.focus_in_bounds(bounds='[1,2][3,4]')
+    assert events == ['preflight', 'checkpoint', 'sent', 'dispatch']
 
 
 def test_phase5b_secondary_activation_block_is_pre_dispatch_and_not_retried(client, monkeypatch):

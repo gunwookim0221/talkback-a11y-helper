@@ -54,7 +54,8 @@ class HierarchyPayloadTransferTest {
             helperIdentity = helperIdentity,
         )
         store.serviceConnected(serviceId)
-        val accepted = store.begin(requestId, clientNonce, initialQueryNonce, buildId, gitCommit, serviceId)
+        val accepted = store.begin(requestId, clientNonce, initialQueryNonce, buildId, gitCommit,
+            helperIdentity.getString("input_digest"), helperIdentity.getString("source_state"), serviceId)
         assertEquals("ACCEPTED", accepted.getString("status"))
         val handle = HierarchyPayloadStore.RequestHandle(requestId, clientNonce, accepted.getLong("generation"))
         assertTrue(store.markCollecting(handle))
@@ -180,7 +181,8 @@ class HierarchyPayloadTransferTest {
             elapsedRealtimeMs = { 100L }, helperIdentity = helperIdentity,
         )
         store.serviceConnected(serviceId)
-        val accepted = store.begin(requestId, clientNonce, initialQueryNonce, buildId, gitCommit, serviceId)
+        val accepted = store.begin(requestId, clientNonce, initialQueryNonce, buildId, gitCommit,
+            helperIdentity.getString("input_digest"), helperIdentity.getString("source_state"), serviceId)
         val handle = HierarchyPayloadStore.RequestHandle(requestId, clientNonce, accepted.getLong("generation"))
         assertTrue(store.markCollecting(handle))
         val result = store.publish(handle, samplePayload(store.processEpoch, handle.generation, 1L))
@@ -206,7 +208,8 @@ class HierarchyPayloadTransferTest {
         val ready = beginAndPublish()
         val wrongNonce = ready.store.status(requestId, "0".repeat(32), "2".repeat(32))
         assertEquals("REQUEST_IDENTITY_MISMATCH", wrongNonce.getString("error_code"))
-        val duplicate = ready.store.begin(requestId, "3".repeat(32), "4".repeat(32), buildId, gitCommit, serviceId)
+        val duplicate = ready.store.begin(requestId, "3".repeat(32), "4".repeat(32), buildId, gitCommit,
+            helperIdentity.getString("input_digest"), helperIdentity.getString("source_state"), serviceId)
         assertEquals("DUPLICATE_REQUEST", duplicate.getString("error_code"))
         assertEquals("READY", ready.store.status(requestId, clientNonce, "5".repeat(32)).getString("status"))
     }
@@ -311,17 +314,26 @@ class HierarchyPayloadTransferTest {
     }
 
     @Test
-    fun capabilityAndBeginRequireTheCurrentServiceAndCleanMatchingBuild() {
+    fun capabilityAndBeginRequireTheCurrentServiceAndExactBuildInputs() {
         val store = HierarchyPayloadStore(
             temporaryFolder.newFolder(),
             UUID.randomUUID().toString(),
             helperIdentity = helperIdentity.put("source_state", "DIRTY"),
         )
         store.serviceConnected(serviceId)
-        val rejected = store.begin(requestId, clientNonce, initialQueryNonce, buildId, gitCommit, serviceId)
-        assertEquals("IDENTITY_MISMATCH", rejected.getString("error_code"))
+        val accepted = store.begin(requestId, clientNonce, initialQueryNonce, buildId, gitCommit,
+            helperIdentity.getString("input_digest"), "DIRTY", serviceId)
+        assertEquals("ACCEPTED", accepted.getString("status"))
+        val changedDigest = store.begin("1".repeat(32), "2".repeat(32), "3".repeat(32), buildId, gitCommit,
+            "e".repeat(64), "DIRTY", serviceId)
+        assertEquals("IDENTITY_MISMATCH", changedDigest.getString("error_code"))
+        val changedState = store.begin("4".repeat(32), "5".repeat(32), "6".repeat(32), buildId, gitCommit,
+            helperIdentity.getString("input_digest"), "CLEAN", serviceId)
+        assertEquals("IDENTITY_MISMATCH", changedState.getString("error_code"))
         val caps = store.capabilities("9".repeat(32))
         assertEquals("OK", caps.getString("status"))
+        assertFalse(caps.has("lifecycle_event"))
+        assertFalse(caps.has("lifecycle_observation"))
         assertEquals(buildId, caps.getJSONObject("helper_build_identity").getString("build_id"))
         assertEquals("service-hierarchy-v2", caps.getString("payload_schema_version"))
         assertEquals("service-hierarchy-v1", caps.getString("diagnostic_schema_version"))
@@ -339,6 +351,22 @@ class HierarchyPayloadTransferTest {
         assertTrue((0 until advertised.length()).any {
             advertised.getString(it) == ReliableHierarchyCandidateContract.ROOT_CAPTURE_ID_VERSION
         })
+    }
+
+    @Test
+    fun capabilityServiceIdentityRotatesIndependentlyOfProcessEpoch() {
+        val processEpoch = UUID.randomUUID().toString()
+        val store = HierarchyPayloadStore(temporaryFolder.newFolder(), processEpoch)
+        store.serviceConnected("connection-a")
+        val before = store.capabilities("a".repeat(32))
+        store.serviceConnected("connection-b")
+        val after = store.capabilities("b".repeat(32))
+
+        assertEquals(processEpoch, before.getString("process_epoch"))
+        assertEquals(processEpoch, after.getString("process_epoch"))
+        assertEquals("connection-a", before.getString("service_instance_id"))
+        assertEquals("connection-b", after.getString("service_instance_id"))
+        assertFalse(after.has("lifecycle_observation"))
     }
 
     @Test

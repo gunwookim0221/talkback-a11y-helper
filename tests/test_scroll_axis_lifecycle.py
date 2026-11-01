@@ -77,6 +77,19 @@ def pair(ns=None,shifted=None):
     t.observe(obs(old),0);t.observe(obs(new),1)
     return t,old,new
 
+def verified_phase6e_scroll_evidence(**changes):
+    evidence=dict(schema_version='phase6e-scroll-evidence.v1',classification='SCROLL_MOVED',
+        valid_for_edge=True,owner_status='RESOLVED',action_type='SCROLL_FORWARD',
+        owner=dict(class_name='GridView',resource_id='',axis='VERTICAL'),
+        action_request_id='scroll-request',result_request_id='scroll-request',
+        action_result_correlated=True,dispatch_receipt_correlated=True,action_dispatched=True,
+        action_success=True,source_capture_current=True,result_capture_current=True,
+        capture_linked_to_invocation=True,source_capture_id='source-capture',
+        result_capture_id='result-capture',source_state_id='source-state',
+        result_state_id='result-state',meaningful_change=True,boundary=False)
+    evidence.update(changes)
+    return evidence
+
 def test_relocated_old_alias_stale_and_successor_obligation_retained():
     t,old,new=pair()
     assert len(t.lifecycle.aliases)==4
@@ -142,6 +155,49 @@ def test_real_focus_old_covers_logical_successor_without_new_actual_credit():
     assert t.latest['active_unseen']==0 and t.latest['visited_candidates']==4
     assert t.decision()=='content_completed'
     assert all(instance_id(candidate(n,'s')) not in t.visited for n in new)
+
+
+def test_verified_current_scroll_binds_relocation_alias_for_visit_identity():
+    from tb_runner.candidate_lifecycle import classify_visit_identity
+    t=ContentTerminal('s');old,new=nodes(),nodes(-46)
+    t.observe(obs(old),0)
+    t.observe(obs(new),1,scroll={'status':'SCROLL_MOVED'},
+              visit_scroll_evidence=verified_phase6e_scroll_evidence())
+    old_id=instance_id(candidate(old[0],'s'));new_id=instance_id(candidate(new[0],'s'))
+    assert t.lifecycle.aliases[old_id]==new_id
+    assert t.lifecycle.visit_alias_provenance[old_id]=='VERIFIED_PHASE6E_SCROLL'
+    assert classify_visit_identity(new_id,{old_id},t.lifecycle.aliases,
+                                   t.lifecycle.visit_alias_provenance)=='ALREADY_VISITED'
+
+
+@pytest.mark.parametrize('mutation',[
+    {'result_capture_current':False},
+    {'result_state_id':''},
+    {'result_request_id':'different-request'},
+    {'owner':{'class_name':'OtherContainer','resource_id':'','axis':'VERTICAL'}},
+])
+def test_stale_or_unresolved_scroll_cannot_authorize_visit_alias(mutation):
+    from tb_runner.candidate_lifecycle import classify_visit_identity
+    t=ContentTerminal('s');old,new=nodes(),nodes(-46)
+    t.observe(obs(old),0)
+    evidence=verified_phase6e_scroll_evidence(**mutation)
+    t.observe(obs(new),1,scroll={'status':'SCROLL_MOVED'},visit_scroll_evidence=evidence)
+    old_id=instance_id(candidate(old[0],'s'));new_id=instance_id(candidate(new[0],'s'))
+    assert t.lifecycle.aliases[old_id]==new_id
+    assert t.lifecycle.visit_alias_provenance[old_id]=='UNVERIFIED_RELOCATION'
+    assert classify_visit_identity(new_id,{old_id},t.lifecycle.aliases,
+                                   t.lifecycle.visit_alias_provenance)=='AMBIGUOUS'
+
+def test_missing_scroll_evidence_cannot_authorize_visit_alias():
+    from tb_runner.candidate_lifecycle import classify_visit_identity
+    t=ContentTerminal('s');old,new=nodes(),nodes(-46)
+    t.observe(obs(old),0)
+    t.observe(obs(new),1,scroll={'status':'SCROLL_MOVED'})
+    old_id=instance_id(candidate(old[0],'s'));new_id=instance_id(candidate(new[0],'s'))
+    assert t.lifecycle.aliases[old_id]==new_id
+    assert t.lifecycle.visit_alias_provenance[old_id]=='UNVERIFIED_RELOCATION'
+    assert classify_visit_identity(new_id,{old_id},t.lifecycle.aliases,
+                                   t.lifecycle.visit_alias_provenance)=='AMBIGUOUS'
 
 def test_stale_only_unseen_completes_after_actual_successors_visited():
     t,old,new=pair()

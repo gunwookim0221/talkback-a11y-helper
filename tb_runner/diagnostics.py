@@ -700,7 +700,8 @@ class StopEvaluator:
         reason: str,
     ) -> dict[str, Any]:
         repeat_trigger_candidate = bool(
-            repeat_eval["bounded_two_card_loop"]
+            (no_progress_eval.get("no_progress_class") == "production_no_progress" and same_count >= 4)
+            or repeat_eval["bounded_two_card_loop"]
             or (no_progress_eval["hard_no_progress"] and repeat_eval["strict_duplicate"])
             or (
                 repeat_eval["semantic_duplicate"]
@@ -802,7 +803,13 @@ class StopEvaluator:
             stop = True
             reason = "move_terminal"
         elif not stop and bool(effective_stop_policy.get("stop_on_repeat_no_progress", True)):
-            if repeat_eval["bounded_two_card_loop"]:
+            if no_progress_eval.get("no_progress_class") == "production_no_progress":
+                if same_count >= 4:
+                    stop = True
+                    reason = "repeat_no_progress"
+            elif no_progress_eval.get("no_progress_class") == "production_unverified":
+                pass
+            elif repeat_eval["bounded_two_card_loop"]:
                 stop = True
                 reason = "bounded_two_card_loop"
             elif (
@@ -870,6 +877,15 @@ class StopEvaluator:
             recent_semantic_unique_count=recent_semantic_unique_count,
         )
         physical_progress = getattr(progress_override, "physical_progress", None)
+        production_status = (progress_override.get("production_progress_status")
+                             if isinstance(progress_override, dict) else None)
+        production_mode = production_status in {"UNKNOWN", "NO_PROGRESS", "NEW_VISIT",
+                                                "STATE_TRANSITION", "SCROLL_CHANGE"}
+        if production_mode:
+            # A helper terminal/ACK is not an authoritative current traversal
+            # completion. The content/scroll terminal phase still sees the raw
+            # result and can evaluate an owned current scroll opportunity.
+            terminal_signal = False
         if isinstance(progress_override, dict):
             physical_progress = progress_override.get("physical_progress")
         if physical_progress is True:
@@ -888,7 +904,13 @@ class StopEvaluator:
             repeat_eval["semantic_duplicate"] = True
             if repeat_eval.get("repeat_class") == "none":
                 repeat_eval["repeat_class"] = "semantic_duplicate"
-        same_count = same_count + 1 if same_like else 0
+        if production_mode:
+            if production_status == "NO_PROGRESS":
+                same_count += 1
+            elif production_status in {"NEW_VISIT", "STATE_TRANSITION", "SCROLL_CHANGE"}:
+                same_count = 0
+        else:
+            same_count = same_count + 1 if same_like else 0
 
         move_failed = move_result in self._MOVE_FAILURE_RESULTS and physical_progress is not True
         if move_failed:
@@ -899,6 +921,8 @@ class StopEvaluator:
         move_terminal = (
             smart_nav_result in self._MOVE_TERMINAL_RESULTS or move_result in self._MOVE_TERMINAL_RESULTS
         ) and physical_progress is not True
+        if production_mode:
+            move_terminal = False
 
         no_progress_eval = self.evaluate_no_progress(
             same_like=same_like,
@@ -912,6 +936,15 @@ class StopEvaluator:
             same_count=same_count,
             recent_semantic_unique_count=recent_semantic_unique_count,
         )
+        if production_mode:
+            verified_no_progress = production_status == "NO_PROGRESS"
+            no_progress_eval = {
+                "no_progress": verified_no_progress,
+                "hard_no_progress": False,
+                "soft_no_progress": verified_no_progress,
+                "no_progress_class": ("production_no_progress" if verified_no_progress
+                                      else "production_unverified"),
+            }
         no_progress = bool(previous_row) and bool(no_progress_eval["no_progress"])
         overlay_ctx = self.evaluate_overlay_context(row=row, repeat_class=str(repeat_eval["repeat_class"]))
         after_realign = bool(overlay_ctx["after_realign"])

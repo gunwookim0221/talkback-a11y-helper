@@ -1172,7 +1172,8 @@ def recorder_from_existing_rows(rows: list[Mapping[str, Any]], *, run_id: str, s
             step = ordinal
         step = max(0, step)
         primary_raw = _raw_observation_from_row(row)
-        recorder.record(step=step, raw_observation=primary_raw, evidence=_evidence_from_row(row))
+        if row.get("phase6e_scroll_only") is not True:
+            recorder.record(step=step, raw_observation=primary_raw, evidence=_evidence_from_row(row))
 
         if not (isinstance(row.get("scroll_transition"), Mapping)
                 or isinstance(row.get("phase6e_scroll_source_observation"), Mapping)

@@ -23,12 +23,12 @@ SERVICE_ID = "helper-service-instance"
 _DEFAULT_CAPABILITIES = object()
 
 
-def _build_id(commit: str, digest: str = INPUT_DIGEST) -> str:
+def _build_id(commit: str, digest: str = INPUT_DIGEST, source_state: str = "CLEAN") -> str:
     manifest = "\n".join((
         "schema=helper-build-manifest.v1",
         f"git_commit={commit}",
         f"input_digest={digest}",
-        "source_state=CLEAN",
+        f"source_state={source_state}",
         "build_variant=debug",
         "version_name=1.0",
         "version_code=1",
@@ -37,16 +37,16 @@ def _build_id(commit: str, digest: str = INPUT_DIGEST) -> str:
     return hashlib.sha256(manifest.encode("utf-8")).hexdigest()
 
 
-def _ping(*, commit: str = INSTALLED_COMMIT, digest: str = INPUT_DIGEST, **overrides):
+def _ping(*, commit: str = INSTALLED_COMMIT, digest: str = INPUT_DIGEST, source_state: str = "CLEAN", **overrides):
     identity = {
         "schema_version": "1",
         "helper_protocol_version": PROTOCOL_VERSION,
         "versionName": "1.0",
         "versionCode": 1,
-        "build_id": _build_id(commit, digest),
+        "build_id": _build_id(commit, digest, source_state),
         "git_commit": commit,
         "helper_input_digest": digest,
-        "source_state": "CLEAN",
+        "source_state": source_state,
         "build_variant": "debug",
         "metadata_provenance": "GENERATED_AT_BUILD",
     }
@@ -60,7 +60,7 @@ def _ping(*, commit: str = INSTALLED_COMMIT, digest: str = INPUT_DIGEST, **overr
     }
 
 
-def _capabilities(*, commit: str = INSTALLED_COMMIT, digest: str = INPUT_DIGEST, **overrides):
+def _capabilities(*, commit: str = INSTALLED_COMMIT, digest: str = INPUT_DIGEST, source_state: str = "CLEAN", **overrides):
     response = {
         "schema": "hierarchy-transfer-control.v1",
         "protocol_version": "hierarchy-payload.v1",
@@ -70,10 +70,10 @@ def _capabilities(*, commit: str = INSTALLED_COMMIT, digest: str = INPUT_DIGEST,
         "generation": 3,
         "service_instance_id": SERVICE_ID,
         "helper_build_identity": {
-            "build_id": _build_id(commit, digest),
+            "build_id": _build_id(commit, digest, source_state),
             "git_commit": commit,
             "input_digest": digest,
-            "source_state": "CLEAN",
+            "source_state": source_state,
             "build_variant": "debug",
         },
         "payload_schema_version": "service-hierarchy-v2",
@@ -93,11 +93,12 @@ def _capabilities(*, commit: str = INSTALLED_COMMIT, digest: str = INPUT_DIGEST,
     return response
 
 
-def _check(ping=None, capabilities=_DEFAULT_CAPABILITIES, *, commit=EXPECTED_COMMIT, digest=INPUT_DIGEST, **kwargs):
+def _check(ping=None, capabilities=_DEFAULT_CAPABILITIES, *, commit=EXPECTED_COMMIT, digest=INPUT_DIGEST,
+           source_state="CLEAN", **kwargs):
     return check_helper_compatibility(
         commit,
         _ping() if ping is None else ping,
-        expected_build_id=_build_id(commit, digest),
+        expected_build_id=_build_id(commit, digest, source_state),
         expected_input_digest=digest,
         expected_gradle_version=GRADLE_VERSION,
         expected_version_name="1.0",
@@ -115,6 +116,31 @@ def test_exact_commit_and_inputs_with_required_schemas_is_exact_match():
     assert result.reason == "EXACT_BUILD_PROVENANCE_MATCH"
     assert helper_compatibility_allows_execution(result)
     assert result.to_dict()["execution_allowed"] is True
+
+
+def test_matching_dirty_candidate_build_identity_is_allowed_by_exact_provenance():
+    ping = _ping(commit=EXPECTED_COMMIT, source_state="DIRTY")
+    capabilities = _capabilities(commit=EXPECTED_COMMIT, source_state="DIRTY")
+
+    result = _check(ping=ping, capabilities=capabilities, commit=EXPECTED_COMMIT, source_state="DIRTY")
+
+    assert result.status == HelperIdentityStatus.EXACT_MATCH
+    assert result.reason == "EXACT_BUILD_PROVENANCE_MATCH"
+    assert result.installed_metadata["source_state"] == "DIRTY"
+    assert helper_compatibility_allows_execution(result)
+
+
+def test_ping_and_capability_must_agree_on_dirty_build_input_identity():
+    for field, mismatch in (("source_state", "CLEAN"), ("input_digest", "f" * 64)):
+        ping = _ping(commit=EXPECTED_COMMIT, source_state="DIRTY")
+        capabilities = _capabilities(commit=EXPECTED_COMMIT, source_state="DIRTY")
+        capabilities["helper_build_identity"][field] = mismatch
+
+        result = _check(ping=ping, capabilities=capabilities, commit=EXPECTED_COMMIT, source_state="DIRTY")
+
+        assert result.status == HelperIdentityStatus.UNKNOWN
+        assert result.reason == "CAPABILITY_IDENTITY_INCONSISTENT"
+        assert not helper_compatibility_allows_execution(result)
 
 
 def test_python_only_head_difference_with_same_helper_inputs_is_compatible():
@@ -233,9 +259,11 @@ def test_same_git_commit_does_not_override_changed_helper_digest():
     "mutation",
     [
         {"remove": "helper_input_digest"},
+        {"remove": "source_state"},
         {"set": ("helper_input_digest", "not-a-sha256")},
         {"set": ("metadata_provenance", "UNKNOWN")},
         {"set": ("schema_version", "future")},
+        {"set": ("source_state", "UNKNOWN")},
     ],
 )
 def test_missing_or_malformed_identity_evidence_is_unknown(mutation):
@@ -426,6 +454,28 @@ def test_repo_helper_precheck_still_rejects_dirty_inputs_that_differ_from_instal
     assert result.status == HelperIdentityStatus.REBUILD_REQUIRED
     assert result.reason == "HELPER_INPUT_DIGEST_MISMATCH"
     assert not helper_compatibility_allows_execution(result)
+
+
+def test_untracked_generated_artifact_outside_helper_inputs_does_not_change_source_authority(monkeypatch, tmp_path):
+    import talkback_lib.exact_node_protocol as exact_node_protocol
+
+    (tmp_path / "build").mkdir()
+    (tmp_path / "build" / "generated-report.json").write_text("{}", encoding="utf-8")
+
+    def scoped_git(_root, *args):
+        if args[:2] == ("rev-parse", "HEAD"):
+            return EXPECTED_COMMIT
+        if args[:2] == ("status", "--porcelain"):
+            assert "--" in args
+            assert "build/generated-report.json" not in args
+            return ""
+        return None
+
+    monkeypatch.setattr(exact_node_protocol, "_git", scoped_git)
+    identity = exact_node_protocol.compute_repo_helper_build_identity(tmp_path)
+
+    assert identity["source_state"] == "CLEAN"
+    assert identity["helper_input_digest"] == hashlib.sha256(b"").hexdigest()
 
 
 def test_bridge_precheck_diagnostics_are_opt_in_and_compare_manifest_and_schemas(monkeypatch, tmp_path):

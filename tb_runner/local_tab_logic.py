@@ -1623,7 +1623,8 @@ def _reset_content_phase_after_tab_switch(
             setattr(state, name, default)
 
     state.fail_count = 0
-    state.same_count = 0
+    if not getattr(state, "production_progress_enabled", False):
+        state.same_count = 0
     state.prev_fingerprint = ("", "", "")
     state.previous_step_row = {}
     clear_attr("recent_representative_signatures", deque())

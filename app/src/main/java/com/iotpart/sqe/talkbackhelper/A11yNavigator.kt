@@ -190,20 +190,34 @@ object A11yNavigator {
         processEpoch: String,
         generation: Long,
         serviceInstanceId: String,
-        captureSequence: Long
+        captureSequence: Long,
+        trace: HierarchySnapshotTrace? = null,
     ): ReliableHierarchyCapture {
         require(processEpoch.isNotBlank() && generation > 0 && serviceInstanceId.isNotBlank() && captureSequence > 0) {
             "CAPTURE_IDENTITY_INVALID"
         }
+        trace?.mark("ROOT_ACQUISITION_STARTED")
         val serviceWindows = service.windows.orEmpty()
-        val traversalRoot = SmartNextPerf.acquireRoot("A11yNavigator.dumpReliableHierarchy") { service.rootInActiveWindow }
-            ?: throw IllegalStateException("NO_ROOT")
+        val acquiredRoot = if (trace != null) {
+            trace.around("ROOT_ACQUISITION") {
+                SmartNextPerf.acquireRoot("A11yNavigator.dumpReliableHierarchy") { service.rootInActiveWindow }
+            }
+        } else {
+            SmartNextPerf.acquireRoot("A11yNavigator.dumpReliableHierarchy") { service.rootInActiveWindow }
+        }
+        val traversalRoot = acquiredRoot ?: run {
+            trace?.mark("ERROR_STAGE", mapOf("failed_stage" to "ROOT_ACQUISITION", "reason" to "NO_ROOT"))
+            throw IllegalStateException("NO_ROOT")
+        }
+        trace?.mark("ROOT_ACQUISITION_COMPLETE", mapOf("window_id" to traversalRoot.windowId))
         val activeWindowIndex = if (serviceWindows.isEmpty()) 0 else ReliableHierarchyCandidateContract.traversalRootIndex(
             serviceWindows.map { it.id }, traversalRoot.windowId
         )
         val traversalRootRef = "windows[$activeWindowIndex].root"
+        trace?.mark("HIERARCHY_BUILD_STARTED", mapOf("window_count" to serviceWindows.size))
         val rawSerializationStarted = System.nanoTime()
         val captured = ImmutableHierarchyCapture.capture(traversalRoot)
+        trace?.mark("RAW_HIERARCHY_SERIALIZATION_STARTED")
         val totalNodes = intArrayOf(0)
         val serializedWindows = JSONArray()
         val rootNodes = JSONArray()
@@ -234,6 +248,7 @@ object A11yNavigator {
                 put("boundsInScreen", rectToJson(Rect().also(traversalRoot::getBoundsInScreen))); put("root", rootJson)
             })
         }
+        trace?.mark("RAW_HIERARCHY_SERIALIZATION_COMPLETE", mapOf("window_count" to serializedWindows.length(), "node_count" to totalNodes[0]))
         val rawRoot = serializedWindows.getJSONObject(activeWindowIndex).getJSONObject("root")
         val rootDigest = CaptureCanonicalJson.sha256(rawRoot)
         val payload = JSONObject().apply {
@@ -248,6 +263,7 @@ object A11yNavigator {
         val rawHierarchyBytes = HierarchyPayloadEnvelope.estimatedJsonUtf8Bytes(payload)
         if (rawHierarchyBytes > HierarchyPayloadEnvelope.MAX_PAYLOAD_BYTES) throw IllegalStateException("PAYLOAD_TOO_LARGE")
         val candidateStarted = System.nanoTime()
+        trace?.mark("CANDIDATE_PROJECTION_STARTED")
         val rootCaptureId = ReliableHierarchyCandidateContract.rootCaptureId(
             reqId, processEpoch, generation, serviceInstanceId, captureSequence, traversalRootRef, rootDigest,
         )
@@ -258,6 +274,10 @@ object A11yNavigator {
         val candidateProjectionBytes = HierarchyPayloadEnvelope.estimatedJsonUtf8Bytes(candidates)
         val candidateDigest = candidates.getString("candidate_digest")
         payload.put("traversalCandidates", candidates)
+        trace?.mark("CANDIDATE_PROJECTION_COMPLETE", mapOf(
+            "candidate_count" to candidates.getJSONArray("candidates").length(),
+            "candidate_generation_elapsed_ms" to candidateGenerationElapsedNanos / 1_000_000.0,
+        ))
         payload.put("captureEnvelope", JSONObject()
             .put("schema_version", "phase6d-capture-envelope-v1")
             .put("canonicalization", CaptureCanonicalJson.VERSION)
@@ -272,6 +292,14 @@ object A11yNavigator {
         val totalPayloadBytes = HierarchyPayloadEnvelope.estimatedJsonUtf8Bytes(payload)
         if (totalPayloadBytes > HierarchyPayloadEnvelope.MAX_PAYLOAD_BYTES) throw IllegalStateException("PAYLOAD_TOO_LARGE")
         if (!ReliableHierarchyCandidateContract.hasValidRootBinding(payload)) throw IllegalStateException("TRAVERSAL_CANDIDATE_ROOT_BINDING_FAILED")
+        trace?.mark("HIERARCHY_BUILD_COMPLETE", mapOf(
+            "window_count" to serializedWindows.length(),
+            "node_count" to totalNodes[0],
+            "candidate_count" to candidates.getJSONArray("candidates").length(),
+            "payload_bytes_estimate" to totalPayloadBytes,
+            "raw_serialization_elapsed_ms" to rawSerializationElapsedNanos / 1_000_000.0,
+            "candidate_generation_elapsed_ms" to candidateGenerationElapsedNanos / 1_000_000.0,
+        ))
         return ReliableHierarchyCapture(
             payload = payload,
             rawHierarchyBytesEstimate = rawHierarchyBytes,

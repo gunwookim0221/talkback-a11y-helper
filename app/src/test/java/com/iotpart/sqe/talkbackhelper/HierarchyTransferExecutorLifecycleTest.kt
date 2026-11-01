@@ -82,6 +82,8 @@ class HierarchyTransferExecutorLifecycleTest {
             queryNonce = UUID.randomUUID().toString().replace("-", ""),
             expectedBuildId = buildId,
             expectedGitCommit = gitCommit,
+            expectedInputDigest = helperIdentity.getString("input_digest"),
+            expectedSourceState = helperIdentity.getString("source_state"),
             expectedServiceInstanceId = serviceId,
         )
         assertEquals("ACCEPTED", accepted.getString("status"))
@@ -502,7 +504,8 @@ class HierarchyTransferExecutorLifecycleTest {
         val identityField = store.javaClass.getDeclaredField("helperIdentity").apply { isAccessible = true }
         val identity = identityField.get(store) as JSONObject
         // Test-only fake identity lets the real store run against a deliberately uncommitted test tree.
-        identity.put("build_id", buildId).put("git_commit", gitCommit).put("source_state", "CLEAN")
+        identity.put("build_id", buildId).put("git_commit", gitCommit)
+            .put("input_digest", helperIdentity.getString("input_digest")).put("source_state", "CLEAN")
         val directoryField = store.javaClass.getDeclaredField("directory").apply { isAccessible = true }
         val directory = directoryField.get(store) as File
         val oldServiceId = A11yHelperService.serviceInstanceId

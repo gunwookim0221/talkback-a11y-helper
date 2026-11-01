@@ -223,9 +223,15 @@ def _validate_identity(
     control_helper = control.get("helper_build_identity")
     if not isinstance(helper, dict) or helper != control_helper:
         raise HierarchyTransportError("BUILD_IDENTITY_METADATA_MISMATCH", request_id)
+    expected_source_state = expected.get("source_state")
+    expected_input_digest = expected.get("input_digest")
+    if (expected_source_state not in {"CLEAN", "DIRTY"}
+            or not isinstance(expected_input_digest, str) or not _SHA256.fullmatch(expected_input_digest)):
+        raise HierarchyTransportError("BUILD_INPUT_IDENTITY_MISMATCH", request_id)
     if helper.get("build_id") != expected["build_id"] or helper.get("git_commit") != expected["git_commit"]:
         raise HierarchyTransportError("BUILD_IDENTITY_MISMATCH", request_id)
-    if helper.get("source_state") != "CLEAN" or helper.get("input_digest") != expected.get("input_digest", helper.get("input_digest")):
+    if (helper.get("source_state") != expected_source_state
+            or helper.get("input_digest") != expected_input_digest):
         raise HierarchyTransportError("BUILD_INPUT_IDENTITY_MISMATCH", request_id)
     if helper.get("build_variant") != expected.get("build_variant", helper.get("build_variant")):
         raise HierarchyTransportError("BUILD_VARIANT_MISMATCH", request_id)
@@ -551,8 +557,13 @@ def validate_expected_build_precheck(
         input_digest = value.get("helper_input_digest")
         if not isinstance(input_digest, str) or not _SHA256.fullmatch(input_digest):
             raise HierarchyTransportError("BUILD_IDENTITY_PRECHECK_INVALID")
+        installed_metadata = value.get("installed_metadata")
+        source_state = installed_metadata.get("source_state") if isinstance(installed_metadata, dict) else None
+        if source_state not in {"CLEAN", "DIRTY"}:
+            raise HierarchyTransportError("BUILD_IDENTITY_PRECHECK_INVALID")
         expected = {"build_id": build_id, "git_commit": git_commit, "service_instance_id": service_id}
         expected["input_digest"] = input_digest
+        expected["source_state"] = source_state
         for source_key, target_key in (("helper_input_digest", "input_digest"), ("build_variant", "build_variant")):
             extra = value.get(source_key)
             if extra is not None:
@@ -575,11 +586,16 @@ def validate_control_identity(value: dict[str, Any], expected: dict[str, str], *
     helper = value.get("helper_build_identity")
     if not isinstance(helper, dict):
         raise HierarchyTransportError("BUILD_IDENTITY_MISSING", request_id)
+    expected_source_state = expected.get("source_state")
+    expected_input_digest = expected.get("input_digest")
+    if (expected_source_state not in {"CLEAN", "DIRTY"}
+            or not isinstance(expected_input_digest, str) or not _SHA256.fullmatch(expected_input_digest)):
+        raise HierarchyTransportError("BUILD_INPUT_IDENTITY_MISMATCH", request_id)
     if helper.get("build_id") != expected["build_id"] or helper.get("git_commit") != expected["git_commit"]:
         raise HierarchyTransportError("BUILD_IDENTITY_MISMATCH", request_id)
-    if helper.get("source_state") != "CLEAN" or (
-        "input_digest" in expected and helper.get("input_digest") != expected["input_digest"]
-    ) or ("build_variant" in expected and helper.get("build_variant") != expected["build_variant"]):
+    if (helper.get("source_state") != expected_source_state
+            or helper.get("input_digest") != expected_input_digest
+            or helper.get("build_variant") != expected.get("build_variant", helper.get("build_variant"))):
         raise HierarchyTransportError("BUILD_INPUT_IDENTITY_MISMATCH", request_id)
     if value.get("service_instance_id") != expected["service_instance_id"]:
         raise HierarchyTransportError("SERVICE_INSTANCE_MISMATCH", request_id)

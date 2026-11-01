@@ -42,7 +42,8 @@ class HierarchyPayloadStoreAtomicWritePruneTest {
             helperIdentity = helperIdentity,
         )
         store.serviceConnected(serviceId)
-        val accepted = store.begin(requestId, clientNonce, initialQueryNonce, buildId, gitCommit, serviceId)
+        val accepted = store.begin(requestId, clientNonce, initialQueryNonce, buildId, gitCommit,
+            helperIdentity.getString("input_digest"), helperIdentity.getString("source_state"), serviceId)
         assertEquals("ACCEPTED", accepted.getString("status"))
         val handle = HierarchyPayloadStore.RequestHandle(requestId, clientNonce, accepted.getLong("generation"))
         assertTrue(store.markCollecting(handle))

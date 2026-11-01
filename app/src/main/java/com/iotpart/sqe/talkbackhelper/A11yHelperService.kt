@@ -2,11 +2,13 @@ package com.iotpart.sqe.talkbackhelper
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.Intent
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
@@ -14,6 +16,10 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executor
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import java.util.UUID
@@ -22,6 +28,24 @@ import kotlin.math.abs
 class A11yHelperService : AccessibilityService() {
     internal var smartNextDispatcher = SmartNextDispatcher { reqId -> moveFocusSmart(reqId) }
     internal var focusCommandDispatcher = AccessibilityCommandDispatcher()
+    private val focusEventProcessorLock = Any()
+    @Volatile private var focusEventWorker: ExecutorService? = null
+    @Volatile private var focusEventProcessor: CoalescingAccessibilityEventProcessor<AccessibilityEvent, CapturedAccessibilityFocusEvent>? = null
+
+    /** Injectable only for tests; production always acquires a fresh root for each event. */
+    internal var focusEventRootProviderForTesting: (() -> AccessibilityNodeInfo?)? = null
+
+    private data class CapturedAccessibilityFocusEvent(
+        val eventType: Int,
+        val eventPackageName: String?,
+        val eventClassName: String?,
+        val announcement: String,
+        val activeAccessibilityFocusPackage: String?,
+        val snapshot: FocusSnapshot,
+        val candidateIdentity: String?,
+        val candidateLabel: String?
+    )
+
     companion object {
         @Volatile var serviceInstanceId: String = UUID.randomUUID().toString()
             private set
@@ -64,18 +88,24 @@ class A11yHelperService : AccessibilityService() {
         instance = this
         ExactPostActionRuntime.connect()
         serviceInstanceId = ExactActionRuntime.connect(this)
+        invalidateFocusEventWork()
+        HelperLifecycleDiagnostics.recordServiceLifecycle("ON_SERVICE_CONNECTED")
         A11yCommandReceiver.hierarchyPublicationLedger.serviceConnected(serviceInstanceId)
         HierarchyPayloadRuntime.serviceConnected(this, serviceInstanceId)
         Log.i(TAG, "Service connected")
     }
 
     override fun onInterrupt() {
+        invalidateFocusEventWork()
+        HelperLifecycleDiagnostics.recordServiceLifecycle("ON_INTERRUPT")
         ExactPostActionRuntime.stop("SERVICE_INTERRUPTED")
         ExactActionRuntime.stop("SERVICE_INTERRUPTED")
         Log.w(TAG, "Service interrupted")
     }
 
     override fun onDestroy() {
+        closeFocusEventWork()
+        HelperLifecycleDiagnostics.recordServiceLifecycle("ON_DESTROY")
         HierarchyPayloadRuntime.serviceDisconnected(serviceInstanceId)
         A11yCommandReceiver.hierarchyPublicationLedger.serviceEnded(serviceInstanceId)
         ExactPostActionRuntime.stop("SERVICE_DESTROYED")
@@ -86,6 +116,11 @@ class A11yHelperService : AccessibilityService() {
         if (instance === this) {
             instance = null
         }
+    }
+
+    override fun onUnbind(intent: Intent): Boolean {
+        invalidateFocusEventWork()
+        return super.onUnbind(intent)
     }
 
     internal fun sendAccessibilityEvent(eventType: Int) {
@@ -105,6 +140,7 @@ class A11yHelperService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
+        focusEventProcessor?.invalidatePending()
         ExactPostActionRuntime.receive(event)
         val type = event.eventType
         if (type == AccessibilityEvent.TYPE_VIEW_CLICKED) {
@@ -124,57 +160,149 @@ class A11yHelperService : AccessibilityService() {
         ) {
             return
         }
-        if (A11yHistoryManager.shouldSuppressPreCommitTransientSystemUiEvent(type, event.packageName?.toString(), SmartNextPerf.acquireRoot("A11yHelperService.onAccessibilityEvent") { rootInActiveWindow })) {
-            return
+        val eventCopy = AccessibilityEvent.obtain(event)
+        val context = AccessibilityEventWorkContext(
+            serviceInstanceId = serviceInstanceId,
+            activeTurnId = A11yHistoryManager.activeSmartNextTurnId,
+            activeRequestId = A11yHistoryManager.activeSmartNextReqId,
+            finalCommitTurnId = A11yHistoryManager.lastFinalCommitTurnId
+        )
+        focusEventProcessor().submit(eventCopy, context)
+    }
+
+    private fun focusEventProcessor(): CoalescingAccessibilityEventProcessor<AccessibilityEvent, CapturedAccessibilityFocusEvent> {
+        synchronized(focusEventProcessorLock) {
+            focusEventProcessor?.let { return it }
+            val worker = Executors.newSingleThreadExecutor { runnable ->
+                Thread(runnable, "a11y-focus-events").apply { isDaemon = true }
+            }
+            val mainHandler = Handler(Looper.getMainLooper())
+            val processor = CoalescingAccessibilityEventProcessor(
+                worker = worker,
+                main = Executor { runnable ->
+                    if (!mainHandler.post(runnable)) {
+                        throw RejectedExecutionException("Main looper rejected accessibility focus result")
+                    }
+                },
+                isContextCurrent = ::isFocusEventContextCurrent,
+                process = { copy, _ -> captureAccessibilityFocusEvent(copy) },
+                commit = ::commitAccessibilityFocusEvent,
+                disposeInput = AccessibilityEvent::recycle,
+                onFailure = { failure -> Log.w(TAG, "Accessibility focus event processing failed", failure) }
+            )
+            focusEventWorker = worker
+            focusEventProcessor = processor
+            return processor
+        }
+    }
+
+    private fun isFocusEventContextCurrent(context: AccessibilityEventWorkContext): Boolean =
+        instance === this && serviceInstanceId == context.serviceInstanceId &&
+            A11yHistoryManager.activeSmartNextTurnId == context.activeTurnId &&
+            A11yHistoryManager.activeSmartNextReqId == context.activeRequestId &&
+            A11yHistoryManager.lastFinalCommitTurnId == context.finalCommitTurnId
+
+    private fun invalidateFocusEventWork() {
+        focusEventProcessor?.invalidateConnection()
+    }
+
+    private fun closeFocusEventWork() {
+        synchronized(focusEventProcessorLock) {
+            focusEventProcessor?.close()
+            focusEventProcessor = null
+            focusEventWorker?.shutdownNow()
+            focusEventWorker = null
+        }
+    }
+
+    private fun captureAccessibilityFocusEvent(event: AccessibilityEvent): CapturedAccessibilityFocusEvent? {
+        val rootProvider = focusEventRootProviderForTesting
+        val root = SmartNextPerf.acquireRoot("A11yHelperService.onAccessibilityEvent") {
+            if (rootProvider != null) rootProvider() else rootInActiveWindow
+        } ?: return null
+
+        val accessibilityFocus = SmartNextPerf.findFocus(root, AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val inputFocus = if (accessibilityFocus == null) {
+            SmartNextPerf.findFocus(root, AccessibilityNodeInfo.FOCUS_INPUT)
+        } else {
+            null
+        }
+        val node = resolveFocusNode(event, accessibilityFocus, inputFocus)
+        if (node == null) {
+            Log.d(TAG, "Focus node not found for eventType=${event.eventType}")
+            return null
         }
 
-        val node = resolveFocusNode(event)
-        if (node == null) {
-            Log.d(TAG, "Focus node not found for eventType=$type")
-            return
-        }
-        if (A11yHistoryManager.shouldIgnorePostCommitResurfacedHeader(SmartNextPerf.acquireRoot("A11yHelperService.onAccessibilityEvent") { rootInActiveWindow }, node, type)) {
-            return
-        }
+        val snapshot = FocusSnapshot.fromNode(node)
+        val candidateIdentity = A11yNavigator.nodeIdentityOf(node)
+        val candidateLabel = A11yNavigator.resolvePrimaryLabel(node)
+            ?: A11yTraversalAnalyzer.recoverDescendantLabel(node)
+            ?: "<no-label>"
+        return CapturedAccessibilityFocusEvent(
+            eventType = event.eventType,
+            eventPackageName = event.packageName?.toString(),
+            eventClassName = event.className?.toString(),
+            announcement = extractAnnouncementText(event, node),
+            activeAccessibilityFocusPackage = accessibilityFocus?.packageName?.toString(),
+            snapshot = snapshot,
+            candidateIdentity = candidateIdentity,
+            candidateLabel = candidateLabel
+        )
+    }
+
+    private fun commitAccessibilityFocusEvent(
+        capture: CapturedAccessibilityFocusEvent,
+        ticket: AccessibilityEventWorkTicket
+    ) {
+        if (A11yHistoryManager.shouldSuppressPreCommitTransientSystemUiEvent(
+                eventType = capture.eventType,
+                eventPackageName = capture.eventPackageName,
+                activeFocusPackage = capture.activeAccessibilityFocusPackage
+            )) return
+        if (A11yHistoryManager.shouldIgnorePostCommitResurfacedHeader(
+                candidateBounds = capture.snapshot.boundsInScreen,
+                candidateIdentity = capture.candidateIdentity,
+                candidateLabel = capture.candidateLabel,
+                eventType = capture.eventType
+            )) return
+
         if (
-            type == AccessibilityEvent.TYPE_ANNOUNCEMENT ||
-            type == AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED ||
-            type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+            capture.eventType == AccessibilityEvent.TYPE_ANNOUNCEMENT ||
+            capture.eventType == AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED ||
+            capture.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
         ) {
-            val announcement = extractAnnouncementText(event)
-            if (announcement.isNotBlank()) {
-                Log.i(TAG, "A11Y_ANNOUNCEMENT: $announcement")
+            if (capture.announcement.isNotBlank()) {
+                Log.i(TAG, "A11Y_ANNOUNCEMENT: ${capture.announcement}")
                 A11yEvidence.emit(
                     "ANNOUNCEMENT_OBSERVED",
-                    A11yHistoryManager.activeSmartNextReqId,
-                    JSONObject().put("text", announcement).put("eventType", type)
+                    ticket.context.activeRequestId,
+                    JSONObject().put("text", capture.announcement).put("eventType", capture.eventType)
                 )
             }
         }
 
-        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+        if (capture.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             Log.i(TAG, "SCREEN_CHANGED")
         }
 
         runCatching {
-            val snapshot = FocusSnapshot.fromNode(node)
-            A11yStateStore.update(snapshot)
+            A11yStateStore.update(capture.snapshot)
             A11yEvidence.emit(
                 "ACCESSIBILITY_EVENT",
-                A11yHistoryManager.activeSmartNextReqId,
-                JSONObject().put("eventType", type).put("eventClass", event.className?.toString()).put("focus", snapshot.toJson())
+                ticket.context.activeRequestId,
+                JSONObject().put("eventType", capture.eventType).put("eventClass", capture.eventClassName).put("focus", capture.snapshot.toJson())
             )
             A11yEvidence.emit(
                 "ACCESSIBILITY_FOCUS_EVENT",
-                A11yHistoryManager.activeSmartNextReqId,
-                JSONObject().put("eventType", type).put("focus", snapshot.toJson())
+                ticket.context.activeRequestId,
+                JSONObject().put("eventType", capture.eventType).put("focus", capture.snapshot.toJson())
             )
         }.onFailure {
             Log.e(TAG, "Failed to capture focus snapshot", it)
         }
     }
 
-    private fun extractAnnouncementText(event: AccessibilityEvent): String {
+    private fun extractAnnouncementText(event: AccessibilityEvent, sourceNode: AccessibilityNodeInfo?): String {
         val eventText = event.text
             .mapNotNull { it?.toString()?.trim() }
             .filter { it.isNotEmpty() }
@@ -184,7 +312,7 @@ class A11yHelperService : AccessibilityService() {
             return eventText
         }
 
-        val sourceNode = event.source ?: return ""
+        sourceNode ?: return ""
         val sourceText = listOf(
             sourceNode.text?.toString()?.trim().orEmpty(),
             sourceNode.contentDescription?.toString()?.trim().orEmpty(),
@@ -195,14 +323,18 @@ class A11yHelperService : AccessibilityService() {
         return sourceText
     }
 
-    private fun resolveFocusNode(event: AccessibilityEvent): AccessibilityNodeInfo? {
+    private fun resolveFocusNode(
+        event: AccessibilityEvent,
+        accessibilityFocus: AccessibilityNodeInfo?,
+        inputFocus: AccessibilityNodeInfo?
+    ): AccessibilityNodeInfo? {
         val source = event.source
         if (source != null && (source.isAccessibilityFocused || source.isFocused)) {
             return source
         }
 
-        SmartNextPerf.acquireRoot("A11yHelperService.resolveFocusNode") { rootInActiveWindow }?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.let { return it }
-        SmartNextPerf.acquireRoot("A11yHelperService.resolveFocusNode") { rootInActiveWindow }?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.let { return it }
+        accessibilityFocus?.let { return it }
+        inputFocus?.let { return it }
         return source
     }
 
@@ -271,8 +403,9 @@ class A11yHelperService : AccessibilityService() {
         generation: Long,
         serviceInstanceId: String,
         captureSequence: Long,
+        trace: HierarchySnapshotTrace? = null,
     ): ReliableHierarchyCapture = A11yNavigator.dumpReliableHierarchy(
-        this, reqId, processEpoch, generation, serviceInstanceId, captureSequence,
+        this, reqId, processEpoch, generation, serviceInstanceId, captureSequence, trace,
     )
 
     /**

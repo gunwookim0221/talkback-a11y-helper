@@ -159,6 +159,7 @@ class A11yAdbClient:
         self.last_dump_metadata: dict[str, Any] = {}
         self.last_hierarchy_metadata: dict[str, Any] = {}
         self.last_hierarchy_cleanup_diagnostic: dict[str, Any] = {}
+        self.last_hierarchy_transport_diagnostics: list[dict[str, Any]] = []
         self._last_hierarchy_capabilities: dict[str, Any] | None = None
         self._last_hierarchy_transport_metadata: dict[str, Any] | None = None
         self._hierarchy_capture_sequence = 0
@@ -1258,6 +1259,7 @@ class A11yAdbClient:
         *,
         include_device_collection: bool = False,
         expected_helper_build_identity: dict[str, Any] | None = None,
+        hierarchy_diagnostic_context: dict[str, Any] | None = None,
     ) -> "TraversalCandidateSnapshot":
         """Acquire one validated reliable v2 snapshot and its C3 candidate view."""
         self.last_scroll_capabilities = []
@@ -1268,6 +1270,7 @@ class A11yAdbClient:
             dev=dev,
             wait_seconds=wait_seconds,
             expected_helper_build_identity=expected_helper_build_identity,
+            hierarchy_diagnostic_context=hierarchy_diagnostic_context,
         )
         response = legacy_dump_tree_response(decoded)
         self.last_dump_metadata = {
@@ -1360,6 +1363,7 @@ class A11yAdbClient:
         include_scroll_capabilities: bool = False,
         include_device_collection: bool = False,
         transport_mode: str = DEFAULT_HIERARCHY_TRANSPORT_MODE,
+        hierarchy_diagnostic_context: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Compatibility surface; normal callers receive reliable v2 candidates.
 
@@ -1387,6 +1391,7 @@ class A11yAdbClient:
             dev=dev,
             wait_seconds=max(0.1, float(wait_seconds)),
             include_device_collection=include_device_collection,
+            hierarchy_diagnostic_context=hierarchy_diagnostic_context,
         )
         return snapshot.candidates
 
@@ -1489,6 +1494,7 @@ class A11yAdbClient:
         *,
         transport_mode: str = DEFAULT_HIERARCHY_TRANSPORT_MODE,
         expected_helper_build_identity: dict[str, Any] | None = None,
+        hierarchy_diagnostic_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Capture the service-owned hierarchy without opening UiAutomation."""
         self.last_hierarchy_metadata = {}
@@ -1496,14 +1502,16 @@ class A11yAdbClient:
         self._last_hierarchy_transport_metadata = None
         if transport_mode == DEFAULT_HIERARCHY_TRANSPORT_MODE:
             expected_identity = expected_helper_build_identity
-            diagnostic_context: dict[str, Any] = {}
+            diagnostic_context: dict[str, Any] = dict(hierarchy_diagnostic_context or {})
+            build_identity_diagnostic: dict[str, Any] = {}
             if expected_identity is None:
                 if self._hierarchy_precheck_diagnostic_sink() is None:
                     expected_identity = self.precheck_helper_build_identity(dev=dev, acceptance_mode=True)
                 else:
                     expected_identity = self.precheck_helper_build_identity(
-                        dev=dev, acceptance_mode=True, diagnostic_observer=diagnostic_context.update
+                        dev=dev, acceptance_mode=True, diagnostic_observer=build_identity_diagnostic.update
                     )
+            diagnostic_context.update(build_identity_diagnostic)
             pfd_kwargs: dict[str, Any] = {
                 "dev": dev,
                 "wait_seconds": wait_seconds,
@@ -1620,6 +1628,7 @@ class A11yAdbClient:
         wait_seconds: float = 30.0,
         *,
         expected_helper_build_identity: dict[str, Any] | None = None,
+        hierarchy_diagnostic_context: dict[str, Any] | None = None,
     ) -> ReliableHierarchyPayload:
         """Return the v2 raw hierarchy and candidate projection as a read-only model.
 
@@ -1631,6 +1640,7 @@ class A11yAdbClient:
             wait_seconds=wait_seconds,
             transport_mode=DEFAULT_HIERARCHY_TRANSPORT_MODE,
             expected_helper_build_identity=expected_helper_build_identity,
+            hierarchy_diagnostic_context=hierarchy_diagnostic_context,
         )
         if self._last_hierarchy_capabilities is None:
             raise HierarchyTransportError("CANDIDATE_CAPABILITY_REQUIRED", str(payload.get("reqId") or ""))
@@ -1653,6 +1663,7 @@ class A11yAdbClient:
         *,
         request_id: str,
         remaining_seconds: float,
+        trace: Any = None,
     ) -> dict[str, Any]:
         action_names = {
             "CAPABILITIES": "HIERARCHY_TRANSFER_CAPABILITIES",
@@ -1662,16 +1673,33 @@ class A11yAdbClient:
             "CANCEL": "HIERARCHY_TRANSFER_CANCEL",
         }
         try:
+            if trace is not None:
+                trace("HOST_CONTROL_SEND", action=action, request_id=request_id)
             stdout = self._broadcast(
                 dev,
                 f"com.iotpart.sqe.talkbackhelper.{action_names[action]}",
                 extras,
                 timeout=max(0.1, min(2.0, remaining_seconds)),
             )
-            return decode_hierarchy_control_reply(stdout, request_id=request_id)
-        except HierarchyTransportError:
+            if trace is not None:
+                trace("HOST_CONTROL_REPLY_RECEIVED", action=action, stdout_bytes=len(stdout.encode("utf-8", errors="replace")))
+            response = decode_hierarchy_control_reply(stdout, request_id=request_id)
+            if trace is not None:
+                trace(
+                    "HOST_CONTROL_FRAME_PARSED",
+                    action=action,
+                    response_status=response.get("status"),
+                    response_request_id=response.get("request_id"),
+                    response_query_nonce=response.get("query_nonce"),
+                )
+            return response
+        except HierarchyTransportError as error:
+            if trace is not None:
+                trace("ERROR_STAGE", failed_stage=f"HOST_CONTROL_{action}_PARSE", reason=error.reason)
             raise
         except Exception as error:
+            if trace is not None:
+                trace("ERROR_STAGE", failed_stage=f"HOST_CONTROL_{action}_SEND", error_type=type(error).__name__)
             raise HierarchyTransportError(f"CONTROL_{action}_FAILED", request_id) from error
 
 
@@ -1703,6 +1731,7 @@ class A11yAdbClient:
         expected_helper_build_identity: dict[str, Any] | None,
         diagnostic_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        self.last_hierarchy_transport_diagnostics = []
         diagnostic_sink = self._hierarchy_precheck_diagnostic_sink()
         try:
             expected = validate_expected_hierarchy_build_precheck(
@@ -1720,6 +1749,57 @@ class A11yAdbClient:
         started = time.monotonic()
         budget = min(30.0, max(0.1, float(wait_seconds)))
         deadline = started + budget
+        trace_context = dict(diagnostic_context or {})
+        trace_identity: dict[str, Any] = {
+            "process_epoch": "UNKNOWN",
+            "service_instance_id": str(expected.get("service_instance_id") or "UNKNOWN"),
+            "connection_epoch": "UNKNOWN",
+            "boot_epoch": "UNKNOWN",
+            "build_id": str(expected.get("build_id") or "UNKNOWN"),
+            "helper_input_digest": str(expected.get("input_digest") or "UNKNOWN"),
+        }
+        stage_records: list[dict[str, Any]] = []
+        current_stage = "REQUEST_CREATED"
+
+        def trace(stage: str, **fields: Any) -> None:
+            try:
+                now_mono = time.monotonic_ns()
+                response = fields.pop("_response", None)
+                if isinstance(response, dict):
+                    for source_key, trace_key in (
+                        ("process_epoch", "process_epoch"),
+                        ("service_instance_id", "service_instance_id"),
+                        ("connection_epoch", "connection_epoch"),
+                        ("boot_epoch", "boot_epoch"),
+                    ):
+                        value = response.get(source_key)
+                        if isinstance(value, str) and value.strip():
+                            trace_identity[trace_key] = value
+                    identity = response.get("helper_build_identity")
+                    if isinstance(identity, dict):
+                        if identity.get("build_id"):
+                            trace_identity["build_id"] = str(identity["build_id"])
+                        if identity.get("input_digest"):
+                            trace_identity["helper_input_digest"] = str(identity["input_digest"])
+                record = {
+                    "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                    "monotonic_ns": now_mono,
+                    "elapsed_ms": round((now_mono - int(started * 1_000_000_000)) / 1_000_000, 3),
+                    "stage": str(stage),
+                    "request_id": request_id,
+                    "run_id": str(trace_context.get("run_id") or "UNKNOWN"),
+                    "scenario_id": str(trace_context.get("scenario_id") or "UNKNOWN"),
+                    "step": str(trace_context.get("step", trace_context.get("step_index", "UNKNOWN"))),
+                    "device_serial": str(self._resolve_serial(dev) or "UNKNOWN"),
+                    **trace_identity,
+                }
+                record.update({key: value for key, value in fields.items() if key not in record})
+                stage_records.append(record)
+            except Exception:
+                # Trace collection must never change a timeout, transport, or authority decision.
+                return
+
+        trace("HOST_REQUEST_CREATED", client_nonce=client_nonce)
         started_request = False
         acknowledged = False
         latest_query_nonce = ""
@@ -1737,12 +1817,24 @@ class A11yAdbClient:
             query_nonce = self._hierarchy_nonce()
             latest_query_nonce = query_nonce
             extras = list(request_extras) + ["--es", "queryNonce", query_nonce]
+            diagnostic_extras = (
+                ("run_id", "hierarchyDiagnosticRunId"),
+                ("scenario_id", "hierarchyDiagnosticScenarioId"),
+                ("step", "hierarchyDiagnosticStep"),
+                ("device_serial", "hierarchyDiagnosticDeviceSerial"),
+            )
+            for source_key, extra_name in diagnostic_extras:
+                value = trace_context.get(source_key)
+                if value is not None and str(value).strip() and str(value).upper() != "UNKNOWN":
+                    extras.extend(["--es", extra_name, str(value)[:128]])
+            current_stage = f"HOST_CONTROL_{action}_SEND"
             response = self._hierarchy_transfer_control(
                 dev,
                 action,
                 extras,
                 request_id=request_id,
                 remaining_seconds=remaining(),
+                trace=trace,
             )
             if response.get("query_nonce") != query_nonce:
                 raise HierarchyTransportError("CONTROL_NONCE_MISMATCH", request_id)
@@ -1760,9 +1852,19 @@ class A11yAdbClient:
                 if expected_generation is not None and response.get("generation") != expected_generation:
                     reason = "ACK_IDENTITY_MISMATCH" if action == "ACK" else "GENERATION_CHANGED"
                     raise HierarchyTransportError(reason, request_id)
+            trace(
+                "HOST_CONTROL_CORRELATION_VALIDATED",
+                action=action,
+                query_nonce=query_nonce,
+                response_query_nonce=response.get("query_nonce"),
+                response_request_id=response.get("request_id"),
+                response_client_nonce=response.get("client_nonce"),
+                _response=response,
+            )
             return response
 
         try:
+            current_stage = "CAPABILITIES_VALIDATION"
             capability = send("CAPABILITIES", [])
             validate_hierarchy_control_response(
                 capability,
@@ -1778,11 +1880,13 @@ class A11yAdbClient:
             if capability.get("max_payload_bytes") != MAX_HIERARCHY_PAYLOAD_BYTES:
                 raise HierarchyTransportError("PAYLOAD_LIMIT_MISMATCH", request_id)
             self._last_hierarchy_capabilities = dict(capability)
+            trace("HOST_CAPABILITIES_VALIDATED", capabilities=capability.get("capabilities"), _response=capability)
             expected_process_epoch = capability.get("process_epoch")
             if not isinstance(expected_process_epoch, str) or not expected_process_epoch:
                 raise HierarchyTransportError("PROCESS_EPOCH_MISSING", request_id)
 
             started_request = True
+            current_stage = "HOST_START_REQUEST"
             start_response = send(
                 "START",
                 [
@@ -1790,6 +1894,8 @@ class A11yAdbClient:
                     "--es", "clientNonce", client_nonce,
                     "--es", "expectedBuildId", expected["build_id"],
                     "--es", "expectedGitCommit", expected["git_commit"],
+                    "--es", "expectedInputDigest", expected["input_digest"],
+                    "--es", "expectedSourceState", expected["source_state"],
                     "--es", "expectedServiceInstanceId", expected["service_instance_id"],
                 ],
             )
@@ -1804,10 +1910,12 @@ class A11yAdbClient:
             if start_response.get("process_epoch") != expected_process_epoch:
                 raise HierarchyTransportError("PROCESS_EPOCH_CHANGED", request_id)
             expected_generation = validate_hierarchy_request_generation(start_response, request_id=request_id)
+            trace("HOST_START_ACCEPTED", generation=expected_generation, _response=start_response)
 
             ready: dict[str, Any] | None = None
             while remaining() > 0:
                 time.sleep(min(0.25, max(0.0, remaining())))
+                current_stage = "HOST_STATUS_WAIT"
                 status = send(
                     "STATUS",
                     ["--es", "requestId", request_id, "--es", "clientNonce", client_nonce],
@@ -1818,6 +1926,7 @@ class A11yAdbClient:
                     expected_nonce=latest_query_nonce,
                     expected_request_id=request_id,
                 )
+                trace("HOST_STATUS_OBSERVED", status=status.get("status"), completed=status.get("completed"), _response=status)
                 if status.get("status") == "READY":
                     ready = status
                     break
@@ -1825,6 +1934,7 @@ class A11yAdbClient:
                     raise HierarchyTransportError(str(status.get("error_code") or "CAPTURE_FAILED"), request_id)
             if ready is None:
                 raise HierarchyTransportError("END_TO_END_TIMEOUT", request_id)
+            current_stage = "HOST_READY_VALIDATION"
 
             uri = ready.get("payload_uri")
             if not isinstance(uri, str) or not self._valid_hierarchy_uri(uri, ready):
@@ -1833,6 +1943,7 @@ class A11yAdbClient:
                 raise HierarchyTransportError("ARTIFACT_SIZE_INVALID", request_id)
             if not isinstance(ready.get("artifact_sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", ready["artifact_sha256"]):
                 raise HierarchyTransportError("ARTIFACT_HASH_INVALID", request_id)
+            trace("HOST_READY_METADATA_VALIDATED", artifact_bytes=ready.get("artifact_bytes"), artifact_sha256=ready.get("artifact_sha256"), _response=ready)
             user_text = self._run(
                 ["shell", "am", "get-current-user"],
                 dev=dev,
@@ -1852,6 +1963,8 @@ class A11yAdbClient:
                 phase5_authorize_read(
                     user_id=user_text.strip(), uri=uri, control=ready
                 )
+            current_stage = "HOST_PROVIDER_READ"
+            trace("HOST_PROVIDER_READ_STARTED", uri=uri)
             binary = self._adb_device._run_adb_binary_command(
                 ["shell", "-T", "content", "read", "--user", user_text.strip(), "--uri", uri],
                 dev=dev,
@@ -1859,10 +1972,13 @@ class A11yAdbClient:
                 max_stdout_bytes=MAX_HIERARCHY_ARTIFACT_BYTES,
                 max_stderr_bytes=64 * 1024,
             )
+            trace("HOST_PROVIDER_READ_RETURNED", payload_bytes=len(binary.stdout), stderr_bytes=len(binary.stderr))
             if binary.stderr or binary.stderr_truncated:
                 raise HierarchyTransportError("CONTENT_READ_STDERR", request_id)
             if len(binary.stdout) != ready["artifact_bytes"] or hierarchy_sha256(binary.stdout) != ready["artifact_sha256"]:
                 raise HierarchyTransportError("ARTIFACT_INTEGRITY_MISMATCH", request_id)
+            trace("HOST_ARTIFACT_SIZE_DIGEST_VALIDATED", artifact_bytes=len(binary.stdout), artifact_sha256=ready["artifact_sha256"])
+            current_stage = "HOST_ARTIFACT_SCHEMA_CURRENTNESS"
             decoded = decode_hierarchy_artifact(
                 binary.stdout,
                 ready,
@@ -1871,7 +1987,9 @@ class A11yAdbClient:
                 expected_client_nonce=client_nonce,
                 capabilities=capability,
             )
+            trace("HOST_ARTIFACT_SCHEMA_CURRENTNESS_VALIDATED", payload_bytes=len(decoded.payload_bytes), payload_sha256=ready.get("payload_sha256"))
 
+            current_stage = "HOST_FINAL_STATUS_RECONCILIATION"
             final_status = send(
                 "STATUS",
                 ["--es", "requestId", request_id, "--es", "clientNonce", client_nonce],
@@ -1890,6 +2008,7 @@ class A11yAdbClient:
             ):
                 if final_status.get(key) != ready.get(key):
                     raise HierarchyTransportError("STATUS_CHANGED_DURING_READ", request_id)
+            trace("HOST_FINAL_STATUS_RECONCILED", _response=final_status)
             if time.monotonic() > deadline:
                 raise HierarchyTransportError("END_TO_END_TIMEOUT", request_id)
 
@@ -1960,6 +2079,7 @@ class A11yAdbClient:
                 capabilities=self._last_hierarchy_capabilities,
                 transport_metadata=self._last_hierarchy_transport_metadata,
             )
+            trace("HOST_HIERARCHY_SCHEMA_CURRENTNESS_VALIDATED", capture_sequence=ready.get("capture_sequence"))
             authority = verified_hierarchy.capture_authority
             if authority is None or authority.capture_sequence != ready.get("capture_sequence"):
                 raise HierarchyTransportError("CAPTURE_AUTHORITY_INVALID", request_id)
@@ -1999,21 +2119,30 @@ class A11yAdbClient:
             observer = getattr(self, "hierarchy_observer", None)
             if observer is not None:
                 observer(payload)
+            trace("HOST_HIERARCHY_SNAPSHOT_COMPLETE", capture_sequence=capture_sequence, payload_bytes=len(decoded.payload_bytes), artifact_bytes=len(binary.stdout))
             return payload
         except AdbBinaryCommandFailure as error:
+            trace("ERROR_STAGE", failed_stage=current_stage, error_type=type(error).__name__, reason=error.reason)
             if started_request and not acknowledged:
                 self._cancel_hierarchy_transfer(
                     dev, request_id, client_nonce, self._remaining_for_cleanup(deadline),
                     expected_process_epoch=expected_process_epoch, expected_generation=expected_generation,
                 )
             raise HierarchyTransportError(error.reason.upper(), request_id) from error
-        except Exception:
+        except Exception as error:
+            reason = error.reason if isinstance(error, HierarchyTransportError) else str(getattr(error, "reason", ""))
+            trace("ERROR_STAGE", failed_stage=current_stage, error_type=type(error).__name__, reason=reason or str(error)[:120])
             if started_request and not acknowledged:
                 self._cancel_hierarchy_transfer(
                     dev, request_id, client_nonce, self._remaining_for_cleanup(deadline),
                     expected_process_epoch=expected_process_epoch, expected_generation=expected_generation,
                 )
             raise
+        finally:
+            try:
+                self.last_hierarchy_transport_diagnostics = list(stage_records)
+            except Exception:
+                pass
 
     def _cancel_hierarchy_transfer(
         self, dev: Any, request_id: str, client_nonce: str, remaining: float, *,
@@ -2951,6 +3080,12 @@ class A11yAdbClient:
                     }
                     self.last_target_action_result = dict(result)
                     return False, result
+            progress_hook = getattr(self, "_production_progress_pre_dispatch", None)
+            if callable(progress_hook):
+                try:
+                    progress_hook(action="FOCUS_IN_BOUNDS", request_id=req_id)
+                except Exception:
+                    self._production_progress_pending = None
             self._evidence_action_sent(action="FOCUS_IN_BOUNDS", req_id=req_id)
             result = self._helper_bridge.request_focus_command(dev, ACTION_FOCUS_IN_BOUNDS, req_id, extras)
             if self._recovery_evidence_active():
@@ -3885,6 +4020,12 @@ class A11yAdbClient:
         if require_focusable:
             extras.extend(["--ez", "requireFocusable", "true"])
         extras.extend(self._evidence_correlation_extras())
+        progress_hook = getattr(self, "_production_progress_pre_dispatch", None)
+        if callable(progress_hook):
+            try:
+                progress_hook(action="TARGET_FOCUS_COMMIT", request_id=req_id)
+            except Exception:
+                self._production_progress_pending = None
         self._evidence_action_sent(action=ACTION_TARGET_FOCUS_COMMIT, req_id=req_id)
         result = self._helper_bridge.request_focus_command(dev, ACTION_TARGET_FOCUS_COMMIT, req_id, extras)
         result = self._normalize_target_action_payload(result if isinstance(result, dict) else {})

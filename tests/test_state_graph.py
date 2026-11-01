@@ -498,6 +498,81 @@ def _phase6e_row(source, result, transition):
     }
 
 
+@pytest.mark.parametrize("changed,expected_edges", [(True, 1), (False, 0)])
+def test_filtered_scroll_step_is_projected_without_inventing_focus_or_visits(changed, expected_edges):
+    from tb_runner.collection_flow import _phase6e_graph_rows
+
+    source = _phase6e_capture(sequence=10)
+    result = _phase6e_capture(sequence=11, changed=changed, focus=True,
+                              action_epoch=1, request_id="scroll-1")
+    transition = _phase6e_transition(source, changed=changed)
+    original = _phase6e_row(source, result, transition)
+    previous = {key: value for key, value in original.items()
+                if not key.startswith("phase6e_scroll_") and key != "scroll_transition"}
+    following = dict(previous, step_index=3)
+    snapshots = {(source["scenario_id"], 2): {
+        "source_observation": source, "source_marker": source["_exploration_observation"],
+        "result_observation": result, "result_marker": result["_exploration_observation"],
+        "transition": transition,
+    }}
+    rows = _phase6e_graph_rows([previous, following], snapshots, source["scenario_id"])
+    assert [row["step_index"] for row in rows] == [1, 2, 3]
+    graph = recorder_from_existing_rows(rows, run_id="filtered-scroll",
+                                        scenario_id=source["scenario_id"]).to_dict()
+    edges = [edge for edge in graph["edges"] if edge["edge_type"] == "SCROLL_FORWARD"]
+    assert len(edges) == expected_edges
+    assert all(edge["visit_outcome"] != VisitObservation.VISIT_GRANTED.value for edge in edges)
+    assert all(obs["visit_outcome"] != VisitObservation.VISIT_GRANTED.value
+               for obs in graph["observations"] if obs["step"] == 2)
+
+
+def test_filtered_scroll_rejects_stale_result_and_does_not_duplicate_existing_row():
+    from tb_runner.collection_flow import _phase6e_graph_rows
+
+    source = _phase6e_capture(sequence=10)
+    result = _phase6e_capture(sequence=11, changed=True, action_epoch=2, request_id="scroll-1")
+    transition = _phase6e_transition(source)
+    row = _phase6e_row(source, result, transition)
+    snapshots = {(source["scenario_id"], 1): {
+        "source_observation": source, "source_marker": source["_exploration_observation"],
+        "result_observation": result, "result_marker": result["_exploration_observation"],
+        "transition": transition,
+    }}
+    rows = _phase6e_graph_rows([row], snapshots, source["scenario_id"])
+    assert len(rows) == 1
+    graph = recorder_from_existing_rows(rows, run_id="stale-scroll",
+                                        scenario_id=source["scenario_id"]).to_dict()
+    assert not [edge for edge in graph["edges"] if edge["edge_type"] == "SCROLL_FORWARD"]
+
+
+def test_filtered_scroll_is_followed_by_separate_actual_focus_visit():
+    from tb_runner.collection_flow import _phase6e_graph_rows
+
+    source = _phase6e_capture(sequence=10)
+    result = _phase6e_capture(sequence=11, changed=True, focus=True,
+                              action_epoch=1, request_id="scroll-1")
+    transition = _phase6e_transition(source)
+    later = _phase6e_row(result, result, transition)
+    later = {key: value for key, value in later.items()
+             if not key.startswith("phase6e_scroll_") and key != "scroll_transition"}
+    later.update(step_index=3, focus_transition_status="CONFIRMED_MOVED",
+                 actual_focus_instance_id="actual-after-scroll", visit_record_status="RECORDED",
+                 reconciled_visit_instance_id="actual-after-scroll")
+    snapshots = {(source["scenario_id"], 2): {
+        "source_observation": source, "source_marker": source["_exploration_observation"],
+        "result_observation": result, "result_marker": result["_exploration_observation"],
+        "transition": transition,
+    }}
+    rows = _phase6e_graph_rows([later], snapshots, source["scenario_id"])
+    graph = recorder_from_existing_rows(rows, run_id="continued-scroll",
+                                        scenario_id=source["scenario_id"]).to_dict()
+    scroll = next(edge for edge in graph["edges"] if edge["edge_type"] == "SCROLL_FORWARD")
+    visit = next(obs for obs in graph["observations"] if obs["step"] == 3)
+    assert scroll["visit_outcome"] != VisitObservation.VISIT_GRANTED.value
+    assert visit["focus"]["instance_id"] == "actual-after-scroll"
+    assert visit["visit_outcome"] == VisitObservation.VISIT_GRANTED.value
+
+
 def test_phase6e_resolves_explicit_current_scroll_owner_across_multiple_containers():
     identities = set()
     for path, bounds in (("0.0.1", "[0,100][900,800]"),
@@ -538,6 +613,31 @@ def test_phase6e_rejects_stale_or_mismatched_owner(target_path, target_bounds, r
     )
     assert evidence_row["classification"] == expected
     assert evidence_row["valid_for_edge"] is False
+
+
+def test_phase6e_moved_tree_search_fallback_without_current_owner_creates_no_edge():
+    source = _phase6e_capture(sequence=10, omit_owner=True)
+    result = _phase6e_capture(sequence=11, changed=True, action_epoch=1,
+                              request_id="scroll-1")
+    transition = _phase6e_transition(source)
+    transition["action_target"] = {"mode": "ACCESSIBILITY_FALLBACK",
+                                   "container_path": None, "container_bounds": None}
+    transition["action_result"].update(
+        explicitTarget=False, scrollContainerPath=None, scrollableNodeFound=True,
+        fallbackToTreeSearchScrollable=True, fallbackToLargestScrollable=False,
+        scrollContainerClass="android.widget.ListView")
+    evidence_row = build_phase6e_scroll_evidence(
+        source, result, transition,
+        source_marker=source["_exploration_observation"],
+        result_marker=result["_exploration_observation"],
+    )
+
+    graph = recorder_from_existing_rows([_phase6e_row(source, result, transition)],
+                                        run_id="unowned-fallback", scenario_id=source["scenario_id"]).to_dict()
+
+    assert evidence_row["classification"] == "OWNER_NOT_IN_CURRENT_HIERARCHY"
+    assert evidence_row["valid_for_edge"] is False
+    assert not [edge for edge in graph["edges"] if edge["edge_type"] == "SCROLL_FORWARD"]
 
 
 def test_phase6e_requires_current_matching_dispatch_receipt_and_result():

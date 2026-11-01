@@ -320,10 +320,22 @@ def _maybe_realign_focus_to_representative_impl(
         f"target='{truncate_fn(selected_label or selected_rid, 96)}' rid='{truncate_fn(selected_rid, 96)}' "
         f"bounds='{selected_bounds}' class='{truncate_fn(selected_class, 96)}'"
     )
+    # The actual helper invokes this only after its preflight, immediately
+    # before dispatch. A blocked request must not invalidate a current capture.
+    from tb_runner.collection_flow import _production_progress_target_checkpoint
+    previous_hook = getattr(client, "_production_progress_pre_dispatch", None)
+    client._production_progress_pending = None
+    client._production_progress_pre_dispatch = lambda **_kwargs: setattr(
+        client, "_production_progress_pending",
+        _production_progress_target_checkpoint(client, dev, row, scenario_id=scenario_id, step=step_idx))
     try:
-        command_result = target_focus_fn(dev=dev, target=target_descriptor, wait_=2.0)
+        from talkback_lib.native_dispatch_evidence import current_operation_id, native_dispatch_operation
+        with native_dispatch_operation(current_operation_id() or None):
+            command_result = target_focus_fn(dev=dev, target=target_descriptor, wait_=2.0)
     except Exception as error:
         command_result = {"success": False, "status": "ERROR", "reason": type(error).__name__}
+    finally:
+        client._production_progress_pre_dispatch = previous_hook
     request_id = str(
         command_result.get("reqId") or command_result.get("requestId")
         or command_result.get("request_id") or ""

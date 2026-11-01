@@ -71,4 +71,64 @@ class A11yHistoryManagerTest {
 
         assertFalse(suppressed)
     }
+
+    @Test
+    fun shouldSuppressPreCommitTransientSystemUiEvent_usesFreshWorkerFocusPackageWithCurrentHistoryState() {
+        A11yHistoryManager.activeSmartNextTurnId = 91L
+        A11yHistoryManager.markFinalCommitTurn(0L)
+        A11yHistoryManager.clearTopChromeTransientSystemUiSuppression("test_setup")
+        A11yHistoryManager.startTopChromeTransientSystemUiSuppression("com.example.target")
+
+        val suppressed = A11yHistoryManager.shouldSuppressPreCommitTransientSystemUiEvent(
+            eventType = android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            eventPackageName = "com.android.systemui",
+            activeFocusPackage = "com.example.target"
+        )
+        val differentCurrentPackageSuppressed = A11yHistoryManager.shouldSuppressPreCommitTransientSystemUiEvent(
+            eventType = android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            eventPackageName = "com.android.systemui",
+            activeFocusPackage = "com.example.other"
+        )
+
+        assertTrue(suppressed)
+        assertFalse(differentCurrentPackageSuppressed)
+        A11yHistoryManager.clearTopChromeTransientSystemUiSuppression("test_cleanup")
+        A11yHistoryManager.activeSmartNextTurnId = 0L
+    }
+
+    @Test
+    fun shouldIgnorePostCommitResurfacedHeader_dataSnapshotOverloadPreservesCurrentIdentityAndBoundsRules() {
+        val committedBounds = Rect(0, 300, 800, 400)
+        A11yHistoryManager.startAuthoritativeFocusWindow(
+            untilMs = System.currentTimeMillis() + 5_000L,
+            label = "Committed",
+            identity = "stable-node-a",
+            bounds = committedBounds,
+            status = "moved"
+        )
+
+        val sameNodeIgnored = A11yHistoryManager.shouldIgnorePostCommitResurfacedHeader(
+            candidateBounds = Rect(0, 500, 800, 600),
+            candidateIdentity = "stable-node-b",
+            candidateLabel = "Other",
+            eventType = android.view.accessibility.AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED
+        )
+        val sameBoundsIgnored = A11yHistoryManager.shouldIgnorePostCommitResurfacedHeader(
+            candidateBounds = Rect(committedBounds),
+            candidateIdentity = "stable-node-b",
+            candidateLabel = "Other",
+            eventType = android.view.accessibility.AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED
+        )
+        val sameIdentityIgnored = A11yHistoryManager.shouldIgnorePostCommitResurfacedHeader(
+            candidateBounds = Rect(0, 500, 800, 600),
+            candidateIdentity = "stable-node-a",
+            candidateLabel = "Other",
+            eventType = android.view.accessibility.AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED
+        )
+
+        assertTrue(sameNodeIgnored)
+        assertFalse(sameBoundsIgnored)
+        assertFalse(sameIdentityIgnored)
+        A11yHistoryManager.clearAuthoritativeFocusWindow()
+    }
 }

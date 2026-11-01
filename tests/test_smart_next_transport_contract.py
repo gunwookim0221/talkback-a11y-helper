@@ -89,6 +89,33 @@ def test_missing_correlated_result_times_out_without_false_success(client, monke
     assert result["reason"] == "smart_nav_result_wait_timeout"
 
 
+def test_premature_adb_logcat_eof_with_partial_smart_result_fails_closed(client, monkeypatch):
+    import base64
+    import hashlib
+
+    req_id = "truncated-adb-eof"
+    payload = json.dumps({"reqId": req_id, "success": True, "status": "moved", "data": "x" * 7000})
+    payload_bytes = payload.encode()
+    parts = [payload_bytes[index : index + 2500] for index in range(0, len(payload_bytes), 2500)]
+    digest = hashlib.sha256(payload_bytes).hexdigest()
+    output = "\n".join(
+        "A11Y_HELPER: SMART_NAV_RESULT_CHUNK "
+        f"reqId={req_id} index={index} count={len(parts)} sha256={digest} "
+        f"payload={base64.b64encode(part).decode('ascii')}"
+        for index, part in enumerate(parts[:-1])
+    )
+    monkeypatch.setattr(client._adb_device, "_run_adb_command", lambda _cmd, **_kwargs: output)
+
+    result = client._read_log_result(
+        None, "SMART_NAV_RESULT", req_id, wait_seconds=0.02, poll_interval_sec=0.01
+    )
+
+    assert result["success"] is False
+    assert result["status"] == "transport_error"
+    assert result["reason"] == "incomplete_chunked_payload"
+    assert result["reqId"] == req_id
+
+
 def test_result_returned_after_wait_deadline_is_explicitly_late(client, monkeypatch, clock):
     monkeypatch.setattr(client, "_broadcast", lambda *a, **k: "ACK")
     def logs(dev=None):
@@ -122,6 +149,41 @@ def test_retired_late_result_is_observed_once_and_cannot_satisfy_next_request(cl
     assert result["success"] is True
     client._helper_bridge.observe_late_smart_results(payload("old"))
     assert capsys.readouterr().out.count("late_result req_id=old ignored=true") == 1
+
+
+def test_sequential_smart_next_ignores_old_partial_chunks_and_accepts_only_current_complete_result(client, monkeypatch):
+    import hashlib
+    import base64
+
+    def chunk(req_id, index, count, digest, data):
+        return (
+            "A11Y_HELPER: SMART_NAV_RESULT_CHUNK "
+            f"reqId={req_id} index={index} count={count} sha256={digest} "
+            f"payload={base64.b64encode(data).decode('ascii')}"
+        )
+
+    old_payload = json.dumps({"reqId": "old", "success": True, "status": "moved", "data": "x" * 5000})
+    old_bytes = old_payload.encode()
+    old_parts = [old_bytes[:2500], old_bytes[2500:]]
+    old_digest = hashlib.sha256(old_bytes).hexdigest()
+    current_payload = json.dumps({"reqId": "new", "success": True, "status": "moved", "data": "y" * 5000})
+    current_bytes = current_payload.encode()
+    current_parts = [current_bytes[:2500], current_bytes[2500:]]
+    current_digest = hashlib.sha256(current_bytes).hexdigest()
+    current_logs = "\n".join([
+        chunk("old", 0, 2, old_digest, old_parts[0]),
+        chunk("new", 1, 2, current_digest, current_parts[1]),
+        chunk("new", 0, 2, current_digest, current_parts[0]),
+        chunk("old", 1, 2, old_digest, old_parts[1]),
+    ])
+    monkeypatch.setattr(client, "_broadcast", lambda *a, **k: "ACK")
+    monkeypatch.setattr(client._logcat_reader, "dump_filtered", lambda dev=None: current_logs)
+
+    result = client._helper_bridge._request_smart_next(None, "new")
+
+    assert result["reqId"] == "new"
+    assert result["success"] is True
+    assert result["status"] == "moved"
 
 
 def test_move_focus_smart_does_not_retry_transport_failure(client, monkeypatch):
