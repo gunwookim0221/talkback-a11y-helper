@@ -11833,6 +11833,58 @@ def test_open_scenario_pre_navigation_select_and_click_focused_success(monkeypat
     assert client.select_calls[0]["type_"] == "r"
 
 
+def test_settings_entry_uses_exact_focused_navigation_without_coordinate_fallback(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    canonical = _scenario_config("settings_entry_example")
+    runtime_cfg = json.loads(Path("config/runtime_config.json").read_text(encoding="utf-8"))
+    assert canonical["enabled"] is False
+    assert canonical["pre_navigation"][0]["action"] == "select_and_click_focused"
+    assert runtime_cfg["shared_pre_navigation"]["enter_settings"][0]["action"] == "select_and_click_focused"
+    tab_cfg = {**canonical, "pre_navigation": [dict(step) for step in canonical["pre_navigation"]]}
+
+    client = DummyClient([_anchor_row()])
+
+    def _select(**kwargs):
+        client.last_target_action_result = {
+            "reason": "moved_to_target",
+            "target": {
+                "viewIdResourceName": "com.samsung.android.oneconnect:id/setting_button_layout",
+                "accessibilityFocused": True,
+            },
+        }
+        return True
+
+    client.select = _select
+    assert collection_flow.open_scenario(client, "SERIAL", tab_cfg) is True
+    assert len(client.click_focused_calls) == 1
+    assert len(client.tap_bounds_center_adb_calls) == 0
+
+
+def test_settings_entry_fails_closed_without_exact_focus_and_never_taps(monkeypatch):
+    monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+
+    canonical = _scenario_config("settings_entry_example")
+    tab_cfg = {**canonical, "pre_navigation": [dict(step) for step in canonical["pre_navigation"]]}
+    client = DummyClient([_anchor_row()])
+
+    def _select_without_focus(**kwargs):
+        client.last_target_action_result = {
+            "reason": "target_not_found",
+            "target": {"accessibilityFocused": False},
+        }
+        return False
+
+    client.select = _select_without_focus
+    assert collection_flow.open_scenario(client, "SERIAL", tab_cfg) is False
+    assert len(client.click_focused_calls) == 0
+    assert len(client.tap_bounds_center_adb_calls) == 0
+
+
 def test_open_scenario_pre_navigation_select_and_click_focused_select_failure(monkeypatch):
     monkeypatch.setattr(collection_flow, "stabilize_tab_selection", lambda **kwargs: {"ok": True})
     monkeypatch.setattr(collection_flow, "stabilize_anchor", lambda **kwargs: {"ok": True})
@@ -14400,6 +14452,98 @@ def test_life_reset_launches_smartthings_when_app_is_outside(monkeypatch):
     assert foreground_calls[0]["serial"] == "SERIAL"
 
 
+def test_life_reset_uses_exact_foreground_identity_to_recover_from_app_detail(monkeypatch):
+    detail_nodes = [{
+        "text": "Air quality detail",
+        "viewIdResourceName": "back",
+        "className": "android.widget.Button",
+        "visibleToUser": True,
+    }]
+    home_nodes = _life_reset_r2_nodes()
+    selected_home_nodes = _life_reset_r2_nodes(selected=True)
+    client = DummyClient([])
+    client.dump_tree_sequence = [
+        detail_nodes,
+        detail_nodes,
+        home_nodes,
+        home_nodes,
+        selected_home_nodes,
+    ]
+    foreground_calls = []
+    monkeypatch.setattr(
+        collection_flow,
+        "ensure_smartthings_foreground",
+        lambda **kwargs: foreground_calls.append(kwargs) or {
+            "status": "PASS",
+            "package": "com.samsung.android.oneconnect",
+        },
+    )
+    monkeypatch.setattr(collection_flow, "_verify_fresh_life_list_state", lambda *_args, **_kwargs: (True, "ready"))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_args: None)
+
+    ok, reason = collection_flow._ensure_life_plugin_list_ready(
+        client,
+        "SERIAL",
+        {"scenario_id": "life_music_sync_plugin", "back_recovery_wait_seconds": 0.2},
+    )
+
+    assert (ok, reason) == (True, "ready")
+    assert len(foreground_calls) == 1
+    assert client.back_calls == 1
+
+
+def test_life_reset_foreground_identity_does_not_replace_fresh_navigation_evidence(monkeypatch):
+    detail_nodes = [{
+        "text": "Air quality detail",
+        "viewIdResourceName": "back",
+        "className": "android.widget.Button",
+        "visibleToUser": True,
+    }]
+    client = DummyClient([])
+    client.dump_tree = lambda **_kwargs: detail_nodes
+    monkeypatch.setattr(
+        collection_flow,
+        "ensure_smartthings_foreground",
+        lambda **_kwargs: {"status": "PASS", "package": "com.samsung.android.oneconnect"},
+    )
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_args: None)
+
+    ok, reason = collection_flow._ensure_life_plugin_list_ready(
+        client,
+        "SERIAL",
+        {"scenario_id": "life_music_sync_plugin", "back_recovery_wait_seconds": 0.2},
+    )
+
+    assert (ok, reason) == (False, "bottom_nav_not_ready")
+    assert client.select_calls == []
+
+
+def test_life_reset_rejects_non_smartthings_foreground_as_app_context(monkeypatch):
+    detail_nodes = [{
+        "text": "Air quality detail",
+        "viewIdResourceName": "back",
+        "className": "android.widget.Button",
+        "visibleToUser": True,
+    }]
+    client = DummyClient([])
+    client.dump_tree = lambda **_kwargs: detail_nodes
+    monkeypatch.setattr(
+        collection_flow,
+        "ensure_smartthings_foreground",
+        lambda **_kwargs: {"status": "PASS", "package": "com.example.other"},
+    )
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_args: None)
+
+    ok, reason = collection_flow._ensure_life_plugin_list_ready(
+        client,
+        "SERIAL",
+        {"scenario_id": "life_music_sync_plugin", "back_recovery_wait_seconds": 0.2},
+    )
+
+    assert (ok, reason) == (False, "outside_app")
+    assert client.select_calls == []
+
+
 def test_verify_fresh_life_list_state_uses_service_hierarchy_selected_fallback(monkeypatch):
     client = DummyClient([])
     client.dump_tree_sequence = [_life_reset_r2_nodes()]
@@ -14718,6 +14862,208 @@ def test_run_pre_navigation_steps_triggers_capture_for_life_air_care_failure(mon
 
     assert ok is False
     assert captured == {}
+
+
+def test_navigation_contract_rejection_never_falls_back_to_legacy_scrolltouch(monkeypatch):
+    client = DummyClient([])
+    logs = []
+    fallback_calls = []
+    monkeypatch.setattr(collection_flow, "log", lambda message, level="NORMAL": logs.append(message))
+    monkeypatch.setattr(collection_flow.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(
+        collection_flow,
+        "_run_xml_scroll_search_tap",
+        lambda *_args, **_kwargs: (False, "entry_safety:NAVIGATION_ACTION_SAFETY_MODE_REQUIRED"),
+    )
+    monkeypatch.setattr(
+        client,
+        "scrollTouch",
+        lambda **kwargs: fallback_calls.append(kwargs) or True,
+        raising=False,
+    )
+
+    ok = collection_flow._run_pre_navigation_steps(
+        client=client,
+        dev="SERIAL",
+        tab_cfg={
+            "scenario_id": "life_air_care_plugin",
+            "entry_type": "card",
+            "screen_context_mode": "new_screen",
+            "pre_navigation": [
+                {"action": "xml_scroll_search_tap", "target": "(?i).*air care.*", "type": "a"}
+            ],
+            "pre_navigation_retry_count": 1,
+        },
+    )
+
+    assert ok is False
+    assert fallback_calls == []
+    assert client.last_pre_nav_failure_reason == (
+        "navigation_action_rejected:entry_safety:NAVIGATION_ACTION_SAFETY_MODE_REQUIRED"
+    )
+    assert any("abort='navigation_action_fail_closed'" in line for line in logs)
+
+
+def test_configured_life_navigation_recovery_rejection_never_sends_raw_back_or_retries(monkeypatch):
+    client = DummyClient([])
+    client.dump_tree = lambda **_kwargs: [{
+        "resourceId": "com.samsung.android.oneconnect:id/back",
+        "packageName": "com.samsung.android.oneconnect",
+    }]
+    monkeypatch.setattr(collection_flow, "_life_root_state_snapshot", lambda _nodes: {
+        "global_nav_visible": False, "life_selected": False,
+    })
+    monkeypatch.setattr(collection_flow, "_augment_life_snapshot_with_hierarchy_selected", lambda _c, _d, state: state)
+    monkeypatch.setattr(collection_flow, "time", SimpleNamespace(sleep=lambda *_args: None))
+    recovery_calls = []
+    raw_back_calls = []
+
+    def reject_recovery(*args, **kwargs):
+        recovery_calls.append((args, kwargs))
+        return False, "NAVIGATION_ACTION_CONTRACT_NOT_READY"
+
+    monkeypatch.setattr(collection_flow, "_run_configured_life_navigation_recovery", reject_recovery)
+    monkeypatch.setattr(collection_flow, "_send_back", lambda *_a, **_k: raw_back_calls.append(True) or True)
+
+    ok, reason = collection_flow._ensure_life_plugin_list_ready(
+        client, "SERIAL", {
+            "scenario_id": "life_air_care_plugin",
+            "navigation_action_recovery": {
+                "contract_id": "life_plugin_navigate_up_to_landing",
+                "target": "(?i)^navigate up$",
+            },
+        },
+    )
+
+    assert ok is False
+    assert reason == "safe_navigation_return_failed:NAVIGATION_ACTION_CONTRACT_NOT_READY"
+    assert len(recovery_calls) == 1
+    assert raw_back_calls == []
+
+
+def test_shared_recover_to_start_state_consumes_generic_configured_navigation_recovery(monkeypatch):
+    client = DummyClient([])
+    detail = [{
+        "resourceId": "com.samsung.android.oneconnect:id/back",
+        "packageName": "com.samsung.android.oneconnect",
+    }]
+    client.dump_tree_sequence = [detail, _life_reset_r2_nodes(selected=True)]
+    monkeypatch.setattr(collection_flow, "_resolve_recovery_policy", lambda _cfg: {"enabled": True})
+    monkeypatch.setattr(collection_flow, "_life_root_state_snapshot", lambda nodes: {
+        "global_nav_visible": bool(nodes and nodes[0].get("contentDescription")),
+        "life_selected": any(bool(node.get("selected")) for node in nodes),
+        "life_selected_source": "fresh_helper_hierarchy",
+    })
+    monkeypatch.setattr(collection_flow, "_augment_life_snapshot_with_hierarchy_selected", lambda _c, _d, state: state)
+    monkeypatch.setattr(collection_flow, "_verify_fresh_life_list_state", lambda *_a, **_k: (True, "life_tab_ready"))
+    monkeypatch.setattr(collection_flow, "time", SimpleNamespace(sleep=lambda *_args: None))
+    configured_calls = []
+
+    def verified_exact_route(_client, _dev, *, tab_cfg, target, type_, max_scroll_search_steps,
+                             step_wait_seconds, transition_fast_path, navigation_action_contract_id):
+        configured_calls.append((tab_cfg, target, type_, max_scroll_search_steps,
+                                 step_wait_seconds, transition_fast_path, navigation_action_contract_id))
+        return True, "VERIFIED_NAVIGATION"
+
+    monkeypatch.setattr(collection_flow, "_run_xml_scroll_search_tap", verified_exact_route)
+    raw_back_calls = []
+    monkeypatch.setattr(collection_flow, "_send_back", lambda *_a, **_k: raw_back_calls.append(True) or True)
+    tab_cfg = {
+        "scenario_id": "life_air_care_plugin",
+        "navigation_action_recovery": {
+            "contract_id": "life_plugin_navigate_up_to_landing",
+            "target": "(?i)^(navigate up|navigate to parent menu)$",
+        },
+    }
+
+    ok = collection_flow.recover_to_start_state(client, "SERIAL", tab_cfg)
+
+    assert ok is True
+    assert len(configured_calls) == 1
+    cfg, target, action_type, max_steps, wait_seconds, transition_fast_path, contract_id = configured_calls[0]
+    assert cfg is tab_cfg
+    assert target == tab_cfg["navigation_action_recovery"]["target"]
+    assert action_type == "a"
+    assert max_steps == 0
+    assert wait_seconds <= 0.45
+    assert transition_fast_path is False
+    assert contract_id == "life_plugin_navigate_up_to_landing"
+    assert raw_back_calls == []
+
+
+def test_malformed_configured_navigation_recovery_stays_fail_closed(monkeypatch):
+    client = DummyClient([])
+    client.dump_tree = lambda **_kwargs: [{
+        "resourceId": "com.samsung.android.oneconnect:id/back",
+        "packageName": "com.samsung.android.oneconnect",
+    }]
+    monkeypatch.setattr(collection_flow, "_life_root_state_snapshot", lambda _nodes: {
+        "global_nav_visible": False, "life_selected": False,
+    })
+    monkeypatch.setattr(collection_flow, "_augment_life_snapshot_with_hierarchy_selected", lambda _c, _d, state: state)
+    monkeypatch.setattr(collection_flow, "time", SimpleNamespace(sleep=lambda *_args: None))
+    raw_back_calls = []
+    monkeypatch.setattr(collection_flow, "_send_back", lambda *_a, **_k: raw_back_calls.append(True) or True)
+
+    ok, reason = collection_flow._ensure_life_plugin_list_ready(
+        client, "SERIAL", {"scenario_id": "life_music_sync_plugin", "navigation_action_recovery": None})
+
+    assert ok is False
+    assert reason == "safe_navigation_return_failed:NAVIGATION_RECOVERY_NOT_CONFIGURED"
+    assert raw_back_calls == []
+
+
+def test_non_opted_life_recovery_keeps_existing_back_behavior(monkeypatch):
+    client = DummyClient([])
+    client.dump_tree_sequence = [
+        [{"resourceId": "com.samsung.android.oneconnect:id/back", "packageName": "com.samsung.android.oneconnect"}],
+        _life_reset_r2_nodes(selected=True),
+    ]
+    monkeypatch.setattr(collection_flow, "_life_root_state_snapshot", lambda nodes: {
+        "global_nav_visible": bool(nodes and nodes[0].get("contentDescription")),
+        "life_selected": bool(nodes and nodes[0].get("selected")),
+        "life_selected_source": "test",
+    })
+    monkeypatch.setattr(collection_flow, "_augment_life_snapshot_with_hierarchy_selected", lambda _c, _d, state: state)
+    monkeypatch.setattr(collection_flow, "_verify_fresh_life_list_state", lambda *_a, **_k: (True, "ready"))
+    monkeypatch.setattr(collection_flow, "time", SimpleNamespace(sleep=lambda *_args: None))
+
+    ok, _reason = collection_flow._ensure_life_plugin_list_ready(
+        client, "SERIAL", {"scenario_id": "life_music_sync_plugin"})
+
+    assert ok is True
+    assert client.back_calls == 1
+
+
+def test_non_card_explicit_navigation_step_refusal_does_not_fall_back_to_legacy_action(monkeypatch):
+    client = DummyClient([])
+    fallback_calls = []
+    monkeypatch.setattr(collection_flow, "time", SimpleNamespace(sleep=lambda *_args: None))
+    monkeypatch.setattr(
+        collection_flow,
+        "_run_xml_scroll_search_tap",
+        lambda *_args, **_kwargs: (False, "entry_safety:NAVIGATION_ACTION_CONTRACT_NOT_READY"),
+    )
+    monkeypatch.setattr(client, "scrollTouch", lambda **kwargs: fallback_calls.append(kwargs) or True, raising=False)
+
+    ok = collection_flow._run_pre_navigation_steps(
+        client=client, dev="SERIAL", tab_cfg={
+            "scenario_id": "life_music_sync_plugin",
+            "entry_type": "button",
+            "pre_navigation": [{
+                "action": "xml_scroll_search_tap", "target": "(?i)^navigate up$", "type": "a",
+                "exact_node_only": True,
+                "navigation_action_contract_id": "unconfigured-contract",
+            }],
+            "pre_navigation_retry_count": 1,
+        },
+    )
+
+    assert ok is False
+    assert fallback_calls == []
+    assert client.last_pre_nav_failure_reason == (
+        "navigation_action_rejected:entry_safety:NAVIGATION_ACTION_CONTRACT_NOT_READY"
+    )
 
 
 def test_run_pre_navigation_steps_scrolltouch_accumulates_step_and_final_capture_in_same_run(monkeypatch):
@@ -20159,3 +20505,81 @@ def test_phase6d_capture_authority_requires_current_action_clock_and_never_backf
     assert row["production_observation_capture_status"] == "UNALIGNED"
     assert row["production_observation_envelope"]["capture_complete"] is False
     assert row["production_observation_envelope"]["focus_capture_id"] is None
+
+
+def test_collection_scenario_evidence_initializer_binds_real_runtime_and_ledger(tmp_path):
+    from tb_runner.plugin_entry_provenance import evidence_invocation_identity
+
+    runtime = EvidenceRuntime(
+        output_path=tmp_path / "scenario-evidence.xlsx",
+        run_id="run-collection-lifecycle-test",
+        enabled=True,
+    )
+    client = SimpleNamespace(
+        evidence_runtime=runtime,
+        _active_evidence_scenario_id="stale-scenario",
+        _active_evidence_scenario_tx_id="stale-transaction",
+    )
+    tab_cfg = next(cfg for cfg in TAB_CONFIGS if cfg.get("scenario_id") == "life_air_care_plugin")
+
+    scenario_tx_id = collection_flow.initialize_collection_scenario_evidence(client, tab_cfg)
+
+    assert scenario_tx_id
+    assert client._active_evidence_scenario_id == "life_air_care_plugin"
+    assert client._active_evidence_scenario_tx_id == scenario_tx_id
+    assert runtime._scenario_tx_id == scenario_tx_id
+    assert runtime._scenario_id == "life_air_care_plugin"
+    assert evidence_invocation_identity(client, "life_air_care_plugin") == {
+        "evidence_run_id": "run-collection-lifecycle-test",
+        "scenario_tx_id": scenario_tx_id,
+        "invocation_id": scenario_tx_id,
+    }
+    event = json.loads(runtime.ledger.path.read_text(encoding="utf-8").splitlines()[0])
+    assert event["event_type"] == "SCENARIO_TRANSACTION_OPENED"
+    assert event["run_id"] == "run-collection-lifecycle-test"
+    assert event["scenario_id"] == "life_air_care_plugin"
+    assert event["scenario_tx_id"] == scenario_tx_id
+
+
+def test_collection_scenario_evidence_initializer_clears_client_identity_on_start_failure():
+    from tb_runner.plugin_entry_provenance import evidence_invocation_identity
+
+    class FailedRuntime:
+        is_enabled = True
+
+        def start_scenario(self, *_args, **_kwargs):
+            raise RuntimeError("start failed")
+
+    client = SimpleNamespace(
+        evidence_runtime=FailedRuntime(),
+        _active_evidence_scenario_id="stale-scenario",
+        _active_evidence_scenario_tx_id="stale-transaction",
+    )
+
+    assert collection_flow.initialize_collection_scenario_evidence(
+        client, next(cfg for cfg in TAB_CONFIGS if cfg.get("scenario_id") == "life_air_care_plugin")
+    ) == ""
+    assert client._active_evidence_scenario_id == ""
+    assert client._active_evidence_scenario_tx_id == ""
+    assert evidence_invocation_identity(client, "life_air_care_plugin") == {
+        "evidence_run_id": "",
+        "scenario_tx_id": "",
+        "invocation_id": "",
+    }
+
+
+def test_collection_scenario_evidence_initializer_clears_client_identity_when_disabled(tmp_path):
+    client = SimpleNamespace(
+        evidence_runtime=EvidenceRuntime(
+            output_path=tmp_path / "disabled-evidence.xlsx",
+            enabled=False,
+        ),
+        _active_evidence_scenario_id="stale-scenario",
+        _active_evidence_scenario_tx_id="stale-transaction",
+    )
+
+    assert collection_flow.initialize_collection_scenario_evidence(
+        client, next(cfg for cfg in TAB_CONFIGS if cfg.get("scenario_id") == "life_air_care_plugin")
+    ) == ""
+    assert client._active_evidence_scenario_id == ""
+    assert client._active_evidence_scenario_tx_id == ""

@@ -14,6 +14,10 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from talkback_lib import A11yAdbClient
+from talkback_lib.helper_bridge import (
+    NAVIGATION_ACTIVATION_DIAGNOSTIC_AIRCARE_FRAME_LAYOUT_CHILD_CLICK,
+    NAVIGATION_ACTIVATION_EXACT_OWNER_FOCUS_THEN_CLICK,
+)
 from talkback_lib.exploration_evidence_clock import clock_for, owned_dispatch
 from tb_runner.anchor_logic import build_landing_surface_signature, stabilize_anchor
 from tb_runner.bottom_nav import annotate_bottom_nav_candidates, is_annotated_bottom_nav_candidate
@@ -137,6 +141,18 @@ COLLECTION_FLOW_ENTRY_CONTRACT_VERSION = "pr67-special-state-grace-home-like-str
 COLLECTION_FLOW_REPEAT_CTA_GRACE_VERSION = "pr78-repeat-cta-focus-align-v1"
 COLLECTION_FLOW_SCROLL_READY_VERSION = "pr79-scroll-ready-move-smart-v1"
 COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION = "pr108-local-tab-last-selected-hint-v1"
+
+
+def _navigation_entry_activation_mode(scenario_id: str, readiness: Mapping[str, Any]) -> str:
+    if os.environ.get("TB_DIAGNOSTIC_AIRCARE_FRAME_LAYOUT_CHILD") != "1":
+        return NAVIGATION_ACTIVATION_EXACT_OWNER_FOCUS_THEN_CLICK
+    if (scenario_id == "life_air_care_plugin" and
+            readiness.get("contract_id") == "life_service_card_read_only_navigation"):
+        return NAVIGATION_ACTIVATION_DIAGNOSTIC_AIRCARE_FRAME_LAYOUT_CHILD_CLICK
+    # The scenario also uses a separate, approved Navigate-up contract during
+    # recovery. Keep that action on its normal mode; diagnostic child activation
+    # is only for the Life card entry contract.
+    return NAVIGATION_ACTIVATION_EXACT_OWNER_FOCUS_THEN_CLICK
 COLLECTION_FLOW_REPEAT_SUPPRESSION_VERSION = "phase3f-repeat-suppression-v1"
 COLLECTION_FLOW_BOTTOM_STRIP_GUARD_VERSION = "phase4d-bottom-strip-guard-v1"
 COLLECTION_FLOW_BOTTOM_STRIP_FAST_STOP_VERSION = "phase4e-bottom-strip-no-unvisited-fast-stop-v1"
@@ -4401,13 +4417,46 @@ def _verify_fresh_life_list_state(
     return False, last_reason
 
 
+def _run_configured_life_navigation_recovery(
+    client: A11yAdbClient, dev: str, tab_cfg: dict[str, Any], wait_seconds: float,
+) -> tuple[bool, str]:
+    """Run one configured, exact-node read-only route back to the Life landing."""
+    recovery = tab_cfg.get("navigation_action_recovery")
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip().lower()
+    if not isinstance(recovery, dict):
+        return False, "NAVIGATION_RECOVERY_NOT_CONFIGURED"
+    contract_id = str(recovery.get("contract_id") or "").strip()
+    target = str(recovery.get("target") or "").strip()
+    if (not contract_id or not target
+            or not _navigation_action_contract_configured(tab_cfg, contract_id)
+            or _navigation_action_policy_contract(tab_cfg, scenario_id, contract_id) is None):
+        return False, "NAVIGATION_RECOVERY_CONTRACT_INVALID"
+    return _run_xml_scroll_search_tap(
+        client, dev, tab_cfg=tab_cfg, target=target, type_="a", max_scroll_search_steps=0,
+        step_wait_seconds=min(max(wait_seconds, 0.2), 0.45), transition_fast_path=False,
+        navigation_action_contract_id=contract_id,
+    )
+
+
 def _ensure_life_plugin_list_ready(client: A11yAdbClient, dev: str, tab_cfg: dict[str, Any]) -> tuple[bool, str]:
     wait_seconds = _get_wait_seconds(tab_cfg, "back_recovery_wait_seconds", MAIN_STEP_WAIT_SECONDS)
     max_attempts = 2
     scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip() or "unknown"
     invocation_phase = str(tab_cfg.get("_recover_invocation_reason", "") or "").strip() or "default"
+    configured_navigation_recovery = "navigation_action_recovery" in tab_cfg
+    reviewed_return_attempted = False
     pre_reset_state_logged = False
     log("[LIFE_RESET] start")
+
+    def _return_toward_life() -> tuple[bool, str]:
+        nonlocal reviewed_return_attempted
+        if configured_navigation_recovery:
+            if reviewed_return_attempted:
+                return False, "SAFE_NAVIGATION_RETURN_ALREADY_ATTEMPTED"
+            reviewed_return_attempted = True
+            return _run_configured_life_navigation_recovery(client, dev, tab_cfg, wait_seconds)
+        sent = _send_back(client, dev)
+        return sent, "legacy_back_sent" if sent else "back_failed"
 
     def _read_snapshot() -> tuple[list[dict[str, Any]], dict[str, Any], bool]:
         try:
@@ -4427,6 +4476,29 @@ def _ensure_life_plugin_list_ready(client: A11yAdbClient, dev: str, tab_cfg: dic
             or bool(snapshot.get("global_nav_visible"))
         )
         return nodes, snapshot, app_inside
+
+    def _confirm_app_inside_from_foreground(snapshot: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        """Use exact foreground identity only to keep bounded recovery in-app.
+
+        Foreground package confirmation does not establish the Life root or
+        authorize navigation/visit credit. Callers must still verify the
+        bottom navigation and selected Life tab from a fresh hierarchy.
+        """
+        try:
+            foreground_result = ensure_smartthings_foreground(serial=dev)
+        except Exception as exc:
+            foreground_result = {"status": "FAIL", "package": "", "message": str(exc)}
+        foreground_status = str(foreground_result.get("status", "") or "") if isinstance(foreground_result, dict) else ""
+        foreground_package = str(foreground_result.get("package", "") or "") if isinstance(foreground_result, dict) else ""
+        log(
+            "[LIFE_RESET][foreground_recovery] "
+            f"status='{foreground_status}' package='{foreground_package}'"
+        )
+        if foreground_status != "PASS" or foreground_package != _SMARTTHINGS_PACKAGE:
+            return snapshot, False
+        _, fresh_snapshot, _ = _read_snapshot()
+        log("[LIFE_RESET] app_inside=true source='foreground_package_confirmed' authority='recovery_only'")
+        return fresh_snapshot, True
 
     for attempt in range(1, max_attempts + 1):
         current_nodes, snapshot, app_inside = _read_snapshot()
@@ -4464,24 +4536,14 @@ def _ensure_life_plugin_list_ready(client: A11yAdbClient, dev: str, tab_cfg: dic
             pre_reset_state_logged = True
         log(f"[LIFE_RESET] app_inside={str(app_inside).lower()}")
         if not app_inside:
-            try:
-                foreground_result = ensure_smartthings_foreground(serial=dev)
-            except Exception as exc:
-                foreground_result = {"status": "FAIL", "message": str(exc)}
-            foreground_status = str(foreground_result.get("status", "") or "") if isinstance(foreground_result, dict) else ""
-            foreground_package = str(foreground_result.get("package", "") or "") if isinstance(foreground_result, dict) else ""
-            log(
-                "[LIFE_RESET][foreground_recovery] "
-                f"status='{foreground_status}' package='{foreground_package}'"
-            )
-            if foreground_status == "PASS":
-                _, snapshot, app_inside = _read_snapshot()
-                log(f"[LIFE_RESET] app_inside={str(app_inside).lower()} source='foreground_recovery'")
+            snapshot, app_inside = _confirm_app_inside_from_foreground(snapshot)
         for _ in range(2):
             if app_inside:
                 break
-            back_sent = _send_back(client, dev)
+            back_sent, back_reason = _return_toward_life()
             if not back_sent:
+                if configured_navigation_recovery:
+                    return False, f"safe_navigation_return_failed:{back_reason}"
                 break
             time.sleep(min(max(wait_seconds, 0.2), 0.8))
             _, snapshot, app_inside = _read_snapshot()
@@ -4497,14 +4559,18 @@ def _ensure_life_plugin_list_ready(client: A11yAdbClient, dev: str, tab_cfg: dic
         for _ in range(2):
             if bottom_nav_ready:
                 break
-            back_sent = _send_back(client, dev)
+            back_sent, back_reason = _return_toward_life()
             if not back_sent:
+                if configured_navigation_recovery:
+                    return False, f"safe_navigation_return_failed:{back_reason}"
                 break
             time.sleep(min(max(wait_seconds, 0.2), 0.8))
             _, snapshot, app_inside = _read_snapshot()
             if not app_inside:
-                log("[LIFE_RESET] success=false fail reason='app_exited_after_back'")
-                return False, "app_exited_after_back"
+                snapshot, app_inside = _confirm_app_inside_from_foreground(snapshot)
+                if not app_inside:
+                    log("[LIFE_RESET] success=false fail reason='app_exited_after_back'")
+                    return False, "app_exited_after_back"
             bottom_nav_ready = bool(snapshot.get("global_nav_visible"))
         log(f"[LIFE_RESET] bottom_nav_ready={str(bottom_nav_ready).lower()}")
         if not bottom_nav_ready:
@@ -4885,6 +4951,1043 @@ def _extract_window_focus_line(client: A11yAdbClient, dev: str) -> str:
         if "mCurrentFocus" in line or "mFocusedApp" in line:
             return line.strip()
     return ""
+
+
+def _navigation_action_request_id(result: Any) -> str:
+    if not isinstance(result, Mapping):
+        return ""
+    for key in ("reqId", "request_id"):
+        value = result.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+_NAVIGATION_FOCUS_REVALIDATION_LEAF_FIELDS = frozenset({
+    "capture_lease_fresh",
+    "connection_identity_matches",
+    "retained_node_refresh_succeeded",
+    "window_identity_matches",
+    "retained_node_accessibility_focused",
+    "unique_active_window",
+    "root_available",
+    "node_at_path_resolved",
+    "retained_node_identity_matches",
+    "focus_neutral_descriptor_matches",
+    "focus_neutral_hierarchy_digest_matches",
+    "capture_complete",
+})
+_NAVIGATION_FOCUS_REVALIDATION_DIGEST_FIELDS = frozenset({
+    "expected_focus_neutral_descriptor_digest",
+    "current_focus_neutral_descriptor_digest",
+    "expected_focus_neutral_hierarchy_digest",
+    "current_focus_neutral_hierarchy_digest",
+})
+_NAVIGATION_FOCUS_DESCRIPTOR_DIAGNOSTIC_FIELDS = frozenset({
+    "text", "contentDescription", "viewIdResourceName", "className", "packageName",
+    "sourceNodeId", "windowId", "boundsInScreen", "clickable", "effectiveClickable",
+    "enabled", "focusable", "focused", "inputFocused", "selected", "scrollable",
+    "isScrollable", "checkable", "checked", "visibleToUser", "isVisibleToUser", "actions",
+})
+_NAVIGATION_FOCUS_ACTION_ID_MAX = 2_147_483_647
+_NAVIGATION_FOCUS_ACTION_ID_DIAGNOSTIC_LIMIT = 64
+_NAVIGATION_FOCUS_REVALIDATION_CHECKS = _NAVIGATION_FOCUS_REVALIDATION_LEAF_FIELDS | {
+    "capture_lease_fresh",
+}
+_NAVIGATION_FOCUS_REVALIDATION_OUTER_BOOL_FIELDS = frozenset({
+    "prepared_deadline_valid",
+    "service_identity_matches",
+    "connection_identity_matches",
+    "window_identity_matches",
+    "focus_event_owner_matches",
+    "aggregate_accepted",
+})
+
+
+def _bounded_navigation_focus_revalidation(result: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """Project only bounded, non-text focus revalidation diagnostics from a receipt."""
+    if not isinstance(result, Mapping):
+        return None
+    receipt = result.get("receipt")
+    if not isinstance(receipt, Mapping):
+        return None
+    activation = receipt.get("activation_diagnostics")
+    if not isinstance(activation, Mapping):
+        return None
+    focus = activation.get("focus_revalidation")
+    if not isinstance(focus, Mapping):
+        return None
+
+    projected: dict[str, Any] = {
+        key: value for key, value in focus.items()
+        if key in _NAVIGATION_FOCUS_REVALIDATION_OUTER_BOOL_FIELDS and type(value) is bool
+    }
+    currentness = focus.get("target_currentness")
+    if isinstance(currentness, Mapping):
+        bounded_currentness: dict[str, Any] = {
+            key: value for key, value in currentness.items()
+            if key in _NAVIGATION_FOCUS_REVALIDATION_LEAF_FIELDS and type(value) is bool
+        }
+        for key in _NAVIGATION_FOCUS_REVALIDATION_DIGEST_FIELDS:
+            value = currentness.get(key)
+            if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value):
+                bounded_currentness[key] = value
+        if type(currentness.get("diagnostics_available")) is bool:
+            bounded_currentness["diagnostics_available"] = currentness["diagnostics_available"]
+        if type(currentness.get("aggregate_accepted")) is bool:
+            bounded_currentness["aggregate_accepted"] = currentness["aggregate_accepted"]
+        lease_age = currentness.get("capture_lease_age_ms")
+        if type(lease_age) is int and 0 <= lease_age <= 60_000:
+            bounded_currentness["capture_lease_age_ms"] = lease_age
+        failed_check = currentness.get("first_failed_check")
+        if isinstance(failed_check, str) and failed_check in _NAVIGATION_FOCUS_REVALIDATION_CHECKS:
+            bounded_currentness["first_failed_check"] = failed_check
+        evaluation = currentness.get("evaluation")
+        if evaluation == "SKIPPED_PREPARED_DEADLINE":
+            bounded_currentness["evaluation"] = evaluation
+        changed_fields = currentness.get("focus_neutral_descriptor_mismatch_fields")
+        if isinstance(changed_fields, (list, tuple)):
+            bounded_currentness["focus_neutral_descriptor_mismatch_fields"] = [
+                field for field in changed_fields[:24]
+                if isinstance(field, str) and field in _NAVIGATION_FOCUS_DESCRIPTOR_DIAGNOSTIC_FIELDS
+            ]
+        action_id_arrays: dict[str, list[int]] = {}
+        action_id_inputs_valid = True
+        for key in ("focus_neutral_action_ids_added", "focus_neutral_action_ids_removed"):
+            raw_ids = currentness.get(key)
+            if not isinstance(raw_ids, (list, tuple)):
+                action_id_inputs_valid = False
+                continue
+            valid_ids = [value for value in raw_ids
+                         if type(value) is int and 0 <= value <= _NAVIGATION_FOCUS_ACTION_ID_MAX]
+            if len(valid_ids) != len(raw_ids) or len(raw_ids) > _NAVIGATION_FOCUS_ACTION_ID_DIAGNOSTIC_LIMIT:
+                action_id_inputs_valid = False
+            action_id_arrays[key] = sorted(set(valid_ids))[:_NAVIGATION_FOCUS_ACTION_ID_DIAGNOSTIC_LIMIT]
+        if action_id_arrays:
+            bounded_currentness.update(action_id_arrays)
+            bounded_currentness["focus_neutral_action_id_delta_complete"] = (
+                currentness.get("focus_neutral_action_id_delta_complete") is True and action_id_inputs_valid
+            )
+        if bounded_currentness:
+            projected["target_currentness"] = bounded_currentness
+    if not projected:
+        return None
+
+    activation_projection: dict[str, Any] = {"focus_revalidation": projected}
+    mode = activation.get("activation_mode")
+    if mode in {"EXACT_OWNER_FOCUS_THEN_CLICK", "DIRECT_CLICK"}:
+        activation_projection["activation_mode"] = mode
+    event_status = activation.get("focus_event_status")
+    if event_status in {"FOCUSED_HIERARCHY_REVALIDATION_FAILED", "EXACT_OWNER_FOCUSED_CURRENT"}:
+        activation_projection["focus_event_status"] = event_status
+    return {"activation_diagnostics": activation_projection}
+
+
+_NAVIGATION_POST_CAPTURE_POLL_SKIP_REASONS = {
+    "ACTION_WINDOW_NOT_ACTIVE_TYPE1", "ACTION_WINDOW_ACTIVE_TYPE1_AMBIGUOUS",
+    "ROOT_MISSING", "TREE_INCOMPLETE", "IMMUTABLE_CAPTURE_UNAVAILABLE",
+    "COMPLETE_SAMPLE_NOT_VERIFIED",
+}
+
+
+def _bounded_navigation_post_capture_polling(value: Any) -> dict[str, Any] | None:
+    """Allow only redacted counters and window state from the Kotlin poll trace."""
+    if not isinstance(value, Mapping):
+        return None
+    bounded: dict[str, Any] = {}
+    string_fields = (
+        "schema", "request_id", "transaction_id", "service_instance_id", "connection_id",
+        "termination_stage", "root_package_name", "root_class_name",
+    )
+    bool_fields = ("service_changed", "deadline_reached")
+    int_fields = (
+        "action_window_id", "attempt_count", "complete_sample_count",
+        "first_attempt_elapsed_realtime_ms", "last_attempt_elapsed_realtime_ms",
+        "last_complete_sample_elapsed_realtime_ms", "omitted_window_state_count",
+        "omitted_active_window_id_count", "service_change_elapsed_realtime_ms",
+        "deadline_elapsed_realtime_ms",
+    )
+    for key in string_fields:
+        if isinstance(value.get(key), str):
+            bounded[key] = value[key][:256]
+    for key in bool_fields:
+        if isinstance(value.get(key), bool):
+            bounded[key] = value[key]
+    for key in int_fields:
+        field_value = value.get(key)
+        if isinstance(field_value, int) and not isinstance(field_value, bool):
+            bounded[key] = field_value
+    states = value.get("observed_type1_window_states")
+    if isinstance(states, list):
+        bounded["observed_type1_window_states"] = [
+            {
+                key: row[key]
+                for key in ("window_id", "last_active", "active_observation_count", "inactive_observation_count")
+                if ((key == "last_active" and isinstance(row.get(key), bool)) or
+                    (key != "last_active" and isinstance(row.get(key), int) and
+                     not isinstance(row.get(key), bool)))
+            }
+            for row in states[:16] if isinstance(row, Mapping)
+        ]
+    active_ids = value.get("observed_active_type1_window_ids")
+    if isinstance(active_ids, list):
+        bounded["observed_active_type1_window_ids"] = [
+            window_id for window_id in active_ids[:16]
+            if isinstance(window_id, int) and not isinstance(window_id, bool)
+        ]
+    skip_counts = value.get("skip_reason_counts")
+    if isinstance(skip_counts, Mapping):
+        bounded["skip_reason_counts"] = {
+            reason: count for reason, count in skip_counts.items()
+            if reason in _NAVIGATION_POST_CAPTURE_POLL_SKIP_REASONS and
+            isinstance(count, int) and not isinstance(count, bool) and count >= 0
+        }
+    return bounded
+
+
+def _bounded_navigation_post_window_authority(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    bounded: dict[str, Any] = {}
+    for key in ("schema", "request_id", "transaction_id", "service_instance_id", "connection_id",
+                "root_package_name", "root_class_name"):
+        if isinstance(value.get(key), str):
+            bounded[key] = value[key][:256]
+    for key in ("action_window_id", "click_window_id", "click_event_type", "click_event_elapsed_realtime_ms",
+                "post_window_id", "observed_at_elapsed_realtime_ms", "root_window_id"):
+        item = value.get(key)
+        if isinstance(item, int) and not isinstance(item, bool):
+            bounded[key] = item
+    ids = value.get("active_type1_window_ids")
+    if isinstance(ids, list):
+        bounded["active_type1_window_ids"] = [
+            item for item in ids[:16] if isinstance(item, int) and not isinstance(item, bool)
+        ]
+    return bounded
+
+
+def _bounded_navigation_post_structure(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    bounded: dict[str, Any] = {}
+    for key in ("exact_text_within_webview", "container_within_webview", "excluded_class_present"):
+        if isinstance(value.get(key), bool):
+            bounded[key] = value[key]
+    for key in ("exact_text_count", "container_count", "webview_count", "exact_back_anchor_count"):
+        item = value.get(key)
+        if isinstance(item, int) and not isinstance(item, bool):
+            bounded[key] = item
+    path = value.get("anchor_path")
+    if isinstance(path, list) and len(path) <= 80 and all(
+            isinstance(item, int) and not isinstance(item, bool) and 0 <= item <= 4096 for item in path):
+        bounded["anchor_path"] = list(path)
+    return bounded
+
+
+def _bounded_navigation_path(value: Any) -> list[int] | None:
+    if not isinstance(value, list) or len(value) > 80 or any(
+            not isinstance(item, int) or isinstance(item, bool) or item < 0 or item > 4096 for item in value):
+        return None
+    return list(value)
+
+
+def _bounded_navigation_relation(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    bounded: dict[str, Any] = {}
+    for key in ("kind", "child_class_pattern", "child_resource_id"):
+        if isinstance(value.get(key), str):
+            bounded[key] = value[key][:256]
+    index = value.get("child_index")
+    if isinstance(index, int) and not isinstance(index, bool) and 0 <= index <= 4096:
+        bounded["child_index"] = index
+    return bounded
+
+
+def _bounded_navigation_owner_click_provenance(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping) or value.get("schema") != "navigation-owner-click-v1":
+        return None
+    strings = (
+        "schema", "request_id", "transaction_id", "owner_lease_id", "service_instance_id",
+        "connection_id", "click_event_id", "authorization_owner_descriptor_digest",
+        "action_target_descriptor_digest",
+    )
+    bounded: dict[str, Any] = {}
+    for key in strings:
+        item = value.get(key)
+        if not isinstance(item, str) or not item or len(item) > 256:
+            return None
+        bounded[key] = item
+    for key in ("authorization_owner_descriptor_digest", "action_target_descriptor_digest"):
+        digest = bounded[key]
+        if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            return None
+    integer_keys = (
+        "action_window_id", "dispatch_elapsed_realtime_ms", "eligible_exact_click_count",
+        "click_event_type", "click_event_elapsed_realtime_ms", "click_event_window_id",
+    )
+    for key in integer_keys:
+        item = value.get(key)
+        if not isinstance(item, int) or isinstance(item, bool) or item < 0:
+            return None
+        bounded[key] = item
+    for key in ("dispatch_marked_before_action", "dispatch_target_currentness_accepted", "owner_exact"):
+        item = value.get(key)
+        if not isinstance(item, bool):
+            return None
+        bounded[key] = item
+    owner_path = _bounded_navigation_path(value.get("authorization_owner_path"))
+    action_path = _bounded_navigation_path(value.get("action_target_path"))
+    if owner_path is None or action_path is None:
+        return None
+    relation_value = value.get("activation_owner_relation")
+    relation = _bounded_navigation_relation(relation_value) if relation_value is not None else None
+    if relation_value is not None and (relation is None or relation.get("kind") != "direct_child" or
+            "child_index" not in relation or not relation.get("child_class_pattern") or
+            not relation.get("child_resource_id")):
+        return None
+    if relation is None:
+        if action_path != owner_path:
+            return None
+    elif action_path != owner_path + [relation["child_index"]]:
+        return None
+    if (not bounded["request_id"] or not bounded["transaction_id"] or not bounded["owner_lease_id"] or
+            not bounded["service_instance_id"] or not bounded["connection_id"] or
+            not bounded["dispatch_marked_before_action"] or
+            not bounded["dispatch_target_currentness_accepted"] or not bounded["owner_exact"] or
+            bounded["eligible_exact_click_count"] != 1 or bounded["click_event_type"] != 1 or
+            bounded["click_event_window_id"] != bounded["action_window_id"] or
+            bounded["click_event_elapsed_realtime_ms"] < bounded["dispatch_elapsed_realtime_ms"]):
+        return None
+    bounded["authorization_owner_path"] = owner_path
+    bounded["action_target_path"] = action_path
+    if relation is not None:
+        bounded["activation_owner_relation"] = relation
+    source_diagnostics = _bounded_navigation_click_source_diagnostics(
+        value.get("click_event_source_diagnostics"), request_id=bounded["request_id"],
+        transaction_id=bounded["transaction_id"],
+    )
+    if source_diagnostics is not None:
+        bounded["click_event_source_diagnostics"] = source_diagnostics
+    return bounded
+
+
+def _bounded_navigation_post_capture_sample_artifact(
+    value: Any, diagnostics: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Validate and retain only the redacted, hash-bound strict-post capture sample."""
+    if not isinstance(value, Mapping):
+        return None
+    wrapper_keys = {
+        "result_channel", "request_id", "receipt_field", "artifact_sha256", "artifact_bytes",
+        "completeness", "node_count", "persisted_node_count", "payload",
+    }
+    if set(value) - wrapper_keys:
+        return None
+    payload = value.get("payload")
+    if not isinstance(payload, Mapping):
+        return None
+    payload_keys = {
+        "schema", "request_id", "transaction_id", "service_instance_id", "connection_id",
+        "window_id", "capture_id", "captured_at_elapsed_realtime_ms", "hierarchy_digest",
+        "node_count", "persisted_node_count", "completeness", "omitted_fields", "nodes",
+        "diagnostic_only", "effect_contract_id", "required_anchor_structural_match_count",
+    }
+    if set(payload) - payload_keys or payload.get("schema") != "strict-post-capture-redacted-v1":
+        return None
+    if payload.get("diagnostic_only", True) is not True:
+        return None
+    omitted_fields = payload.get("omitted_fields")
+    if (not isinstance(omitted_fields, list) or len(omitted_fields) > 8 or any(
+            not isinstance(item, str) or item not in {"text", "contentDescription", "action_labels", "sourceNodeId",
+                                                      "node_summary_size_limit"} for item in omitted_fields)):
+        return None
+    for key in ("request_id", "transaction_id", "service_instance_id", "connection_id", "capture_id"):
+        item = payload.get(key)
+        if not isinstance(item, str) or not item or len(item) > 256:
+            return None
+    for key in ("window_id", "captured_at_elapsed_realtime_ms"):
+        item = payload.get(key)
+        if not isinstance(item, int) or isinstance(item, bool) or item < 0:
+            return None
+    hierarchy_digest = payload.get("hierarchy_digest")
+    if (not isinstance(hierarchy_digest, str) or len(hierarchy_digest) != 64 or
+            any(char not in "0123456789abcdef" for char in hierarchy_digest)):
+        return None
+    contract_id = payload.get("effect_contract_id")
+    if contract_id is not None and (not isinstance(contract_id, str) or
+            re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", contract_id) is None):
+        return None
+
+    digest = value.get("artifact_sha256")
+    if (not isinstance(digest, str) or len(digest) != 64 or
+            any(char not in "0123456789abcdef" for char in digest)):
+        return None
+    try:
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        canonical_bytes = canonical.encode("utf-8")
+        node_count = payload.get("node_count")
+        persisted_count = payload.get("persisted_node_count")
+        artifact_bytes = value.get("artifact_bytes")
+        nodes = payload.get("nodes")
+        if (hashlib.sha256(canonical_bytes).hexdigest() != digest or len(canonical_bytes) > 48 * 1024 or
+                artifact_bytes != len(canonical_bytes) or value.get("artifact_bytes") != artifact_bytes or
+                not isinstance(node_count, int) or isinstance(node_count, bool) or not 0 <= node_count <= 5000 or
+                not isinstance(persisted_count, int) or isinstance(persisted_count, bool) or
+                not 0 <= persisted_count <= min(node_count, 256) or not isinstance(nodes, list) or
+                len(nodes) != persisted_count or value.get("persisted_node_count") != persisted_count or
+                value.get("node_count") != node_count or value.get("completeness") != payload.get("completeness")):
+            return None
+    except (TypeError, ValueError, UnicodeEncodeError):
+        return None
+    if (value.get("result_channel") != "NAVIGATION_ACTION_RESULT" or
+            value.get("receipt_field") != "receipt.post_state_diagnostics.post_capture_sample_artifact.payload" or
+            value.get("request_id") != payload.get("request_id")):
+        return None
+    if payload.get("completeness") not in {
+            "COMPLETE", "INCOMPLETE_IDENTITY_LIMIT", "INCOMPLETE_NODE_LIMIT",
+            "INCOMPLETE_ACTION_LIMIT", "INCOMPLETE_SIZE_LIMIT"}:
+        return None
+
+    structural_count_present = "required_anchor_structural_match_count" in payload
+    structural_count = payload.get("required_anchor_structural_match_count")
+    if structural_count_present:
+        if payload.get("completeness") == "COMPLETE":
+            if (not isinstance(structural_count, int) or isinstance(structural_count, bool) or
+                    structural_count < 0 or structural_count > node_count or persisted_count != node_count):
+                return None
+        elif structural_count is not None:
+            return None
+
+    binding_aliases = {
+        "request_id": ("post_request_id", "request_id"),
+        "transaction_id": ("post_transaction_id", "transaction_id"),
+        "service_instance_id": ("post_service_instance_id", "action_service_instance_id"),
+        "connection_id": ("post_connection_id", "action_connection_id"),
+        "window_id": ("post_window_id", "action_window_id"),
+        "capture_id": ("post_capture_id",),
+        "hierarchy_digest": ("post_hierarchy_digest",),
+    }
+    for payload_key, aliases in binding_aliases.items():
+        expected = next((diagnostics.get(key) for key in aliases if diagnostics.get(key) is not None), None)
+        if expected is not None and payload.get(payload_key) != expected:
+            return None
+    post_authority = diagnostics.get("post_window_authority")
+    if post_authority is not None:
+        if not isinstance(post_authority, Mapping):
+            return None
+        post_window_id = post_authority.get("post_window_id")
+        root_window_id = post_authority.get("root_window_id")
+        active_type1_ids = post_authority.get("active_type1_window_ids")
+        if (payload.get("window_id") != post_window_id or payload.get("window_id") != root_window_id or
+                active_type1_ids != [payload.get("window_id")]):
+            return None
+
+    node_keys = {
+        "id", "parent_id", "child_index", "path", "class_name", "package_name", "resource_id",
+        "window_id", "bounds", "text_present", "content_description_present", "resource_id_present",
+        "clickable", "enabled", "focusable", "focused", "accessibility_focused", "selected", "scrollable",
+        "visible_to_user", "action_ids", "action_count", "action_ids_complete", "destination_label_match",
+        "required_anchor_match_count", "diagnostic_policy_match_ids", "diagnostic_policy_matches",
+        "diagnostic_anchor_semantic_status",
+    }
+    allowed_match_ids = {
+        "destination_label", "empty_state_exact_text", "required_anchor_label", "empty_state_anchor_candidate",
+        "empty_state_anchor_semantic_click_target", "required_anchor_structural_match",
+    }
+    allowed_policy_match_ids = allowed_match_ids - {"required_anchor_structural_match"}
+    observed_structural_match_count = 0
+    for node in nodes:
+        if not isinstance(node, Mapping) or set(node) - node_keys:
+            return None
+        path = node.get("path")
+        action_ids = node.get("action_ids")
+        match_ids = node.get("diagnostic_policy_match_ids", [])
+        policy_matches = node.get("diagnostic_policy_matches", [])
+        if (not isinstance(path, list) or len(path) > 80 or any(
+                not isinstance(item, int) or isinstance(item, bool) or not 0 <= item <= 4096 for item in path) or
+                not isinstance(action_ids, list) or len(action_ids) > 64 or any(
+                    not isinstance(item, int) or isinstance(item, bool) for item in action_ids) or
+                not isinstance(match_ids, list) or len(match_ids) > len(allowed_match_ids) or any(
+                    not isinstance(item, str) or item not in allowed_match_ids for item in match_ids) or
+                len(match_ids) != len(set(match_ids)) or
+                not isinstance(policy_matches, list) or len(policy_matches) > 8):
+            return None
+        if "required_anchor_structural_match" in match_ids:
+            if not structural_count_present or "required_anchor_label" not in match_ids:
+                return None
+            observed_structural_match_count += 1
+        for policy_match in policy_matches:
+            if not isinstance(policy_match, Mapping) or set(policy_match) - {
+                    "contract_id", "contract_digest", "match_ids", "anchor_semantic_status"}:
+                return None
+            policy_contract_id = policy_match.get("contract_id")
+            policy_digest = policy_match.get("contract_digest")
+            policy_match_ids = policy_match.get("match_ids")
+            if (not isinstance(policy_contract_id, str) or
+                    re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", policy_contract_id) is None or
+                    not isinstance(policy_digest, str) or re.fullmatch(r"[0-9a-f]{64}", policy_digest) is None or
+                    not isinstance(policy_match_ids, list) or not policy_match_ids or
+                    len(policy_match_ids) > len(allowed_policy_match_ids) or any(
+                        not isinstance(item, str) or item not in allowed_policy_match_ids for item in policy_match_ids)):
+                return None
+            semantic_status = policy_match.get("anchor_semantic_status")
+            if semantic_status is not None and semantic_status not in ("UNKNOWN", "POLICY_LABEL_MATCH"):
+                return None
+            if semantic_status is not None and "empty_state_anchor_candidate" not in policy_match_ids:
+                return None
+        for key in ("class_name", "package_name", "resource_id"):
+            item = node.get(key)
+            if item is not None and (not isinstance(item, str) or
+                    re.fullmatch(r"[A-Za-z0-9_.$:/-]{0,256}", item) is None):
+                return None
+        for key in ("text_present", "content_description_present", "resource_id_present", "clickable", "enabled",
+                    "focusable", "focused", "accessibility_focused", "selected", "scrollable", "visible_to_user",
+                    "action_ids_complete", "destination_label_match"):
+            if not isinstance(node.get(key), bool):
+                return None
+        semantic_status = node.get("diagnostic_anchor_semantic_status")
+        if semantic_status is not None and semantic_status not in ("UNKNOWN", "POLICY_LABEL_MATCH"):
+            return None
+        for key in ("id", "window_id", "action_count", "required_anchor_match_count"):
+            item = node.get(key)
+            if not isinstance(item, int) or isinstance(item, bool) or item < 0:
+                return None
+        if node.get("window_id") != payload.get("window_id"):
+            return None
+        for key in ("parent_id", "child_index"):
+            item = node.get(key)
+            if item is not None and (not isinstance(item, int) or isinstance(item, bool) or item < 0):
+                return None
+        bounds = node.get("bounds")
+        if not isinstance(bounds, list) or len(bounds) != 4 or any(
+                not isinstance(item, int) or isinstance(item, bool) for item in bounds):
+            return None
+
+    if structural_count_present:
+        if payload.get("completeness") == "COMPLETE" and structural_count != observed_structural_match_count:
+            return None
+    elif observed_structural_match_count:
+        return None
+
+    # The node summaries already contain the strict post-capture redacted fields; no raw label keys are allowed.
+    return {key: value[key] for key in wrapper_keys if key in value}
+
+
+def _bounded_navigation_destination_anchor_focus(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    bounded: dict[str, Any] = {}
+    status = value.get("status")
+    if isinstance(status, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", status):
+        bounded["status"] = status
+    failure = value.get("failure_stage")
+    if isinstance(failure, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,95}", failure):
+        bounded["failure_stage"] = failure
+    resolver_failure = value.get("resolver_failure_code")
+    if isinstance(resolver_failure, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", resolver_failure):
+        bounded["resolver_failure_code"] = resolver_failure
+    capture_id = value.get("fresh_capture_id")
+    if isinstance(capture_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", capture_id):
+        bounded["fresh_capture_id"] = capture_id
+    for key in ("window_id", "fresh_capture_window_id"):
+        item = value.get(key)
+        if type(item) is int and 0 <= item <= 2**31 - 1:
+            bounded[key] = item
+    elapsed = value.get("dispatch_elapsed_realtime_ms")
+    if type(elapsed) is int and 0 <= elapsed <= 2**63 - 1:
+        bounded["dispatch_elapsed_realtime_ms"] = elapsed
+    focus_count = value.get("focus_action_count")
+    if type(focus_count) is int and 0 <= focus_count <= 1:
+        bounded["focus_action_count"] = focus_count
+    for key in ("focus_action_acknowledged", "currentness_revalidation_accepted",
+                "fresh_capture_after_focus", "same_post_window"):
+        item = value.get(key)
+        if type(item) is bool:
+            bounded[key] = item
+    currentness = value.get("currentness_revalidation")
+    if isinstance(currentness, Mapping):
+        currentness_bounded: dict[str, Any] = {}
+        for key in ("diagnostics_available", "aggregate_accepted"):
+            item = currentness.get(key)
+            if type(item) is bool:
+                currentness_bounded[key] = item
+        first_failure = currentness.get("first_failed_check")
+        if first_failure is None and "first_failed_check" in currentness:
+            currentness_bounded["first_failed_check"] = None
+        elif isinstance(first_failure, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,95}", first_failure):
+            currentness_bounded["first_failed_check"] = first_failure
+        if currentness_bounded:
+            bounded["currentness_revalidation"] = currentness_bounded
+    return bounded or None
+
+
+def _bounded_navigation_strict_post_diagnostics(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    bounded: dict[str, Any] = {}
+    strings = (
+        "diagnostic_schema", "request_id", "transaction_id", "action", "source_service_instance_id",
+        "source_connection_epoch", "source_capture_request_id", "source_capture_key",
+        "action_service_instance_id", "action_connection_id", "capture_request_id",
+        "capture_transaction_id", "capture_service_instance_id", "capture_connection_id",
+        "post_capture_id", "post_capture_root_package", "post_capture_root_class",
+        "post_capture_sample_persistence_status", "post_hierarchy_digest", "required_anchor_outcome", "receipt_decision",
+        "receipt_failure_code", "event_source_status", "event_source_request_id",
+        "event_source_transaction_id", "event_source_service_instance_id", "event_source_connection_id",
+        "post_request_id", "post_transaction_id", "post_service_instance_id", "post_connection_id",
+        "post_capture_failure_stage",
+    )
+    integers = (
+        "dispatch_elapsed_realtime_ms", "dispatch_deadline_elapsed_realtime_ms",
+        "capture_call_start_elapsed_realtime_ms", "capture_call_completion_elapsed_realtime_ms",
+        "post_state_evaluation_elapsed_realtime_ms", "receipt_decision_elapsed_realtime_ms",
+        "source_capture_generation", "source_capture_sequence", "action_window_id", "capture_window_id",
+        "post_window_id", "post_captured_at_elapsed_realtime_ms", "post_capture_node_count",
+        "required_anchor_match_count", "event_source_event_type", "event_source_event_window_id",
+        "event_source_node_window_id", "focus_window_id",
+    )
+    booleans = ("event_source_connection_match", "post_hierarchy_digest_changed", "accessibility_focused",
+                "focus_in_current_hierarchy", "required_destination_match")
+    for key in strings:
+        if isinstance(value.get(key), str):
+            bounded[key] = value[key][:256]
+    for key in integers:
+        item = value.get(key)
+        if isinstance(item, int) and not isinstance(item, bool):
+            bounded[key] = item
+    for key in booleans:
+        if isinstance(value.get(key), bool):
+            bounded[key] = value[key]
+    for key in ("action_owner_path", "action_target_path"):
+        path = _bounded_navigation_path(value.get(key))
+        if path is not None:
+            bounded[key] = path
+    relation = _bounded_navigation_relation(value.get("activation_owner_relation"))
+    if relation is not None:
+        bounded["activation_owner_relation"] = relation
+    authority = _bounded_navigation_post_window_authority(value.get("post_window_authority"))
+    if authority is not None:
+        bounded["post_window_authority"] = authority
+    structure = _bounded_navigation_post_structure(value.get("post_structure_evidence"))
+    if structure is not None:
+        bounded["post_structure_evidence"] = structure
+    owner_click = _bounded_navigation_owner_click_provenance(value.get("owner_click_provenance"))
+    if owner_click is not None:
+        bounded["owner_click_provenance"] = owner_click
+    destination_focus = _bounded_navigation_destination_anchor_focus(value.get("destination_anchor_focus"))
+    if destination_focus is not None:
+        bounded["destination_anchor_focus"] = destination_focus
+    source_sample = value.get("post_capture_sample_artifact")
+    sample = _bounded_navigation_post_capture_sample_artifact(source_sample, value)
+    bounded["post_capture_sample_projection_status"] = (
+        "ABSENT" if source_sample is None else "RETAINED" if sample is not None else "REJECTED"
+    )
+    if sample is not None:
+        bounded["post_capture_sample_artifact"] = sample
+    return bounded
+
+
+_NAVIGATION_OWNER_DISPATCH_MARK_REASON = re.compile(r"^[A-Z][A-Z0-9_]{0,79}$")
+
+
+def _bounded_navigation_click_source_diagnostics(
+    value: Any, *, request_id: Any = None, transaction_id: Any = None,
+) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping) or value.get("schema") != "navigation-click-source-v1":
+        return None
+    bounded: dict[str, Any] = {"schema": "navigation-click-source-v1"}
+    for key, expected in (("request_id", request_id), ("transaction_id", transaction_id)):
+        item = value.get(key)
+        if not isinstance(item, str) or not item or len(item) > 256 or (expected is not None and item != expected):
+            return None
+        bounded[key] = item
+    for key in ("service_instance_id", "connection_id"):
+        item = value.get(key)
+        if not isinstance(item, str) or not item or len(item) > 256:
+            return None
+        bounded[key] = item
+    status_values = {"FIELD_PRESENT", "FIELD_ABSENT", "READ_FAILED", "UNSUPPORTED_API", "NOT_CAPTURED"}
+    for key in ("callback_source_status", "callback_source_window_status", "callback_source_node_id_status",
+                "callback_source_resource_id_status", "callback_source_class_name_status", "strict_source_status"):
+        item = value.get(key)
+        if not isinstance(item, str) or item not in status_values:
+            return None
+        bounded[key] = item
+    failure_values = {
+        "REQUEST_ID_MISMATCH", "TRANSACTION_ID_MISMATCH", "SERVICE_INSTANCE_MISMATCH",
+        "CONNECTION_MISMATCH", "ACTION_WINDOW_MISMATCH", "EVENT_TYPE_MISMATCH",
+        "EVENT_TIME_UNAVAILABLE", "EVENT_OUTSIDE_DISPATCH", "CALLBACK_SOURCE_READ_FAILED",
+        "CALLBACK_SOURCE_ABSENT", "VERIFIER_SOURCE_ABSENT", "SOURCE_OWNER_MISMATCH", "NONE",
+    }
+    failure = value.get("first_failure_check")
+    if not isinstance(failure, str) or failure not in failure_values:
+        return None
+    bounded["first_failure_check"] = failure
+    int_ranges = {
+        "event_type": (0, 2**31 - 1), "event_window_id": (0, 2**31 - 1),
+        "event_elapsed_realtime_ms": (-1, 2**63 - 1), "callback_elapsed_realtime_ms": (0, 2**63 - 1),
+        "dispatch_elapsed_realtime_ms": (0, 2**63 - 1),
+        "dispatch_deadline_elapsed_realtime_ms": (0, 2**63 - 1),
+        "callback_source_window_id": (0, 2**31 - 1),
+    }
+    optional_ints = {"callback_elapsed_realtime_ms", "dispatch_elapsed_realtime_ms",
+                     "dispatch_deadline_elapsed_realtime_ms", "callback_source_window_id"}
+    for key, (minimum, maximum) in int_ranges.items():
+        item = value.get(key)
+        if item is None and key in optional_ints:
+            bounded[key] = None
+        elif type(item) is int and minimum <= item <= maximum:
+            bounded[key] = item
+        else:
+            return None
+    if (bounded["dispatch_elapsed_realtime_ms"] is not None and
+            bounded["dispatch_deadline_elapsed_realtime_ms"] is not None and
+            bounded["dispatch_deadline_elapsed_realtime_ms"] < bounded["dispatch_elapsed_realtime_ms"]):
+        return None
+    for key in ("callback_source_owner_exact", "first_click_selected", "strict_source_owner_exact",
+                "request_binding_match", "transaction_binding_match", "service_binding_match",
+                "connection_binding_match", "action_window_match", "dispatch_window_match"):
+        item = value.get(key)
+        if type(item) is not bool:
+            return None
+        bounded[key] = item
+    return bounded
+
+
+def _bounded_navigation_owner_diagnostics(
+    result: Mapping[str, Any], receipt: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Keep only typed Kotlin owner-dispatch and owner-receipt rejection diagnostics."""
+    bounded: dict[str, Any] = {}
+    reason = receipt.get("owner_dispatch_mark_reason")
+    if isinstance(reason, str) and _NAVIGATION_OWNER_DISPATCH_MARK_REASON.fullmatch(reason):
+        bounded["owner_dispatch_mark_reason"] = reason
+    for key in ("owner_dispatch_mark_ok", "owner_dispatch_mark_lease_match",
+                "owner_dispatch_mark_target_match"):
+        value = receipt.get(key)
+        if type(value) is bool:
+            bounded[key] = value
+    count = receipt.get("owner_dispatch_mark_eligible_exact_click_count")
+    if type(count) is int and -1 <= count <= 10_000:
+        bounded["owner_dispatch_mark_eligible_exact_click_count"] = count
+    receipt_reason = result.get("receipt_owner_receipt_reason")
+    if isinstance(receipt_reason, str) and _NAVIGATION_OWNER_DISPATCH_MARK_REASON.fullmatch(receipt_reason):
+        bounded["receipt_owner_receipt_reason"] = receipt_reason
+    receipt_click_count = result.get("receipt_owner_click_count")
+    if type(receipt_click_count) is int and -1 <= receipt_click_count <= 10_000:
+        bounded["receipt_owner_click_count"] = receipt_click_count
+    for key in ("owner_receipt_ok", "owner_receipt_lease_match", "owner_receipt_target_match",
+                "owner_receipt_event_match", "owner_receipt_click_event_present"):
+        value = receipt.get(key)
+        if type(value) is bool:
+            bounded[key.replace("owner_receipt_", "receipt_owner_", 1)] = value
+    receipt_event_count = receipt.get("owner_receipt_eligible_exact_click_count")
+    if type(receipt_event_count) is int and -1 <= receipt_event_count <= 10_000:
+        bounded["receipt_owner_eligible_exact_click_count"] = receipt_event_count
+    for source_key, target_key in (
+        ("owner_receipt_click_event_elapsed_realtime_ms", "receipt_owner_click_event_elapsed_realtime_ms"),
+        ("owner_click_event_elapsed_realtime_ms", "owner_click_event_elapsed_realtime_ms"),
+    ):
+        value = receipt.get(source_key)
+        if type(value) is int and -1 <= value <= 10_000_000_000_000:
+            bounded[target_key] = value
+    source_diagnostics = _bounded_navigation_click_source_diagnostics(
+        receipt.get("click_event_source_diagnostics", result.get("click_event_source_diagnostics")),
+        request_id=receipt.get("request_id", result.get("request_id", result.get("reqId"))),
+        transaction_id=receipt.get("transaction_id", result.get("transaction_id")),
+    )
+    if source_diagnostics is not None:
+        bounded["click_event_source_diagnostics"] = source_diagnostics
+    return bounded
+
+
+def _navigation_action_evidence_projection(result: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Build the bounded strict-result summary persisted with secondary observations."""
+    if not isinstance(result, Mapping):
+        return {}
+    strict_result_keys = (
+        "success", "status", "reason", "reqId", "request_id", "transaction_id",
+        "receipt_status", "receipt_failure_code", "receipt_mismatch_fields",
+        "post_state_mismatch_fields", "post_state_diagnostics",
+    )
+    projected = {key: result[key] for key in strict_result_keys if key in result}
+    strict_post = _bounded_navigation_strict_post_diagnostics(result.get("post_state_diagnostics"))
+    if strict_post is not None:
+        projected["post_state_diagnostics"] = strict_post
+    elif "post_state_diagnostics" in projected:
+        projected.pop("post_state_diagnostics", None)
+    receipt = result.get("receipt")
+    if isinstance(receipt, Mapping):
+        projected.update(_bounded_navigation_owner_diagnostics(result, receipt))
+    if isinstance(receipt, Mapping) and receipt.get("status") == "VERIFIED_NAVIGATION":
+        receipt_keys = (
+            "status", "request_id", "transaction_id", "scenario_id", "action", "activation_mode",
+            "verified_navigation", "visit_authority", "c5_credit", "action_call_count",
+            "run_id", "invocation_id", "owner_capture_request_id", "owner_lease_id",
+            "service_instance_id", "connection_id", "window_id", "source_capture_id",
+            "helper_snapshot_id", "post_capture_id", "effect_contract_id", "effect_contract_digest",
+        )
+        bounded_receipt = {key: receipt[key] for key in receipt_keys if key in receipt}
+        post = _bounded_navigation_strict_post_diagnostics(receipt.get("post_state_diagnostics"))
+        if post is not None:
+            bounded_receipt["post_state_diagnostics"] = post
+        owner_click = _bounded_navigation_owner_click_provenance(receipt.get("owner_click_provenance"))
+        if owner_click is not None:
+            bounded_receipt["owner_click_provenance"] = owner_click
+        source_diagnostics = _bounded_navigation_click_source_diagnostics(
+            receipt.get("click_event_source_diagnostics"), request_id=receipt.get("request_id"),
+            transaction_id=receipt.get("transaction_id"),
+        )
+        if source_diagnostics is not None:
+            bounded_receipt["click_event_source_diagnostics"] = source_diagnostics
+        projected["receipt"] = bounded_receipt
+    if isinstance(receipt, Mapping) and receipt.get("status") == "DIAGNOSTIC_ONLY":
+        # Keep the exact no-credit diagnostic receipt through the existing transaction
+        # ledger. Values are already bounded by the Helper/bridge; do not persist raw UI text.
+        diagnostic_keys = (
+            "status", "reason", "reqId", "request_id", "transaction_id", "action", "activation_mode",
+            "service_instance_id", "connection_id", "window_id", "capture_id",
+            "diagnostic_only", "diagnostic_action_dispatched", "action_call_count",
+            "verified_navigation", "visit_authority", "c5_credit", "traversal_credit",
+            "diagnostic_target", "diagnostic_click_event", "post_capture_sample_artifact",
+            "post_capture_sample_sha256", "post_capture_completeness", "post_capture_node_count",
+            "post_capture_root_package", "post_capture_root_class", "post_capture_digest",
+            "post_state_diagnostics", "failure_code", "failure_stages",
+        )
+        bounded_receipt = {key: receipt[key] for key in diagnostic_keys if key in receipt}
+        source_diagnostics = _bounded_navigation_click_source_diagnostics(
+            receipt.get("click_event_source_diagnostics"), request_id=receipt.get("request_id"),
+            transaction_id=receipt.get("transaction_id"),
+        )
+        if source_diagnostics is not None:
+            bounded_receipt["click_event_source_diagnostics"] = source_diagnostics
+        post_diagnostics = bounded_receipt.get("post_state_diagnostics")
+        if isinstance(post_diagnostics, Mapping) and "capture_polling" in post_diagnostics:
+            polling = _bounded_navigation_post_capture_polling(post_diagnostics.get("capture_polling"))
+            if polling is not None:
+                bounded_post_diagnostics = dict(post_diagnostics)
+                bounded_post_diagnostics["capture_polling"] = polling
+                strict = _bounded_navigation_strict_post_diagnostics(post_diagnostics)
+                if strict is not None:
+                    for key in ("post_window_authority", "post_structure_evidence", "action_owner_path",
+                                "action_target_path", "activation_owner_relation", "action_window_id",
+                                "post_window_id", "post_capture_root_package", "post_capture_root_class"):
+                        if key in strict:
+                            bounded_post_diagnostics[key] = strict[key]
+                bounded_receipt["post_state_diagnostics"] = bounded_post_diagnostics
+        projected["receipt"] = bounded_receipt
+        projected["diagnostic_only"] = True
+        projected["navigation_credit"] = False
+    focus_diagnostics = _bounded_navigation_focus_revalidation(result)
+    if focus_diagnostics:
+        projected.update(focus_diagnostics)
+    return projected
+
+
+def _capture_navigation_independent_observations(
+    client: A11yAdbClient,
+    dev: str,
+    *,
+    request_id: str,
+    transaction_id: str,
+    navigation_action_result: Mapping[str, Any] | None = None,
+    action_context: Mapping[str, Any] | None = None,
+    action_result_received_monotonic_ns: int | None = None,
+) -> dict[str, Any]:
+    """Collect best-effort read-only observations after nav dispatch returns.
+
+    These diagnostics are explicitly secondary: callers must not feed them into
+    navigation verification, authority, dispatch, or visit-credit decisions.
+    Each operation is bounded and failures are represented in this record.
+    """
+    import tempfile
+    import uuid
+
+    observer_started_ns = time.monotonic_ns()
+    try:
+        result_received_ns = (int(action_result_received_monotonic_ns)
+                              if action_result_received_monotonic_ns is not None else None)
+    except (TypeError, ValueError):
+        result_received_ns = None
+    action_identity_keys = (
+        "request_id", "transaction_id", "run_id", "invocation_id", "service_instance_id",
+        "connection_id", "window_id", "owner_lease_id", "owner_capture_id",
+        "owner_capture_request_id", "source_capture_request_id", "source_snapshot_id",
+        "helper_snapshot_id", "source_capture_key", "source_generation", "source_capture_sequence",
+        "source_service_instance_id", "source_process_epoch", "source_connection_epoch", "source_boot_epoch",
+        "descriptor_digest", "effect_contract_id", "effect_contract_digest", "owner_source_node_id_status",
+    )
+    action_identity = ({key: action_context.get(key) for key in action_identity_keys}
+                       if isinstance(action_context, Mapping) else {})
+    record: dict[str, Any] = {
+        "evidence_role": "SECONDARY_ONLY",
+        "observation_stage": "AFTER_NAVIGATION_ACTION_RESULT",
+        "action_request_id": str(request_id or ""),
+        "transaction_id": str(transaction_id or ""),
+        "action_context": action_identity,
+        "action_result_received_monotonic_ns": result_received_ns,
+        "started_monotonic_ns": observer_started_ns,
+        "observer_call_started_monotonic_ns": observer_started_ns,
+        "observer_delay_from_result_ns": (
+            max(0, observer_started_ns - result_received_ns) if result_received_ns is not None else None
+        ),
+        "strict_navigation_result": _navigation_action_evidence_projection(navigation_action_result),
+        "observations": {},
+    }
+    run_fn = getattr(client, "_run", None)
+
+    def run_read(stage: str, command: list[str], *, timeout: float = 8.0) -> tuple[dict[str, Any], str]:
+        started = time.monotonic_ns()
+        try:
+            if not callable(run_fn):
+                raise RuntimeError("READ_ONLY_ADB_UNAVAILABLE")
+            output = str(run_fn(command, dev=dev, timeout=timeout) or "")
+            error = ""
+        except Exception as exc:
+            output = ""
+            error = type(exc).__name__
+        ended = time.monotonic_ns()
+        result = {
+            "stage": stage,
+            "started_monotonic_ns": started,
+            "completed_monotonic_ns": ended,
+            "duration_ns": max(0, ended - started),
+            "output_sha256": hashlib.sha256(output.encode("utf-8", errors="replace")).hexdigest()
+            if output else "",
+            "error": error,
+        }
+        if error:
+            result["error_stage"] = stage
+        return result, output
+
+    activity, activity_output = run_read("activity", ["shell", "dumpsys", "activity", "activities"], timeout=8.0)
+    activity["foreground_lines"] = [
+        line.strip() for line in activity_output.splitlines()
+        if any(token in line for token in ("topResumedActivity", "mResumedActivity", "ResumedActivity", "mFocusedActivity"))
+    ][:24]
+    record["observations"]["activity"] = activity
+
+    window, window_output = run_read("window", ["shell", "dumpsys", "window", "windows"], timeout=8.0)
+    window["foreground_lines"] = [
+        line.strip() for line in window_output.splitlines()
+        if any(token in line for token in ("mCurrentFocus", "mFocusedApp", "Display ", "isOnScreen", "isVisible"))
+    ][:40]
+    record["observations"]["window"] = window
+
+    safe_tx = re.sub(r"[^A-Za-z0-9_-]+", "_", str(transaction_id or "tx"))[:48] or "tx"
+    dump_name = f"phase6f_nav_{safe_tx}_{uuid.uuid4().hex[:12]}.xml"
+    remote_xml = f"/sdcard/{dump_name}"
+    dump, dump_output = run_read("uiautomator_xml.dump", ["shell", "uiautomator", "dump", remote_xml], timeout=12.0)
+    dump["remote_path"] = remote_xml
+    dump["result_summary"] = " ".join(dump_output.split())[:240]
+    xml_read, xml_text = run_read("uiautomator_xml.read", ["shell", "cat", remote_xml], timeout=8.0)
+    xml_read["remote_path"] = remote_xml
+    xml_local_path = ""
+    if xml_text:
+        local_path = Path(tempfile.gettempdir()) / dump_name
+        try:
+            local_path.write_text(xml_text, encoding="utf-8")
+            xml_local_path = str(local_path)
+        except OSError as exc:
+            xml_read["save_error"] = type(exc).__name__
+    xml_read["local_path"] = xml_local_path
+    xml_read["byte_count"] = len(xml_text.encode("utf-8", errors="replace"))
+    if xml_text:
+        try:
+            xml_root = ET.fromstring(xml_text)
+            xml_read["node_count"] = sum(1 for _ in xml_root.iter("node"))
+        except ET.ParseError:
+            xml_read["parse_error"] = "XML_PARSE_ERROR"
+    record["observations"]["uiautomator_xml"] = {"dump": dump, "read": xml_read}
+
+    snapshot_started = time.monotonic_ns()
+    snapshot_row: dict[str, Any] = {
+        "started_monotonic_ns": snapshot_started,
+        "completed_monotonic_ns": None,
+        "duration_ns": None,
+        "wait_seconds": 8.0,
+        "status": "ERROR",
+    }
+    try:
+        snapshot_reader = getattr(client, "get_traversal_candidate_snapshot", None)
+        if not callable(snapshot_reader):
+            raise RuntimeError("SEALED_HELPER_SNAPSHOT_UNAVAILABLE")
+        snapshot = snapshot_reader(dev=dev, wait_seconds=8.0)
+        decoded = getattr(snapshot, "decoded", None)
+        raw = getattr(snapshot, "raw_hierarchy", None)
+        metadata = getattr(client, "last_hierarchy_metadata", {})
+        metadata = metadata if isinstance(metadata, Mapping) else {}
+        from talkback_lib.reliable_hierarchy_schema import validate_capture_authority
+
+        authority = validate_capture_authority(getattr(decoded, "capture_authority", None))
+        metadata_authority = validate_capture_authority(metadata.get("captureAuthority"))
+        if authority is not None:
+            authority_dict = authority.to_dict()
+            snapshot_row.update({
+                "request_id": str(getattr(decoded, "request_id", "") or ""),
+                "capture_key": authority.capture_key,
+                "capture_sequence": authority.capture_sequence,
+                "generation": authority.generation,
+                "service_instance_id": authority.service_instance_id,
+                "process_epoch": authority.process_epoch,
+                "window_id": authority.hierarchy_window_id,
+                "root_digest": authority.root_digest,
+                "candidate_digest": authority.candidate_digest,
+                "capture_authority_valid": True,
+                "metadata_authority_matches": bool(
+                    metadata_authority is not None and metadata_authority.to_dict() == authority_dict
+                ),
+            })
+        else:
+            snapshot_row["capture_authority_valid"] = False
+        identity_keys = (
+            "helperConnectionEpoch", "connectionEpoch", "bootEpoch", "helperServiceInstanceId",
+            "helperProcessEpoch", "captureGeneration", "captureSequence", "windowId", "snapshotId",
+            "captureTimestampElapsedRealtimeMs", "capturedAtUptimeMs", "captureTimestamp",
+        )
+        snapshot_row["transport_identity_fields"] = {
+            key: metadata[key] for key in identity_keys if key in metadata
+        }
+        if isinstance(raw, dict):
+            canonical = json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            snapshot_bytes = canonical.encode("utf-8")
+            snapshot_row["hierarchy_sha256"] = hashlib.sha256(snapshot_bytes).hexdigest()
+            snapshot_row["raw_hierarchy_bytes"] = len(snapshot_bytes)
+            if authority is not None:
+                local_path = Path(tempfile.gettempdir()) / f"phase6f_nav_{safe_tx}_{uuid.uuid4().hex[:12]}.helper.json"
+                envelope = {"capture_authority": authority.to_dict(), "raw_hierarchy": raw}
+                local_path.write_text(json.dumps(envelope, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+                snapshot_row["local_path"] = str(local_path)
+                snapshot_row["saved_sha256"] = hashlib.sha256(local_path.read_bytes()).hexdigest()
+        snapshot_row["status"] = "CAPTURED"
+    except Exception as exc:
+        snapshot_row["error"] = type(exc).__name__
+    snapshot_ended = time.monotonic_ns()
+    snapshot_row["completed_monotonic_ns"] = snapshot_ended
+    snapshot_row["duration_ns"] = max(0, snapshot_ended - snapshot_started)
+    record["observations"]["sealed_helper_hierarchy"] = snapshot_row
+    error_stages: list[str] = []
+    timeout_stages: list[str] = []
+    for stage, observation in (("activity", activity), ("window", window),
+                               ("uiautomator_xml.dump", dump), ("uiautomator_xml.read", xml_read),
+                               ("sealed_helper_hierarchy", snapshot_row)):
+        stage_error = str(observation.get("error") or observation.get("parse_error")
+                          or observation.get("save_error") or "")
+        if stage_error or (stage == "sealed_helper_hierarchy" and
+                           (observation.get("capture_authority_valid") is not True or
+                            observation.get("metadata_authority_matches") is not True)):
+            error_stages.append(stage)
+            if stage_error == "TimeoutError":
+                timeout_stages.append(stage)
+    record["observer_error_stages"] = error_stages
+    record["observer_timeout_stages"] = timeout_stages
+    record["observer_status"] = ("COMPLETE" if not error_stages else
+                                 "FAILED" if len(error_stages) == 5 else "PARTIAL")
+    record["completed_monotonic_ns"] = time.monotonic_ns()
+    record["observer_call_completed_monotonic_ns"] = record["completed_monotonic_ns"]
+    record["duration_ns"] = max(0, record["completed_monotonic_ns"] - record["started_monotonic_ns"])
+    return record
 
 
 def _map_pre_nav_failure_reason_to_entry_reason(reason: str) -> str:
@@ -7728,7 +8831,14 @@ def _load_scrolltouch_xml_nodes(client: A11yAdbClient, dev: str) -> tuple[list[d
     try:
         from talkback_lib.hierarchy_snapshot import legacy_scroll_nodes
 
-        snapshot = client.dump_hierarchy(dev=dev)
+        candidate_reader = getattr(client, "get_traversal_candidate_snapshot", None)
+        if callable(candidate_reader):
+            candidate_snapshot = candidate_reader(dev=dev)
+            snapshot = getattr(candidate_snapshot, "raw_hierarchy", None)
+            if not isinstance(snapshot, dict):
+                return [], "service_hierarchy_invalid_reliable_snapshot"
+        else:
+            snapshot = client.dump_hierarchy(dev=dev)
         hierarchy_children = legacy_scroll_nodes(snapshot)
     except Exception as exc:
         return [], f"service_hierarchy_failed:{exc}"
@@ -7736,6 +8846,1246 @@ def _load_scrolltouch_xml_nodes(client: A11yAdbClient, dev: str) -> tuple[list[d
     if not hierarchy_children:
         return [], "service_hierarchy_no_bounded_nodes"
     return [{"children": hierarchy_children, "visibleToUser": True, "boundsInScreen": "0,0,1,1"}], "ok"
+
+
+def _load_navigation_action_policy() -> dict[str, Any] | None:
+    policy_path = Path(__file__).resolve().parents[1] / "app/src/main/res/raw/safe_navigation_contracts.json"
+    try:
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if (not isinstance(policy, dict) or policy.get("schema") != "safe-navigation-contracts-v1"
+            or policy.get("default_enabled") is not False or not isinstance(policy.get("contracts"), list)):
+        return None
+    return policy
+
+
+def _navigation_action_entry_required(tab_cfg: dict[str, Any]) -> bool:
+    """Keep listed new-screen card routes on the exact-navigation path, even if invalid/off."""
+    if (not isinstance(tab_cfg, dict) or tab_cfg.get("entry_type") != "card"
+            or tab_cfg.get("screen_context_mode") != "new_screen"):
+        return False
+    scenario_id = str(tab_cfg.get("scenario_id") or "").strip()
+    policy = _load_navigation_action_policy()
+    if policy is None or not scenario_id:
+        return True
+    return any(isinstance(row, dict) and isinstance(row.get("scenario_ids"), list)
+               and scenario_id in row["scenario_ids"] for row in policy["contracts"])
+
+
+def _navigation_action_contract_configured(tab_cfg: dict[str, Any], contract_id: str | None) -> bool:
+    """Return true only when trusted scenario data explicitly names this action contract."""
+    requested = str(contract_id or "").strip()
+    if not requested or not isinstance(tab_cfg, dict):
+        return False
+    if str(tab_cfg.get("navigation_action_contract_id") or "").strip() == requested:
+        return True
+    recovery = tab_cfg.get("navigation_action_recovery")
+    if isinstance(recovery, dict) and str(recovery.get("contract_id") or "").strip() == requested:
+        return True
+    steps = tab_cfg.get("pre_navigation")
+    return isinstance(steps, list) and any(
+        isinstance(step, dict)
+        and str(step.get("navigation_action_contract_id") or "").strip() == requested
+        for step in steps
+    )
+
+
+def _navigation_action_policy_contract(tab_cfg: dict[str, Any], scenario_id: str,
+                                       contract_id: str | None = None) -> dict[str, Any] | None:
+    requested_contract_id = str(contract_id or tab_cfg.get("_navigation_action_contract_id") or
+                                tab_cfg.get("navigation_action_contract_id") or "").strip()
+    if not (_navigation_action_entry_required(tab_cfg)
+            or _navigation_action_contract_configured(tab_cfg, requested_contract_id)):
+        return None
+    policy = _load_navigation_action_policy()
+    if policy is None:
+        return None
+    matches = [row for row in policy["contracts"] if isinstance(row, dict)
+               and isinstance(row.get("scenario_ids"), list) and scenario_id in row["scenario_ids"]
+               and (not requested_contract_id or row.get("id") == requested_contract_id)]
+    if len(matches) != 1:
+        return None
+    contract = matches[0]
+    if (contract.get("enabled") is not True or contract.get("effect") != "read_only_navigation"
+            or not isinstance(contract.get("id"), str) or not contract.get("id")):
+        return None
+    return contract
+
+
+def _navigation_action_effect_authorization(tab_cfg: dict[str, Any], readiness: Any,
+                                            scenario_id: str,
+                                            contract_id: str | None = None) -> dict[str, str] | None:
+    """Build a navigation-only host authorization from the packaged route and Helper READY evidence."""
+    contract = _navigation_action_policy_contract(tab_cfg, scenario_id, contract_id)
+    if contract is None or not _navigation_action_readiness_valid(readiness, scenario_id):
+        return None
+    if readiness.get("contract_id") != contract.get("id"):
+        return None
+    identity = readiness.get("identity_check") or {}
+    return {
+        "effect": "read_only_navigation",
+        "contract_id": str(contract["id"]),
+        "contract_digest": str(readiness["contract_digest"]),
+        "scenario_id": scenario_id,
+        "service_instance_id": str(identity["helper_service_instance_id"]),
+    }
+
+
+def _navigation_action_entry_gate_reason(tab_cfg: dict[str, Any], readiness: Any,
+                                         scenario_id: str,
+                                         contract_id: str | None = None) -> str | None:
+    requested_contract_id = str(contract_id or tab_cfg.get("_navigation_action_contract_id") or
+                                tab_cfg.get("navigation_action_contract_id") or "").strip()
+    if not (_navigation_action_entry_required(tab_cfg)
+            or _navigation_action_contract_configured(tab_cfg, requested_contract_id)):
+        return None
+    if _navigation_action_effect_authorization(tab_cfg, readiness, scenario_id, contract_id) is None:
+        return "NAVIGATION_ACTION_CONTRACT_NOT_READY"
+    return None
+
+
+def _navigation_action_readiness_valid(readiness: Any, scenario_id: str) -> bool:
+    """Accept only the unique Helper-owned reviewed contract for this scenario."""
+    if not isinstance(readiness, dict) or readiness.get("eligible") is not True:
+        return False
+    if readiness.get("scenario_id") != scenario_id:
+        return False
+    contract_id = readiness.get("contract_id")
+    digest = readiness.get("contract_digest")
+    if (not isinstance(contract_id, str) or not contract_id or not isinstance(digest, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+        return False
+    identity = readiness.get("identity_check")
+    if not isinstance(identity, dict) or identity.get("status") != "EXACT_MATCH":
+        return False
+    service_id = str(identity.get("helper_service_instance_id") or "")
+    state = identity.get("navigation_action_state")
+    if (not service_id or not isinstance(state, dict) or state.get("supported") is not True
+            or state.get("enabled") is not True or state.get("ready") is not True
+            or state.get("default_enabled") is not False or state.get("visit_credit") is not False
+            or state.get("c5_credit") is not False or state.get("exact_action_gate_independent") is not True
+            or state.get("service_instance_id") != service_id):
+        return False
+    contracts = state.get("contracts")
+    matches = [row for row in contracts if isinstance(row, dict)
+               and isinstance(row.get("scenario_ids"), list)
+               and scenario_id in row["scenario_ids"]
+               and row.get("contract_id") == contract_id
+               and row.get("contract_digest") == digest] if isinstance(contracts, list) else []
+    return len(matches) == 1
+
+
+def _navigation_action_owner_has_current_identity(node: Any) -> bool:
+    """Require a current service-tree path/descriptor lease input for exact ACTION_CLICK."""
+    if not isinstance(node, dict) or (node.get("clickable") is not True and node.get("effectiveClickable") is not True):
+        return False
+    source_identity = _navigation_owner_source_node_identity(node)
+    if (source_identity is None
+            or node.get("_helperOwnerSourceNodeIdStatus") != source_identity[0]
+            or node.get("_helperOwnerSourceNodeId") != source_identity[1]):
+        return False
+    actions = node.get("actions")
+    click_declared = isinstance(actions, list) and any(
+        (isinstance(action, dict) and (action.get("id") == 16 or action.get("name") == "ACTION_CLICK"))
+        or action == "ACTION_CLICK" for action in actions)
+    if not click_declared:
+        return False
+    path = node.get("_helperNodePath")
+    if (not isinstance(path, list) or not path
+            or any(type(part) is not int or part < 0 for part in path)):
+        return False
+    digest = node.get("_helperNodeDescriptorDigest")
+    source_snapshot = node.get("_helperSourceSnapshotId")
+    package = str(node.get("packageName") or "").strip()
+    try:
+        window_id = int(node.get("windowId"))
+    except (TypeError, ValueError):
+        return False
+    return (isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest) is not None
+            and isinstance(source_snapshot, str) and bool(source_snapshot.strip())
+            and bool(package) and window_id > 0 and node.get("enabled") is True
+            and node.get("checkable") is False)
+
+
+def _navigation_action_capture_matches_owner(capture: Any, owner: dict[str, Any], scenario_id: str,
+                                             transaction_id: str, service_id: str) -> bool:
+    """Bind the armed Helper lease to this exact path, snapshot, window, and invocation."""
+    if not isinstance(capture, dict) or capture.get("transaction_id") != transaction_id:
+        return False
+    armed = capture.get("armed")
+    if not isinstance(armed, dict) or armed.get("ok") is not True:
+        return False
+    from talkback_lib.reliable_hierarchy_schema import validate_capture_authority
+    authority = validate_capture_authority(owner.get("_helperCaptureAuthority"))
+    if authority is None:
+        return False
+    path = owner.get("_helperNodePath")
+    try:
+        deadline = int(armed.get("leaseDeadlineElapsedRealtimeMs") or 0)
+        owner_window = int(owner.get("windowId"))
+        armed_window = int(armed.get("ownerWindowId"))
+    except (TypeError, ValueError):
+        return False
+    return (bool(capture.get("req_id")) and bool(service_id)
+            and armed.get("reqId") == armed.get("responseReqId")
+            and armed.get("captureReqId") == capture.get("req_id")
+            and armed.get("scenarioId") == scenario_id
+            and (armed.get("requestedTransactionId") or armed.get("transactionId")) == transaction_id
+            and armed.get("ownerPath") == path
+            and armed.get("ownerDescriptorDigest") == owner.get("_helperNodeDescriptorDigest")
+            and armed.get("sourceSnapshotId") == owner.get("_helperSourceSnapshotId")
+            and armed_window == owner_window
+            and armed.get("ownerPackageName") == owner.get("packageName")
+            and armed.get("sourceCaptureRequestId") == authority.request_id
+            and armed.get("sourceProcessEpoch") == authority.process_epoch
+            and armed.get("sourceGeneration") == authority.generation
+            and armed.get("sourceServiceInstanceId") == authority.service_instance_id
+            and armed.get("sourceCaptureSequence") == authority.capture_sequence
+            and armed.get("sourceRootDigest") == authority.root_digest
+            and armed.get("sourceCandidateDigest") == authority.candidate_digest
+            and armed.get("sourceCaptureKey") == authority.capture_key
+            and armed.get("sourceConnectionEpoch") == owner.get("_helperConnectionEpoch")
+            and armed.get("sourceBootEpoch") == owner.get("_helperBootEpoch")
+            and armed.get("ownerSourceNodeId") == owner.get("_helperOwnerSourceNodeId")
+            and armed.get("ownerSourceNodeIdStatus") == owner.get("_helperOwnerSourceNodeIdStatus")
+            and armed.get("connectionId") == service_id
+            and all(bool(str(armed.get(key) or "")) for key in
+                    ("ownerLeaseId", "captureId", "runId", "invocationId", "helperSnapshotId"))
+            and deadline > 0)
+
+
+def _arm_navigation_action_owner_lease(client: Any, dev: str, entry_safety: Any, owner: Any,
+                                       scenario_id: str, transaction_id: str,
+                                       readiness: Any) -> tuple[dict[str, Any] | None, bool, str]:
+    if not _navigation_action_readiness_valid(readiness, scenario_id):
+        return None, False, "NAVIGATION_ACTION_CONTRACT_NOT_READY"
+    if not _navigation_action_owner_has_current_identity(owner):
+        return None, False, "NAVIGATION_TARGET_CURRENT_IDENTITY_UNAVAILABLE"
+    if not _navigation_owner_capture_authority_matches(owner, readiness):
+        return None, False, "NAVIGATION_HELPER_CAPTURE_AUTHORITY_STALE"
+    service_id = str(readiness["identity_check"].get("helper_service_instance_id") or "")
+    capture = entry_safety.begin_transaction_click_capture(
+        client, dev, transaction_id=transaction_id, target_node=owner, scenario_id=scenario_id,
+        include_talkback_baseline=False, require_canonical_invocation=True)
+    armed = capture.get("armed") if isinstance(capture, dict) else None
+    if not isinstance(armed, Mapping) or armed.get("ok") is not True:
+        if isinstance(armed, Mapping):
+            return capture, False, str(armed.get("reason") or "NAVIGATION_OWNER_LEASE_ARM_FAILED")
+        return capture, False, "NAVIGATION_OWNER_LEASE_ARM_FAILED"
+    if not _navigation_action_capture_matches_owner(capture, owner, scenario_id, transaction_id, service_id):
+        return capture, False, "NAVIGATION_OWNER_LEASE_MISMATCH"
+    return capture, True, "NAVIGATION_OWNER_LEASE_ARMED"
+
+
+def _navigation_snapshot_candidate_matches(node: Mapping[str, Any], contract: Mapping[str, Any],
+                                           source_snapshot_id: str) -> bool:
+    """Match one Helper-owned current node to a packaged navigation contract."""
+    if (str(node.get("packageName") or "").strip() != str(contract.get("package") or "").strip()
+            or node.get("enabled") is not True
+            or (node.get("clickable") is not True and node.get("effectiveClickable") is not True)
+            or node.get("checkable") is not False
+            or str(node.get("_helperSourceSnapshotId") or "") != source_snapshot_id):
+        return False
+    actions = node.get("actions")
+    if not isinstance(actions, list) or not any(
+            isinstance(action, Mapping) and
+            (action.get("id") == 16 or action.get("name") == "ACTION_CLICK") for action in actions):
+        return False
+    try:
+        path = node.get("_helperNodePath")
+        window_id = int(node.get("windowId"))
+        if (not isinstance(path, list) or not path or
+                any(type(part) is not int or part < 0 for part in path) or window_id <= 0):
+            return False
+    except (TypeError, ValueError):
+        return False
+    descriptor_digest = node.get("_helperNodeDescriptorDigest")
+    if not isinstance(descriptor_digest, str) or re.fullmatch(r"[0-9a-f]{64}", descriptor_digest) is None:
+        return False
+    resource_pattern = "^" + re.escape(str(contract.get("resource_id") or "")) + "$"
+    class_pattern = str(contract.get("target_class_pattern") or "")
+    label_pattern = str(contract.get("label_pattern") or "")
+    subtree_pattern = str(contract.get("target_subtree_pattern") or "")
+    try:
+        resource_id = str(node.get("viewIdResourceName") or "")
+        node_class = str(node.get("className") or "")
+        label = str(node.get("text") or "").strip() or str(node.get("contentDescription") or "").strip()
+        if (not re.fullmatch(resource_pattern, resource_id, flags=re.IGNORECASE)
+                or not re.fullmatch(class_pattern, node_class, flags=re.IGNORECASE)
+                or not re.fullmatch(label_pattern, label, flags=re.IGNORECASE)):
+            return False
+    except re.error:
+        return False
+    descendants: list[Mapping[str, Any]] = []
+    labels: list[str] = []
+
+    def visit(current: Mapping[str, Any], *, include: bool) -> None:
+        if include:
+            descendants.append(current)
+        current_label = str(current.get("text") or "").strip() or str(current.get("contentDescription") or "").strip()
+        if current_label:
+            labels.append(current_label)
+        children = current.get("children")
+        if isinstance(children, list):
+            for child in children:
+                if isinstance(child, Mapping):
+                    visit(child, include=True)
+
+    visit(node, include=False)
+    try:
+        if (len(descendants) != int(contract.get("expected_descendant_count", -1))
+                or not re.search(subtree_pattern, "\n".join(labels), flags=re.IGNORECASE)):
+            return False
+        excluded = [str(value) for value in contract.get("excluded_descendant_resource_ids", [])]
+        if len(excluded) != len(set(excluded)):
+            return False
+        state_changing_action_ids = {16, 32, 2097152, 16908349, 262144, 524288}
+        actionable_ids: list[str] = []
+        for child in descendants:
+            child_actions = child.get("actions")
+            action_ids = {action.get("id") for action in child_actions if isinstance(action, Mapping)} \
+                if isinstance(child_actions, list) else set()
+            may_change = (child.get("clickable") is True or child.get("effectiveClickable") is True
+                          or child.get("longClickable") is True or child.get("checkable") is True
+                          or child.get("editable") is True or child.get("scrollable") is True
+                          or bool(action_ids & state_changing_action_ids))
+            if may_change:
+                actionable_ids.append(str(child.get("viewIdResourceName") or ""))
+        if (len(actionable_ids) != len(excluded) or set(actionable_ids) != set(excluded)):
+            return False
+        for pattern in contract.get("required_non_actionable_descendant_label_patterns", []):
+            matching = []
+            for child in descendants:
+                child_label = str(child.get("text") or "").strip() or str(child.get("contentDescription") or "").strip()
+                if re.fullmatch(str(pattern), child_label, flags=re.IGNORECASE):
+                    matching.append(child)
+            if len(matching) != 1:
+                return False
+            child = matching[0]
+            child_actions = child.get("actions")
+            action_ids = {action.get("id") for action in child_actions if isinstance(action, Mapping)} \
+                if isinstance(child_actions, list) else set()
+            if (child.get("clickable") is True or child.get("effectiveClickable") is True
+                    or child.get("longClickable") is True or child.get("checkable") is True
+                    or child.get("editable") is True or child.get("scrollable") is True
+                    or bool(action_ids & state_changing_action_ids)):
+                return False
+    except (TypeError, ValueError, re.error):
+        return False
+    return True
+
+
+def _validated_navigation_capture_authority(snapshot: Any, client: Any, readiness: Any
+                                           ) -> tuple[Any | None, str]:
+    """Resolve the capture key only from the trusted, sealed Helper capture envelope."""
+    decoded = getattr(snapshot, "decoded", None)
+    raw = getattr(snapshot, "raw_hierarchy", None)
+    metadata = getattr(client, "last_hierarchy_metadata", {})
+    if not isinstance(raw, dict) or not isinstance(metadata, Mapping):
+        return None, "NAVIGATION_HELPER_CAPTURE_AUTHORITY_MISSING"
+    if not isinstance(readiness, Mapping) or not isinstance(readiness.get("identity_check"), Mapping):
+        return None, "NAVIGATION_HELPER_CAPTURE_AUTHORITY_MISSING"
+    identity = readiness["identity_check"]
+    from talkback_lib.reliable_hierarchy_schema import capture_canonical_sha256, validate_capture_authority
+
+    metadata_authority = validate_capture_authority(metadata.get("captureAuthority"))
+    decoded_authority = validate_capture_authority(getattr(decoded, "capture_authority", None))
+    if metadata_authority is None or decoded_authority is None:
+        return None, "NAVIGATION_HELPER_CAPTURE_AUTHORITY_MISSING"
+    if metadata_authority.to_dict() != decoded_authority.to_dict():
+        return None, "NAVIGATION_HELPER_CAPTURE_AUTHORITY_MISMATCH"
+    authority = metadata_authority
+    try:
+        metadata_sequence = metadata.get("captureSequence")
+        metadata_generation = metadata.get("captureGeneration")
+        capability_generation = identity.get("capability_generation")
+        if (type(metadata_sequence) is not int or type(metadata_generation) is not int
+                or type(capability_generation) is not int or metadata_sequence <= 0
+                or metadata_generation <= 0 or capability_generation < 0):
+            return None, "NAVIGATION_HELPER_CAPTURE_AUTHORITY_INVALID"
+    except (TypeError, ValueError):
+        return None, "NAVIGATION_HELPER_CAPTURE_AUTHORITY_INVALID"
+    service_id = str(identity.get("helper_service_instance_id") or "")
+    capability_service_id = str(identity.get("capability_service_instance_id") or "")
+    capability_process_epoch = str(identity.get("capability_process_epoch") or "")
+    request_id = str(getattr(decoded, "request_id", "") or "")
+    if (not request_id or raw.get("success") is not True or raw.get("reqId") != request_id
+            or metadata.get("reqId") != request_id or authority.request_id != request_id
+            or not service_id or authority.service_instance_id != service_id
+            or capability_service_id != service_id
+            or metadata.get("helperServiceInstanceId") != service_id
+            or not capability_process_epoch or authority.process_epoch != capability_process_epoch
+            or authority.generation != metadata_generation
+            or authority.generation < capability_generation
+            or authority.capture_sequence != metadata_sequence
+            or metadata.get("snapshotId") != authority.capture_key
+            or ("snapshotId" in raw and raw.get("snapshotId") != authority.capture_key)):
+        return None, "NAVIGATION_HELPER_CAPTURE_AUTHORITY_MISMATCH"
+
+    # The decoder may omit legacy identity projection fields. If present, they
+    # must agree with the sealed envelope; absence never causes us to mint ids.
+    identity_metadata = raw.get("identityMetadata")
+    identity_snapshot = identity_metadata.get("snapshot") if isinstance(identity_metadata, Mapping) else None
+    if isinstance(identity_snapshot, Mapping):
+        for field, expected in (("capture_id", authority.capture_key), ("snapshot_id", authority.capture_key),
+                                ("request_id", authority.request_id),
+                                ("capture_sequence", authority.capture_sequence)):
+            row = identity_snapshot.get(field)
+            if isinstance(row, Mapping) and row.get("status") == "PRESENT" and row.get("value") != expected:
+                return None, "NAVIGATION_HELPER_CAPTURE_AUTHORITY_MISMATCH"
+
+    root_match = re.fullmatch(r"windows\[(\d+)\]\.root", authority.root_ref)
+    windows = raw.get("windows")
+    if root_match is None or not isinstance(windows, list):
+        return None, "NAVIGATION_HELPER_CAPTURE_AUTHORITY_INVALID"
+    root_index = int(root_match.group(1))
+    if (root_index >= len(windows) or not isinstance(windows[root_index], Mapping)
+            or not isinstance(windows[root_index].get("root"), Mapping)):
+        return None, "NAVIGATION_HELPER_CAPTURE_AUTHORITY_INVALID"
+    root = windows[root_index]["root"]
+    try:
+        root_window = root.get("windowId")
+        if (capture_canonical_sha256(root) != authority.root_digest
+                or type(root_window) is not int or root_window != authority.hierarchy_window_id
+                or root.get("packageName") != authority.hierarchy_package_name
+                or root.get("className") != authority.hierarchy_root_class_name
+                or root.get("sourceNodeId") != authority.hierarchy_root_source_node_id):
+            return None, "NAVIGATION_HELPER_CAPTURE_AUTHORITY_MISMATCH"
+    except (TypeError, ValueError):
+        return None, "NAVIGATION_HELPER_CAPTURE_AUTHORITY_INVALID"
+    return authority, "NAVIGATION_HELPER_CAPTURE_AUTHORITY_VALID"
+
+
+def _navigation_owner_capture_authority_matches(owner: Any, readiness: Any) -> bool:
+    """Require the exact validated source envelope again immediately before arming."""
+    if not isinstance(owner, dict) or not isinstance(readiness, Mapping):
+        return False
+    identity = readiness.get("identity_check")
+    if not isinstance(identity, Mapping):
+        return False
+    from talkback_lib.reliable_hierarchy_schema import validate_capture_authority
+
+    authority = validate_capture_authority(owner.get("_helperCaptureAuthority"))
+    if authority is None:
+        return False
+    lifecycle = _navigation_source_lifecycle_identity(readiness)
+    source_identity = _navigation_owner_source_node_identity(owner)
+    try:
+        return (authority.capture_key == owner.get("_helperSourceSnapshotId")
+                and authority.request_id == owner.get("_helperCaptureRequestId")
+                and authority.service_instance_id == identity.get("helper_service_instance_id")
+                and authority.service_instance_id == identity.get("capability_service_instance_id")
+                and authority.process_epoch == identity.get("capability_process_epoch")
+                and authority.generation >= identity.get("capability_generation")
+                and authority.hierarchy_window_id == int(owner.get("windowId"))
+                and authority.hierarchy_package_name == owner.get("packageName")
+                and lifecycle is not None
+                and owner.get("_helperConnectionEpoch") == lifecycle[0]
+                and owner.get("_helperBootEpoch") == lifecycle[1]
+                and source_identity is not None
+                and owner.get("_helperOwnerSourceNodeIdStatus") == source_identity[0]
+                and owner.get("_helperOwnerSourceNodeId") == source_identity[1])
+    except (TypeError, ValueError):
+        return False
+
+
+def _navigation_owner_source_node_identity(owner: Any) -> tuple[str, str] | None:
+    """Preserve whether a source id is explicitly present or explicitly absent."""
+    if not isinstance(owner, Mapping) or "sourceNodeId" not in owner:
+        return None
+    if owner.get("_helperSourceNodeIdFieldPresent", True) is not True:
+        return None
+    raw = owner.get("sourceNodeId")
+    if raw is None or raw == "":
+        return "FIELD_ABSENT", ""
+    if isinstance(raw, str) and raw.strip():
+        return "FIELD_PRESENT", raw.strip()
+    return None
+
+
+def _navigation_source_lifecycle_identity(readiness: Any) -> tuple[str, str] | None:
+    """Extract real connection/boot epochs from the current validated PING/CAP identity."""
+    if not isinstance(readiness, Mapping):
+        return None
+    identity = readiness.get("identity_check")
+    if not isinstance(identity, Mapping) or identity.get("status") != "EXACT_MATCH":
+        return None
+    # The current PING's ExactAction section carries lifecycle identity even
+    # when ExactAction itself is OFF. Read only these identity fields; they do
+    # not authorize or enable ExactAction/C5.
+    ping_lifecycle = identity.get("exact_action_state")
+    ping_lifecycle = ping_lifecycle if isinstance(ping_lifecycle, Mapping) else {}
+    connection_epoch = (identity.get("navigation_connection_epoch")
+                        or identity.get("helper_connection_epoch")
+                        or identity.get("connection_epoch")
+                        or ping_lifecycle.get("connection_epoch"))
+    boot_epoch = identity.get("boot_epoch") or ping_lifecycle.get("boot_epoch")
+    connection_text = str(connection_epoch or "").strip()
+    boot_text = str(boot_epoch or "").strip()
+    if (not connection_text or connection_text.upper() == "UNKNOWN"
+            or not boot_text or boot_text.upper() == "UNKNOWN"):
+        return None
+    if (not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", connection_text)
+            or not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", boot_text)):
+        return None
+    return connection_text, boot_text
+
+
+def _resolve_navigation_owner_from_helper_snapshot(client: Any, dev: str, tab_cfg: dict[str, Any],
+                                                   scenario_id: str, contract_id: str, readiness: Any
+                                                   ) -> tuple[dict[str, Any] | None, str]:
+    """Resolve exactly one explicit route owner from a complete current Helper snapshot."""
+    snapshot_reader = getattr(client, "get_traversal_candidate_snapshot", None)
+    if not callable(snapshot_reader):
+        return None, "NAVIGATION_HELPER_SNAPSHOT_UNAVAILABLE"
+    try:
+        snapshot = snapshot_reader(dev=dev)
+    except Exception:
+        return None, "NAVIGATION_HELPER_SNAPSHOT_FAILED"
+    decoded = getattr(snapshot, "decoded", None)
+    raw = getattr(snapshot, "raw_hierarchy", None)
+    if (not isinstance(raw, dict) or decoded is None
+            or getattr(decoded, "capability_verified", False) is not True
+            or getattr(decoded, "raw_completion_valid", False) is not True):
+        return None, "NAVIGATION_HELPER_SNAPSHOT_INCOMPLETE"
+    request_id = str(getattr(decoded, "request_id", "") or "").strip()
+    metadata = getattr(client, "last_hierarchy_metadata", {})
+    if (not request_id or raw.get("success") is not True or raw.get("reqId") != request_id
+            or not isinstance(metadata, Mapping) or metadata.get("reqId") != request_id):
+        return None, "NAVIGATION_HELPER_SNAPSHOT_IDENTITY_MISMATCH"
+    authority, authority_reason = _validated_navigation_capture_authority(snapshot, client, readiness)
+    if authority is None:
+        return None, authority_reason
+    lifecycle = _navigation_source_lifecycle_identity(readiness)
+    if lifecycle is None:
+        return None, "NAVIGATION_HELPER_LIFECYCLE_IDENTITY_UNAVAILABLE"
+    capture_id = authority.capture_key
+    from talkback_lib.hierarchy_snapshot import legacy_scroll_nodes
+
+    roots = legacy_scroll_nodes(raw, validated_source_snapshot_id=authority.capture_key)
+    flat: list[dict[str, Any]] = []
+
+    def flatten(node: Mapping[str, Any]) -> None:
+        flat.append(dict(node))
+        children = node.get("children")
+        if isinstance(children, list):
+            for child in children:
+                if isinstance(child, Mapping):
+                    flatten(child)
+
+    for root in roots:
+        if isinstance(root, Mapping):
+            flatten(root)
+    contract = _navigation_action_policy_contract(tab_cfg, scenario_id, contract_id)
+    if contract is None:
+        return None, "NAVIGATION_CONTRACT_UNAVAILABLE"
+    matches = [node for node in flat if node.get("windowId") == authority.hierarchy_window_id
+               and _navigation_snapshot_candidate_matches(node, contract, capture_id)]
+    if len(matches) != 1:
+        return None, "NAVIGATION_TARGET_NOT_FOUND" if not matches else "NAVIGATION_TARGET_AMBIGUOUS"
+    owner = matches[0]
+    source_identity = _navigation_owner_source_node_identity(owner)
+    if source_identity is None:
+        return None, "NAVIGATION_TARGET_SOURCE_IDENTITY_UNAVAILABLE"
+    owner["_helperCaptureAuthority"] = authority.to_dict()
+    owner["_helperCaptureRequestId"] = authority.request_id
+    owner["_helperConnectionEpoch"] = lifecycle[0]
+    owner["_helperBootEpoch"] = lifecycle[1]
+    owner["_helperOwnerSourceNodeIdStatus"] = source_identity[0]
+    owner["_helperOwnerSourceNodeId"] = source_identity[1]
+    return owner, "NAVIGATION_TARGET_RESOLVED"
+
+
+def _resolve_navigation_scroll_container_from_helper_snapshot(
+    client: Any, dev: str, tab_cfg: dict[str, Any], scenario_id: str, contract_id: str,
+    readiness: Any,
+) -> tuple[dict[str, Any] | None, str]:
+    """Bind scrolling to the sole eligible container in one validated Helper capture."""
+    snapshot_reader = getattr(client, "get_traversal_candidate_snapshot", None)
+    if not callable(snapshot_reader):
+        return None, "NAVIGATION_HELPER_SNAPSHOT_UNAVAILABLE"
+    try:
+        snapshot = snapshot_reader(dev=dev)
+    except Exception:
+        return None, "NAVIGATION_HELPER_SNAPSHOT_FAILED"
+    decoded = getattr(snapshot, "decoded", None)
+    raw = getattr(snapshot, "raw_hierarchy", None)
+    metadata = getattr(client, "last_hierarchy_metadata", {})
+    if (not isinstance(raw, dict) or decoded is None
+            or getattr(decoded, "capability_verified", False) is not True
+            or getattr(decoded, "raw_completion_valid", False) is not True):
+        return None, "NAVIGATION_HELPER_SNAPSHOT_INCOMPLETE"
+    request_id = str(getattr(decoded, "request_id", "") or "").strip()
+    if (not request_id or raw.get("success") is not True or raw.get("reqId") != request_id
+            or not isinstance(metadata, Mapping) or metadata.get("reqId") != request_id):
+        return None, "NAVIGATION_HELPER_SNAPSHOT_IDENTITY_MISMATCH"
+    authority, authority_reason = _validated_navigation_capture_authority(snapshot, client, readiness)
+    if authority is None:
+        return None, authority_reason
+    contract = _navigation_action_policy_contract(tab_cfg, scenario_id, contract_id)
+    package_name = str(contract.get("package") or "").strip() if isinstance(contract, Mapping) else ""
+    if not package_name:
+        return None, "NAVIGATION_SCROLL_CONTAINER_CONTRACT_UNAVAILABLE"
+
+    from talkback_lib.hierarchy_snapshot import legacy_scroll_nodes
+
+    try:
+        roots = legacy_scroll_nodes(raw, validated_source_snapshot_id=authority.capture_key)
+    except (TypeError, ValueError):
+        return None, "NAVIGATION_SCROLL_HIERARCHY_INVALID"
+    flattened: list[dict[str, Any]] = []
+
+    def flatten(node: Mapping[str, Any]) -> None:
+        flattened.append(dict(node))
+        children = node.get("children")
+        if isinstance(children, list):
+            for child in children:
+                if isinstance(child, Mapping):
+                    flatten(child)
+
+    for root in roots:
+        if isinstance(root, Mapping):
+            flatten(root)
+    visible_nodes = [node for node in flattened
+                     if node.get("windowId") == authority.hierarchy_window_id
+                     and str(node.get("packageName") or "").strip() == package_name
+                     and node.get("visibleToUser") is True]
+    candidates = [node for node in flattened
+                  if node.get("windowId") == authority.hierarchy_window_id
+                  and str(node.get("packageName") or "").strip() == package_name
+                  and node.get("scrollable") is True
+                  and node.get("enabled") is True
+                  and node.get("visibleToUser") is True]
+    if not candidates:
+        return None, "NAVIGATION_SCROLL_CONTAINER_NOT_FOUND"
+    if len(candidates) != 1:
+        return None, "NAVIGATION_SCROLL_CONTAINER_AMBIGUOUS"
+    node = candidates[0]
+    path = node.get("_helperNodePath")
+    if (not isinstance(path, list) or any(type(index) is not int or index < 0 for index in path)
+            or node.get("_helperSourceSnapshotId") != authority.capture_key):
+        return None, "NAVIGATION_SCROLL_CONTAINER_IDENTITY_INVALID"
+    bounds = parse_bounds_str(str(node.get("boundsInScreen") or ""))
+    if not bounds or bounds[2] <= bounds[0] or bounds[3] <= bounds[1]:
+        return None, "NAVIGATION_SCROLL_CONTAINER_BOUNDS_INVALID"
+    action_ids: set[int] = set()
+    for action in node.get("actions", []):
+        if not isinstance(action, Mapping):
+            continue
+        try:
+            action_id = int(action.get("id"))
+        except (TypeError, ValueError):
+            continue
+        if action_id in {4096, 8192, 16908344, 16908346}:
+            action_ids.add(action_id)
+    container_path = ".".join(("0", *(str(index) for index in path)))
+    visible_projection = [{
+        "path": node.get("_helperNodePath"),
+        "descriptor_digest": node.get("_helperNodeDescriptorDigest"),
+    } for node in visible_nodes]
+    visible_digest = hashlib.sha256(json.dumps(
+        visible_projection, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")).hexdigest()
+    identity_check = readiness.get("identity_check", {}) if isinstance(readiness, Mapping) else {}
+    identity_check = identity_check if isinstance(identity_check, Mapping) else {}
+    connection_epoch = (identity_check.get("navigation_connection_epoch")
+                        or identity_check.get("helper_connection_epoch")
+                        or identity_check.get("connection_epoch"))
+    boot_epoch = identity_check.get("boot_epoch")
+    return {
+        "path": container_path,
+        "bounds": ",".join(str(value) for value in bounds),
+        "window_id": authority.hierarchy_window_id,
+        "package_name": package_name,
+        "class_name": str(node.get("className") or ""),
+        "resource_id": str(node.get("viewIdResourceName") or ""),
+        "descriptor_digest": str(node.get("_helperNodeDescriptorDigest") or ""),
+        "source_node_id": str(node.get("sourceNodeId") or ""),
+        "source_capture_id": authority.capture_key,
+        "source_request_id": authority.request_id,
+        "service_instance_id": authority.service_instance_id,
+        "process_epoch": authority.process_epoch,
+        "connection_epoch": str(connection_epoch)[:128] if connection_epoch else None,
+        "boot_epoch": str(boot_epoch)[:128] if boot_epoch else None,
+        "generation": authority.generation,
+        "capture_sequence": authority.capture_sequence,
+        "root_digest": authority.root_digest,
+        "candidate_digest": authority.candidate_digest,
+        "visible_node_count": len(visible_nodes),
+        "visible_node_digest": visible_digest,
+        "action_ids": sorted(action_ids),
+        "forward_supported": bool(action_ids & {4096, 16908346}),
+        "backward_supported": bool(action_ids & {8192, 16908344}),
+    }, "NAVIGATION_SCROLL_CONTAINER_RESOLVED"
+
+
+def _navigation_scroll_capture_record(container: Mapping[str, Any]) -> dict[str, Any]:
+    """Return bounded, payload-free identity evidence for one sealed capture."""
+    return {
+        "request_id": container.get("source_request_id"),
+        "transport_ledger_ref_request_id": container.get("source_request_id"),
+        "capture_id": container.get("source_capture_id"),
+        "generation": container.get("generation"),
+        "capture_sequence": container.get("capture_sequence"),
+        "window_id": container.get("window_id"),
+        "service_instance_id": container.get("service_instance_id"),
+        "process_epoch": container.get("process_epoch"),
+        "connection_epoch": container.get("connection_epoch"),
+        "boot_epoch": container.get("boot_epoch"),
+        "root_digest": container.get("root_digest"),
+        "candidate_digest": container.get("candidate_digest"),
+        "visible_node_count": container.get("visible_node_count"),
+        "visible_node_digest": container.get("visible_node_digest"),
+        "container": {
+            "path": container.get("path"),
+            "bounds": container.get("bounds"),
+            "window_id": container.get("window_id"),
+            "package_name": container.get("package_name"),
+            "class_name": container.get("class_name"),
+            "resource_id": container.get("resource_id"),
+            "source_node_id": container.get("source_node_id"),
+            "descriptor_digest": container.get("descriptor_digest"),
+            "action_ids": list(container.get("action_ids", [])),
+        },
+    }
+
+
+def _navigation_scroll_changed_fields(before: Mapping[str, Any], after: Mapping[str, Any],
+                                      fields: tuple[str, ...]) -> list[dict[str, Any]]:
+    changes: list[dict[str, Any]] = []
+    for field in fields:
+        old = before.get(field)
+        new = after.get(field)
+        if old != new:
+            changes.append({"field": field, "before": old, "after": new})
+    return changes
+
+
+def _navigation_scroll_container_identity(container: Mapping[str, Any]) -> tuple[Any, ...]:
+    """Use a stable node identity; path/bounds remain per-capture dispatch locators."""
+    window_id = container.get("window_id")
+    package_name = container.get("package_name")
+    class_name = container.get("class_name")
+    resource_id = container.get("resource_id")
+    source_node_id = container.get("source_node_id")
+    if source_node_id:
+        locator = ("source_node_id", source_node_id)
+    elif resource_id and package_name and class_name:
+        # Resource/class is resolved uniquely in each sealed capture. Its path
+        # can move when the hierarchy is rebuilt after scrolling.
+        locator = ("resource_id", resource_id)
+    else:
+        # Without a stable platform or resource identity, a relocated path is
+        # ambiguous and must remain fail-closed.
+        locator = ("path_descriptor", container.get("path"), container.get("descriptor_digest"))
+    return (window_id, package_name, class_name, resource_id, locator)
+
+
+def _navigation_scroll_identity_changed_fields(before: Mapping[str, Any],
+                                               after: Mapping[str, Any]) -> list[str]:
+    fields = ["window_id", "package_name", "class_name", "resource_id"]
+    changed = [field for field in fields if before.get(field) != after.get(field)]
+    before_source = before.get("source_node_id")
+    after_source = after.get("source_node_id")
+    if before_source or after_source:
+        if before_source != after_source:
+            changed.append("source_node_id")
+    elif not (before.get("resource_id") and after.get("resource_id")
+              and before.get("package_name") and after.get("package_name")
+              and before.get("class_name") and after.get("class_name")):
+        for field in ("path", "descriptor_digest"):
+            if before.get(field) != after.get(field):
+                changed.append(field)
+    return changed
+
+
+def _secondary_window_event_diagnostics_log_line(value: Any) -> str | None:
+    if not isinstance(value, dict) or value.get("evidence_role") != "SECONDARY_ONLY":
+        return None
+    return "[NAVIGATION_ACTION][secondary_window_event_diagnostics] " + json.dumps(
+        value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+
+
+def _run_helper_snapshot_navigation_action(client: Any, dev: str, tab_cfg: dict[str, Any],
+                                           scenario_id: str, contract_id: str) -> tuple[bool, str]:
+    """Run a configured route only through a fresh Helper owner lease and strict nav receipt."""
+    if not _navigation_action_contract_configured(tab_cfg, contract_id):
+        return False, "NAVIGATION_CONTRACT_NOT_CONFIGURED"
+    readiness_lookup = getattr(client, "navigation_action_contract_for_scenario", None)
+    if not callable(readiness_lookup):
+        return False, "NAVIGATION_CAPABILITY_NOT_READY"
+    readiness = readiness_lookup(dev, scenario_id, contract_id=contract_id)
+    if _navigation_action_entry_gate_reason(tab_cfg, readiness, scenario_id, contract_id):
+        return False, "NAVIGATION_CAPABILITY_NOT_READY"
+    authorization = _navigation_action_effect_authorization(tab_cfg, readiness, scenario_id, contract_id)
+    if authorization is None:
+        return False, "NAVIGATION_EFFECT_AUTHORIZATION_UNAVAILABLE"
+    owner, resolve_reason = _resolve_navigation_owner_from_helper_snapshot(
+        client, dev, tab_cfg, scenario_id, contract_id, readiness)
+    if owner is None:
+        log(f"[NAVIGATION_ACTION][helper_snapshot] dispatched=false reason='{resolve_reason}'")
+        return False, resolve_reason
+    from tb_runner import entry_safety
+
+    runtime = getattr(client, "evidence_runtime", None)
+    evidence_active = bool(getattr(runtime, "is_enabled", False))
+    begin_evidence_transaction = getattr(runtime, "begin_transaction", None)
+    previous_evidence_transaction = getattr(client, "_evidence_active_transaction", None)
+    previous_evidence_request_id = getattr(client, "_evidence_active_request_id", "")
+    evidence_transaction = None
+    transaction_id = entry_safety.uuid.uuid4().hex
+    transaction_outcome = {"status": "rejected", "reason": "NAVIGATION_NOT_VERIFIED"}
+    independent_post_action_observations: dict[str, Any] | None = None
+    if evidence_active and callable(begin_evidence_transaction):
+        try:
+            parent_transaction_id = (str(previous_evidence_transaction.get("transaction_id") or "")
+                                     if isinstance(previous_evidence_transaction, Mapping) else "")
+            evidence_transaction = begin_evidence_transaction(
+                "NAVIGATION_ACTION",
+                phase="pre_navigation",
+                parent_transaction_id=parent_transaction_id or None,
+                payload={"scenario_id": scenario_id, "contract_id": contract_id},
+            )
+            registered_transaction_id = str((evidence_transaction or {}).get("transaction_id") or "")
+            if registered_transaction_id:
+                transaction_id = registered_transaction_id
+                setattr(client, "_evidence_active_transaction", evidence_transaction)
+                setattr(client, "_evidence_active_request_id", "")
+            else:
+                evidence_transaction = None
+        except Exception as exc:
+            # Evidence is a shadow channel and must not affect navigation execution.
+            log(f"[NAVIGATION_ACTION][evidence] transaction_registration_failed error='{type(exc).__name__}'")
+    capture = None
+    try:
+        capture, armed, arm_reason = _arm_navigation_action_owner_lease(
+            client, dev, entry_safety, owner, scenario_id, transaction_id, readiness)
+        if not armed:
+            transaction_outcome["reason"] = str(arm_reason or "NAVIGATION_OWNER_LEASE_ARM_FAILED")
+            return False, arm_reason
+        current_lease = entry_safety.validate_transaction_click_capture(
+            client, dev, capture_session=capture, transaction_id=transaction_id)
+        if current_lease.get("ok") is not True:
+            transaction_outcome["reason"] = str(current_lease.get("reason") or "NAVIGATION_OWNER_LEASE_STALE")
+            return False, transaction_outcome["reason"]
+        if not _navigation_action_capture_matches_owner(
+                capture, owner, scenario_id, transaction_id,
+                str(readiness.get("identity_check", {}).get("helper_service_instance_id") or "")):
+            transaction_outcome["reason"] = "NAVIGATION_OWNER_LEASE_MISMATCH"
+            return False, "NAVIGATION_OWNER_LEASE_MISMATCH"
+        dispatch = getattr(client, "dispatch_navigation_action", None)
+        if not callable(dispatch):
+            transaction_outcome["reason"] = "NAVIGATION_DISPATCH_UNAVAILABLE"
+            return False, "NAVIGATION_DISPATCH_UNAVAILABLE"
+        result = dispatch(dev, scenario_id=scenario_id, transaction_id=transaction_id,
+                          capture_session=capture, current_lease=current_lease, readiness=readiness,
+                          activation_mode=_navigation_entry_activation_mode(scenario_id, readiness))
+        action_result_received_ns = time.monotonic_ns()
+        observation_request_id = _navigation_action_request_id(result)
+        if observation_request_id:
+            lease_identity = current_lease.get("result") if isinstance(current_lease, Mapping) else None
+            lease_identity = lease_identity if isinstance(lease_identity, Mapping) else {}
+            readiness_identity = readiness.get("identity_check") if isinstance(readiness, Mapping) else None
+            readiness_identity = readiness_identity if isinstance(readiness_identity, Mapping) else {}
+            action_context = {
+                "request_id": observation_request_id,
+                "transaction_id": transaction_id,
+                "run_id": lease_identity.get("runId"),
+                "invocation_id": lease_identity.get("invocationId"),
+                "service_instance_id": readiness_identity.get("helper_service_instance_id"),
+                "connection_id": lease_identity.get("connectionId"),
+                "window_id": lease_identity.get("ownerWindowId"),
+                "owner_lease_id": lease_identity.get("ownerLeaseId"),
+                "owner_capture_id": lease_identity.get("captureId"),
+                "owner_capture_request_id": capture.get("req_id") if isinstance(capture, Mapping) else None,
+                "source_capture_request_id": lease_identity.get("sourceCaptureRequestId"),
+                "source_snapshot_id": lease_identity.get("sourceSnapshotId"),
+                "helper_snapshot_id": lease_identity.get("helperSnapshotId"),
+                "source_capture_key": lease_identity.get("sourceCaptureKey"),
+                "source_generation": lease_identity.get("sourceGeneration"),
+                "source_capture_sequence": lease_identity.get("sourceCaptureSequence"),
+                "source_service_instance_id": lease_identity.get("sourceServiceInstanceId"),
+                "source_process_epoch": lease_identity.get("sourceProcessEpoch"),
+                "source_connection_epoch": lease_identity.get("sourceConnectionEpoch"),
+                "source_boot_epoch": lease_identity.get("sourceBootEpoch"),
+                "descriptor_digest": lease_identity.get("ownerDescriptorDigest"),
+                "effect_contract_id": readiness.get("contract_id") if isinstance(readiness, Mapping) else None,
+                "effect_contract_digest": readiness.get("contract_digest") if isinstance(readiness, Mapping) else None,
+                "owner_source_node_id_status": lease_identity.get("ownerSourceNodeIdStatus"),
+            }
+            observer_started_ns = time.monotonic_ns()
+            try:
+                independent_post_action_observations = _capture_navigation_independent_observations(
+                    client, dev, request_id=observation_request_id, transaction_id=transaction_id,
+                    navigation_action_result=result if isinstance(result, Mapping) else None,
+                    action_context=action_context,
+                    action_result_received_monotonic_ns=action_result_received_ns,
+                )
+            except Exception as exc:
+                observer_completed_ns = time.monotonic_ns()
+                independent_post_action_observations = {
+                    "evidence_role": "SECONDARY_ONLY",
+                    "observation_stage": "AFTER_NAVIGATION_ACTION_RESULT",
+                    "observer_status": "FAILED",
+                    "action_request_id": observation_request_id,
+                    "transaction_id": transaction_id,
+                    "action_context": action_context,
+                    "action_result_received_monotonic_ns": action_result_received_ns,
+                    "started_monotonic_ns": observer_started_ns,
+                    "observer_call_started_monotonic_ns": observer_started_ns,
+                    "completed_monotonic_ns": observer_completed_ns,
+                    "observer_call_completed_monotonic_ns": observer_completed_ns,
+                    "duration_ns": max(0, observer_completed_ns - observer_started_ns),
+                    "observer_delay_from_result_ns": max(0, observer_started_ns - action_result_received_ns),
+                    "observer_error_stages": ["collector"],
+                    "observer_timeout_stages": [],
+                    "strict_navigation_result": _navigation_action_evidence_projection(
+                        result if isinstance(result, Mapping) else None),
+                    "error": type(exc).__name__,
+                }
+            try:
+                setattr(client, "last_navigation_independent_post_action_observations",
+                        independent_post_action_observations)
+            except Exception as exc:
+                independent_post_action_observations["persistence_error_stages"] = ["client_record"]
+                independent_post_action_observations["client_record_error"] = type(exc).__name__
+            try:
+                log("[NAVIGATION_ACTION][independent_post_action_observations] " + json.dumps(
+                    independent_post_action_observations, ensure_ascii=True, sort_keys=True,
+                    separators=(",", ":")))
+                independent_post_action_observations["normal_log_persistence"] = "RECORDED"
+            except Exception as exc:
+                independent_post_action_observations["normal_log_persistence"] = "FAILED"
+                independent_post_action_observations.setdefault("persistence_error_stages", []).append("normal_log")
+                independent_post_action_observations["normal_log_error"] = type(exc).__name__
+        verified = isinstance(result, dict) and result.get("success") is True \
+            and result.get("status") == "VERIFIED_NAVIGATION"
+        transaction_outcome["status"] = "verified" if verified else "rejected"
+        transaction_outcome["reason"] = str(
+            result.get("reason") or result.get("status") or "NAVIGATION_ACTION_REJECTED") \
+            if isinstance(result, dict) else "NAVIGATION_ACTION_REJECTED"
+        response_keys = result.get("response_keys", []) if isinstance(result, dict) else []
+        if not isinstance(response_keys, list):
+            response_keys = []
+        broadcast_stdout = str(result.get("broadcast_stdout") or "") if isinstance(result, dict) else ""
+        broadcast_argv = result.get("broadcast_argv", []) if isinstance(result, dict) else []
+        if not isinstance(broadcast_argv, list):
+            broadcast_argv = []
+        receipt_mismatch_fields = result.get("receipt_mismatch_fields", []) if isinstance(result, dict) else []
+        if not isinstance(receipt_mismatch_fields, list):
+            receipt_mismatch_fields = []
+        post_state_mismatch_fields = result.get("post_state_mismatch_fields", []) if isinstance(result, dict) else []
+        if not isinstance(post_state_mismatch_fields, list):
+            post_state_mismatch_fields = []
+        post_state_diagnostics = result.get("post_state_diagnostics", {}) if isinstance(result, dict) else {}
+        if not isinstance(post_state_diagnostics, dict):
+            post_state_diagnostics = {}
+        adb_stdout = str(result.get("adb_stdout") or "") if isinstance(result, dict) else ""
+        adb_stderr = str(result.get("adb_stderr") or "") if isinstance(result, dict) else ""
+        log(f"[NAVIGATION_ACTION][helper_snapshot] dispatched=true verified={str(verified).lower()} "
+            f"reason='{result.get('reason', result.get('status', 'REJECTED'))}' "
+            f"transaction_id='{transaction_id}' request_id='{result.get('reqId', '')}' "
+            f"response_req_id='{result.get('response_req_id', '')}' "
+            f"response_status='{result.get('response_status', '')}' "
+            f"response_failure_code='{result.get('response_failure_code', '')}' "
+            f"receipt_status='{result.get('receipt_status', '')}' "
+            f"receipt_failure_code='{result.get('receipt_failure_code', '')}' "
+            f"receipt_mismatch_fields='{','.join(str(key)[:48] for key in receipt_mismatch_fields[:16])}' "
+            f"post_state_mismatch_fields='{','.join(str(key)[:48] for key in post_state_mismatch_fields[:16])}' "
+            f"post_state_diagnostics={json.dumps(post_state_diagnostics, ensure_ascii=True, sort_keys=True,
+                                                separators=(',', ':'))[:1200]!r} "
+            f"receipt_owner_reason='{result.get('receipt_owner_receipt_reason', '')}' "
+            f"receipt_owner_click_count='{result.get('receipt_owner_click_count', '')}' "
+            f"receipt_present={str(result.get('receipt_present') is True).lower()} "
+            f"response_keys='{','.join(str(key)[:40] for key in response_keys[:16])}' "
+            f"adb_returncode='{result.get('adb_returncode', '')}' "
+            f"adb_stdout={adb_stdout[:240]!r} adb_stderr={adb_stderr[:240]!r} "
+            f"broadcast_argv={broadcast_argv[:24]!r} "
+            f"broadcast_stdout={broadcast_stdout[:240]!r}")
+        secondary_events_log = _secondary_window_event_diagnostics_log_line(
+            result.get("secondary_window_event_diagnostics"))
+        if secondary_events_log:
+            log(secondary_events_log)
+        return (True, "VERIFIED_NAVIGATION") if verified else (
+            False, str(result.get("reason") or result.get("status") or "NAVIGATION_ACTION_REJECTED"))
+    finally:
+        if isinstance(capture, dict) and capture.get("req_id"):
+            try:
+                ended = entry_safety.end_transaction_click_capture(
+                    client, dev, capture_session=capture, transaction_id=transaction_id)
+                log(f"[NAVIGATION_ACTION][helper_snapshot][cleanup] ok={str(ended.get('ok') is True).lower()} "
+                    f"reason='{ended.get('reason', '')}' transaction_id='{transaction_id}'")
+            except Exception as exc:
+                log(f"[NAVIGATION_ACTION][helper_snapshot][cleanup] ok=false error='{type(exc).__name__}'")
+        if evidence_transaction is not None and runtime is not None:
+            close_evidence_transaction = getattr(runtime, "close_transaction", None)
+            if callable(close_evidence_transaction):
+                try:
+                    close_evidence_transaction(
+                        evidence_transaction,
+                        status=str(transaction_outcome["status"]),
+                        phase="pre_navigation",
+                        payload={"scenario_id": scenario_id, "contract_id": contract_id,
+                                 "result": str(transaction_outcome["reason"])[:160],
+                                 "independent_post_action_observations": independent_post_action_observations},
+                    )
+                except Exception as exc:
+                    log(f"[NAVIGATION_ACTION][evidence] transaction_close_failed error='{type(exc).__name__}'")
+        if evidence_transaction is not None:
+            setattr(client, "_evidence_active_transaction", previous_evidence_transaction)
+            setattr(client, "_evidence_active_request_id", previous_evidence_request_id)
+
+
+def _run_helper_snapshot_navigation_search(client: Any, dev: str, tab_cfg: dict[str, Any],
+                                           scenario_id: str, contract_id: str, *,
+                                           max_scroll_search_steps: int,
+                                           step_wait_seconds: float) -> tuple[bool, str]:
+    """Search a configured route with fresh exact Helper resolution after every scroll."""
+    try:
+        max_steps = max(0, int(max_scroll_search_steps))
+    except (TypeError, ValueError):
+        return False, "NAVIGATION_SCROLL_BOUND_INVALID"
+    scroll = getattr(client, "scroll", None)
+    readiness_lookup = getattr(client, "navigation_action_contract_for_scenario", None)
+    if not callable(readiness_lookup):
+        return False, "NAVIGATION_CAPABILITY_NOT_READY"
+    readiness = readiness_lookup(dev, scenario_id, contract_id=contract_id)
+    if _navigation_action_entry_gate_reason(tab_cfg, readiness, scenario_id, contract_id):
+        return False, "NAVIGATION_CAPABILITY_NOT_READY"
+    if _navigation_action_effect_authorization(tab_cfg, readiness, scenario_id, contract_id) is None:
+        return False, "NAVIGATION_EFFECT_AUTHORIZATION_UNAVAILABLE"
+
+    phase = "top"
+    upward_steps = 0
+    downward_steps = 0
+    previous_container_identity: tuple[Any, ...] | None = None
+    pending_scroll: dict[str, Any] | None = None
+    # The configured bound applies in each direction, so a list already at
+    # its lower edge can still be reset to the top and searched end-to-end.
+    for step in range((2 * max_steps) + 1):
+        ok, reason = _run_helper_snapshot_navigation_action(
+            client, dev, tab_cfg, scenario_id, contract_id)
+        if pending_scroll is not None:
+            pending_scroll["post_owner_result"] = reason
+            pending_scroll["post_target_match_count"] = (
+                1 if ok else 0 if reason == "NAVIGATION_TARGET_NOT_FOUND" else None)
+        log(f"[NAVIGATION_ACTION][search] step={step}/{2 * max_steps} phase='{phase}' owner_result='{reason}'")
+        if ok:
+            if pending_scroll is not None:
+                pending_scroll["post_capture_status"] = "OWNER_VERIFIED"
+                log("[NAVIGATION_ACTION][search_scroll_result] " + json.dumps(
+                    pending_scroll, ensure_ascii=True, sort_keys=True, separators=(",", ":")))
+                pending_scroll = None
+            return True, reason
+        # Only a current complete snapshot with no matching owner permits a
+        # bounded list scroll. Ambiguity, stale authority, missing identity,
+        # readiness, lease, or receipt failures all stop here.
+        if reason != "NAVIGATION_TARGET_NOT_FOUND":
+            if pending_scroll is not None:
+                pending_scroll["post_capture_status"] = "OWNER_CHECK_REJECTED"
+                pending_scroll["post_owner_rejection"] = reason
+                log("[NAVIGATION_ACTION][search_scroll_result] " + json.dumps(
+                    pending_scroll, ensure_ascii=True, sort_keys=True, separators=(",", ":")))
+            return False, reason
+        if not callable(scroll):
+            return False, "NAVIGATION_SCROLL_UNAVAILABLE"
+        container, container_reason = _resolve_navigation_scroll_container_from_helper_snapshot(
+            client, dev, tab_cfg, scenario_id, contract_id, readiness)
+        if container is None:
+            if pending_scroll is not None:
+                pending_scroll["post_capture_status"] = "CONTAINER_RESOLUTION_REJECTED"
+                pending_scroll["post_container_resolution_reason"] = container_reason
+                pending_scroll["post_target_match_count"] = 0
+                log("[NAVIGATION_ACTION][search_scroll_result] " + json.dumps(
+                    pending_scroll, ensure_ascii=True, sort_keys=True, separators=(",", ":")))
+            return False, container_reason
+        identity = _navigation_scroll_container_identity(container)
+        identity_changed = False
+        if previous_container_identity is None:
+            previous_container_identity = identity
+        elif identity != previous_container_identity:
+            identity_changed = True
+
+        if pending_scroll is not None:
+            # A false/unusable response is never interpreted by itself. The
+            # target was just reacquired from a fresh sealed hierarchy above;
+            # this second fresh capture now supplies boundary/action evidence.
+            pending = pending_scroll
+            response_correlated = bool(pending.get("request_id") and
+                                       pending.get("response_request_id") == pending.get("request_id") and
+                                       pending.get("explicit_target") is True and
+                                       pending.get("reported_path") ==
+                                       pending.get("container", {}).get("path") and
+                                       pending.get("scrollable_found") is True and
+                                       pending.get("action_supported") is True and
+                                       pending.get("action_attempted") is True)
+            direction_still_supported = (container["backward_supported"] if pending["direction"] == "up"
+                                         else container["forward_supported"])
+            post = _navigation_scroll_capture_record(container)
+            pending["post_capture"] = post
+            pending["post_capture_status"] = "VALIDATED"
+            pre_container = pending.get("pre_container_capture", {})
+            pre_container = pre_container.get("container", {}) if isinstance(pre_container, Mapping) else {}
+            post_container = post.get("container", {})
+            diagnostic_fields = (
+                "path", "bounds", "window_id", "package_name", "class_name", "resource_id",
+                "source_node_id", "descriptor_digest", "action_ids",
+            )
+            pending["changed_fields"] = _navigation_scroll_changed_fields(
+                pre_container, post_container, diagnostic_fields)
+            pending["identity_changed_reasons"] = _navigation_scroll_identity_changed_fields(
+                pre_container, post_container)
+            pending["capture_identity_changed_reasons"] = [
+                change["field"] for change in _navigation_scroll_changed_fields(
+                    pending.get("pre_capture", {}), post,
+                    ("window_id", "service_instance_id", "process_epoch", "connection_epoch", "boot_epoch"))
+            ]
+            pending["target_match_count"] = {
+                "before_scroll": pending.get("pre_target_match_count"),
+                "after_scroll": pending.get("post_target_match_count"),
+            }
+            pending["visible_projection_changed"] = (
+                pending.get("pre_visible_node_digest") != container["visible_node_digest"])
+            pending["visible_node_count_delta"] = (
+                int(container["visible_node_count"]) - int(pending.get("pre_visible_node_count", 0)))
+            pending["boundary_action_absent"] = not direction_still_supported
+            pending["container_identity_changed"] = identity_changed
+            log("[NAVIGATION_ACTION][search_scroll_result] " + json.dumps(
+                pending, ensure_ascii=True, sort_keys=True, separators=(",", ":")))
+            pending_scroll = None
+            if not response_correlated:
+                return False, "NAVIGATION_SCROLL_RESULT_UNVERIFIED"
+            pre_capture = pending.get("pre_capture", {})
+            post_is_fresh = bool(
+                isinstance(pre_capture, Mapping)
+                and post["capture_id"] and post["capture_id"] != pre_capture.get("capture_id")
+                and post["request_id"] and post["request_id"] != pre_capture.get("request_id")
+                and type(post["generation"]) is int
+                and type(pre_capture.get("generation")) is int
+                and post["generation"] > pre_capture["generation"]
+                and type(post["capture_sequence"]) is int
+                and type(pre_capture.get("capture_sequence")) is int
+                and post["capture_sequence"] > pre_capture["capture_sequence"]
+                and post["service_instance_id"] == pre_capture.get("service_instance_id")
+                and post["process_epoch"] == pre_capture.get("process_epoch")
+                and post["window_id"] == pre_capture.get("window_id")
+            )
+            if not post_is_fresh:
+                return False, "NAVIGATION_SCROLL_POST_CAPTURE_STALE"
+            if identity_changed:
+                return False, "NAVIGATION_SCROLL_CONTAINER_CHANGED"
+            if pending["scroll_confirmed"]:
+                if pending["direction"] == "up" and not direction_still_supported:
+                    phase = "down"
+                elif pending["direction"] == "down" and not direction_still_supported:
+                    log(f"[NAVIGATION_ACTION][search] coverage='FULL_CONTAINER_BOUNDARY' "
+                        f"container_path='{container['path']}' window_id='{container['window_id']}'")
+                    return False, "NAVIGATION_TARGET_NOT_FOUND"
+            else:
+                if pending.get("scroll_return") is not False or pending.get("helper_success") is not False:
+                    return False, "NAVIGATION_SCROLL_RESULT_UNVERIFIED"
+                if direction_still_supported:
+                    return False, "NAVIGATION_SCROLL_NOT_CONFIRMED"
+                if pending["direction"] == "up":
+                    phase = "down"
+                else:
+                    log(f"[NAVIGATION_ACTION][search] coverage='FULL_CONTAINER_BOUNDARY' "
+                        f"container_path='{container['path']}' window_id='{container['window_id']}'")
+                    return False, "NAVIGATION_TARGET_NOT_FOUND"
+        elif identity_changed:
+            return False, "NAVIGATION_SCROLL_CONTAINER_CHANGED"
+
+        if phase == "top" and not container["backward_supported"]:
+            phase = "down"
+        if phase == "top":
+            if upward_steps >= max_steps:
+                return False, "NAVIGATION_SCROLL_BOUND_EXHAUSTED_BEFORE_TOP"
+            direction = "up"
+            upward_steps += 1
+        else:
+            if not container["forward_supported"]:
+                log(f"[NAVIGATION_ACTION][search] coverage='FULL_CONTAINER_BOUNDARY' "
+                    f"container_path='{container['path']}' window_id='{container['window_id']}'")
+                return False, "NAVIGATION_TARGET_NOT_FOUND"
+            if downward_steps >= max_steps:
+                return False, "NAVIGATION_SCROLL_BOUND_EXHAUSTED_BEFORE_END"
+            direction = "down"
+            downward_steps += 1
+        try:
+            scroll_return = bool(scroll(
+                dev=dev, direction=direction, container_path=container["path"],
+                container_bounds=container["bounds"],
+            ))
+        except Exception as exc:
+            log(f"[NAVIGATION_ACTION][search] step={step}/{max_steps} scroll_exception='{type(exc).__name__}'")
+            return False, "NAVIGATION_SCROLL_FAILED"
+        scroll_result = getattr(client, "last_scroll_result", {})
+        if not isinstance(scroll_result, Mapping):
+            scroll_result = {}
+        scroll_request_id = str(getattr(client, "last_scroll_request_id", "") or "").strip()
+        pending_scroll = {
+            "scenario_id": scenario_id,
+            "contract_id": contract_id,
+            "step": step,
+            "direction": direction,
+            "scroll_request_id": scroll_request_id,
+            "request_id": scroll_request_id,
+            "response_request_id": (str(scroll_result.get("reqId", ""))[:96]
+                                    if isinstance(scroll_result.get("reqId"), str) else ""),
+            "scroll_confirmed": scroll_return and scroll_result.get("success") is True,
+            "scroll_return": scroll_return,
+            "helper_success": scroll_result.get("success") if isinstance(scroll_result.get("success"), bool) else None,
+            "explicit_target": scroll_result.get("explicitTarget") is True,
+            "reported_path": (str(scroll_result.get("scrollContainerPath", ""))[:128]
+                              if isinstance(scroll_result.get("scrollContainerPath"), str) else ""),
+            "scrollable_found": scroll_result.get("scrollableNodeFound") is True,
+            "action_supported": scroll_result.get("actionSupported") is True,
+            "action_attempted": scroll_result.get("actionAttempted") is True,
+            "top_boundary_evidence": (scroll_result.get("topBoundaryEvidence")
+                                       if isinstance(scroll_result.get("topBoundaryEvidence"), bool) else None),
+            "helper_reason": (str(scroll_result.get("reason", ""))[:96]
+                              if isinstance(scroll_result.get("reason"), str) else ""),
+            "helper_status": (str(scroll_result.get("status", ""))[:48]
+                              if isinstance(scroll_result.get("status"), str) else ""),
+            "performed_action_id": (scroll_result.get("performedActionId")
+                                    if type(scroll_result.get("performedActionId")) is int else None),
+            "pre_capture": {
+                "capture_id": container["source_capture_id"],
+                "request_id": container["source_request_id"],
+                "transport_ledger_ref_request_id": container["source_request_id"],
+                "service_instance_id": container["service_instance_id"],
+                "process_epoch": container["process_epoch"],
+                "connection_epoch": container.get("connection_epoch"),
+                "boot_epoch": container.get("boot_epoch"),
+                "generation": container["generation"],
+                "capture_sequence": container["capture_sequence"],
+                "window_id": container["window_id"],
+                "root_digest": container["root_digest"],
+                "candidate_digest": container["candidate_digest"],
+                "visible_node_count": container["visible_node_count"],
+                "visible_node_digest": container["visible_node_digest"],
+            },
+            "pre_container_capture": _navigation_scroll_capture_record(container),
+            "pre_target_match_count": 0 if reason == "NAVIGATION_TARGET_NOT_FOUND" else None,
+            "pre_visible_node_count": container["visible_node_count"],
+            "container": {
+                "path": container["path"], "bounds": container["bounds"],
+                "class_name": container["class_name"], "resource_id": container["resource_id"],
+                "descriptor_digest": container["descriptor_digest"],
+                "source_node_id": container["source_node_id"],
+                "window_id": container["window_id"],
+                "package_name": container["package_name"],
+                "action_ids": list(container.get("action_ids", [])),
+            },
+        }
+        log(f"[NAVIGATION_ACTION][search] step={step}/{2 * max_steps} phase='{phase}' "
+            f"direction='{direction}' container_path='{container['path']}' "
+            f"bounds='{container['bounds']}' scroll_confirmed="
+            f"{str(pending_scroll['scroll_confirmed']).lower()}")
+        time.sleep(max(min(float(step_wait_seconds), 0.45), 0.2))
+    return False, ("NAVIGATION_SCROLL_NOT_CONFIRMED" if pending_scroll else
+                   "NAVIGATION_SCROLL_BOUND_EXHAUSTED")
 
 
 def _run_xml_scroll_search_tap(
@@ -7748,9 +10098,21 @@ def _run_xml_scroll_search_tap(
     max_scroll_search_steps: int,
     step_wait_seconds: float,
     transition_fast_path: bool,
+    navigation_action_contract_id: str | None = None,
 ) -> tuple[bool, str]:
     scenario_id = str(tab_cfg.get("scenario_id", "") or "").strip().lower()
-    entry_geometry_compatibility = scenario_id in {"life_air_care_plugin", "life_energy_plugin"}
+    if navigation_action_contract_id:
+        return _run_helper_snapshot_navigation_search(
+            client, dev, tab_cfg, scenario_id, str(navigation_action_contract_id).strip(),
+            max_scroll_search_steps=max_scroll_search_steps,
+            step_wait_seconds=step_wait_seconds,
+        )
+    navigation_action_required = (
+        _navigation_action_entry_required(tab_cfg)
+        or bool(str(navigation_action_contract_id or "").strip())
+    )
+    entry_geometry_compatibility = (scenario_id in {"life_air_care_plugin", "life_energy_plugin"}
+                                    and not navigation_action_required)
     preserve_actionable_match = scenario_id == "life_find_plugin"
     strict_phrase_cfg = STRICT_PLUGIN_ENTRY_PHRASES.get(scenario_id, {})
     strict_phrases = tuple(str(phrase).strip().lower() for phrase in strict_phrase_cfg.get("strict", ()) if str(phrase).strip())
@@ -8032,7 +10394,8 @@ def _run_xml_scroll_search_tap(
                 parent_hops += 1
             promoted_bounds = parse_bounds_str(str(promoted.get("boundsInScreen", "") or "").strip())
             if not promoted_bounds:
-                failure_reason = "bounds_missing"
+                failure_reason = ("entry_safety:" + str((navigation_action_result or {}).get("reason") or
+                                  "NAVIGATION_ACTION_REJECTED") if navigation_action_attempted else "bounds_missing")
                 continue
             width = max(1, promoted_bounds[2] - promoted_bounds[0])
             height = max(1, promoted_bounds[3] - promoted_bounds[1])
@@ -8092,7 +10455,9 @@ def _run_xml_scroll_search_tap(
         for sample in target_candidates:
             sample_node = sample.get("node", {})
             sample_bounds = parse_bounds_str(str(sample_node.get("boundsInScreen", "") or "").strip())
-            if entry_geometry_compatibility:
+            if navigation_action_required:
+                tap_bounds, obstruction_reason = sample_bounds, ""
+            elif entry_geometry_compatibility:
                 tap_bounds, obstruction_reason = _xml_entry_candidate_tap_bounds(sample_bounds, xml_nodes)
             else:
                 tap_bounds = sample_bounds
@@ -8154,9 +10519,12 @@ def _run_xml_scroll_search_tap(
             if not selected_bounds:
                 failure_reason = "bounds_missing"
                 break
-            tap_bounds = selected["tap_bounds"]
-            center_x = int((tap_bounds[0] + tap_bounds[2]) / 2)
-            center_y = int((tap_bounds[1] + tap_bounds[3]) / 2)
+            tap_bounds = selected.get("tap_bounds")
+            if navigation_action_required:
+                center_x = center_y = None
+            else:
+                center_x = int((tap_bounds[0] + tap_bounds[2]) / 2)
+                center_y = int((tap_bounds[1] + tap_bounds[3]) / 2)
             selected_resource = str(selected_node.get("viewIdResourceName", "") or selected_node.get("resourceId", "") or "").strip()
             selected_text = _node_label_blob(selected_node)
             log(
@@ -8164,7 +10532,8 @@ def _run_xml_scroll_search_tap(
                 f"bounds='{selected_node.get('boundsInScreen', '')}' text='{selected_text[:80]}' "
                 f"target_match=true match_source='{selected.get('match_source', '')}' "
                 f"matched_phrase='{str(selected.get('matched_phrase', '') or '')[:80]}'"
-                f" tap_bounds='{','.join(map(str, tap_bounds))}' tap_point='{center_x},{center_y}'"
+                + (" dispatch='exact_node_ACTION_CLICK'" if navigation_action_required else
+                   f" tap_bounds='{','.join(map(str, tap_bounds))}' tap_point='{center_x},{center_y}'")
             )
             selected_own_text = str(selected.get("own_text", "") or "").strip()
             selected_desc_texts = [str(value or "").strip() for value in selected.get("descendant_text_summary", []) if str(value or "").strip()]
@@ -8242,14 +10611,18 @@ def _run_xml_scroll_search_tap(
                     selected_node = refreshed_target
                     selected_bounds = refreshed_bounds
                     tap_bounds, obstruction = (
+                        (selected_bounds, "") if navigation_action_required else
                         _xml_entry_candidate_tap_bounds(selected_bounds, xml_nodes)
                         if entry_geometry_compatibility else (selected_bounds, "")
                     )
                     if tap_bounds is None:
                         failure_reason = f"recoverable_precondition:target_obstructed:{obstruction}"
                         break
-                    center_x = int((tap_bounds[0] + tap_bounds[2]) / 2)
-                    center_y = int((tap_bounds[1] + tap_bounds[3]) / 2)
+                    if navigation_action_required:
+                        center_x = center_y = None
+                    else:
+                        center_x = int((tap_bounds[0] + tap_bounds[2]) / 2)
+                        center_y = int((tap_bounds[1] + tap_bounds[3]) / 2)
                 log(
                     "[XMLENTRY][recoverable_precondition] "
                     "success=true outcome='RECOVERED_STABLE' "
@@ -8259,46 +10632,117 @@ def _run_xml_scroll_search_tap(
                 os.environ.get("TB_PHASE5B_CONTROLLED") == "1"
                 and os.environ.get("TB_PHASE5A_ACTION_SAFETY_MODE") == "enforce"
             )
+            navigation_action_readiness = None
+            navigation_action_authorization = None
+            if navigation_action_required:
+                navigation_contract_lookup = getattr(client, "navigation_action_contract_for_scenario", None)
+                if callable(navigation_contract_lookup):
+                    if navigation_action_contract_id:
+                        navigation_action_readiness = navigation_contract_lookup(
+                            dev, scenario_id, contract_id=navigation_action_contract_id)
+                    else:
+                        navigation_action_readiness = navigation_contract_lookup(dev, scenario_id)
+                navigation_gate_reason = _navigation_action_entry_gate_reason(
+                    tab_cfg, navigation_action_readiness, scenario_id, navigation_action_contract_id)
+                if navigation_gate_reason:
+                    failure_reason = "entry_safety:" + navigation_gate_reason
+                    break
+                navigation_action_authorization = _navigation_action_effect_authorization(
+                    tab_cfg, navigation_action_readiness, scenario_id, navigation_action_contract_id)
+            entry_action_evidence_enabled = entry_safety_enforced or navigation_action_authorization is not None
             entry_permit = None
             entry_baseline_nodes = None
             entry_baseline_window = ""
             before_click_events = {}
             entry_click_capture = None
-            if entry_safety_enforced:
+            if entry_action_evidence_enabled:
                 from tb_runner import entry_safety
+
+                navigation_gate_reason = _navigation_action_entry_gate_reason(
+                    tab_cfg, navigation_action_readiness, scenario_id, navigation_action_contract_id)
+                if navigation_gate_reason:
+                    failure_reason = "entry_safety:" + navigation_gate_reason
+                    break
 
                 entry_baseline_nodes = client.dump_tree(dev=dev)
                 entry_baseline_window = _extract_window_focus_line(client, dev)
                 setattr(client, "last_entry_source_digest", entry_safety.hierarchy_digest(entry_baseline_nodes))
                 setattr(client, "last_entry_source_window", entry_baseline_window)
                 current_roots, current_reason = _load_scrolltouch_xml_nodes(client=client, dev=dev)
-                resolution = entry_safety.resolve_navigation_owner(
-                    xml_nodes, selected_node, str(selected.get("matched_phrase") or "")
-                )
-                entry_permit = entry_safety.authorize_entry(
-                    resolution, current_roots, scenario=scenario_id,
-                    matched_phrase=str(selected.get("matched_phrase") or ""),
-                )
+                entry_transaction_id = entry_safety.uuid.uuid4().hex
+                if navigation_action_required:
+                    resolution = {"owner_identity": entry_safety._identity(selected_node),
+                                 "snapshot_digest": entry_safety.hierarchy_digest(xml_nodes),
+                                 "reason": "HELPER_SNAPSHOT_EXACT_SELECTED_NODE"}
+                    (entry_click_capture, navigation_lease_ok,
+                     navigation_lease_reason) = _arm_navigation_action_owner_lease(
+                        client, dev, entry_safety, selected_node, scenario_id, entry_transaction_id,
+                        navigation_action_readiness,
+                    )
+                    entry_permit = dict(authorized=navigation_lease_ok and navigation_action_authorization is not None,
+                        reason=navigation_lease_reason,
+                        transaction_id=entry_transaction_id,
+                        target_identity=resolution["owner_identity"],
+                        point=None, snapshot_digest=resolution["snapshot_digest"],
+                        navigation_action_authorization=navigation_action_authorization)
+                else:
+                    resolution = entry_safety.resolve_navigation_owner(
+                        xml_nodes, selected_node, str(selected.get("matched_phrase") or "")
+                    )
+                    entry_preflight = entry_safety.authorize_entry(
+                        resolution, current_roots, scenario=scenario_id,
+                        matched_phrase=str(selected.get("matched_phrase") or ""),
+                        preflight=True, transaction_id=entry_transaction_id,
+                    )
+                    if entry_preflight.get("preflight_eligible") is True:
+                        entry_click_capture = entry_safety.begin_transaction_click_capture(
+                            client, dev, transaction_id=entry_transaction_id,
+                            target_node=resolution.get("owner"), scenario_id=scenario_id,
+                        )
+                        entry_permit = entry_safety.authorize_entry(
+                            resolution, current_roots, scenario=scenario_id,
+                            matched_phrase=str(selected.get("matched_phrase") or ""),
+                            observation_lease=entry_click_capture.get("armed"),
+                            capture_req_id=str(entry_click_capture.get("req_id") or ""),
+                            transaction_id=entry_transaction_id,
+                        )
+                    else:
+                        entry_permit = dict(authorized=False,
+                            reason=entry_preflight.get("reason") or "ENTRY_TARGET_PREFLIGHT_REJECTED",
+                            transaction_id=entry_transaction_id,
+                            target_identity=entry_preflight.get("target_identity"),
+                            point=entry_preflight.get("point"),
+                            classification=entry_preflight.get("classification"))
                 entry_safety.append_entry_audit(dict(
                     event="ENTRY_AUTHORIZATION", scenario=scenario_id,
                     candidate_identity=entry_safety._identity(selected_node),
                     resolved_owner=resolution.get("owner_identity"),
-                    original_tap_point=[center_x, center_y],
+                    original_tap_point=None if navigation_action_required else [center_x, center_y],
                     dispatch_tap_point=entry_permit.get("point"),
                     snapshot_digest=entry_permit.get("snapshot_digest"),
                     transaction_id=entry_permit.get("transaction_id"),
                     authorized=entry_permit["authorized"],
                     reason=entry_permit["reason"],
+                    navigation_action_authorization=entry_permit.get("navigation_action_authorization"),
                     safety_class=(entry_permit.get("classification") or {}).get("safety_class"),
                     current_hierarchy_reason=current_reason,
                 ))
                 if not entry_permit["authorized"]:
+                    if entry_click_capture is not None and (entry_click_capture.get("armed") or {}).get("ok") is True:
+                        cleanup = entry_safety.end_transaction_click_capture(
+                            client, dev, capture_session=entry_click_capture,
+                            transaction_id=entry_transaction_id,
+                        )
+                        entry_safety.append_entry_audit(dict(
+                            event="ENTRY_CLICK_CAPTURE_CLEANUP", scenario=scenario_id,
+                            transaction_id=entry_transaction_id,
+                            request_id=entry_click_capture.get("req_id"), cleanup_result=cleanup,
+                            reason="FINAL_ENTRY_PERMIT_REJECTED",
+                        ))
                     failure_reason = "entry_safety:" + str(entry_permit["reason"])
                     break
-                center_x, center_y = entry_permit["point"]
-                entry_click_capture = entry_safety.begin_transaction_click_capture(
-                    client, dev, transaction_id=entry_permit["transaction_id"],
-                )
+                if entry_permit.get("point") is not None:
+                    center_x, center_y = entry_permit["point"]
                 before_click_events = entry_click_capture.get("talkback_baseline") or {}
                 entry_safety.append_entry_audit(dict(
                     event="ENTRY_CLICK_CAPTURE_STARTED", scenario=scenario_id,
@@ -8326,9 +10770,55 @@ def _run_xml_scroll_search_tap(
                 hard_stop = getattr(client, "_phase5c_hard_stop_state", None)
                 if hard_stop is not None:
                     hard_stop.guard("entry_tap_dispatch")
+                current_lease = entry_safety.validate_transaction_click_capture(
+                    client, dev, capture_session=entry_click_capture,
+                    transaction_id=entry_permit["transaction_id"],
+                )
+                entry_safety.append_entry_audit(dict(
+                    event="ENTRY_CLICK_CAPTURE_PRE_DISPATCH_VALIDATION", scenario=scenario_id,
+                    transaction_id=entry_permit["transaction_id"],
+                    request_id=entry_click_capture.get("req_id"),
+                    validation=current_lease,
+                ))
+                if current_lease.get("ok") is not True:
+                    cleanup = entry_safety.end_transaction_click_capture(
+                        client, dev, capture_session=entry_click_capture,
+                        transaction_id=entry_permit["transaction_id"],
+                    )
+                    entry_safety.append_entry_audit(dict(
+                        event="ENTRY_CLICK_CAPTURE_CLEANUP", scenario=scenario_id,
+                        transaction_id=entry_permit["transaction_id"],
+                        request_id=entry_click_capture.get("req_id"), cleanup_result=cleanup,
+                        reason="PRE_DISPATCH_VALIDATION_FAILED",
+                    ))
+                    failure_reason = "entry_safety:" + str(
+                        current_lease.get("reason") or "ENTRY_CLICK_CAPTURE_TARGET_STALE")
+                    break
             tap_ok = False
             dispatch_receipt = None
-            if entry_safety_enforced:
+            navigation_action_attempted = bool(
+                navigation_action_authorization is not None
+                and entry_permit.get("authorized") is True
+                and _navigation_action_readiness_valid(navigation_action_readiness, scenario_id)
+            )
+            navigation_action_result = None
+            if navigation_action_attempted:
+                navigation_dispatch = getattr(client, "dispatch_navigation_action", None)
+                if callable(navigation_dispatch):
+                    navigation_action_result = navigation_dispatch(
+                        dev, scenario_id=scenario_id, transaction_id=entry_permit["transaction_id"],
+                        capture_session=entry_click_capture, current_lease=current_lease,
+                        readiness=navigation_action_readiness,
+                        activation_mode=_navigation_entry_activation_mode(scenario_id,
+                                                                           navigation_action_readiness),
+                    )
+                else:
+                    navigation_action_result = dict(success=False, reason="NAVIGATION_HOST_BRIDGE_UNAVAILABLE")
+                tap_ok = isinstance(navigation_action_result, dict) and navigation_action_result.get("success") is True
+                dispatch_receipt = dict(executed=tap_ok, dispatch_uptime_ms=None,
+                    reason=("VERIFIED_NAVIGATION" if tap_ok else
+                            navigation_action_result.get("reason", "NAVIGATION_ACTION_REJECTED")))
+            elif entry_safety_enforced:
                 dispatch_receipt = entry_safety.dispatch_authorized_entry_tap(
                     client, dev, entry_permit["point"],
                 )
@@ -8344,7 +10834,7 @@ def _run_xml_scroll_search_tap(
                     except Exception:
                         tap_ok = False
             if not tap_ok:
-                if entry_safety_enforced:
+                if entry_action_evidence_enabled:
                     cleanup = entry_safety.end_transaction_click_capture(
                         client, dev, capture_session=entry_click_capture,
                         transaction_id=entry_permit["transaction_id"],
@@ -8353,7 +10843,10 @@ def _run_xml_scroll_search_tap(
                         event="ENTRY_DISPATCH", scenario=scenario_id,
                         transaction_id=entry_permit["transaction_id"],
                         authorized_target=entry_permit["target_identity"],
-                        dispatched_point=[center_x, center_y], executed=False,
+                        dispatch_mode=("NAVIGATION_ACTION" if navigation_action_attempted else "HOST_TAP"),
+                        dispatched_point=None if navigation_action_attempted else [center_x, center_y],
+                        navigation_action_result=navigation_action_result,
+                        executed=False,
                         dispatch_uptime_ms=(dispatch_receipt or {}).get("dispatch_uptime_ms"),
                         dispatch_started_monotonic_ns=(dispatch_receipt or {}).get("dispatch_started_monotonic_ns"),
                         dispatch_completed_monotonic_ns=(dispatch_receipt or {}).get("dispatch_completed_monotonic_ns"),
@@ -8361,9 +10854,10 @@ def _run_xml_scroll_search_tap(
                         dispatch_command=(dispatch_receipt or {}).get("command"),
                         capture_cleanup=cleanup,
                     ))
-                failure_reason = "bounds_missing"
+                failure_reason = ("entry_safety:" + str((navigation_action_result or {}).get("reason")
+                                  or "NAVIGATION_ACTION_REJECTED") if navigation_action_attempted else "bounds_missing")
                 break
-            if entry_safety_enforced:
+            if entry_action_evidence_enabled:
                 summary = getattr(client, "last_start_open_summary", {})
                 if isinstance(summary, dict):
                     summary["entry_action_executed"] = True
@@ -8374,27 +10868,59 @@ def _run_xml_scroll_search_tap(
                     event="ENTRY_DISPATCH", scenario=scenario_id,
                     transaction_id=entry_permit["transaction_id"],
                     authorized_target=entry_permit["target_identity"],
-                    dispatched_point=[center_x, center_y], executed=tap_ok,
+                    dispatch_mode=("NAVIGATION_ACTION" if navigation_action_attempted else "HOST_TAP"),
+                    dispatched_point=None if navigation_action_attempted else [center_x, center_y],
+                    navigation_action_result=navigation_action_result,
+                    executed=tap_ok,
                     dispatch_uptime_ms=(dispatch_receipt or {}).get("dispatch_uptime_ms"),
                     dispatch_started_monotonic_ns=(dispatch_receipt or {}).get("dispatch_started_monotonic_ns"),
                     dispatch_completed_monotonic_ns=(dispatch_receipt or {}).get("dispatch_completed_monotonic_ns"),
                     dispatch_cursor_status=(dispatch_receipt or {}).get("reason"),
                     dispatch_command=(dispatch_receipt or {}).get("command"),
                 ))
-                dispatch_uptime_ms = (dispatch_receipt or {}).get("dispatch_uptime_ms")
-                mark_result = entry_safety.mark_transaction_click_dispatch(
-                    client, dev, capture_session=entry_click_capture,
-                    transaction_id=entry_permit["transaction_id"],
-                    dispatch_uptime_ms=dispatch_uptime_ms,
-                )
-                collection = entry_safety.collect_transaction_click_events(
-                    client, dev, transaction_id=entry_permit["transaction_id"],
-                    hierarchy_roots=current_roots, permit={**entry_permit, "dispatch_uptime_ms": dispatch_uptime_ms},
-                    before_talkback_events=before_click_events,
-                    capture_session=entry_click_capture,
-                    dispatch_started_monotonic_ns=(dispatch_receipt or {}).get("dispatch_started_monotonic_ns"),
-                    dispatch_completed_monotonic_ns=(dispatch_receipt or {}).get("dispatch_completed_monotonic_ns"),
-                )
+                if navigation_action_attempted:
+                    navigation_receipt = (navigation_action_result or {}).get("receipt") or {}
+                    dispatch_uptime_ms = None
+                    mark_result = dict(ok=navigation_action_result.get("success") is True,
+                                       reason="NAVIGATION_RECEIPT" if navigation_action_result.get("success") is True
+                                           else navigation_action_result.get("reason"))
+                    collection = dict(ok=navigation_action_result.get("success") is True,
+                                      reason="NAVIGATION_RECEIPT",
+                                      candidate_events=[navigation_receipt], post_action_observations=[],
+                                      navigation_action_receipt=navigation_receipt)
+                    observation_request_id = _navigation_action_request_id(navigation_action_result)
+                    if observation_request_id:
+                        # Secondary diagnostics run only after the exact navigation
+                        # bridge returns. They never feed the strict receipt verifier.
+                        try:
+                            independent_observations = _capture_navigation_independent_observations(
+                                client, dev, request_id=observation_request_id,
+                                transaction_id=str(entry_permit["transaction_id"]),
+                                navigation_action_result=navigation_action_result,
+                            )
+                        except Exception as exc:
+                            independent_observations = {
+                                "evidence_role": "SECONDARY_ONLY",
+                                "action_request_id": observation_request_id,
+                                "transaction_id": str(entry_permit["transaction_id"]),
+                                "error": type(exc).__name__,
+                            }
+                        collection["independent_post_action_observations"] = independent_observations
+                else:
+                    dispatch_uptime_ms = (dispatch_receipt or {}).get("dispatch_uptime_ms")
+                    mark_result = entry_safety.mark_transaction_click_dispatch(
+                        client, dev, capture_session=entry_click_capture,
+                        transaction_id=entry_permit["transaction_id"],
+                        dispatch_uptime_ms=dispatch_uptime_ms,
+                    )
+                    collection = entry_safety.collect_transaction_click_events(
+                        client, dev, transaction_id=entry_permit["transaction_id"],
+                        hierarchy_roots=current_roots, permit={**entry_permit, "dispatch_uptime_ms": dispatch_uptime_ms},
+                        before_talkback_events=before_click_events,
+                        capture_session=entry_click_capture,
+                        dispatch_started_monotonic_ns=(dispatch_receipt or {}).get("dispatch_started_monotonic_ns"),
+                        dispatch_completed_monotonic_ns=(dispatch_receipt or {}).get("dispatch_completed_monotonic_ns"),
+                    )
                 activity_after = ("" if str(collection.get("reason") or "").startswith("AUTHORITATIVE_HARD_STOP")
                                   else _extract_window_focus_line(client, dev))
                 activity_transition_evidence = dict(
@@ -8407,7 +10933,16 @@ def _run_xml_scroll_search_tap(
                     evidence_role="SECONDARY_ONLY",
                 )
                 collection["activity_transition"] = activity_transition_evidence
-                if dispatch_uptime_ms is None or mark_result.get("ok") is not True:
+                if navigation_action_attempted:
+                    hit_result = dict(
+                        matched=navigation_action_result.get("success") is True,
+                        reason=("VERIFIED_NAVIGATION" if navigation_action_result.get("success") is True
+                                else navigation_action_result.get("reason", "NAVIGATION_ACTION_REJECTED")),
+                        evidence_strength="HELPER_EXACT_NAVIGATION_RECEIPT",
+                        candidate_count=1 if navigation_action_result.get("success") is True else 0,
+                        events=collection.get("candidate_events") or [],
+                    )
+                elif dispatch_uptime_ms is None or mark_result.get("ok") is not True:
                     hit_result = dict(
                         matched=False,
                         reason="ENTRY_DISPATCH_CURSOR_UNAVAILABLE" if dispatch_uptime_ms is None
@@ -8427,6 +10962,7 @@ def _run_xml_scroll_search_tap(
                         entry_permit, {}, collection.get("candidate_events") or [],
                         roots=current_roots, dispatch_uptime_ms=dispatch_uptime_ms,
                         collection=collection,
+                        required_anchor_patterns=_build_transition_patterns(tab_cfg),
                     )
                 hit_result["collection"] = collection
                 hit_result["dispatch_marker"] = mark_result
@@ -8445,7 +10981,7 @@ def _run_xml_scroll_search_tap(
                 baseline_nodes=entry_baseline_nodes,
                 baseline_window_focus=entry_baseline_window,
             )
-            if entry_safety_enforced:
+            if entry_action_evidence_enabled:
                 entry_safety.append_entry_audit(dict(
                     event="ENTRY_POST_OPEN_TRANSITION", scenario=scenario_id,
                     transaction_id=entry_permit["transaction_id"],
@@ -12244,11 +14780,13 @@ def _run_pre_navigation_steps(
             elif action == "touch":
                 step_ok = bool(client.touch(dev=dev, name=target, type_=type_, wait_=action_wait_seconds))
             elif action == "xml_scroll_search_tap":
-                max_scroll_search_steps = max(
+                exact_node_only = step.get("exact_node_only") is True
+                max_scroll_search_steps = (0 if exact_node_only else max(
                     1,
                     int(step.get("max_scroll_search_steps", tab_cfg.get("max_scroll_search_steps", _PLUGIN_SCROLL_SEARCH_MAX_STEPS)) or _PLUGIN_SCROLL_SEARCH_MAX_STEPS),
-                )
-                if attempt == 1:
+                ))
+                configured_navigation_contract_id = str(step.get("navigation_action_contract_id") or "").strip()
+                if attempt == 1 and not exact_node_only and not configured_navigation_contract_id:
                     log("[XMLENTRY][search] pre_reset scroll_to_top=true")
                     scroll_to_top_fn = getattr(client, "scroll_to_top", None)
                     if callable(scroll_to_top_fn):
@@ -12265,8 +14803,18 @@ def _run_pre_navigation_steps(
                     max_scroll_search_steps=max_scroll_search_steps,
                     step_wait_seconds=step_wait_seconds,
                     transition_fast_path=transition_fast_path,
+                    navigation_action_contract_id=(str(step.get("navigation_action_contract_id") or "").strip() or None),
                 )
                 if not step_ok:
+                    if (_navigation_action_entry_required(tab_cfg)
+                            or bool(str(step.get("navigation_action_contract_id") or "").strip())):
+                        actual_reason = f"navigation_action_rejected:{xml_reason}"
+                        log(
+                            "[SCENARIO][pre_nav][xmlentry] "
+                            f"abort='navigation_action_fail_closed' reason='{actual_reason}'"
+                        )
+                        setattr(client, "last_pre_nav_failure_reason", actual_reason)
+                        return False
                     if (
                         os.environ.get("TB_PHASE5B_CONTROLLED") == "1"
                         and os.environ.get("TB_PHASE5A_ACTION_SAFETY_MODE") == "enforce"
@@ -13226,7 +15774,8 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict, *, output_base
             log("[PLUGIN_START][recover_before_entry] triggered=true mode='life_reset'")
             recover_success = False
             life_list_reason = "recover_failed"
-            for recover_attempt in range(1, 3):
+            recover_attempt_limit = 1 if "navigation_action_recovery" in tab_cfg else 2
+            for recover_attempt in range(1, recover_attempt_limit + 1):
                 previous_recover_invocation_reason = tab_cfg.get("_recover_invocation_reason", None)
                 tab_cfg["_recover_invocation_reason"] = "plugin_start"
                 try:
@@ -13239,7 +15788,7 @@ def open_scenario(client: A11yAdbClient, dev: str, tab_cfg: dict, *, output_base
                 if recover_success:
                     life_list_reason = "life_reset_ready"
                     break
-                if recover_attempt < 2:
+                if recover_attempt < recover_attempt_limit:
                     log(
                         f"[PLUGIN_START][recover_before_entry] retry={recover_attempt}/2 "
                         "reason='recover_to_start_state_failed'"
@@ -24971,6 +27520,28 @@ def _phase6e_graph_rows(rows, snapshots, scenario_id):
     return graph_rows
 
 
+def initialize_collection_scenario_evidence(client: Any, tab_cfg: Mapping[str, Any]) -> str:
+    """Start the collector's real scenario evidence transaction and bind it to the client."""
+    scenario_id = str(tab_cfg.get("scenario_id", "") or "")
+    evidence_runtime = getattr(client, "evidence_runtime", None)
+    if bool(getattr(evidence_runtime, "is_enabled", False)):
+        try:
+            scenario_tx_id = evidence_runtime.start_scenario(
+                scenario_id,
+                plugin_family=str(tab_cfg.get("plugin_family", "") or tab_cfg.get("scenario_type", "") or ""),
+            )
+            setattr(client, "_active_evidence_scenario_id", scenario_id)
+            setattr(client, "_active_evidence_scenario_tx_id", str(scenario_tx_id or ""))
+            return str(scenario_tx_id or "")
+        except Exception:
+            setattr(client, "_active_evidence_scenario_id", "")
+            setattr(client, "_active_evidence_scenario_tx_id", "")
+            return ""
+    setattr(client, "_active_evidence_scenario_id", "")
+    setattr(client, "_active_evidence_scenario_tx_id", "")
+    return ""
+
+
 def _collect_tab_rows_inner(
     client: A11yAdbClient,
     dev: str,
@@ -24989,20 +27560,7 @@ def _collect_tab_rows_inner(
     setattr(client, "last_recoverable_precondition_attempt_count", 0)
     setattr(client, "last_recoverable_precondition_attempt_result", {})
     evidence_runtime = getattr(client, "evidence_runtime", None)
-    if bool(getattr(evidence_runtime, "is_enabled", False)):
-        try:
-            scenario_tx_id = evidence_runtime.start_scenario(
-                scenario_id,
-                plugin_family=str(tab_cfg.get("plugin_family", "") or tab_cfg.get("scenario_type", "") or ""),
-            )
-            setattr(client, "_active_evidence_scenario_id", scenario_id)
-            setattr(client, "_active_evidence_scenario_tx_id", str(scenario_tx_id or ""))
-        except Exception:
-            setattr(client, "_active_evidence_scenario_id", "")
-            setattr(client, "_active_evidence_scenario_tx_id", "")
-    else:
-        setattr(client, "_active_evidence_scenario_id", "")
-        setattr(client, "_active_evidence_scenario_tx_id", "")
+    initialize_collection_scenario_evidence(client, tab_cfg)
     crash_attempt = _crash_guard_attempt_for_tab_cfg(tab_cfg)
     _reset_crash_guard_latch(client, scenario_id=scenario_id, attempt=crash_attempt)
     setattr(
