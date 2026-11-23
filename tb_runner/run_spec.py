@@ -88,6 +88,10 @@ class RunSpec:
 
     def build_subprocess_env(self, base_env: Mapping[str, str] | None = None) -> dict[str, str]:
         env = dict(os.environ if base_env is None else base_env)
+        # Child-frame activation is a diagnostic-only path. Canonical batch
+        # scenarios always use the production activation contract, even if a
+        # parent process happens to carry the opt-in variable.
+        env.pop("TB_DIAGNOSTIC_AIRCARE_FRAME_LAYOUT_CHILD", None)
         env.pop("TB_TALKBACK_PREFLIGHT_PID", None)
         if self.preflight_talkback_pid:
             env["TB_TALKBACK_PREFLIGHT_PID"] = self.preflight_talkback_pid

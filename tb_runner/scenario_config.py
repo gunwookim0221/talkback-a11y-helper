@@ -260,6 +260,10 @@ TAB_CONFIGS = [
         "tab_type": "b",
         "screen_context_mode": "new_screen",
         "stabilization_mode": "anchor_only",
+        "navigation_action_recovery": {
+            "contract_id": "life_plugin_navigate_up_to_landing",
+            "target": "(?i)^(navigate up|navigate to parent menu|상위\\s*메뉴로\\s*이동)$",
+        },
 
         "recoverable_precondition": {
             "target_resource_ids": [
@@ -279,6 +283,7 @@ TAB_CONFIGS = [
                 "action": "xml_scroll_search_tap",
                 "target": "(?i)(^smart\\s*air\\s*care$|^air\\s*care$|air\\s*care\\.|\\baircare\\b|에어\\s*케어)",
                 "type": "a",
+                "navigation_action_contract_id": "life_service_card_read_only_navigation",
             }
         ],
         "entry_match": {
@@ -1098,7 +1103,7 @@ TAB_CONFIGS = [
         "stabilization_mode": "anchor_only",
         "pre_navigation": [
             {
-                "action": "select_and_click_focused_or_tap_bounds_center_adb",
+                "action": "select_and_click_focused",
                 "target": "com.samsung.android.oneconnect:id/setting_button_layout",
                 "type": "r",
                 "target_stable_labels": ["Settings", "설정"],

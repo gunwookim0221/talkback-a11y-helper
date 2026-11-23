@@ -4,12 +4,20 @@ import subprocess
 ROOT=Path(__file__).resolve().parents[1]
 SRC=ROOT/'app/src/main/java/com/iotpart/sqe/talkbackhelper'
 
-def test_exact_action_has_one_direct_native_call_and_no_fallback_or_focus():
+def test_exact_navigation_actions_are_retained_node_only_with_no_fallback():
     paths=list(SRC.glob('ExactAction*.kt'))+[SRC/'ExactLiveNodeResolver.kt']
     code='\n'.join(p.read_text(encoding='utf-8') for p in paths)
-    assert code.count('.performAction(')==1
-    assert 'node.performAction(AccessibilityNodeInfo.ACTION_CLICK)' in code
-    for forbidden in ('ACTION_FOCUS','ACTION_ACCESSIBILITY_FOCUS','CLICK_TARGET','CLICK_FOCUSED',
+    resolver=(SRC/'ExactLiveNodeResolver.kt').read_text(encoding='utf-8')
+    lease_start=resolver.index('inner class NavigationTargetLease')
+    lease_end=resolver.index('fun captureObservationTarget', lease_start)
+    lease=resolver[lease_start:lease_end]
+    assert lease.count('.performAction(')==3
+    assert lease.count('node.performAction(AccessibilityNodeInfo.ACTION_CLICK)')==2
+    assert 'node.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)' in lease
+    assert lease.count('authorization.consume(requestId, transactionId, leaseToken,')==3
+    assert lease.count('observation.identifiesRetainedNode(node)')==3
+    assert 'stillCurrentAfterAccessibilityFocus' in lease
+    for forbidden in ('ACTION_FOCUS','CLICK_TARGET','CLICK_FOCUSED',
                       'A11yTargetFinder','dispatchGesture(','.touch(','.tap('):
         assert forbidden not in code
 

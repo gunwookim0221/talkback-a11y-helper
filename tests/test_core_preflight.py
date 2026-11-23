@@ -30,14 +30,34 @@ def _smartthings_foreground() -> str:
     return "mCurrentFocus=Window{abc u0 com.samsung.android.oneconnect/.ui.SCMainActivity}"
 
 
+def _safe_interaction_state(args):
+    responses = {
+        ("shell", "dumpsys", "power"): "mWakefulness=Awake",
+        ("shell", "dumpsys", "display"): "DisplayViewport{valid=true, isActive=true, displayId=0}\nDisplay State=ON",
+        ("shell", "dumpsys", "window", "policy"): "mShowingLockscreen=false\ninputRestricted=false",
+        ("shell", "dumpsys", "window", "windows"): "Window #0 Window{app display=0}:\n mDisplayId=0\n package=com.samsung.android.oneconnect\n isOnScreen=true\n isVisible=true",
+    }
+    output = responses.get(args)
+    return (True, output) if output is not None else None
+
+
 def _successful_adb(_adb_path, serial, *args, timeout=8.0):
     assert serial == "SERIAL"
     if args == ("get-state",):
         return True, "device"
+    safe_state = _safe_interaction_state(args)
+    if safe_state is not None:
+        return safe_state
     if args == ("shell", "dumpsys", "window"):
         return True, _smartthings_foreground()
     if args == ("shell", "dumpsys", "window", "policy"):
-        return True, "mShowingLockscreen=false"
+        return True, "mShowingLockscreen=false\ninputRestricted=false"
+    if args == ("shell", "dumpsys", "power"):
+        return True, "mWakefulness=Awake"
+    if args == ("shell", "dumpsys", "display"):
+        return True, "DisplayViewport{valid=true, isActive=true, displayId=0}\nDisplay State=ON"
+    if args == ("shell", "dumpsys", "window", "windows"):
+        return True, "Window #0 Window{app display=0}:\n mDisplayId=0\n package=com.samsung.android.oneconnect\n isOnScreen=true\n isVisible=true"
     return True, ""
 
 
@@ -151,14 +171,16 @@ def test_core_preflight_uses_one_serial_for_helper_and_talkback(monkeypatch):
     assert any(call == ("hierarchy", "SERIAL") for call in client.serials)
     assert result.screen_awake["status"] == "PASS"
     assert result.unlock_swipe["status"] == "PASS"
+    assert result.screen_awake["action_attempted"] is False
+    assert result.unlock_swipe["action_attempted"] is False
     assert result.app_foreground["status"] == "PASS"
     assert (
         "[PREFLIGHT] wake_screen PASS "
-        "message='Wake keyevent sent; screen settle completed'"
+        "message='Display already interactive; wake input skipped'"
     ) in logs
     assert (
         "[PREFLIGHT] unlock_swipe PASS "
-        "message='Swipe command sent; keyguard not active after 1 attempt(s)'"
+        "message='Keyguard clear and no blocking SystemUI overlay; unlock input skipped'"
     ) in logs
     assert (
         "[PREFLIGHT] app_foreground PASS "
@@ -182,7 +204,13 @@ def test_core_preflight_dismisses_internal_samsung_account_popup_after_foregroun
         if args == ("shell", "dumpsys", "window"):
             return True, _smartthings_foreground()
         if args == ("shell", "dumpsys", "window", "policy"):
-            return True, "mShowingLockscreen=false"
+            return True, "mShowingLockscreen=false\ninputRestricted=false"
+        if args == ("shell", "dumpsys", "power"):
+            return True, "mWakefulness=Awake"
+        if args == ("shell", "dumpsys", "display"):
+            return True, "DisplayViewport{valid=true, isActive=true, displayId=0}\nDisplay State=ON"
+        if args == ("shell", "dumpsys", "window", "windows"):
+            return True, "Window #0 Window{app display=0}:\n mDisplayId=0\n package=com.samsung.android.oneconnect\n isOnScreen=true\n isVisible=true"
         if args == ("shell", "input", "tap", "282", "2334"):
             dumped_popup["active"] = False
             return True, ""
@@ -225,36 +253,28 @@ def test_core_preflight_dismisses_internal_samsung_account_popup_after_foregroun
     )
 
 
-def test_wake_screen_waits_for_screen_settle():
+def test_wake_screen_skips_input_when_interactive_unlocked_gate_passes():
     sleeps = []
 
     result = core_preflight.wake_screen(
         serial="SERIAL",
-        adb_runner=lambda _adb_path, _serial, *args, timeout=8.0: (True, ""),
+        adb_runner=_successful_adb,
         sleep_fn=sleeps.append,
     )
 
     assert result["status"] == "PASS"
-    assert sleeps == [0.75]
+    assert result["action_attempted"] is False
+    assert "wake input skipped" in result["message"]
+    assert sleeps == []
 
 
-def test_unlock_swipe_uses_screen_size_and_retries_until_keyguard_clears():
+def test_unlock_swipe_skips_input_when_interactive_unlocked_gate_passes():
     commands = []
-    keyguard_states = iter(
-        [
-            "mShowingLockscreen=true",
-            "mShowingLockscreen=false",
-        ]
-    )
     sleeps = []
 
     def adb_runner(_adb_path, _serial, *args, timeout=8.0):
         commands.append(args)
-        if args == ("shell", "wm", "size"):
-            return True, "Physical size: 1080x2400"
-        if args == ("shell", "dumpsys", "window", "policy"):
-            return True, next(keyguard_states)
-        return True, ""
+        return _successful_adb(_adb_path, "SERIAL", *args, timeout=timeout)
 
     result = core_preflight.unlock_swipe(
         serial="SERIAL",
@@ -262,33 +282,33 @@ def test_unlock_swipe_uses_screen_size_and_retries_until_keyguard_clears():
         sleep_fn=sleeps.append,
     )
 
-    swipe_commands = [
-        args for args in commands if args[:3] == ("shell", "input", "swipe")
-    ]
-    assert swipe_commands == [
-        ("shell", "input", "swipe", "540", "2040", "540", "600"),
-        ("shell", "input", "swipe", "540", "2040", "540", "600"),
-    ]
+    assert not any(args[:2] == ("shell", "input") for args in commands)
     assert result["status"] == "PASS"
+    assert result["action_attempted"] is False
     assert result["keyguard_active"] is False
-    assert len(result["attempts"]) == 2
-    assert sleeps == [0.6, 0.6]
+    assert sleeps == []
 
 
-def test_unlock_swipe_warns_when_keyguard_state_cannot_be_verified():
+def test_unlock_swipe_fails_closed_when_keyguard_state_cannot_be_verified():
+    commands = []
+
+    def adb_runner(_adb_path, _serial, *args, timeout=8.0):
+        commands.append(args)
+        return True, ""
+
     result = core_preflight.unlock_swipe(
         serial="SERIAL",
-        adb_runner=lambda _adb_path, _serial, *args, timeout=8.0: (True, ""),
+        adb_runner=adb_runner,
         sleep_fn=lambda _seconds: None,
     )
 
-    assert result["status"] == "WARN"
+    assert result["status"] == "FAIL"
+    assert result["action_attempted"] is False
     assert result["keyguard_active"] is None
-    assert "secure lock state not verified" in result["message"]
-    assert len(result["attempts"]) == 3
+    assert not any(args[:2] == ("shell", "input") for args in commands)
 
 
-def test_core_preflight_stops_when_wake_screen_fails(monkeypatch):
+def test_core_preflight_stops_when_interaction_state_is_unknown_before_input(monkeypatch):
     client = _Client()
     commands = []
 
@@ -296,8 +316,6 @@ def test_core_preflight_stops_when_wake_screen_fails(monkeypatch):
         commands.append(args)
         if args == ("get-state",):
             return True, "device"
-        if args == ("shell", "input", "keyevent", "KEYCODE_WAKEUP"):
-            return False, "device offline"
         return True, ""
 
     monkeypatch.setattr(
@@ -315,9 +333,12 @@ def test_core_preflight_stops_when_wake_screen_fails(monkeypatch):
     )
 
     assert result.ok is False
-    assert result.reason == "wake_screen_failed"
+    assert result.reason == "device_interaction_precondition_failed"
     assert result.screen_awake["status"] == "FAIL"
-    assert result.unlock_swipe["status"] == "NOT_RUN"
+    assert result.screen_awake["action_attempted"] is False
+    assert result.unlock_swipe["status"] == "FAIL"
+    assert result.unlock_swipe["action_attempted"] is False
+    assert not any(command[:2] == ("shell", "input") for command in commands)
     assert client.serials == []
 
 
@@ -344,17 +365,25 @@ def test_core_preflight_stops_when_device_is_not_connected(monkeypatch):
     assert result.screen_awake["status"] == "NOT_RUN"
 
 
-def test_core_preflight_unlock_warn_continues_to_helper(monkeypatch):
+def test_core_preflight_locked_keyguard_blocks_before_input(monkeypatch):
     client = _Client()
     settings = AccessibilitySettings("helper", "1")
+    commands = []
 
     def adb_runner(_adb_path, _serial, *args, timeout=8.0):
+        commands.append(args)
         if args == ("get-state",):
             return True, "device"
         if args == ("shell", "dumpsys", "window"):
             return True, _smartthings_foreground()
         if args == ("shell", "dumpsys", "window", "policy"):
-            return True, "mShowingLockscreen=true"
+            return True, "mShowingLockscreen=true\ninputRestricted=true"
+        if args == ("shell", "dumpsys", "power"):
+            return True, "mWakefulness=Awake"
+        if args == ("shell", "dumpsys", "display"):
+            return True, "DisplayViewport{valid=true, isActive=true, displayId=0}\nDisplay State=ON"
+        if args == ("shell", "dumpsys", "window", "windows"):
+            return True, ""
         return True, ""
 
     monkeypatch.setattr(
@@ -373,12 +402,49 @@ def test_core_preflight_unlock_warn_continues_to_helper(monkeypatch):
         sleep_fn=lambda _seconds: None,
     )
 
-    assert result.ok is True
-    assert result.unlock_swipe["status"] == "WARN"
-    assert "secure lockscreen may still be active" in result.unlock_swipe["message"]
-    assert len(result.unlock_swipe["attempts"]) == 3
-    assert client.serials[0] == ("ping", "SERIAL")
-    assert client.serials[-1] == ("talkback", "SERIAL")
+    assert result.ok is False
+    assert result.reason == "device_interaction_precondition_failed"
+    assert result.unlock_swipe["status"] == "FAIL"
+    assert result.unlock_swipe["action_attempted"] is False
+    assert not any(command[:2] == ("shell", "input") for command in commands)
+    assert client.serials == []
+
+
+def test_core_preflight_visible_systemui_overlay_blocks_before_input(monkeypatch):
+    client = _Client()
+    commands = []
+
+    def adb_runner(_adb_path, _serial, *args, timeout=8.0):
+        commands.append(args)
+        if args == ("get-state",):
+            return True, "device"
+        if args == ("shell", "dumpsys", "power"):
+            return True, "mWakefulness=Awake"
+        if args == ("shell", "dumpsys", "display"):
+            return True, "DisplayViewport{valid=true, isActive=true, displayId=0}\nDisplay State=ON"
+        if args == ("shell", "dumpsys", "window", "policy"):
+            return True, "mShowingLockscreen=false\ninputRestricted=false"
+        if args == ("shell", "dumpsys", "window", "windows"):
+            return True, (
+                "Window #3 Window{bouncer Bouncer}:\n"
+                " mDisplayId=0\n package=com.android.systemui\n"
+                " isOnScreen=true\n isVisible=true"
+            )
+        return True, _smartthings_foreground()
+
+    monkeypatch.setattr(
+        core_preflight, "ensure_accessibility_service_enabled",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("must stop before helper setup")),
+    )
+    result = core_preflight.run_preflight(
+        client=client, serial="SERIAL", log_fn=lambda _line: None,
+        adb_runner=adb_runner, sleep_fn=lambda _seconds: None,
+    )
+    assert result.ok is False
+    assert result.reason == "device_interaction_precondition_failed"
+    assert result.unlock_swipe["systemui_overlay_clear"] is False
+    assert result.unlock_swipe["action_attempted"] is False
+    assert not any(args[:2] == ("shell", "input") for args in commands)
 
 
 def test_foreground_launches_smartthings_when_another_app_is_active():
@@ -408,10 +474,49 @@ def test_foreground_launches_smartthings_when_another_app_is_active():
     ) in commands
 
 
+def test_foreground_uses_display_zero_before_inactive_cover_systemui():
+    commands = []
+    window_dump = """
+WINDOW MANAGER DISPLAY CONTENTS
+Display: mDisplayId=1 (organized)
+  mCurrentFocus=null
+  mFocusedApp=ActivityRecord{cover u0 com.android.systemui/.subscreen.SubHomeActivity t7}
+  displayId=1
+Display: mDisplayId=0 (organized)
+  mCurrentFocus=Window{primary u0 com.samsung.android.oneconnect/com.samsung.android.oneconnect.webplugin.WebPluginActivity}
+  mFocusedApp=ActivityRecord{primary u0 com.samsung.android.oneconnect/.webplugin.WebPluginActivity t1547}
+  displayId=0
+"""
+
+    def adb_runner(_adb_path, _serial, *args, timeout=8.0):
+        commands.append(args)
+        if args == ("shell", "dumpsys", "window", "policy"):
+            return True, "mShowingLockscreen=false"
+        if args == ("shell", "dumpsys", "window"):
+            return True, window_dump
+        if args[:2] == ("shell", "monkey"):
+            raise AssertionError("must not launch when display 0 is already SmartThings")
+        return True, ""
+
+    result = core_preflight.ensure_smartthings_foreground(
+        serial="SERIAL",
+        adb_runner=adb_runner,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result["status"] == "PASS"
+    assert result["package"] == core_preflight.SMARTTHINGS_PACKAGE
+    assert result["launch_attempted"] is False
+    assert not any(args[:2] == ("shell", "monkey") for args in commands)
+
+
 def test_core_preflight_stops_when_smartthings_foreground_is_not_confirmed(monkeypatch):
     client = _Client()
 
     def adb_runner(_adb_path, _serial, *args, timeout=8.0):
+        safe_state = _safe_interaction_state(args)
+        if safe_state is not None:
+            return safe_state
         if args == ("get-state",):
             return True, "device"
         if args == ("shell", "dumpsys", "window", "policy"):
@@ -476,6 +581,9 @@ def test_core_preflight_recovers_play_store_popup_after_foreground_pass(monkeypa
 
     def adb_runner(_adb_path, _serial, *args, timeout=8.0):
         commands.append(args)
+        safe_state = _safe_interaction_state(args)
+        if safe_state is not None:
+            return safe_state
         if args == ("get-state",):
             return True, "device"
         if args == ("shell", "dumpsys", "window", "policy"):
@@ -520,6 +628,9 @@ def test_core_preflight_recovers_play_store_before_app_foreground_failure(monkey
     def adb_runner(_adb_path, _serial, *args, timeout=8.0):
         nonlocal recovered
         commands.append(args)
+        safe_state = _safe_interaction_state(args)
+        if safe_state is not None:
+            return safe_state
         if args == ("get-state",):
             return True, "device"
         if args == ("shell", "dumpsys", "window", "policy"):
@@ -568,6 +679,9 @@ def test_core_preflight_reports_popup_reason_when_early_recovery_fails(monkeypat
     )
 
     def adb_runner(_adb_path, _serial, *args, timeout=8.0):
+        safe_state = _safe_interaction_state(args)
+        if safe_state is not None:
+            return safe_state
         if args == ("get-state",):
             return True, "device"
         if args == ("shell", "dumpsys", "window"):
@@ -999,6 +1113,9 @@ def test_missing_popup_recovery_client_has_dependency_specific_fail_closed_resul
 
 def _unknown_package_adb(_adb_path, serial, *args, timeout=8.0):
     assert serial == "SERIAL"
+    safe_state = _safe_interaction_state(args)
+    if safe_state is not None:
+        return safe_state
     if args == ("get-state",):
         return True, "device"
     if args == ("shell", "dumpsys", "window", "policy"):

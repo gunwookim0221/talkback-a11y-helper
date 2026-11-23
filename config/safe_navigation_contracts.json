@@ -12,6 +12,83 @@
       "return_transport": "BACK",
       "child_kind": "READ_ONLY_MENU",
       "no_editable_or_checkable_child": true
+    },
+    {
+      "id": "life_service_card_read_only_navigation",
+      "enabled": true,
+      "package": "com.samsung.android.oneconnect",
+      "resource_id": "",
+      "target_class_pattern": "^android\\.widget\\.RelativeLayout$",
+      "label_pattern": "^$",
+      "target_subtree_pattern": "(?s)(?=.*(?:에어\\s*케어|air\\s*care))(?=.*공기청정기나\\s*에어컨을\\s*추가)(?=.*(?:보통|나쁨))(?=.*야외).*",
+      "effect": "read_only_navigation",
+      "scenario_ids": [
+        "life_air_care_plugin"
+      ],
+      "destination_pattern": "(?i)^(?:air\\s*care|에어\\s*케어)$",
+      "required_anchor_pattern": "(?i)^(?:navigate\\s*up|navigate\\s*to\\s*parent\\s*menu|상위\\s*메뉴로\\s*이동)$",
+      "return_transport": "BACK",
+      "expected_descendant_count": 7,
+      "excluded_descendant_resource_ids": [
+        "com.samsung.android.oneconnect:id/frameLayout",
+        "com.samsung.android.oneconnect:id/include"
+      ],
+      "required_non_actionable_descendant_label_patterns": [
+        "^(?:보통|나쁨)$",
+        "^야외$"
+      ],
+      "evidence_refs": [
+        "tb_runner/scenario_config.py:life_air_care_plugin(entry_type=card,screen_context_mode=new_screen)",
+        "tb_runner/collection_flow.py:5875(strict AirCare destination verifier)",
+        "current_hierarchy_sha256:25056fb6e2cc7590f364cd6c961e088241ec1f4833a90f134d50faa13853fb8f",
+        "docs/design/talkback-phase10.2.2b-air-care-summary-classification.md#phase6f-empty-state-reference"
+      ],
+      "activation_owner_relation": {
+        "kind": "direct_child",
+        "child_index": 0,
+        "child_class_pattern": "^android\\.widget\\.FrameLayout$",
+        "child_resource_id": "com.samsung.android.oneconnect:id/frameLayout"
+      },
+      "empty_state_signature": {
+        "exact_text": "방에 에어컨이나 공기청정기를 추가하여 방 안의 공기를 자동으로 관리해 보세요.",
+        "root_class_name": "android.widget.FrameLayout",
+        "container_class_name": "android.view.View",
+        "container_resource_id": "paneContainer",
+        "web_view_class_name": "android.webkit.WebView",
+        "anchor_class_name": "android.widget.Button",
+        "anchor_resource_id": "back",
+        "excluded_class_name": "android.widget.GridView"
+      }
+    },
+    {
+      "id": "life_plugin_navigate_up_to_landing",
+      "enabled": true,
+      "package": "com.samsung.android.oneconnect",
+      "resource_id": "back",
+      "target_class_pattern": "^android\\.widget\\.Button$",
+      "label_pattern": "(?i)^(navigate up|navigate to parent menu|상위\\s*메뉴로\\s*이동)$",
+      "target_subtree_pattern": "(?i)(navigate up|navigate to parent menu|상위\\s*메뉴로\\s*이동)",
+      "effect": "read_only_navigation",
+      "scenario_ids": [
+        "life_air_care_plugin"
+      ],
+      "destination_pattern": "(?i)^(life|라이프|생활)$",
+      "required_anchor_pattern": "(?i)^(life|라이프|생활)$",
+      "required_anchor_structure": {
+        "relation": "direct_parent",
+        "node_class_pattern": "^android\\.widget\\.LinearLayout$",
+        "parent_class_pattern": "^android\\.widget\\.HorizontalScrollView$",
+        "parent_resource_id_pattern": "^com\\.samsung\\.android\\.oneconnect:id/bottom_navigation$"
+      },
+      "return_transport": "BACK",
+      "expected_descendant_count": 0,
+      "excluded_descendant_resource_ids": [],
+      "required_non_actionable_descendant_label_patterns": [],
+      "evidence_refs": [
+        "current_snapshot:request=1a9ef23eb5d94b23be701c8ef8828fd7;capture=656a1d95f87291a4f31790bbb0cd99bf224c5848adc86e093a6592b3e7f2442e;service=467a63bf-e64e-4a55-8d4e-88f278e9833a;window=45534;sourceNodeId=10;path=0.0.0.0.0.0.0.0.0.0.0.0;resource=back;class=android.widget.Button;label=상위 메뉴로 이동;action=ACTION_CLICK",
+        "current_snapshot_sha256:0487539fccdd4f34be565007bd44b2a3babc03a572b010b612b199d940b6a7ba",
+        "tb_runner/collection_flow.py:_ensure_life_plugin_list_ready uses exact retained-node action"
+      ]
     }
   ]
 }

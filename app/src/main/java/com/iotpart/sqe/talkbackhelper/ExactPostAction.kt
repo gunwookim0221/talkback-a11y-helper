@@ -227,10 +227,13 @@ internal object ExactPostActionRuntime {
         val deadline=current.closeDeadline() ?: return
         handler.postAtTime({runCatching{current.close()}.onFailure{current.interrupt("AUDIT_PERSIST_FAILED");ExactActionRuntime.stop("AUDIT_PERSIST_FAILED")}},deadline)
     }
-    fun receive(event:AccessibilityEvent) {
+    fun receive(
+        event:AccessibilityEvent,
+        callbackSourceObservation:NavigationCallbackSourceObservation?=null,
+    ) {
         val current=observer ?: return
         runCatching {
-            val source=event.source
+            val source=if(callbackSourceObservation!=null)callbackSourceObservation.source else event.source
             val exactIdentity=current.sourceIdentity(source)
             val bounds=Rect();source?.getBoundsInScreen(bounds)
             val raw=JSONObject().put("event_type",event.eventType).put("event_uptime_ms",event.eventTime)

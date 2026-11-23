@@ -25,6 +25,7 @@ from talkback_lib.hierarchy_file_transport import (
     encode_artifact,
     encode_control,
     sha256_hex,
+    validate_provider_artifact_read,
     validate_expected_build_precheck,
     validate_control_identity,
     validate_prestart_capability_generation,
@@ -230,6 +231,43 @@ def _artifact_control(request_id: str, nonce: str, identity: dict[str, str], pay
     return artifact, control, expected, payload
 
 
+class ProviderArtifactReadTests(unittest.TestCase):
+    def test_exact_read_and_hash_validated_single_suffix(self):
+        artifact = b"canonical hierarchy artifact bytes" * 2
+        digest = sha256_hex(artifact)
+        self.assertEqual(
+            (artifact, False),
+            validate_provider_artifact_read(
+                artifact,
+                expected_artifact_bytes=len(artifact),
+                expected_artifact_sha256=digest,
+                request_id="a" * 32,
+            ),
+        )
+        self.assertEqual(
+            (artifact, True),
+            validate_provider_artifact_read(
+                artifact + b"\x00",
+                expected_artifact_bytes=len(artifact),
+                expected_artifact_sha256=digest,
+                request_id="a" * 32,
+            ),
+        )
+
+    def test_suffix_never_masks_corrupt_prefix_or_multiple_extra_bytes(self):
+        artifact = b"canonical hierarchy artifact bytes" * 2
+        digest = sha256_hex(artifact)
+        for received in (b"!" + artifact[1:] + b"\x00", artifact + b"\x00\x01"):
+            with self.subTest(received_length=len(received)):
+                with self.assertRaisesRegex(HierarchyTransportError, "ARTIFACT_INTEGRITY_MISMATCH"):
+                    validate_provider_artifact_read(
+                        received,
+                        expected_artifact_bytes=len(artifact),
+                        expected_artifact_sha256=digest,
+                        request_id="b" * 32,
+                    )
+
+
 class HierarchyEnvelopeTests(unittest.TestCase):
     def test_binary_envelope_round_trip_and_unicode_bytes_are_exact(self):
         request_id, nonce = "1" * 32, "2" * 32
@@ -246,6 +284,41 @@ class HierarchyEnvelopeTests(unittest.TestCase):
         self.assertIn("🌱".encode("utf-8"), decoded.payload_bytes)
         self.assertEqual(request_id, decoded.payload["reqId"])
         self.assertLessEqual(len(artifact), MAX_ARTIFACT_BYTES)
+
+    def test_single_extra_byte_requires_current_request_and_metadata_end_to_end(self):
+        request_id, nonce = "1" * 32, "2" * 32
+        artifact, control, expected, payload = _artifact_control(request_id, nonce, _identity())
+
+        def read_and_decode(received, ready, expected_request=request_id,
+                            expected_nonce=nonce, expected_identity=expected):
+            validated, stripped = validate_provider_artifact_read(
+                received, expected_artifact_bytes=ready["artifact_bytes"],
+                expected_artifact_sha256=ready["artifact_sha256"], request_id=expected_request,
+            )
+            decoded = decode_artifact(validated, ready, expected_identity=expected_identity,
+                                      expected_request_id=expected_request,
+                                      expected_client_nonce=expected_nonce,
+                                      capabilities=_capabilities())
+            return decoded.payload_bytes, stripped
+
+        self.assertEqual((payload, False), read_and_decode(artifact, control))
+        self.assertEqual((payload, True), read_and_decode(artifact + b"\x00", control))
+        other, other_control, _, _ = _artifact_control("3" * 32, "4" * 32, _identity())
+        failures = (
+            (artifact[:-1], control, request_id, nonce, expected),
+            (b"!" + artifact[1:] + b"\x00", control, request_id, nonce, expected),
+            (artifact + b"\x00", control, "3" * 32, nonce, expected),
+            (artifact + b"\x00", control, request_id, "4" * 32, expected),
+            (other + b"\x00", control, request_id, nonce, expected),
+            (other + b"\x00", other_control, request_id, nonce, expected),
+            (artifact + b"\x00", {**control, "generation": 99}, request_id, nonce, expected),
+            (artifact + b"\x00", control, request_id, nonce,
+             {**expected, "service_instance_id": "different-service"}),
+        )
+        for received, ready, request, client_nonce, identity in failures:
+            with self.subTest(request=request, nonce=client_nonce, size=len(received)):
+                with self.assertRaises(HierarchyTransportError):
+                    read_and_decode(received, ready, request, client_nonce, identity)
 
     def test_dirty_candidate_identity_is_bound_through_control_and_payload(self):
         identity = _identity()
@@ -383,6 +456,103 @@ class HierarchyEnvelopeTests(unittest.TestCase):
 
 
 class HierarchyControlTests(unittest.TestCase):
+    def test_failed_control_diagnostics_do_not_change_fail_closed_status_validation(self):
+        failure = {
+            "schema": CONTROL_SCHEMA,
+            "protocol_version": PROTOCOL_VERSION,
+            "status": "FAILED",
+            "error_code": "COLLECTION_FAILED",
+            "error_stage": "ROOT_ACQUISITION",
+            "error_type": "IllegalStateException",
+        }
+
+        with self.assertRaises(HierarchyTransportError) as rejected:
+            validate_control_identity(failure, _identity(), request_id="request-1")
+
+        self.assertEqual("COLLECTION_FAILED", rejected.exception.reason)
+
+    def test_capabilities_service_mismatch_traces_identity_pair_and_still_fails_closed(self):
+        from talkback_lib import A11yAdbClient
+
+        identity = _identity()
+        precheck = {
+            "status": "COMPATIBLE_SAME_HELPER_INPUT",
+            "execution_allowed": True,
+            "helper_build_id": identity["build_id"],
+            "helper_git_commit": identity["git_commit"],
+            "helper_service_instance_id": identity["service_instance_id"],
+            "helper_input_digest": identity["input_digest"],
+            "installed_metadata": {"source_state": identity["source_state"]},
+            "capability_process_epoch": "ping-process-epoch",
+            "capability_generation": 9,
+            "exact_action_state": {
+                "connection_epoch": "ping-connection-epoch",
+            },
+        }
+        helper_identity = {
+            "build_id": identity["build_id"],
+            "git_commit": identity["git_commit"],
+            "source_state": identity["source_state"],
+            "input_digest": identity["input_digest"],
+            "build_variant": identity.get("build_variant", "debug"),
+        }
+        calls = []
+        client = A11yAdbClient(start_monitor=False)
+
+        def return_mismatched_capability(_dev, action, extras, *, request_id, remaining_seconds, trace=None):
+            calls.append(action)
+            query_nonce = next(
+                extras[index + 2]
+                for index in range(0, len(extras) - 2, 3)
+                if extras[index] == "--es" and extras[index + 1] == "queryNonce"
+            )
+            return {
+                "schema": CONTROL_SCHEMA,
+                "protocol_version": PROTOCOL_VERSION,
+                "status": "OK",
+                "request_id": request_id,
+                "query_nonce": query_nonce,
+                "service_instance_id": "observed-service-instance",
+                "connection_epoch": "observed-connection-epoch",
+                "process_epoch": "observed-process-epoch",
+                "generation": 10,
+                "capture_sequence": 4,
+                "helper_build_identity": helper_identity,
+                "payload_schema_version": PAYLOAD_SCHEMA,
+            }
+
+        client._hierarchy_transfer_control = return_mismatched_capability
+        with self.assertRaises(HierarchyTransportError) as rejected:
+            client._dump_hierarchy_file_pfd(
+                dev="test-serial",
+                wait_seconds=1.0,
+                expected_helper_build_identity=precheck,
+            )
+
+        self.assertEqual("SERVICE_INSTANCE_MISMATCH", rejected.exception.reason)
+        self.assertEqual(["CAPABILITIES"], calls)
+        mismatch = next(
+            record for record in client.last_hierarchy_transport_diagnostics
+            if record["stage"] == "HOST_CONTROL_IDENTITY_REJECTED"
+        )
+        self.assertEqual("SERVICE_INSTANCE_MISMATCH", mismatch["mismatch_reason"])
+        self.assertEqual(rejected.exception.request_id, mismatch["request_id"])
+        self.assertEqual(identity["service_instance_id"], mismatch["expected_service_instance_id"])
+        self.assertEqual("observed-service-instance", mismatch["observed_service_instance_id"])
+        self.assertEqual("ping-process-epoch", mismatch["expected_process_epoch"])
+        self.assertEqual("observed-process-epoch", mismatch["observed_process_epoch"])
+        self.assertEqual(9, mismatch["expected_generation"])
+        self.assertEqual(10, mismatch["observed_generation"])
+        self.assertEqual(4, mismatch["observed_capture_sequence"])
+        self.assertEqual("observed-connection-epoch", mismatch["observed_connection_epoch"])
+        self.assertEqual(rejected.exception.request_id, mismatch["response_request_id"])
+        self.assertEqual("OK", mismatch["response_status"])
+        self.assertIsInstance(mismatch["control_started_monotonic_ns"], int)
+        self.assertIsInstance(mismatch["control_completed_monotonic_ns"], int)
+        self.assertGreaterEqual(
+            mismatch["control_completed_monotonic_ns"], mismatch["control_started_monotonic_ns"]
+        )
+
     def test_ordered_control_reply_requires_one_bounded_prefixed_result(self):
         nonce = "b" * 32
         body = {"schema": CONTROL_SCHEMA, "protocol_version": PROTOCOL_VERSION, "status": "OK", "query_nonce": nonce}
@@ -473,7 +643,18 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
 
     def test_reliable_mode_reads_binary_file(self):
         client = self._client()
+        import tempfile
+        from pathlib import Path
+        from tb_runner.target_attempt_ledger import TargetAttemptLedger
+        from talkback_lib.adb_device import AdbBinaryCommandFailure
+
+        temp_dir = tempfile.TemporaryDirectory()
+        client._target_attempt_ledger = TargetAttemptLedger(Path(temp_dir.name) / "run-output")
+        sidecar_path = client._target_attempt_ledger.path.with_suffix(".hierarchy_snapshot_transport.jsonl")
         request_id, nonce = "" , ""
+        status_observations = 0
+        mutate_final_status = False
+        failure_status_diagnostics: dict[str, str] | None = None
         identity = _identity()
         identity["source_state"] = "DIRTY"
         artifact, template_ready, expected, payload_bytes = _artifact_control("1" * 32, "2" * 32, identity)
@@ -484,7 +665,7 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
         start_pairs: dict[str, str] = {}
 
         def control_response(action: str, extras: list[str]) -> dict:
-            nonlocal request_id, nonce, artifact, expected, payload_bytes
+            nonlocal request_id, nonce, artifact, expected, payload_bytes, status_observations, failure_status_diagnostics
             pairs = {extras[i + 1]: extras[i + 2] for i in range(0, len(extras) - 2, 3) if extras[i] == "--es"}
             query_nonce = pairs["queryNonce"]
             if action.endswith("CAPABILITIES"):
@@ -541,12 +722,23 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
                 "completed_elapsed_realtime_ns": 201,
             }
             if action.endswith("START"):
+                status_observations = 0
                 shared.update(status="ACCEPTED", completed=False, payload_complete=False)
             elif action.endswith("STATUS"):
+                status_observations += 1
                 shared.update(
                     status="READY",
                     payload_uri=f"content://{PROVIDER_AUTHORITY}/v1/{process_epoch}/{request_id}/1/{token}",
                 )
+                if failure_status_diagnostics is not None:
+                    shared.update(
+                        status="FAILED", completed=True, payload_complete=False,
+                        error_code="COLLECTION_FAILED", **failure_status_diagnostics,
+                        payload_uri=None, payload_bytes=None, payload_sha256=None,
+                        artifact_bytes=None, artifact_sha256=None,
+                    )
+                if mutate_final_status and status_observations >= 2:
+                    shared["artifact_bytes"] += 1
             elif action.endswith("ACK"):
                 shared.update(status="ACKED")
             else:
@@ -558,13 +750,15 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
             if action.endswith("HIERARCHY_TRANSFER_START"):
                 pairs = {extras[i + 1]: extras[i + 2] for i in range(0, len(extras or []) - 2, 3) if extras[i] == "--es"}
                 start_pairs.update(pairs)
-            encoded = encode_control(control_response(action, list(extras or [])))
-            return f'Broadcasting: Intent {{}}\nBroadcast completed: result=1, data="{encoded}"'
+            response = control_response(action, list(extras or []))
+            encoded = encode_control(response)
+            result_code = 2 if response.get("status") == "FAILED" else 1
+            return f'Broadcasting: Intent {{}}\nBroadcast completed: result={result_code}, data="{encoded}"'
 
         client._broadcast = broadcast
         client._run = lambda args, **_kwargs: "0"
         client._adb_device._run_adb_binary_command = lambda args, **kwargs: type(
-            "BinaryResult", (), {"stdout": artifact, "stderr": b"", "stderr_truncated": False, "returncode": 0}
+            "BinaryResult", (), {"stdout": artifact + b"\x00", "stderr": b"", "stderr_truncated": False, "returncode": 0}
         )()
         result = client.dump_hierarchy(
             transport_mode="RELIABLE_FILE_PFD",
@@ -600,11 +794,22 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
         correlation_events = [record for record in client.last_hierarchy_transport_diagnostics if record["stage"] == "HOST_CONTROL_CORRELATION_VALIDATED"]
         self.assertTrue(correlation_events)
         self.assertTrue(all(event["query_nonce"] == event["response_query_nonce"] for event in correlation_events))
+        self.assertIn("HOST_PROVIDER_READ_EXTRA_BYTE_EXCLUDED", stages)
         self.assertIn("HOST_ARTIFACT_SIZE_DIGEST_VALIDATED", stages)
         self.assertIn("HOST_ARTIFACT_SCHEMA_CURRENTNESS_VALIDATED", stages)
         self.assertIn("HOST_HIERARCHY_SNAPSHOT_COMPLETE", stages)
         self.assertTrue(all(record["request_id"] == result["reqId"] for record in client.last_hierarchy_transport_diagnostics))
         self.assertTrue(all(record["run_id"] == "trace-run-1" for record in client.last_hierarchy_transport_diagnostics))
+
+        persisted = [json.loads(line) for line in sidecar_path.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual("SUCCESS", persisted[0]["outcome"])
+        self.assertEqual(result["reqId"], persisted[0]["request_id"])
+        self.assertEqual("trace-scenario-2", persisted[0]["scenario_id"])
+        self.assertGreater(persisted[0]["deadline_ms"], 0)
+        self.assertIn("HOST_HIERARCHY_SNAPSHOT_COMPLETE", [item["stage"] for item in persisted[0]["stages"]])
+        persisted_text = json.dumps(persisted[0], sort_keys=True)
+        for forbidden in ("content://", token, "payload_uri", "client_nonce", "query_nonce", "artifact_sha256", "payload_sha256"):
+            self.assertNotIn(forbidden, persisted_text)
 
         from unittest import mock
         with mock.patch("talkback_lib.time.monotonic_ns", side_effect=OSError("diagnostic clock unavailable")):
@@ -623,6 +828,169 @@ class HierarchyClientIntegrationTests(unittest.TestCase):
             )
         self.assertTrue(result_when_trace_fails["success"])
         self.assertEqual([], client.last_hierarchy_transport_diagnostics)
+
+        failure_status_diagnostics = {
+            "error_stage": "ROOT_ACQUISITION",
+            "error_type": "IllegalStateException",
+        }
+        with self.assertRaises(HierarchyTransportError) as failed_status:
+            client.dump_hierarchy(
+                transport_mode="RELIABLE_FILE_PFD",
+                expected_helper_build_identity={
+                    "status": "COMPATIBLE_SAME_HELPER_INPUT",
+                    "execution_allowed": True,
+                    "helper_build_id": identity["build_id"],
+                    "helper_git_commit": identity["git_commit"],
+                    "helper_service_instance_id": identity["service_instance_id"],
+                    "helper_input_digest": identity["input_digest"],
+                    "installed_metadata": {"source_state": identity["source_state"]},
+                },
+                hierarchy_diagnostic_context={"run_id": "trace-run-1", "scenario_id": "trace-scenario-2", "step": 4},
+            )
+        self.assertEqual("COLLECTION_FAILED", failed_status.exception.reason)
+        persisted = [json.loads(line) for line in sidecar_path.read_text(encoding="utf-8").splitlines()]
+        failed_control = persisted[-1]
+        self.assertEqual("FAILED", failed_control["outcome"])
+        host_error = next(item for item in failed_control["stages"] if item["stage"] == "HOST_CONTROL_ERROR_RESPONSE")
+        self.assertEqual(failed_control["request_id"], host_error["request_id"])
+        self.assertEqual("COLLECTION_FAILED", host_error["error_code"])
+        self.assertEqual("ROOT_ACQUISITION", host_error["error_stage"])
+        self.assertEqual("IllegalStateException", host_error["error_type"])
+        self.assertFalse(any(item["stage"] == "HOST_HIERARCHY_SNAPSHOT_COMPLETE" for item in failed_control["stages"]))
+        failure_status_diagnostics = None
+
+        def fail_provider_read(*_args, **_kwargs):
+            raise AdbBinaryCommandFailure(
+                "adb_command_timeout", ["shell", "content", "read"], 8.5,
+                stdout=b"partial", diagnostics={
+                    "adb_elapsed_ms": 8500.0, "adb_timeout_ms": 8500.0, "adb_timed_out": True,
+                    "adb_exit_code": -9, "adb_process_reaped": True,
+                    "adb_stdout_bytes_received": 7, "adb_stderr_bytes_received": 0,
+                    "adb_stdout_reader_joined": True, "adb_stderr_reader_joined": True,
+                    "adb_reader_threads_alive": 0, "subprocess_started_total": 1,
+                    "subprocess_completed_total": 1, "subprocess_active_count": 0,
+                },
+            )
+
+        client._adb_device._run_adb_binary_command = fail_provider_read
+        expected_helper_build_identity = {
+            "status": "COMPATIBLE_SAME_HELPER_INPUT",
+            "execution_allowed": True,
+            "helper_build_id": identity["build_id"],
+            "helper_git_commit": identity["git_commit"],
+            "helper_service_instance_id": identity["service_instance_id"],
+            "helper_input_digest": identity["input_digest"],
+            "installed_metadata": {"source_state": identity["source_state"]},
+        }
+        with self.assertRaises(HierarchyTransportError):
+            client.dump_hierarchy(
+                transport_mode="RELIABLE_FILE_PFD",
+                expected_helper_build_identity=expected_helper_build_identity,
+                hierarchy_diagnostic_context={"run_id": "trace-run-1", "scenario_id": "trace-scenario-2", "step": 4},
+            )
+        persisted = [json.loads(line) for line in sidecar_path.read_text(encoding="utf-8").splitlines()]
+        failed = persisted[-1]
+        self.assertEqual("FAILED", failed["outcome"])
+        self.assertEqual("HOST_PROVIDER_READ", failed["failure_stage"])
+        self.assertEqual("adb_command_timeout", failed["failure_code"])
+        self.assertEqual("CANCELLED", failed["cleanup_status"])
+        provider_error = next(item for item in failed["stages"] if item["stage"] == "ERROR_STAGE")
+        self.assertTrue(provider_error["adb_timed_out"])
+        self.assertEqual(7, provider_error["adb_stdout_bytes_received"])
+        self.assertEqual(0, provider_error["adb_reader_threads_alive"])
+        failed_text = json.dumps(failed, sort_keys=True)
+        for forbidden in ("content://", token, "partial", "payload_uri", "client_nonce", "query_nonce"):
+            self.assertNotIn(forbidden, failed_text)
+
+        persisted_count_before_failure = len(persisted)
+        with mock.patch("pathlib.Path.open", side_effect=OSError("diagnostic path unavailable")):
+            with self.assertRaises(HierarchyTransportError):
+                client.dump_hierarchy(
+                    transport_mode="RELIABLE_FILE_PFD",
+                    expected_helper_build_identity=expected_helper_build_identity,
+                    hierarchy_diagnostic_context={"run_id": "trace-run-1", "scenario_id": "trace-scenario-2", "step": 5},
+                )
+        self.assertEqual(persisted_count_before_failure, len(sidecar_path.read_text(encoding="utf-8").splitlines()))
+
+        client._adb_device._run_adb_binary_command = lambda args, **kwargs: type(
+            "BinaryResult", (), {"stdout": artifact, "stderr": b"", "stderr_truncated": False, "returncode": 0}
+        )()
+        from unittest import mock
+        with mock.patch("pathlib.Path.open", side_effect=OSError("diagnostic path unavailable")):
+            result_when_persistence_fails = client.dump_hierarchy(
+                transport_mode="RELIABLE_FILE_PFD",
+                expected_helper_build_identity=expected_helper_build_identity,
+                hierarchy_diagnostic_context={"run_id": "trace-run-1"},
+            )
+        self.assertTrue(result_when_persistence_fails["success"])
+
+        mutate_final_status = True
+        with mock.patch("pathlib.Path.open", side_effect=OSError("diagnostic path unavailable")):
+            with self.assertRaises(HierarchyTransportError) as stale_result:
+                client.dump_hierarchy(
+                    transport_mode="RELIABLE_FILE_PFD",
+                    expected_helper_build_identity=expected_helper_build_identity,
+                    hierarchy_diagnostic_context={"run_id": "trace-run-1", "scenario_id": "trace-scenario-2", "step": 6},
+                )
+        self.assertEqual("STATUS_CHANGED_DURING_READ", stale_result.exception.reason)
+        temp_dir.cleanup()
+
+    def test_queue_diagnostics_persist_without_changing_client_authority(self):
+        import json
+        import tempfile
+        import time
+        from pathlib import Path
+        from tb_runner.target_attempt_ledger import TargetAttemptLedger
+
+        client = self._client()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ledger = TargetAttemptLedger(Path(temp_dir) / "run-output")
+            client._target_attempt_ledger = ledger
+            before = (
+                client._hierarchy_capture_sequence,
+                client.last_hierarchy_metadata.copy(),
+                client.last_hierarchy_cleanup_diagnostic.copy(),
+                client._last_traversal_candidate_snapshot,
+            )
+            client._persist_hierarchy_transport_diagnostic(
+                request_id="queue-observation-request",
+                diagnostic_context={"run_id": "queue-run", "scenario_id": "queue-path", "step": 7},
+                stage_records=[{
+                    "stage": "WORK_QUEUE_STATE",
+                    "request_id": "queue-observation-request",
+                    "run_id": "queue-run",
+                    "scenario_id": "queue-path",
+                    "step": "7",
+                    "event_worker_queue_depth": 1,
+                    "event_worker_drain_scheduled": True,
+                    "helper_pending_queue_depth": 0,
+                    "helper_active_operation_count": 1,
+                    "unapproved_payload_field": "must_be_dropped",
+                }],
+                started_monotonic=time.monotonic(),
+                deadline_ms=5000,
+                outcome="SUCCESS",
+            )
+
+            sidecar = ledger.path.with_suffix(".hierarchy_snapshot_transport.jsonl")
+            persisted = json.loads(sidecar.read_text(encoding="utf-8").splitlines()[0])
+            stage = persisted["stages"][0]
+            after = (
+                client._hierarchy_capture_sequence,
+                client.last_hierarchy_metadata.copy(),
+                client.last_hierarchy_cleanup_diagnostic.copy(),
+                client._last_traversal_candidate_snapshot,
+            )
+
+        self.assertEqual(before, after)
+        self.assertEqual("queue-observation-request", persisted["request_id"])
+        self.assertEqual(1, stage["event_worker_queue_depth"])
+        self.assertTrue(stage["event_worker_drain_scheduled"])
+        self.assertEqual(0, stage["helper_pending_queue_depth"])
+        self.assertEqual(1, stage["helper_active_operation_count"])
+        self.assertNotIn("unapproved_payload_field", stage)
+        self.assertNotIn("visit_credit", persisted)
+        self.assertNotIn("dispatch_authorized", persisted)
 
     def test_reliable_mode_rejects_zero_generation_on_accepted_start(self):
         client = self._client()

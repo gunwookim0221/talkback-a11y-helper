@@ -48,20 +48,25 @@ def run_entry(monkeypatch, scenario, pages):
 ])
 def test_partly_bottom_obstructed_card_uses_safe_visible_region(monkeypatch, scenario, label, bounds, expected_y):
     result, taps, scrolls = run_entry(monkeypatch, scenario, [[node(label, bounds=bounds, clickable=True), *chrome()]])
+    if scenario == "life_air_care_plugin":
+        assert result == (False, "entry_safety:NAVIGATION_ACTION_CONTRACT_NOT_READY")
+        assert taps == []
+        assert scrolls == []
+        return
     assert result == (True, "xml_entry_success")
     assert taps == [(540, expected_y)]
     assert scrolls == []
     assert taps[0][1] < 2304
 
 
-def test_air_care_thin_top_strip_is_repositioned_without_tapping_room_menu(monkeypatch):
+def test_air_care_exact_navigation_route_fails_closed_without_helper_readiness(monkeypatch):
     result, taps, scrolls = run_entry(monkeypatch, "life_air_care_plugin", [
         [node("에어 케어", bounds="30,0,1050,287", clickable=True), *chrome()],
         [node("에어 케어", bounds="30,1104,1050,1608", clickable=True), *chrome()],
     ])
-    assert result == (True, "xml_entry_success")
-    assert scrolls == ["up"]
-    assert taps == [(540, 1356)]
+    assert result == (False, "entry_safety:NAVIGATION_ACTION_CONTRACT_NOT_READY")
+    assert scrolls == []
+    assert taps == []
 
 
 def test_energy_top_card_tap_avoids_fixed_header(monkeypatch):

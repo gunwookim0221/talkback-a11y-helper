@@ -275,6 +275,31 @@ def test_threadtime_helper_event_appends_to_closed_transaction(tmp_path: Path, m
     assert runtime.transaction(transaction["transaction_id"])["state"] == "closed"
 
 
+def test_navigation_action_helper_event_joins_registered_nested_transaction(tmp_path: Path, monkeypatch) -> None:
+    client = A11yAdbClient(start_monitor=False)
+    runtime = EvidenceRuntime(output_path=tmp_path / "talkback_compare.xlsx", run_id="run_navigation")
+    runtime.start_scenario("life_air_care_plugin", "life")
+    client.set_evidence_runtime(runtime)
+    parent = runtime.begin_transaction("SCENARIO_STEP", phase="pre_navigation")
+    navigation = runtime.begin_transaction(
+        "NAVIGATION_ACTION", phase="pre_navigation",
+        parent_transaction_id=parent["transaction_id"],
+    )
+    runtime.close_transaction(navigation, status="rejected", phase="pre_navigation")
+    line = _helper_log_line(
+        request_id="nav-request", transaction_id=navigation["transaction_id"],
+        event_id="nav-helper-event",
+    )
+    monkeypatch.setattr(client._logcat_reader, "dump_filtered", lambda dev=None: line)
+
+    stats = client._evidence_collect_helper_logcat_events(None, req_id="nav-request")
+
+    assert stats["transaction"] == stats["merged"] == 1
+    assert client._evidence_pending_helper_events == []
+    assert runtime.transaction(navigation["transaction_id"])["parent_transaction_id"] == parent["transaction_id"]
+    assert runtime.events_for_transaction(navigation["transaction_id"])[-1].event_type == "ACTION_API_RESULT"
+
+
 def test_missing_transaction_is_queued_then_retried(tmp_path: Path, monkeypatch) -> None:
     client = A11yAdbClient(start_monitor=False)
     runtime = EvidenceRuntime(output_path=tmp_path / "talkback_compare.xlsx")

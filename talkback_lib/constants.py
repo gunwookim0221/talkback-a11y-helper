@@ -26,6 +26,7 @@ ACTION_RESOLVE_EXACT_NODE = "com.iotpart.sqe.talkbackhelper.RESOLVE_EXACT_NODE"
 ACTION_COMMAND = "com.iotpart.sqe.talkbackhelper.ACTION_COMMAND"
 ACTION_EVIDENCE_EVENTS = "com.iotpart.sqe.talkbackhelper.EVIDENCE_EVENTS"
 ACTION_ENTRY_CLICK_CAPTURE = "com.iotpart.sqe.talkbackhelper.ENTRY_CLICK_CAPTURE"
+ACTION_NAVIGATION_ACTION = "com.iotpart.sqe.talkbackhelper.NAVIGATION_ACTION"
 
 LOG_TAG = "A11Y_HELPER"
 LOGCAT_FILTER_SPECS = ["A11Y_HELPER:V", "A11Y_ANNOUNCEMENT:V", "*:S"]

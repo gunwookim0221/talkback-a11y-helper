@@ -63,6 +63,33 @@ def sha256_hex(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def validate_provider_artifact_read(
+    artifact: bytes,
+    *,
+    expected_artifact_bytes: int,
+    expected_artifact_sha256: str,
+    request_id: str = "",
+) -> tuple[bytes, bool]:
+    """Validate exact provider bytes, allowing one suffix only after a matching prefix hash."""
+    if (
+        not isinstance(artifact, bytes)
+        or isinstance(expected_artifact_bytes, bool)
+        or not isinstance(expected_artifact_bytes, int)
+        or not (1 <= expected_artifact_bytes <= MAX_ARTIFACT_BYTES)
+        or not isinstance(expected_artifact_sha256, str)
+        or not _SHA256.fullmatch(expected_artifact_sha256)
+    ):
+        raise HierarchyTransportError("ARTIFACT_INTEGRITY_MISMATCH", request_id)
+    if len(artifact) == expected_artifact_bytes:
+        if sha256_hex(artifact) == expected_artifact_sha256:
+            return artifact, False
+    elif len(artifact) == expected_artifact_bytes + 1:
+        canonical_artifact = artifact[:expected_artifact_bytes]
+        if sha256_hex(canonical_artifact) == expected_artifact_sha256:
+            return canonical_artifact, True
+    raise HierarchyTransportError("ARTIFACT_INTEGRITY_MISMATCH", request_id)
+
+
 def encode_control(value: dict[str, Any]) -> str:
     raw = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8", errors="strict")
     if len(raw) > MAX_CONTROL_JSON_BYTES:

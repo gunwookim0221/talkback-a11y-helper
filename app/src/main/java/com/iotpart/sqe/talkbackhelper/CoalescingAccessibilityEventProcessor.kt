@@ -18,6 +18,12 @@ internal data class AccessibilityEventWorkTicket(
     val context: AccessibilityEventWorkContext
 )
 
+internal data class AccessibilityEventQueueDiagnostics(
+    val pendingWorkCount: Int,
+    val drainScheduled: Boolean,
+    val closed: Boolean,
+)
+
 /**
  * Runs accessibility-node inspection away from the service callback looper.
  * Pending work is latest-only; a newer event or lifecycle boundary makes every
@@ -55,6 +61,13 @@ internal class CoalescingAccessibilityEventProcessor<I : Any, O : Any>(
         scheduleDrain()
         return !closed.get()
     }
+
+    /** Read-only view of the latest-only pending slot and its single drain task. */
+    fun diagnosticsSnapshot(): AccessibilityEventQueueDiagnostics = AccessibilityEventQueueDiagnostics(
+        pendingWorkCount = if (pending.get() == null) 0 else 1,
+        drainScheduled = drainScheduled.get(),
+        closed = closed.get(),
+    )
 
     /** Invalidates pending/in-flight work when any later accessibility event arrives. */
     fun invalidatePending() {

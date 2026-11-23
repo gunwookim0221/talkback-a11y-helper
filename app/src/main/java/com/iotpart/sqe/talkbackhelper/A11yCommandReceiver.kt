@@ -3,6 +3,7 @@ package com.iotpart.sqe.talkbackhelper
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 
@@ -28,10 +29,126 @@ class A11yCommandReceiver : BroadcastReceiver() {
         private const val ACTION_SET_TEXT = "com.iotpart.sqe.talkbackhelper.SET_TEXT"
         private const val ACTION_SET_SYSTEM_LANGUAGE = "com.iotpart.sqe.talkbackhelper.SET_SYSTEM_LANGUAGE"
         internal const val HELPER_SERVICE_UNAVAILABLE_STATUS = "HELPER_SERVICE_UNAVAILABLE"
+
+        private fun boundedEntryClickCaptureDiagnostics(raw: org.json.JSONObject): org.json.JSONObject {
+            val result = org.json.JSONObject()
+            fun copyString(key: String, max: Int = 128) {
+                raw.optString(key).takeIf { raw.has(key) }?.let { result.put(key, it.take(max)) }
+            }
+            fun copyLong(key: String) {
+                if (raw.has(key)) result.put(key, raw.optLong(key, -1L))
+            }
+            copyString("stage", 64)
+            copyString("code", 96)
+            copyString("request_id")
+            copyString("transaction_id")
+            if (raw.has("expected_path")) {
+                val path = raw.optJSONArray("expected_path")
+                if (path != null && path.length() <= 80) {
+                    val safePath = org.json.JSONArray()
+                    var validPath = true
+                    for (index in 0 until path.length()) {
+                        val value = path.opt(index) as? Number
+                        val part = value?.toInt()
+                        if (part == null || value.toDouble() != part.toDouble() || part !in 0..4096) {
+                            validPath = false
+                            break
+                        }
+                        safePath.put(part)
+                    }
+                    if (validPath) result.put("expected_path", safePath)
+                }
+            }
+            listOf("expected_window_id", "source_generation", "source_capture_sequence",
+                "current_generation", "current_capture_sequence").forEach(::copyLong)
+            listOf("expected_package", "expected_descriptor_digest", "expected_source_node_id_status",
+                "source_capture_request_id", "source_process_epoch", "source_service_instance_id",
+                "source_connection_epoch", "source_boot_epoch", "source_root_digest",
+                "source_candidate_digest", "source_capture_key", "current_service_instance_id",
+                "current_process_epoch", "current_connection_epoch", "current_boot_epoch").forEach { key ->
+                copyString(key, if (key.endsWith("digest") || key.endsWith("key")) 64 else 128)
+            }
+            raw.optJSONObject("actual_live_node")?.let { actual ->
+                val safe = org.json.JSONObject()
+                mapOf("package_name" to 128, "class_name" to 192, "resource_id" to 256).forEach { (key, max) ->
+                    if (actual.has(key)) safe.put(key, actual.optString(key).take(max))
+                }
+                if (actual.has("window_id")) safe.put("window_id", actual.optInt("window_id", -1))
+                listOf("visible", "enabled", "clickable", "action_click").forEach { key ->
+                    if (actual.has(key)) safe.put(key, actual.optBoolean(key, false))
+                }
+                result.put("actual_live_node", safe)
+            }
+            raw.optJSONObject("currentness")?.let { checks ->
+                val safe = org.json.JSONObject()
+                listOf("source_capture_current", "request_id_matches", "process_epoch_matches",
+                    "service_instance_matches", "generation_matches", "capture_sequence_matches",
+                    "capture_key_matches", "connection_epoch_matches", "boot_epoch_matches",
+                    "root_digest_matches", "candidate_digest_matches", "window_package_matches",
+                    "capture_fresh").forEach { key ->
+                    if (checks.has(key)) safe.put(key, checks.optBoolean(key, false))
+                }
+                result.put("currentness", safe)
+            }
+            return result
+        }
+
+        internal fun buildEntryClickCaptureResponse(
+            responseReqId: String,
+            captureReqId: String,
+            transactionId: String,
+            operation: String,
+            compute: () -> org.json.JSONObject,
+        ): org.json.JSONObject {
+            val raw = try {
+                compute()
+            } catch (error: Exception) {
+                org.json.JSONObject().put("ok", false)
+                    .put("reason", "ENTRY_CLICK_CAPTURE_OPERATION_FAILED")
+                    .put("failureType", error.javaClass.simpleName.take(80))
+            }
+            val response = if (raw.optBoolean("ok", false)) {
+                raw
+            } else {
+                // Rejections carry correlation only. Never leak lease IDs,
+                // event payloads, or other authority from a failed operation.
+                org.json.JSONObject().put("ok", false)
+                    .put("reason", raw.optString("reason").ifBlank { "ENTRY_CLICK_CAPTURE_REJECTED" })
+                    .apply {
+                        raw.optString("failureType").takeIf { it.isNotBlank() }?.let { put("failureType", it.take(80)) }
+                        raw.optJSONObject("diagnostics")?.let {
+                            put("diagnostics", boundedEntryClickCaptureDiagnostics(it))
+                        }
+                    }
+            }
+            return response.put("operation", operation.take(80))
+                .put("requestedTransactionId", transactionId.take(128))
+                .put("captureReqId", captureReqId.take(128))
+                .put("reqId", responseReqId.take(128))
+        }
+        internal fun canonicalInvocationUriMatches(data: Uri?, request: org.json.JSONObject?): Boolean {
+            val invocationId = request?.optString("invocation_id")?.trim().orEmpty()
+            return invocationId.isNotEmpty() && data != null && data.scheme == "invocation_id" &&
+                data.schemeSpecificPart == invocationId
+        }
+        internal fun decodeOwnerLeaseRequest(encoded: String?): org.json.JSONObject? {
+            val value = encoded?.takeIf { it.isNotBlank() } ?: return null
+            if (!Regex("^[A-Za-z0-9_-]+={0,2}$").matches(value)) return null
+            val bytes = runCatching {
+                android.util.Base64.decode(value, android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP)
+            }.getOrNull() ?: return null
+            if (bytes.isEmpty()) return null
+            val canonical = runCatching {
+                android.util.Base64.encodeToString(bytes, android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP)
+            }.getOrNull() ?: return null
+            if (canonical != value) return null
+            return runCatching { org.json.JSONObject(String(bytes, Charsets.UTF_8)) }.getOrNull()
+        }
         private const val ACTION_PING = "com.iotpart.sqe.talkbackhelper.PING"
         private const val ACTION_GET_HIERARCHY_PUBLICATION_REPORT = "com.iotpart.sqe.talkbackhelper.GET_HIERARCHY_PUBLICATION_REPORT"
         private const val ACTION_RESOLVE_EXACT_NODE = "com.iotpart.sqe.talkbackhelper.RESOLVE_EXACT_NODE"
         private const val ACTION_EXACT_ACTION = "com.iotpart.sqe.talkbackhelper.EXACT_ACTION"
+        private const val ACTION_NAVIGATION_ACTION = "com.iotpart.sqe.talkbackhelper.NAVIGATION_ACTION"
         private const val ACTION_EXACT_ACTION_RECEIPT = "com.iotpart.sqe.talkbackhelper.EXACT_ACTION_RECEIPT"
         private const val ACTION_EXACT_ACTION_STOP = "com.iotpart.sqe.talkbackhelper.EXACT_ACTION_STOP"
         private const val ACTION_COMMAND = "com.iotpart.sqe.talkbackhelper.ACTION_COMMAND"
@@ -77,7 +194,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
             return
         }
         val reqId = parseReqId(intent)
-        if (action !in setOf(ACTION_RESOLVE_EXACT_NODE,ACTION_EXACT_ACTION,ACTION_EXACT_ACTION_RECEIPT,ACTION_EXACT_ACTION_STOP)) {
+        if (action !in setOf(ACTION_RESOLVE_EXACT_NODE,ACTION_EXACT_ACTION,ACTION_EXACT_ACTION_RECEIPT,ACTION_EXACT_ACTION_STOP,ACTION_NAVIGATION_ACTION)) {
             A11yEvidence.capture(intent, reqId)
             A11yEvidence.emit(
                 "ACTION_EXECUTION_STARTED",
@@ -126,6 +243,7 @@ class A11yCommandReceiver : BroadcastReceiver() {
             ACTION_PING -> handlePing(intent)
             ACTION_RESOLVE_EXACT_NODE -> handleResolveExactNode(intent)
             ACTION_EXACT_ACTION -> handleExactAction(intent)
+            ACTION_NAVIGATION_ACTION -> handleNavigationAction(intent)
             ACTION_EXACT_ACTION_RECEIPT -> handleExactActionReceipt(intent)
             ACTION_EXACT_ACTION_STOP -> ExactActionRuntime.stop("HOST_HARD_STOP")
             ACTION_COMMAND -> handleExternalCommand(context, intent)
@@ -217,22 +335,41 @@ class A11yCommandReceiver : BroadcastReceiver() {
             ?: responseReqId
         val operation = intent.getStringExtra("operation")?.trim()?.lowercase().orEmpty()
         val transactionId = intent.getStringExtra("transactionId")?.trim().orEmpty()
+        val afterEventSequence = intent.getLongExtra("afterEventSequence", -1L).takeIf { it >= 0L }
         val leaseMs = intent.getLongExtra("leaseMs", 2500L).coerceIn(500L, 5000L)
-        val result = when (operation) {
-            "begin" -> if (A11yHelperService.instance == null) {
-                org.json.JSONObject().put("ok", false).put("reason", "HELPER_SERVICE_UNAVAILABLE")
-            } else {
-                A11yEvidence.armEntryClickCapture(captureReqId, transactionId, leaseMs)
+        Log.i(TAG, "[ENTRY_CLICK_CAPTURE][request] reqId=${responseReqId.take(128)} captureReqId=${captureReqId.take(128)} " +
+            "transactionId=${transactionId.take(128)} operation=${operation.take(80)} stage=received")
+        val result = buildEntryClickCaptureResponse(responseReqId, captureReqId, transactionId, operation) {
+            when (operation) {
+            "begin" -> {
+                val service = A11yHelperService.instance
+                val request = decodeOwnerLeaseRequest(intent.getStringExtra("ownerLeaseRequestBase64"))
+                val canonicalInvocation = intent.getBooleanExtra("canonicalInvocation", false)
+                val invocationUriBound = canonicalInvocation && canonicalInvocationUriMatches(intent.data, request)
+                when {
+                    service == null -> org.json.JSONObject().put("ok", false).put("reason", "HELPER_SERVICE_UNAVAILABLE")
+                    request == null -> org.json.JSONObject().put("ok", false).put("reason", "OBSERVATION_LEASE_REQUEST_MISSING")
+                    canonicalInvocation && !invocationUriBound ->
+                        org.json.JSONObject().put("ok", false).put("reason", "OBSERVATION_INVOCATION_URI_MISMATCH")
+                    else -> service.armEntryClickObservation(captureReqId, transactionId, leaseMs, request,
+                        canonicalInvocationUriBound = invocationUriBound).apply {
+                        if (invocationUriBound && optBoolean("ok")) put("invocationUriBound", true)
+                    }
+                }
             }
-            "mark_dispatch" -> A11yEvidence.markEntryClickDispatch(
-                captureReqId,
-                intent.getLongExtra("dispatchUptimeMs", -1L),
-            )
-            "snapshot" -> A11yEvidence.entryClickSnapshot(captureReqId).put("ok", true).put("reason", "SNAPSHOT")
-            "end" -> A11yEvidence.disarmEntryClickCapture(captureReqId)
+            "mark_dispatch" -> A11yHelperService.instance?.markEntryClickDispatch(
+                captureReqId, transactionId, intent.getLongExtra("dispatchUptimeMs", -1L),
+            ) ?: org.json.JSONObject().put("ok", false).put("reason", "HELPER_SERVICE_UNAVAILABLE")
+            "validate" -> A11yHelperService.instance?.validateEntryClickCapture(captureReqId, transactionId)
+                ?: org.json.JSONObject().put("ok", false).put("reason", "HELPER_SERVICE_UNAVAILABLE")
+            "snapshot" -> A11yEvidence.entryClickSnapshot(captureReqId, afterEventSequence)
+                .put("ok", true).put("reason", "SNAPSHOT")
+            "end" -> A11yEvidence.disarmEntryClickCapture(captureReqId, afterEventSequence)
             else -> org.json.JSONObject().put("ok", false).put("reason", "ENTRY_CLICK_CAPTURE_OPERATION_INVALID")
-        }.put("operation", operation).put("requestedTransactionId", transactionId)
-            .put("captureReqId", captureReqId).put("reqId", responseReqId)
+            }
+        }
+        Log.i(TAG, "[ENTRY_CLICK_CAPTURE][result] reqId=${responseReqId.take(128)} operation=${operation.take(80)} " +
+            "stage=encoded ok=${result.optBoolean("ok")} reason=${result.optString("reason").take(96)}")
         A11yResultTransport.encode("ENTRY_CLICK_CAPTURE_RESULT", responseReqId, result.toString())
             .forEach { Log.i(TAG, it) }
     }
@@ -929,7 +1066,9 @@ class A11yCommandReceiver : BroadcastReceiver() {
             .put("helper_build_identity", identity)
             .put("helper_service_instance_id", A11yHelperService.serviceInstanceId)
             .put("exact_action_state", ExactActionRuntime.status())
-            .put("capabilities", org.json.JSONArray().put("read_only_hierarchy_identity").put("resolve_exact_node_read_only"))
+            .put("navigation_action_state", NavigationActionRuntime.capabilityStatus(A11yHelperService.instance))
+            .put("capabilities", org.json.JSONArray().put("read_only_hierarchy_identity")
+                .put("resolve_exact_node_read_only").put("navigation_action"))
     }
 
     private fun handleExactAction(intent:Intent) {
@@ -945,6 +1084,24 @@ class A11yCommandReceiver : BroadcastReceiver() {
                 val payload=org.json.JSONObject().put("reqId",reqId).put("ack",ack).toString()
                 A11yResultTransport.encode("EXACT_ACTION_RESULT",reqId,payload).forEach { Log.i(TAG,it) }
                 ExactActionRuntime.markAckEmitted(ack)
+            } finally { pending?.finish() }
+        }
+    }
+
+    private fun handleNavigationAction(intent: Intent) {
+        val reqId = parseReqId(intent)
+        val service = A11yHelperService.instance
+        if (service == null) {
+            val payload = org.json.JSONObject().put("reqId", reqId).put("failure_code", "HELPER_REACQUIRE_FAILED")
+                .put("visit_authority", false).toString()
+            A11yResultTransport.encode("NAVIGATION_ACTION_RESULT", reqId, payload).forEach { Log.i(TAG, it) }
+            return
+        }
+        val pending = goAsync()
+        NavigationActionRuntime.dispatch(service, intent.getStringExtra("navigationActionRequest").orEmpty(), reqId) { receipt ->
+            try {
+                val payload = org.json.JSONObject().put("reqId", reqId).put("receipt", receipt).toString()
+                A11yResultTransport.encode("NAVIGATION_ACTION_RESULT", reqId, payload).forEach { Log.i(TAG, it) }
             } finally { pending?.finish() }
         }
     }

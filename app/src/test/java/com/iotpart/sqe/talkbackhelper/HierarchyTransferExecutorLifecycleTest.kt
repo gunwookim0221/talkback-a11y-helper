@@ -5,10 +5,12 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -21,6 +23,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.shadows.ShadowLooper
 import java.io.File
 import java.io.IOException
+import java.nio.charset.StandardCharsets
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -45,7 +48,7 @@ class HierarchyTransferExecutorLifecycleTest {
     private data class Fixture(
         val directory: File,
         val store: HierarchyPayloadStore,
-        val serviceId: String,
+        var serviceId: String,
     )
 
     private data class Worker(
@@ -101,10 +104,10 @@ class HierarchyTransferExecutorLifecycleTest {
         val rejection = submitHierarchyTransfer(executor, fixture.store, handle) {
             try {
                 if (!fixture.store.markCollecting(handle)) return@submitHierarchyTransfer
-                fixture.store.reserveCaptureSequence(handle)
+                val captureSequence = fixture.store.reserveCaptureSequence(handle)
                     ?: throw IllegalStateException("CAPTURE_SEQUENCE_UNAVAILABLE")
                 beforePublish()
-                result.set(fixture.store.publish(handle, byteArrayOf(1, 2, 3, 4)))
+                result.set(fixture.store.publish(handle, sealedPayload(fixture, handle, captureSequence)))
             } catch (error: Throwable) {
                 result.set(fixture.store.fail(
                     handle,
@@ -117,6 +120,95 @@ class HierarchyTransferExecutorLifecycleTest {
         }
         assertNull("unexpected submission rejection: ${rejection?.optString("error_code")}", rejection)
         return Worker(completed, result)
+    }
+
+    private fun sealedPayload(
+        fixture: Fixture,
+        handle: HierarchyPayloadStore.RequestHandle,
+        captureSequence: Long,
+    ): ByteArray {
+        val processEpoch = fixture.store.processEpoch
+        val serviceId = fixture.serviceId
+        val rootRef = "windows[0].root"
+        val node = JSONObject()
+            .put("text", "lifecycle fixture")
+            .put("packageName", "com.samsung.android.oneconnect")
+            .put("className", "android.widget.FrameLayout")
+            .put("windowId", 1)
+            .put("screenReaderFocusable", false)
+            .put("rangeInfoPresent", false)
+            .put("children", JSONArray())
+        val candidate = JSONObject()
+            .put("text", "lifecycle fixture")
+            .put("contentDescription", JSONObject.NULL)
+            .put("className", "android.widget.TextView")
+            .put("viewIdResourceName", JSONObject.NULL)
+            .put("boundsInScreen", JSONObject().put("l", 0).put("t", 0).put("r", 100).put("b", 40))
+            .put("clickable", false)
+            .put("focusable", false)
+            .put("isVisibleToUser", true)
+            .put("focused", false)
+            .put("accessibilityFocused", false)
+            .put("isTopAppBar", false)
+            .put("isBottomNavigationBar", false)
+            .put("hasClickableDescendant", false)
+            .put("hasFocusableDescendant", false)
+            .put("effectiveClickable", false)
+            .put("actionableDescendantResourceId", JSONObject.NULL)
+            .put("actionableDescendantClassName", JSONObject.NULL)
+            .put("actionableDescendantContentDescription", JSONObject.NULL)
+        val rootDigest = CaptureCanonicalJson.sha256(node)
+        val rootCaptureId = ReliableHierarchyCandidateContract.rootCaptureId(
+            handle.requestId,
+            processEpoch,
+            handle.generation,
+            serviceId,
+            captureSequence,
+            rootRef,
+            rootDigest,
+        )
+        val candidates = JSONObject()
+            .put("schema_version", ReliableHierarchyCandidateContract.SCHEMA_VERSION)
+            .put("candidate_contract_version", ReliableHierarchyCandidateContract.CONTRACT_VERSION)
+            .put("algorithmVersion", A11yNavigator.NAVIGATOR_ALGORITHM_VERSION)
+            .put("analyzerVersion", A11yTraversalAnalyzer.VERSION)
+            .put("profileId", ReliableHierarchyCandidateContract.PROFILE_ID)
+            .put("profileVersion", ReliableHierarchyCandidateContract.PROFILE_VERSION)
+            .put("completion", JSONObject().put("status", "COMPLETE").put("complete", true).put("candidate_count", 1))
+            .put("traversalRootRef", rootRef)
+            .put("traversalRootWindowId", 1)
+            .put("canScrollDown", false)
+            .put("scrollAxisContract", "axis-v1")
+            .put("source_root_digest", rootDigest)
+            .put("rootCaptureId", rootCaptureId)
+            .put("candidates", JSONArray().put(candidate))
+        val candidateDigest = CaptureCanonicalJson.sha256(candidates)
+        candidates.put("candidate_digest", candidateDigest)
+        val captureEnvelope = JSONObject()
+            .put("schema_version", HierarchyPayloadActions.CAPTURE_ENVELOPE_SCHEMA)
+            .put("canonicalization", CaptureCanonicalJson.VERSION)
+            .put("request_id", handle.requestId)
+            .put("process_epoch", processEpoch)
+            .put("generation", handle.generation)
+            .put("service_instance_id", serviceId)
+            .put("capture_sequence", captureSequence)
+            .put("root_ref", rootRef)
+            .put("root_digest", rootDigest)
+            .put("candidate_digest", candidateDigest)
+        return JSONObject()
+            .put("reqId", handle.requestId)
+            .put("success", true)
+            .put("schemaVersion", HierarchyPayloadActions.PAYLOAD_SCHEMA)
+            .put("platformApiLevel", 34)
+            .put("traversalRootRef", rootRef)
+            .put("traversalRootWindowId", 1)
+            .put("nodeCount", 1)
+            .put("nodes", JSONArray().put(node))
+            .put("windows", JSONArray().put(JSONObject().put("id", 1).put("root", node)))
+            .put("traversalCandidates", candidates)
+            .put("captureEnvelope", captureEnvelope)
+            .toString()
+            .toByteArray(StandardCharsets.UTF_8)
     }
 
     private fun cancel(
@@ -210,6 +302,43 @@ class HierarchyTransferExecutorLifecycleTest {
         } finally {
             release.countDown()
             oldWorker.completed.await(5, TimeUnit.SECONDS)
+        }
+    }
+
+    @Test
+    fun queueDiagnosticsAreReadOnlyAndReportActiveSynchronousTransfer() {
+        val fixture = fixture()
+        val executor = HierarchyTransferExecutorLifecycle()
+        val handle = begin(fixture)
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val worker = submit(fixture, executor, handle) {
+            started.countDown()
+            awaitUninterruptibly(release)
+        }
+
+        try {
+            assertTrue("transfer worker did not start", started.await(2, TimeUnit.SECONDS))
+            val active = executor.diagnosticsSnapshot()
+            assertEquals(1, active.activeOperationCount)
+            assertEquals(0, active.executorQueueDepth)
+            assertEquals(1, active.activeWorkerCount)
+            assertEquals("COLLECTING", fixture.store.status(
+                handle.requestId, handle.clientNonce, "6".repeat(32),
+            ).getString("status"))
+
+            release.countDown()
+            awaitWorker(worker)
+            assertEventually { executor.diagnosticsSnapshot().activeOperationCount == 0 }
+            val idle = executor.diagnosticsSnapshot()
+            assertEquals(0, idle.activeOperationCount)
+            assertEquals(0, idle.executorQueueDepth)
+            assertEquals(0, idle.activeWorkerCount)
+            assertEquals("READY", fixture.store.status(
+                handle.requestId, handle.clientNonce, "7".repeat(32),
+            ).getString("status"))
+        } finally {
+            release.countDown()
         }
     }
 
@@ -374,6 +503,7 @@ class HierarchyTransferExecutorLifecycleTest {
             executor.serviceDisconnected()
             assertTrue("destroy removed a still-open AtomicFile .new", activeNew.exists())
             fixture.store.serviceConnected(newServiceId)
+            fixture.serviceId = newServiceId
 
             val replacement = begin(fixture, requestId = requestId, serviceId = newServiceId)
             assertTrue("service reconnect reused a stale request generation", replacement.generation > oldHandle.generation)
@@ -527,6 +657,7 @@ class HierarchyTransferExecutorLifecycleTest {
             assertTrue("runtime must retain process store across services", store === storeField.get(runtime))
             val nextServiceId = A11yHelperService.serviceInstanceId
             assertTrue(nextServiceId != oldServiceId)
+            fixture.serviceId = nextServiceId
             val next = begin(fixture, requestId = old.requestId, serviceId = nextServiceId)
             assertTrue(next.generation > old.generation)
             val replacement = submit(fixture, executor, next)
@@ -544,7 +675,7 @@ class HierarchyTransferExecutorLifecycleTest {
     }
 
     @Test
-    fun staleAndLegacyCleanupCannotMutateReusedIdentityWithSamePayloadHash() {
+    fun staleAndLegacyCleanupCannotMutateReusedIdentityWithFreshSealedPayloadHash() {
         val fixture = fixture()
         val executor = HierarchyTransferExecutorLifecycle()
         val old = begin(fixture)
@@ -558,7 +689,7 @@ class HierarchyTransferExecutorLifecycleTest {
         val nextWorker = submit(fixture, executor, next)
         awaitWorker(nextWorker)
         val nextResult = nextWorker.result.get()!!
-        assertEquals(oldHash, nextResult.getString("payload_sha256"))
+        assertNotEquals(oldHash, nextResult.getString("payload_sha256"))
         val uri = Uri.parse(nextResult.getString("payload_uri"))
         assertEquals("REQUEST_IDENTITY_MISMATCH", fixture.store.cancel(old.requestId, old.clientNonce,
             "2".repeat(32), fixture.store.processEpoch, old.generation).getString("error_code"))
@@ -571,12 +702,12 @@ class HierarchyTransferExecutorLifecycleTest {
         assertNotNull(fixture.store.resolveReadyFile(uri))
         assertEquals("READY", fixture.store.status(next.requestId, next.clientNonce, "6".repeat(32)).getString("status"))
         assertEquals("ACKED", fixture.store.acknowledge(next.requestId, next.clientNonce, "7".repeat(32),
-            oldHash, fixture.store.processEpoch, next.generation).getString("status"))
+            nextResult.getString("payload_sha256"), fixture.store.processEpoch, next.generation).getString("status"))
         assertNull(fixture.store.resolveReadyFile(uri))
     }
 
     @Test
-    fun priorProcessEpochCannotMutateReplacementEvenWhenGenerationAndPayloadMatch() {
+    fun priorProcessEpochCannotMutateReplacementWhenGenerationMatches() {
         val oldFixture = fixture()
         val newFixture = fixture()
         val oldExecutor = HierarchyTransferExecutorLifecycle()
@@ -589,7 +720,7 @@ class HierarchyTransferExecutorLifecycleTest {
         awaitWorker(nextWorker)
         val hash = oldWorker.result.get()!!.getString("payload_sha256")
         assertEquals(old.generation, next.generation)
-        assertEquals(hash, nextWorker.result.get()!!.getString("payload_sha256"))
+        assertNotEquals(hash, nextWorker.result.get()!!.getString("payload_sha256"))
         val uri = Uri.parse(nextWorker.result.get()!!.getString("payload_uri"))
         assertEquals("REQUEST_IDENTITY_MISMATCH", newFixture.store.cancel(next.requestId, next.clientNonce,
             "8".repeat(32), oldFixture.store.processEpoch, old.generation).getString("error_code"))
@@ -615,7 +746,8 @@ class HierarchyTransferExecutorLifecycleTest {
         val replacement = submit(fixture, executor, next)
         awaitWorker(replacement)
         val uri = Uri.parse(replacement.result.get()!!.getString("payload_uri"))
-        assertEquals(hash, replacement.result.get()!!.getString("payload_sha256"))
+        val replacementHash = replacement.result.get()!!.getString("payload_sha256")
+        assertNotEquals(hash, replacementHash)
         val runtime = HierarchyPayloadRuntime
         val storeField = runtime.javaClass.getDeclaredField("store").apply { isAccessible = true }
         val previous = storeField.get(runtime)
@@ -627,14 +759,14 @@ class HierarchyTransferExecutorLifecycleTest {
             addAction(HierarchyPayloadActions.ACK)
         }
         context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
-        fun control(action: String, generation: Long?, epoch: String?): JSONObject {
+        fun control(action: String, generation: Long?, epoch: String?, payloadHash: String = hash): JSONObject {
             var encoded: String? = null
             val done = object : BroadcastReceiver() {
                 override fun onReceive(context: Context, intent: Intent) { encoded = resultData }
             }
             val intent = Intent(action).putExtra("requestId", next.requestId)
                 .putExtra("clientNonce", next.clientNonce).putExtra("queryNonce", "b".repeat(32))
-                .putExtra("payloadSha256", hash)
+                .putExtra("payloadSha256", payloadHash)
             if (generation != null) intent.putExtra("expectedGeneration", generation.toString())
             if (epoch != null) intent.putExtra("expectedProcessEpoch", epoch)
             context.sendOrderedBroadcast(intent, null, done, null, 0, null, null)
@@ -652,7 +784,7 @@ class HierarchyTransferExecutorLifecycleTest {
                 null, null).getString("error_code"))
             assertNotNull(fixture.store.resolveReadyFile(uri))
             assertEquals("ACKED", control(HierarchyPayloadActions.ACK,
-                next.generation, fixture.store.processEpoch).getString("status"))
+                next.generation, fixture.store.processEpoch, replacementHash).getString("status"))
             assertNull(fixture.store.resolveReadyFile(uri))
         } finally {
             context.unregisterReceiver(receiver)

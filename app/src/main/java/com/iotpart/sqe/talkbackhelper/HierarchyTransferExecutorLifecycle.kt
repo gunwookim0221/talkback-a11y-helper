@@ -17,6 +17,14 @@ internal class HierarchyTransferExecutorLifecycle(
     private val maxRetiredGenerations: Int = MAX_RETIRED_GENERATIONS,
     private val executorFactory: (Long) -> ThreadPoolExecutor = { generation -> newExecutor(generation) },
 ) {
+    internal data class DiagnosticsSnapshot(
+        val activeOperationCount: Int,
+        val executorQueueDepth: Int,
+        val activeWorkerCount: Int,
+        val liveGenerationCount: Int,
+        val retiredGenerationCount: Int,
+    )
+
     private data class Generation(val id: Long, val executor: ThreadPoolExecutor)
     private data class ActiveOperation(
         val handle: HierarchyPayloadStore.RequestHandle,
@@ -85,6 +93,19 @@ internal class HierarchyTransferExecutorLifecycle(
 
     @Synchronized
     internal fun activeHandleForTest(): HierarchyPayloadStore.RequestHandle? = active?.handle
+
+    /** Read-only executor state; queue size is observational and never used for admission. */
+    @Synchronized
+    fun diagnosticsSnapshot(): DiagnosticsSnapshot {
+        val generations = listOf(current) + retired
+        return DiagnosticsSnapshot(
+            activeOperationCount = if (active == null) 0 else 1,
+            executorQueueDepth = generations.fold(0) { count, generation -> count + generation.executor.queue.size },
+            activeWorkerCount = generations.fold(0) { count, generation -> count + generation.executor.activeCount },
+            liveGenerationCount = generations.count { !it.executor.isTerminated },
+            retiredGenerationCount = retired.size,
+        )
+    }
 
     private fun acceptingGeneration(): Generation {
         if (!current.executor.isShutdown) return current

@@ -6,6 +6,7 @@ import android.content.Intent
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Bundle
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -88,6 +89,7 @@ class A11yHelperService : AccessibilityService() {
         instance = this
         ExactPostActionRuntime.connect()
         serviceInstanceId = ExactActionRuntime.connect(this)
+        NavigationActionRuntime.stop(serviceInstanceId)
         invalidateFocusEventWork()
         HelperLifecycleDiagnostics.recordServiceLifecycle("ON_SERVICE_CONNECTED")
         A11yCommandReceiver.hierarchyPublicationLedger.serviceConnected(serviceInstanceId)
@@ -99,6 +101,7 @@ class A11yHelperService : AccessibilityService() {
         invalidateFocusEventWork()
         HelperLifecycleDiagnostics.recordServiceLifecycle("ON_INTERRUPT")
         ExactPostActionRuntime.stop("SERVICE_INTERRUPTED")
+        NavigationActionRuntime.stop(serviceInstanceId)
         ExactActionRuntime.stop("SERVICE_INTERRUPTED")
         Log.w(TAG, "Service interrupted")
     }
@@ -109,6 +112,7 @@ class A11yHelperService : AccessibilityService() {
         HierarchyPayloadRuntime.serviceDisconnected(serviceInstanceId)
         A11yCommandReceiver.hierarchyPublicationLedger.serviceEnded(serviceInstanceId)
         ExactPostActionRuntime.stop("SERVICE_DESTROYED")
+        NavigationActionRuntime.stop(serviceInstanceId)
         ExactActionRuntime.stop("SERVICE_DESTROYED")
         smartNextDispatcher.close()
         focusCommandDispatcher.close()
@@ -120,6 +124,7 @@ class A11yHelperService : AccessibilityService() {
 
     override fun onUnbind(intent: Intent): Boolean {
         invalidateFocusEventWork()
+        NavigationActionRuntime.stop(serviceInstanceId)
         return super.onUnbind(intent)
     }
 
@@ -140,13 +145,32 @@ class A11yHelperService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
-        focusEventProcessor?.invalidatePending()
-        ExactPostActionRuntime.receive(event)
         val type = event.eventType
+        val callbackSourceObservation = if (type == AccessibilityEvent.TYPE_VIEW_CLICKED)
+            NavigationActionRuntime.captureCallbackSourceAtEntry(event, serviceInstanceId) else null
+        focusEventProcessor?.invalidatePending()
         if (type == AccessibilityEvent.TYPE_VIEW_CLICKED) {
-            A11yEvidence.captureEntryClickEvent(event)
+            ExactPostActionRuntime.receive(event, callbackSourceObservation)
+            var clickEventId: String? = null
+            NavigationActionEventHandoff.captureOwnerEvidenceBeforeWake(
+                captureOwnerEvidence = {
+                    clickEventId = A11yEvidence.captureEntryClickEvent(
+                        event, serviceInstanceId, callbackSourceObservation)
+                },
+                wakeNavigationVerifier = {
+                    NavigationActionRuntime.receive(event, serviceInstanceId, callbackSourceObservation)
+                },
+            )
+            clickEventId?.takeIf { it.isNotBlank() }?.let { recordedClickEventId ->
+                evidenceObservationHandler.postDelayed(
+                    { captureEntryClickPostActionObservation(recordedClickEventId) },
+                    300L,
+                )
+            }
             return
         }
+        NavigationActionRuntime.receive(event, serviceInstanceId)
+        ExactPostActionRuntime.receive(event)
         if (type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED ||
             type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || type == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
             SmartNextLookupTrace.structureChanged()
@@ -213,6 +237,16 @@ class A11yHelperService : AccessibilityService() {
             focusEventWorker?.shutdownNow()
             focusEventWorker = null
         }
+    }
+
+    internal fun focusEventQueueDiagnostics(): Map<String, Any?> {
+        val state = focusEventProcessor?.diagnosticsSnapshot()
+        return mapOf(
+            "event_worker_queue_depth" to state?.pendingWorkCount,
+            "event_worker_drain_scheduled" to state?.drainScheduled,
+            "event_worker_processor_closed" to state?.closed,
+            "event_worker_initialized" to (state != null),
+        )
     }
 
     private fun captureAccessibilityFocusEvent(event: AccessibilityEvent): CapturedAccessibilityFocusEvent? {
@@ -396,6 +430,221 @@ class A11yHelperService : AccessibilityService() {
     }
 
     fun dumpHierarchy(reqId: String): JSONObject = A11yNavigator.dumpHierarchy(this, reqId)
+
+    internal fun armEntryClickObservation(
+        reqId: String,
+        transactionId: String,
+        leaseMs: Long,
+        request: JSONObject,
+        canonicalInvocationUriBound: Boolean = false,
+    ): JSONObject {
+        if (request.optString("request_id") != reqId || request.optString("transaction_id") != transactionId) {
+            return JSONObject().put("ok", false).put("reason", "OBSERVATION_LEASE_REQUEST_MISMATCH")
+        }
+        val sourceRequestId = request.optString("source_capture_request_id")
+        val sourceProcessEpoch = request.optString("source_process_epoch")
+        val sourceGeneration = request.optLong("source_generation", -1L)
+        val sourceServiceInstanceId = request.optString("source_service_instance_id")
+        val sourceCaptureSequence = request.optLong("source_capture_sequence", -1L)
+        val sourceRootDigest = request.optString("source_root_digest")
+        val sourceCandidateDigest = request.optString("source_candidate_digest")
+        val sourceCaptureKey = request.optString("source_capture_key")
+        val sourceConnectionEpoch = request.optString("source_connection_epoch")
+        val sourceBootEpoch = request.optString("source_boot_epoch")
+        val ownerSourceNodeId = request.optString("owner_source_node_id")
+        val ownerSourceNodeIdStatus = request.optString("owner_source_node_id_status")
+        val ownerSourceNodeIdStatusValid = request.has("owner_source_node_id") && when (ownerSourceNodeIdStatus) {
+            "FIELD_PRESENT" -> ownerSourceNodeId.isNotBlank()
+            "FIELD_ABSENT" -> ownerSourceNodeId.isBlank()
+            else -> false
+        }
+        val windowId = request.optInt("window_id", -1)
+        val packageName = request.optString("package")
+        if (sourceRequestId.isBlank() || sourceProcessEpoch.isBlank() || sourceGeneration <= 0L ||
+            sourceServiceInstanceId.isBlank() || sourceCaptureSequence <= 0L || sourceRootDigest.isBlank() ||
+            sourceCandidateDigest.isBlank() || sourceCaptureKey.isBlank() || windowId < 0 || packageName.isBlank()) {
+            return JSONObject().put("ok", false).put("reason", "OBSERVATION_SOURCE_CAPTURE_IDENTITY_MISSING")
+        }
+        if (sourceCaptureKey != request.optString("source_snapshot_id") ||
+            sourceServiceInstanceId != serviceInstanceId) {
+            return JSONObject().put("ok", false).put("reason", "OBSERVATION_SOURCE_CAPTURE_IDENTITY_MISMATCH")
+        }
+        val liveActionIdentity = ExactActionRuntime.status()
+        val liveConnectionEpoch = liveActionIdentity.optString("connection_epoch")
+        val liveBootEpoch = liveActionIdentity.optString("boot_epoch")
+        val lifecycleIdentityValid = sourceConnectionEpoch.matches(Regex("[A-Za-z0-9._:-]{1,128}")) &&
+            sourceBootEpoch.matches(Regex("[A-Za-z0-9._:-]{1,128}")) &&
+            sourceConnectionEpoch != "UNKNOWN" && sourceBootEpoch != "UNKNOWN" &&
+            liveConnectionEpoch == sourceConnectionEpoch && liveBootEpoch == sourceBootEpoch
+        if (!lifecycleIdentityValid || !ownerSourceNodeIdStatusValid) {
+            return JSONObject().put("ok", false).put("reason", "OBSERVATION_SOURCE_RUNTIME_IDENTITY_MISMATCH")
+        }
+        val captureMismatch = HierarchyPayloadRuntime.currentReadyCaptureMismatchReason(
+                sourceRequestId, sourceProcessEpoch, sourceGeneration, sourceServiceInstanceId,
+                sourceCaptureSequence, sourceRootDigest, sourceCandidateDigest, sourceCaptureKey,
+                windowId, packageName,
+            )
+        if (captureMismatch != null) {
+            if (captureMismatch == "SOURCE_STORE_UNAVAILABLE") {
+                val store = HierarchyPayloadRuntime.sourceCaptureStoreDiagnostics()
+                Log.w(TAG, "[ENTRY_CLICK_CAPTURE][source_store] " +
+                    "reqId=${reqId.take(128)} captureReqId=${request.optString("request_id").take(128)} " +
+                    "transactionId=${transactionId.take(128)} sourceRequestId=${sourceRequestId.take(128)} " +
+                    "sourceProcessEpoch=${sourceProcessEpoch.take(128)} sourceServiceInstanceId=${sourceServiceInstanceId.take(128)} " +
+                    "sourceGeneration=$sourceGeneration sourceCaptureSequence=$sourceCaptureSequence " +
+                    "sourceCaptureKey=${sourceCaptureKey.take(64)} " +
+                    "storeAvailable=${store["storeAvailable"]} runtimeProcessEpoch=${store["runtimeProcessEpoch"]} " +
+                    "runtimeServiceInstanceId=${store["runtimeServiceInstanceId"]} " +
+                    "storeProcessEpoch=${store["storeProcessEpoch"]} storeServiceInstanceId=${store["storeServiceInstanceId"]} " +
+                    "storeGeneration=${store["storeGeneration"]} storeCaptureSequence=${store["storeCaptureSequence"]} " +
+                    "latestReadyCaptureRequestId=${store["latestReadyCaptureRequestId"]} " +
+                    "latestReadyCaptureSequence=${store["latestReadyCaptureSequence"]} " +
+                    "latestReadyCaptureKey=${store["latestReadyCaptureKey"]} result=$captureMismatch")
+            }
+            return JSONObject().put("ok", false).put("reason", "OBSERVATION_SOURCE_CAPTURE_$captureMismatch")
+        }
+        val pathJson = request.optJSONArray("node_path")
+            ?: return JSONObject().put("ok", false).put("reason", "OBSERVATION_LEASE_PATH_MISSING")
+        val path = (0 until pathJson.length()).map { pathJson.optInt(it, -1) }
+        val resolver = ExactLiveNodeResolver {
+            windows.map { window -> ExactApplicationWindow(window.id, window.type, window.isActive, window.root) }
+        }
+        val actualLiveNode = JSONObject()
+        val target = runCatching {
+            resolver.captureObservationTarget(
+                expectedWindowId = windowId,
+                expectedPackage = packageName,
+                nodePath = path,
+                expectedDescriptorDigest = request.optString("descriptor_digest"),
+                sourceSnapshotId = request.optString("source_snapshot_id"),
+                connectionId = serviceInstanceId,
+                expectedSourceNodeId = ownerSourceNodeId.takeIf { ownerSourceNodeIdStatus == "FIELD_PRESENT" },
+                onResolvedNode = { node ->
+                    actualLiveNode
+                        .put("package_name", node.packageName?.toString()?.take(128) ?: "")
+                        .put("class_name", node.className?.toString()?.take(192) ?: "")
+                        .put("resource_id", node.viewIdResourceName?.take(256) ?: "")
+                        .put("window_id", node.windowId)
+                        .put("visible", node.isVisibleToUser)
+                        .put("enabled", node.isEnabled)
+                        .put("clickable", node.isClickable)
+                        .put("action_click", node.actionList.any {
+                            it.id == android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK
+                        })
+                },
+            )
+        }.getOrElse { error ->
+            val code = (error as? ExactActionRejected)?.code ?: "OBSERVATION_TARGET_RESOLUTION_FAILED"
+            val rejected = JSONObject().put("ok", false).put("reason", code)
+            if (code == "OBSERVATION_TARGET_NOT_ACTIONABLE" && actualLiveNode.length() > 0) {
+                val store = HierarchyPayloadRuntime.sourceCaptureStoreDiagnostics()
+                val currentGeneration = (store["storeGeneration"] as? Number)?.toLong()
+                val currentSequence = (store["storeCaptureSequence"] as? Number)?.toLong()
+                val currentRequest = store["latestReadyCaptureRequestId"]?.toString().orEmpty()
+                val currentProcess = store["storeProcessEpoch"]?.toString().orEmpty()
+                val currentService = store["storeServiceInstanceId"]?.toString().orEmpty()
+                val currentKey = store["latestReadyCaptureKey"]?.toString().orEmpty()
+                val expectedDescriptor = request.optString("descriptor_digest").take(64)
+                val currentness = JSONObject()
+                    .put("source_capture_current", true) // captureMismatch was null immediately before resolution
+                    .put("request_id_matches", sourceRequestId == currentRequest)
+                    .put("process_epoch_matches", sourceProcessEpoch == currentProcess)
+                    .put("service_instance_matches", sourceServiceInstanceId == currentService)
+                    .put("generation_matches", currentGeneration == sourceGeneration)
+                    .put("capture_sequence_matches", currentSequence == sourceCaptureSequence)
+                    .put("capture_key_matches", sourceCaptureKey == currentKey)
+                    .put("connection_epoch_matches", sourceConnectionEpoch == liveConnectionEpoch)
+                    .put("boot_epoch_matches", sourceBootEpoch == liveBootEpoch)
+                    .put("root_digest_matches", true)
+                    .put("candidate_digest_matches", true)
+                    .put("window_package_matches", true)
+                    .put("capture_fresh", true)
+                val expectedPath = org.json.JSONArray().apply { path.take(80).forEach { put(it) } }
+                val diagnostics = JSONObject()
+                    .put("stage", "live_node_actionability")
+                    .put("code", code)
+                    .put("request_id", reqId.take(128))
+                    .put("transaction_id", transactionId.take(128))
+                    .put("expected_path", expectedPath)
+                    .put("expected_window_id", windowId)
+                    .put("expected_package", packageName.take(128))
+                    .put("expected_descriptor_digest", expectedDescriptor)
+                    .put("expected_source_node_id_status", ownerSourceNodeIdStatus.take(32))
+                    .put("source_capture_request_id", sourceRequestId.take(128))
+                    .put("source_process_epoch", sourceProcessEpoch.take(128))
+                    .put("source_generation", sourceGeneration)
+                    .put("source_service_instance_id", sourceServiceInstanceId.take(128))
+                    .put("source_capture_sequence", sourceCaptureSequence)
+                    .put("source_connection_epoch", sourceConnectionEpoch.take(128))
+                    .put("source_boot_epoch", sourceBootEpoch.take(128))
+                    .put("source_root_digest", sourceRootDigest.take(64))
+                    .put("source_candidate_digest", sourceCandidateDigest.take(64))
+                    .put("source_capture_key", sourceCaptureKey.take(64))
+                    .put("current_service_instance_id", serviceInstanceId.take(128))
+                    .put("current_process_epoch", currentProcess.take(128))
+                    .put("current_generation", currentGeneration ?: -1L)
+                    .put("current_capture_sequence", currentSequence ?: -1L)
+                    .put("current_connection_epoch", liveConnectionEpoch.take(128))
+                    .put("current_boot_epoch", liveBootEpoch.take(128))
+                    .put("currentness", currentness)
+                    .put("actual_live_node", actualLiveNode)
+                rejected.put("diagnostics", diagnostics)
+            }
+            return rejected
+        }
+        return A11yEvidence.armEntryClickCapture(
+            reqId = reqId,
+            transactionId = transactionId,
+            leaseMs = leaseMs,
+            connectionId = serviceInstanceId,
+            runId = request.optString("run_id"),
+            invocationId = request.optString("invocation_id"),
+            scenarioId = request.optString("scenario_id"),
+            ownerTarget = target,
+            sourceIdentity = EntryClickSourceIdentity(
+                requestId = sourceRequestId,
+                processEpoch = sourceProcessEpoch,
+                generation = sourceGeneration,
+                serviceInstanceId = sourceServiceInstanceId,
+                captureSequence = sourceCaptureSequence,
+                rootDigest = sourceRootDigest,
+                candidateDigest = sourceCandidateDigest,
+                captureKey = sourceCaptureKey,
+                connectionEpoch = sourceConnectionEpoch,
+                bootEpoch = sourceBootEpoch,
+                ownerSourceNodeId = ownerSourceNodeId,
+                ownerSourceNodeIdStatus = ownerSourceNodeIdStatus,
+            ),
+            canonicalInvocationUriBound = canonicalInvocationUriBound,
+        ).apply {
+            if (optBoolean("ok")) {
+                put("sourceCaptureRequestId", sourceRequestId)
+                put("sourceProcessEpoch", sourceProcessEpoch)
+                put("sourceGeneration", sourceGeneration)
+                put("sourceServiceInstanceId", sourceServiceInstanceId)
+                put("sourceCaptureSequence", sourceCaptureSequence)
+                put("sourceRootDigest", sourceRootDigest)
+                put("sourceCandidateDigest", sourceCandidateDigest)
+                put("sourceCaptureKey", sourceCaptureKey)
+            }
+        }
+    }
+
+    internal fun markEntryClickDispatch(reqId: String, transactionId: String, dispatchElapsedRealtimeMs: Long): JSONObject {
+        val result = A11yEvidence.markEntryClickDispatch(
+            reqId, transactionId, serviceInstanceId, dispatchElapsedRealtimeMs,
+        )
+        val clickEventId = result.optString("clickEventId").takeIf { it.isNotBlank() }
+        if (result.optBoolean("ok") && clickEventId != null) {
+            evidenceObservationHandler.postDelayed(
+                { captureEntryClickPostActionObservation(clickEventId) }, 300L,
+            )
+        }
+        return result
+    }
+
+    internal fun validateEntryClickCapture(reqId: String, transactionId: String): JSONObject =
+        A11yEvidence.validateEntryClickCapture(reqId, transactionId, serviceInstanceId)
 
     internal fun dumpReliableHierarchy(
         reqId: String,
@@ -974,6 +1223,43 @@ class A11yHelperService : AccessibilityService() {
                 offset
             )
         }
+    }
+
+    private fun captureEntryClickPostActionObservation(clickEventId: String) {
+        val connectionId = serviceInstanceId
+        val root = SmartNextPerf.acquireRoot("A11yHelperService.entryClickPostAction") { rootInActiveWindow }
+        val currentHierarchy = root?.let { node ->
+            runCatching { ImmutableHierarchyCapture.capture(node).root.toRawJson() }.getOrNull()
+        }
+        val focusedNode = root?.let { node ->
+            runCatching { node.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY) }.getOrNull()
+        }
+        val focusNodeId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            focusedNode?.let { runCatching { it.uniqueId }.getOrNull()?.takeIf { value -> value.isNotBlank() } }
+        } else null
+        val focusNodePath = if (root != null && focusedNode != null) {
+            val matches = mutableListOf<List<Int>>()
+            fun visit(node: AccessibilityNodeInfo, path: List<Int>, depth: Int, count: IntArray) {
+                if (depth > 80 || ++count[0] > 5000) return
+                if (node == focusedNode) matches.add(path)
+                for (index in 0 until node.childCount) {
+                    val child = node.getChild(index) ?: continue
+                    visit(child, path + index, depth + 1, count)
+                }
+            }
+            runCatching { visit(root, emptyList(), 0, intArrayOf(0)) }.getOrNull()
+            matches.singleOrNull()
+        } else null
+        A11yEvidence.captureEntryClickPostActionObservation(
+            clickEventId = clickEventId,
+            connectionId = connectionId,
+            rootWindowId = root?.windowId?.takeIf { it >= 0 },
+            focusNodeId = focusNodeId,
+            focusNodePath = focusNodePath,
+            focusWindowId = focusedNode?.windowId?.takeIf { it >= 0 },
+            accessibilityFocused = focusedNode?.isAccessibilityFocused == true,
+            currentHierarchy = currentHierarchy,
+        )
     }
 
     private fun parseShortBounds(value: String): Rect? {

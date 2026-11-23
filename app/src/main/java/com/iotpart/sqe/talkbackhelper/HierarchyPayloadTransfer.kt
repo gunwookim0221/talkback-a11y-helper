@@ -188,6 +188,20 @@ internal class HierarchyPayloadStore(
     data class RequestHandle internal constructor(val requestId: String, val clientNonce: String, val generation: Long)
     data class Cancellation internal constructor(val response: JSONObject, val activeHandle: RequestHandle?)
 
+    private data class SourceCaptureIdentity(
+        val requestId: String,
+        val processEpoch: String,
+        val generation: Long,
+        val serviceInstanceId: String,
+        val captureSequence: Long,
+        val rootDigest: String,
+        val candidateDigest: String,
+        val captureKey: String,
+        val windowId: Int,
+        val packageName: String,
+        val publishedAtElapsedMs: Long,
+    )
+
     private data class Record(
         val handle: RequestHandle,
         var queryNonce: String,
@@ -199,6 +213,8 @@ internal class HierarchyPayloadStore(
         val token: String,
         var state: String,
         var errorCode: String? = null,
+        var errorStage: String? = null,
+        var errorType: String? = null,
         var payloadBytes: Int? = null,
         var payloadSha256: String? = null,
         var artifactBytes: Int? = null,
@@ -213,6 +229,7 @@ internal class HierarchyPayloadStore(
     private var currentServiceInstanceId: String? = null
     private var generation = 0L
     private var captureSequence = 0L
+    private var latestReadyCaptureIdentity: SourceCaptureIdentity? = null
     private var activeCollector: RequestHandle? = null
     private val activeWriteFiles = mutableSetOf<File>()
 
@@ -254,6 +271,7 @@ internal class HierarchyPayloadStore(
         if (records.size >= MAX_RECORDS || reservedBytes() + HierarchyPayloadEnvelope.MAX_ARTIFACT_BYTES > MAX_TOTAL_BYTES) {
             return errorResponse(requestId, clientNonce, queryNonce, "QUOTA_EXCEEDED")
         }
+        latestReadyCaptureIdentity = null
         val handle = RequestHandle(requestId, clientNonce, ++generation)
         val token = UUID.randomUUID().toString().replace("-", "")
         val identity = JSONObject(helperIdentity.toString())
@@ -315,6 +333,126 @@ internal class HierarchyPayloadStore(
                 .put(ReliableHierarchyCandidateContract.ROOT_CAPTURE_ID_VERSION))
     }
 
+    /** Match a host-validated capture authority to the latest immutable READY payload. */
+    @Synchronized
+    fun matchesCurrentReadyCapture(
+        sourceRequestId: String,
+        sourceProcessEpoch: String,
+        sourceGeneration: Long,
+        sourceServiceInstanceId: String,
+        sourceCaptureSequence: Long,
+        sourceRootDigest: String,
+        sourceCandidateDigest: String,
+        sourceCaptureKey: String,
+        targetWindowId: Int,
+        targetPackage: String,
+    ): Boolean = currentReadyCaptureMismatchReason(sourceRequestId, sourceProcessEpoch, sourceGeneration,
+        sourceServiceInstanceId, sourceCaptureSequence, sourceRootDigest, sourceCandidateDigest,
+        sourceCaptureKey, targetWindowId, targetPackage) == null
+
+    @Synchronized
+    fun currentReadyCaptureMismatchReason(
+        sourceRequestId: String,
+        sourceProcessEpoch: String,
+        sourceGeneration: Long,
+        sourceServiceInstanceId: String,
+        sourceCaptureSequence: Long,
+        sourceRootDigest: String,
+        sourceCandidateDigest: String,
+        sourceCaptureKey: String,
+        targetWindowId: Int,
+        targetPackage: String,
+    ): String? {
+        pruneExpired()
+        if (sourceRequestId.isBlank() || sourceProcessEpoch != processEpoch ||
+            sourceServiceInstanceId.isBlank() || sourceServiceInstanceId != currentServiceInstanceId ||
+            sourceGeneration <= 0L || sourceGeneration != generation ||
+            sourceCaptureSequence <= 0L || sourceCaptureSequence != captureSequence ||
+            !sourceRootDigest.matches(Regex("[0-9a-f]{64}")) ||
+            !sourceCandidateDigest.matches(Regex("[0-9a-f]{64}")) ||
+            !sourceCaptureKey.matches(Regex("[0-9a-f]{64}"))) return "SOURCE_IDENTITY_MISMATCH"
+        val source = latestReadyCaptureIdentity ?: return "SOURCE_CAPTURE_NOT_RETAINED"
+        if (source.requestId != sourceRequestId || source.processEpoch != sourceProcessEpoch ||
+            source.generation != sourceGeneration || source.serviceInstanceId != sourceServiceInstanceId ||
+            source.captureSequence != sourceCaptureSequence) {
+            return "SOURCE_IDENTITY_MISMATCH"
+        }
+        if (source.rootDigest != sourceRootDigest || source.candidateDigest != sourceCandidateDigest ||
+            source.captureKey != sourceCaptureKey) return "SOURCE_ENVELOPE_MISMATCH"
+        if (source.windowId != targetWindowId || source.packageName != targetPackage) {
+            return "SOURCE_TARGET_WINDOW_OR_PACKAGE_MISMATCH"
+        }
+        val age = elapsedRealtimeMs() - source.publishedAtElapsedMs
+        if (age !in 0..2_500L) return "SOURCE_CAPTURE_EXPIRED"
+        return null
+    }
+
+    @Synchronized
+    internal fun sourceCaptureIdentityForDiagnostics(): Map<String, Any?> {
+        val latest = latestReadyCaptureIdentity
+        return mapOf(
+            "processEpoch" to processEpoch,
+            "serviceInstanceId" to currentServiceInstanceId,
+            "generation" to generation,
+            "captureSequence" to captureSequence,
+            "latestReadyCaptureRequestId" to latest?.requestId,
+            "latestReadyCaptureSequence" to latest?.captureSequence,
+            "latestReadyCaptureKey" to latest?.captureKey,
+        )
+    }
+
+    /** Retain only the identity projection needed after the host ACK deletes the full payload. */
+    private fun sourceCaptureIdentity(payloadBytes: ByteArray, record: Record): SourceCaptureIdentity? =
+        runCatching {
+            val payload = JSONObject(payloadBytes.toString(StandardCharsets.UTF_8))
+            if (payload.optString("reqId") != record.handle.requestId ||
+                !ReliableHierarchyCandidateContract.hasValidRootBinding(payload)) return@runCatching null
+            val envelope = payload.optJSONObject("captureEnvelope") ?: return@runCatching null
+            val sequence = record.captureSequence ?: return@runCatching null
+            if (envelope.optString("request_id") != record.handle.requestId ||
+                envelope.optString("process_epoch") != processEpoch ||
+                envelope.optLong("generation", -1L) != record.handle.generation ||
+                envelope.optString("service_instance_id") != record.serviceInstanceId ||
+                envelope.optLong("capture_sequence", -1L) != sequence) return@runCatching null
+            val rootRef = envelope.optString("root_ref")
+            val rootMatch = Regex("^windows\\[(0|[1-9][0-9]*)]\\.root$").matchEntire(rootRef)
+                ?: return@runCatching null
+            val windowIndex = rootMatch.groupValues[1].toIntOrNull() ?: return@runCatching null
+            val root = payload.optJSONArray("windows")?.optJSONObject(windowIndex)?.optJSONObject("root")
+                ?: return@runCatching null
+            val rootDigest = envelope.optString("root_digest")
+            val candidateDigest = envelope.optString("candidate_digest")
+            val packageName = root.optString("packageName")
+            val windowId = root.optInt("windowId", Int.MIN_VALUE)
+            if (!rootDigest.matches(Regex("[0-9a-f]{64}")) ||
+                !candidateDigest.matches(Regex("[0-9a-f]{64}")) || packageName.isBlank() || windowId < 0 ||
+                CaptureCanonicalJson.sha256(root) != rootDigest) return@runCatching null
+            val bounds = root.optJSONObject("boundsInScreen")
+            val rootBounds = if (bounds != null && listOf("l", "t", "r", "b").all { key ->
+                    bounds.opt(key) is Int || bounds.opt(key) is Long
+                }) JSONArray().put(bounds.getInt("l")).put(bounds.getInt("t"))
+                    .put(bounds.getInt("r")).put(bounds.getInt("b")) else JSONObject.NULL
+            val authorityCore = JSONObject()
+                .put("schema_version", envelope.opt("schema_version") ?: JSONObject.NULL)
+                .put("canonicalization", envelope.opt("canonicalization") ?: JSONObject.NULL)
+                .put("request_id", envelope.opt("request_id") ?: JSONObject.NULL)
+                .put("process_epoch", envelope.opt("process_epoch") ?: JSONObject.NULL)
+                .put("generation", envelope.opt("generation") ?: JSONObject.NULL)
+                .put("service_instance_id", envelope.opt("service_instance_id") ?: JSONObject.NULL)
+                .put("capture_sequence", envelope.opt("capture_sequence") ?: JSONObject.NULL)
+                .put("root_ref", envelope.opt("root_ref") ?: JSONObject.NULL)
+                .put("root_digest", envelope.opt("root_digest") ?: JSONObject.NULL)
+                .put("candidate_digest", envelope.opt("candidate_digest") ?: JSONObject.NULL)
+                .put("hierarchy_package_name", root.opt("packageName") ?: JSONObject.NULL)
+                .put("hierarchy_window_id", root.opt("windowId") ?: JSONObject.NULL)
+                .put("hierarchy_root_class_name", root.opt("className") ?: JSONObject.NULL)
+                .put("hierarchy_root_source_node_id", root.opt("sourceNodeId") ?: JSONObject.NULL)
+                .put("hierarchy_root_bounds", rootBounds)
+            val captureKey = CaptureCanonicalJson.sha256(authorityCore)
+            SourceCaptureIdentity(record.handle.requestId, processEpoch, record.handle.generation,
+                record.serviceInstanceId, sequence, rootDigest, candidateDigest, captureKey, windowId, packageName, 0L)
+        }.getOrNull()
+
     @Synchronized
     fun markCollecting(handle: RequestHandle): Boolean {
         val record = records[handle.requestId] ?: return false
@@ -368,6 +506,20 @@ internal class HierarchyPayloadStore(
         } ?: return errorResponse(handle.requestId, handle.clientNonce, "", "REQUEST_CANCELLED_OR_STALE")
 
         val readyFile = readyFile(record)
+        val sourceCaptureIdentity = sourceCaptureIdentity(payload, record)
+        if (sourceCaptureIdentity == null) {
+            return synchronized(this) {
+                if (records[handle.requestId] === record && same(record, handle) && record.state == "WRITING") {
+                    record.state = "FAILED"
+                    record.errorCode = "CAPTURE_AUTHORITY_INVALID"
+                    record.reservedBytes = 0
+                    record.retentionStartedAtMs = elapsedRealtimeMs()
+                    if (activeCollector == handle) activeCollector = null
+                }
+                activeWriteFiles.remove(readyFile)
+                response(record, completed = true)
+            }
+        }
         val atomicFile = AtomicFile(readyFile)
         try {
             if (!directory.exists() && !directory.mkdirs()) throw IOException("DIRECTORY_CREATE_FAILED")
@@ -429,6 +581,7 @@ internal class HierarchyPayloadStore(
                     record.payloadUri = contentUri(record)
                     record.state = "READY"
                     record.reservedBytes = 0
+                    latestReadyCaptureIdentity = sourceCaptureIdentity.copy(publishedAtElapsedMs = elapsedRealtimeMs())
                     response(record, completed = true)
                 }
             }
@@ -449,13 +602,15 @@ internal class HierarchyPayloadStore(
     }
 
     @Synchronized
-    fun fail(handle: RequestHandle, code: String): JSONObject {
+    fun fail(handle: RequestHandle, code: String, failedStage: String? = null, failureType: String? = null): JSONObject {
         val record = records[handle.requestId]
             ?: return errorResponse(handle.requestId, handle.clientNonce, "", "REQUEST_NOT_FOUND")
         if (!same(record, handle)) return errorResponse(handle.requestId, handle.clientNonce, "", "REQUEST_IDENTITY_MISMATCH")
         if (record.state !in TERMINAL_STATES) {
             record.state = "FAILED"
             record.errorCode = safeError(code)
+            record.errorStage = safeDiagnostic(failedStage)
+            record.errorType = safeDiagnostic(failureType)
             record.reservedBytes = 0
         }
         return response(record, completed = true)
@@ -613,6 +768,8 @@ internal class HierarchyPayloadStore(
         .put("created_elapsed_realtime_ns", record.createdElapsedNs)
         .put("completed_elapsed_realtime_ns", if (completed) SystemClock.elapsedRealtimeNanos() else JSONObject.NULL)
         .put("error_code", record.errorCode ?: JSONObject.NULL)
+        .put("error_stage", record.errorStage ?: JSONObject.NULL)
+        .put("error_type", record.errorType ?: JSONObject.NULL)
 
     private fun errorResponse(requestId: String, clientNonce: String, queryNonce: String, code: String) = JSONObject()
         .put("schema", HierarchyPayloadActions.CONTROL_SCHEMA)
@@ -683,6 +840,7 @@ internal class HierarchyPayloadStore(
         file.name == readyFile.name || file.name == "${readyFile.name}.new" || file.name == "${readyFile.name}.bak"
 
     private fun invalidateAll(reason: String) {
+        latestReadyCaptureIdentity = null
         records.values.forEach { record -> record.file?.let { AtomicFile(it).delete() } }
         records.clear()
         activeCollector = null
@@ -702,6 +860,7 @@ internal class HierarchyPayloadStore(
     }
 
     private fun safeError(value: String) = value.takeIf { it.matches(Regex("[A-Z0-9_]{1,64}")) } ?: "TRANSFER_FAILED"
+    private fun safeDiagnostic(value: String?): String? = value?.takeIf { it.matches(Regex("[A-Za-z0-9_]{1,64}")) }
 
     companion object {
         const val PROVIDER_AUTHORITY = "com.iotpart.sqe.talkbackhelper.hierarchy"
@@ -726,6 +885,44 @@ internal object HierarchyPayloadRuntime {
     private var activeServiceInstanceId: String? = null
 
     internal fun processEpochForDiagnostics(): String = processEpoch
+
+    @Synchronized
+    internal fun sourceCaptureStoreDiagnostics(): Map<String, Any?> {
+        val current = store
+        val identity = current?.sourceCaptureIdentityForDiagnostics().orEmpty()
+        return mapOf(
+            "storeAvailable" to (current != null),
+            "runtimeProcessEpoch" to processEpoch,
+            "runtimeServiceInstanceId" to activeServiceInstanceId,
+            "storeProcessEpoch" to identity["processEpoch"],
+            "storeServiceInstanceId" to identity["serviceInstanceId"],
+            "storeGeneration" to identity["generation"],
+            "storeCaptureSequence" to identity["captureSequence"],
+            "latestReadyCaptureRequestId" to identity["latestReadyCaptureRequestId"],
+            "latestReadyCaptureSequence" to identity["latestReadyCaptureSequence"],
+            "latestReadyCaptureKey" to identity["latestReadyCaptureKey"],
+        )
+    }
+
+    /** A null mismatch reason means the retained capture matched; only a missing store is unavailable. */
+    internal fun <T : Any> captureMismatchReasonForStore(
+        currentStore: T?,
+        mismatchReason: (T) -> String?,
+    ): String? {
+        val availableStore = currentStore ?: return "SOURCE_STORE_UNAVAILABLE"
+        return mismatchReason(availableStore)
+    }
+
+    internal fun queueDiagnosticsForDiagnostics(): Map<String, Any?> {
+        val state = transferExecutor.diagnosticsSnapshot()
+        return mapOf(
+            "helper_pending_queue_depth" to state.executorQueueDepth,
+            "helper_active_operation_count" to state.activeOperationCount,
+            "helper_active_worker_count" to state.activeWorkerCount,
+            "helper_live_generation_count" to state.liveGenerationCount,
+            "helper_retired_generation_count" to state.retiredGenerationCount,
+        )
+    }
 
     @Synchronized
     fun serviceConnected(context: Context, serviceInstanceId: String) {
@@ -764,6 +961,38 @@ internal object HierarchyPayloadRuntime {
     fun capabilities(queryNonce: String): JSONObject = store?.capabilities(queryNonce)
         ?: errorResponse("", "", queryNonce, "SERVICE_UNAVAILABLE")
 
+    fun matchesCurrentReadyCapture(
+        sourceRequestId: String,
+        sourceProcessEpoch: String,
+        sourceGeneration: Long,
+        sourceServiceInstanceId: String,
+        sourceCaptureSequence: Long,
+        sourceRootDigest: String,
+        sourceCandidateDigest: String,
+        sourceCaptureKey: String,
+        targetWindowId: Int,
+        targetPackage: String,
+    ): Boolean = store?.matchesCurrentReadyCapture(sourceRequestId, sourceProcessEpoch, sourceGeneration,
+        sourceServiceInstanceId, sourceCaptureSequence, sourceRootDigest, sourceCandidateDigest, sourceCaptureKey,
+        targetWindowId, targetPackage) == true
+
+    fun currentReadyCaptureMismatchReason(
+        sourceRequestId: String,
+        sourceProcessEpoch: String,
+        sourceGeneration: Long,
+        sourceServiceInstanceId: String,
+        sourceCaptureSequence: Long,
+        sourceRootDigest: String,
+        sourceCandidateDigest: String,
+        sourceCaptureKey: String,
+        targetWindowId: Int,
+        targetPackage: String,
+    ): String? = captureMismatchReasonForStore(store) { currentStore ->
+        currentStore.currentReadyCaptureMismatchReason(sourceRequestId, sourceProcessEpoch, sourceGeneration,
+            sourceServiceInstanceId, sourceCaptureSequence, sourceRootDigest, sourceCandidateDigest, sourceCaptureKey,
+            targetWindowId, targetPackage)
+    }
+
     @Synchronized
     fun begin(
         requestId: String,
@@ -795,6 +1024,13 @@ internal object HierarchyPayloadRuntime {
         )
         val submissionFailure = submitHierarchyTransfer(transferExecutor, activeStore, handle) {
                 trace?.mark("WORKER_STARTED", mapOf("generation" to handle.generation))
+                if (trace != null) {
+                    HierarchySnapshotDiagnostics.recordQueueState(
+                        trace = trace,
+                        eventQueueSnapshot = service::focusEventQueueDiagnostics,
+                        helperQueueSnapshot = { queueDiagnosticsForDiagnostics() },
+                    )
+                }
                 var failedStage = "STORE_MARK_COLLECTING"
                 try {
                     if (!activeStore.markCollecting(handle)) {
@@ -867,8 +1103,14 @@ internal object HierarchyPayloadRuntime {
                     val published = activeStore.publish(handle, bytes)
                     trace?.mark("STORE_PUBLISH_COMPLETE", mapOf("status" to published.optString("status"), "artifact_bytes" to published.optInt("artifact_bytes", 0)))
                 } catch (error: Throwable) {
+                    val details = runCatching { trace?.failureDetails() }.getOrNull()
                     trace?.mark("ERROR_STAGE", mapOf("failed_stage" to failedStage, "error_type" to error.javaClass.simpleName, "reason" to error.message?.take(80)))
-                    activeStore.fail(handle, if (error.message == "PAYLOAD_TOO_LARGE") "PAYLOAD_TOO_LARGE" else "COLLECTION_FAILED")
+                    activeStore.fail(
+                        handle,
+                        if (error.message == "PAYLOAD_TOO_LARGE") "PAYLOAD_TOO_LARGE" else "COLLECTION_FAILED",
+                        details?.first ?: failedStage,
+                        details?.second ?: error.javaClass.simpleName,
+                    )
                 } finally {
                     activeStore.workerFinished(handle)
                 }

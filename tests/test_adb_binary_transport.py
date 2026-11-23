@@ -36,6 +36,18 @@ class AdbBinaryTransportTests(unittest.TestCase):
                 ["-c", code], timeout=0.1, max_stdout_bytes=64, max_stderr_bytes=8
             )
         self.assertEqual("adb_command_timeout", raised.exception.reason)
+        diagnostics = raised.exception.diagnostics
+        self.assertTrue(diagnostics["adb_timed_out"])
+        self.assertTrue(diagnostics["adb_process_reaped"])
+        self.assertIsNotNone(diagnostics["adb_exit_code"])
+        self.assertTrue(diagnostics["adb_stdout_reader_joined"])
+        self.assertTrue(diagnostics["adb_stderr_reader_joined"])
+        self.assertGreaterEqual(diagnostics["adb_stdout_bytes_received"], len(b"partial"))
+        self.assertGreaterEqual(diagnostics["adb_stdout_bytes_buffered"], len(b"partial"))
+        self.assertEqual(1, diagnostics["subprocess_started_total"])
+        self.assertEqual(1, diagnostics["subprocess_completed_total"])
+        self.assertEqual(1, diagnostics["subprocess_active_count_at_start"])
+        self.assertEqual(0, diagnostics["subprocess_active_count"])
 
     def test_stderr_is_bounded_and_nonzero_exit_is_rejected(self):
         code = "import sys; sys.stderr.buffer.write(b'e' * 128); sys.exit(7)"

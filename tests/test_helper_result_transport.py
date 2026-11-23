@@ -111,6 +111,37 @@ def test_duplicate_chunk_is_reported_as_transport_error(monkeypatch):
     }
 
 
+def test_entry_capture_duplicate_correlated_terminal_results_are_rejected(monkeypatch):
+    client = A11yAdbClient(start_monitor=False)
+    payload = json.dumps({"reqId": "entry-begin", "ok": True, "operation": "begin"})
+    line = f"I/A11Y_HELPER: ENTRY_CLICK_CAPTURE_RESULT {payload}"
+    monkeypatch.setattr(client._logcat_reader, "dump_filtered", lambda dev=None: f"{line}\n{line}")
+
+    result = client._read_log_result(None, "ENTRY_CLICK_CAPTURE_RESULT", "entry-begin", wait_seconds=0.1)
+
+    assert result == {
+        "success": False,
+        "status": "transport_error",
+        "reason": "duplicate_terminal_result",
+        "reqId": "entry-begin",
+    }
+
+
+def test_entry_capture_stale_result_does_not_match_current_request(monkeypatch):
+    client = A11yAdbClient(start_monitor=False)
+    payload = json.dumps({"reqId": "entry-old", "ok": True, "operation": "begin"})
+    monkeypatch.setattr(
+        client._logcat_reader, "dump_filtered",
+        lambda dev=None: f"I/A11Y_HELPER: ENTRY_CLICK_CAPTURE_RESULT {payload}",
+    )
+
+    result = client._read_log_result(None, "ENTRY_CLICK_CAPTURE_RESULT", "entry-current", wait_seconds=0.01)
+
+    assert result["success"] is False
+    assert result["reason"] == "ENTRY_CLICK_CAPTURE_RESULT 로그를 찾지 못했습니다."
+    assert result["reqId"] == "entry-current"
+
+
 def test_missing_chunk_index_is_detected_by_reassembler():
     records = _chunk_records("gap", json.dumps({"reqId": "gap", "success": True, "data": "x" * 5000}))
 

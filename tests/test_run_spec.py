@@ -10,6 +10,18 @@ def test_run_spec_passes_only_explicit_preflight_pid():
     from tb_runner.run_spec import RunSpec
     assert RunSpec(preflight_talkback_pid="18593").build_subprocess_env({})["TB_TALKBACK_PREFLIGHT_PID"] == "18593"
     assert "TB_TALKBACK_PREFLIGHT_PID" not in RunSpec().build_subprocess_env({"TB_TALKBACK_PREFLIGHT_PID": "stale"})
+
+
+def test_canonical_run_spec_suppresses_aircare_child_activation_diagnostic_opt_in():
+    from tb_runner.run_spec import RunSpec
+
+    env = RunSpec(scenario_ids=("life_air_care_plugin",)).build_subprocess_env({
+        "KEEP": "1",
+        "TB_DIAGNOSTIC_AIRCARE_FRAME_LAYOUT_CHILD": "1",
+    })
+
+    assert env["KEEP"] == "1"
+    assert "TB_DIAGNOSTIC_AIRCARE_FRAME_LAYOUT_CHILD" not in env
 from tb_runner.run_selection import apply_run_selection
 from tb_runner.run_spec import RunContext, RunSpec, resolve_identity_feature_flags
 

@@ -39,7 +39,11 @@ class _EntryClient:
     def __init__(self, node):
         store = NativeDispatchReceiptStore()
         self._adb_device = SimpleNamespace(native_dispatch_receipts=store)
-        self.evidence_runtime = SimpleNamespace(is_enabled=True, run_id="evidence-run")
+        self.evidence_runtime = SimpleNamespace(
+            is_enabled=True, run_id="evidence-run",
+            _scenario_id="device_air_purifier_plugin",
+            _scenario_tx_id="scenario-tx-current",
+        )
         self._active_evidence_scenario_id = "device_air_purifier_plugin"
         self._active_evidence_scenario_tx_id = "scenario-tx-current"
         self.last_hierarchy_metadata = {

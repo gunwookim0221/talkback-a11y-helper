@@ -73,6 +73,39 @@ class HierarchySnapshotDiagnosticsTest {
     }
 
     @Test
+    fun failureDetailsSurviveLoggerFailureWithoutChangingFailureOutcome() {
+        val trace = HierarchySnapshotTrace(
+            context(),
+            sink = { error("logger unavailable") },
+            monotonicClock = { 200L },
+        )
+        trace.mark("ERROR_STAGE", mapOf("failed_stage" to "ROOT_ACQUISITION", "error_type" to "IllegalStateException"))
+
+        assertEquals("ROOT_ACQUISITION" to "IllegalStateException", trace.failureDetails())
+    }
+
+    @Test
+    fun queueStateTraceIsObservationalAndQueueReadFailureStaysUnavailable() {
+        val lines = mutableListOf<String>()
+        val trace = HierarchySnapshotTrace(context(), lines::add, { 200L })
+        HierarchySnapshotDiagnostics.recordQueueState(
+            trace,
+            eventQueueSnapshot = { throw IllegalStateException("queue read failed") },
+            helperQueueSnapshot = { mapOf("helper_pending_queue_depth" to 0, "helper_active_operation_count" to 0) },
+        )
+        val operationResult = trace.around("SNAPSHOT_READ") { "READY" }
+
+        assertEquals("READY", operationResult)
+        val record = JSONObject(lines.first())
+        assertEquals("WORK_QUEUE_STATE", record.getString("stage"))
+        assertEquals("UNAVAILABLE", record.getString("event_worker_queue_status"))
+        assertEquals(0, record.getInt("helper_pending_queue_depth"))
+        assertEquals(0, record.getInt("helper_active_operation_count"))
+        assertFalse(record.has("authority"))
+        assertFalse(record.has("visit_credit"))
+    }
+
+    @Test
     fun unavailableIdentityAndScenarioContextStayExplicitlyUnknown() {
         val lines = mutableListOf<String>()
         val failures = mutableListOf<Throwable>()

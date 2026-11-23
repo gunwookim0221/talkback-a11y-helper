@@ -62,6 +62,39 @@ class CoalescingAccessibilityEventProcessorTest {
     }
 
     @Test
+    fun queueDiagnosticsObserveLatestOnlySlotWithoutChangingCommitBehavior() {
+        val worker = ManualExecutor()
+        val main = ManualExecutor()
+        val committed = mutableListOf<String>()
+        val disposed = mutableListOf<String>()
+        val processor = CoalescingAccessibilityEventProcessor<String, Result>(
+            worker = worker,
+            main = main,
+            isContextCurrent = { true },
+            process = { input, _ -> Result(input) },
+            commit = { result, _ -> committed += result.value },
+            disposeInput = disposed::add,
+        )
+
+        assertEquals(0, processor.diagnosticsSnapshot().pendingWorkCount)
+        assertTrue(processor.submit("old", context))
+        assertEquals(1, processor.diagnosticsSnapshot().pendingWorkCount)
+        assertTrue(processor.submit("latest", context))
+        val during = processor.diagnosticsSnapshot()
+        assertEquals(1, during.pendingWorkCount)
+        assertTrue(during.drainScheduled)
+        assertEquals(1, worker.size())
+        assertEquals(listOf("old"), disposed)
+
+        worker.runNext()
+        main.runAll()
+        val after = processor.diagnosticsSnapshot()
+        assertEquals(0, after.pendingWorkCount)
+        assertFalse(after.drainScheduled)
+        assertEquals(listOf("latest"), committed)
+    }
+
+    @Test
     fun aNewerEventInvalidatesAnInFlightResultAndOnlyLatestCanCommit() {
         val worker = ManualExecutor()
         val main = ManualExecutor()

@@ -3,6 +3,10 @@ import sys
 import os
 from pathlib import Path
 
+# Canonical batch entry always uses production navigation contracts. Diagnostic
+# child activation is exercised only by direct isolated tests, never by runs.
+os.environ.pop("TB_DIAGNOSTIC_AIRCARE_FRAME_LAYOUT_CHILD", None)
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--serial", type=str, default=os.environ.get("ANDROID_SERIAL"))
 parser.add_argument("--output-dir", type=str, default=None)

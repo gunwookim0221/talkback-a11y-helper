@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+import hashlib
 
 import pytest
 
 from talkback_lib.hierarchy_snapshot import (
+    _exact_canonical_json,
     flatten_service_hierarchy,
     hierarchy_package,
     legacy_scroll_nodes,
@@ -17,14 +19,18 @@ def _fixture_snapshot():
         "text": "Home",
         "contentDescription": "Home tab",
         "viewIdResourceName": "app:id/home",
+        "sourceNodeId": "unique-home",
+        "windowId": 1,
         "className": "android.widget.Button",
         "packageName": "com.example.app",
-        "boundsInScreen": {"left": 0, "top": 2100, "right": 180, "bottom": 2400},
+        "boundsInScreen": {"l": 0, "t": 2100, "r": 180, "b": 2400,
+                           "left": 0, "top": 2100, "right": 180, "bottom": 2400},
         "clickable": True,
         "focusable": True,
         "enabled": True,
         "selected": True,
         "visibleToUser": True,
+        "isVisibleToUser": True,
         "childIndex": 0,
         "children": [],
     }
@@ -32,6 +38,8 @@ def _fixture_snapshot():
         "text": "Life",
         "contentDescription": "",
         "viewIdResourceName": "app:id/life",
+        "sourceNodeId": "unique-life",
+        "windowId": 1,
         "className": "android.widget.Button",
         "packageName": "com.example.app",
         "boundsInScreen": "[180,2100][360,2400]",
@@ -47,6 +55,7 @@ def _fixture_snapshot():
         "text": "",
         "className": "android.widget.FrameLayout",
         "packageName": "com.example.app",
+        "windowId": 1,
         "boundsInScreen": "[0,0][1080,2400]",
         "children": [first, second],
     }
@@ -79,6 +88,7 @@ def _fixture_snapshot():
         ],
         "nodeCount": 4,
         "windowCoverage": "all_service_visible_windows",
+        "snapshotId": "helper-capture-1",
     }
 
 
@@ -134,7 +144,57 @@ def test_service_xml_adapter_preserves_legacy_semantics_and_window_order():
     scroll_roots = legacy_scroll_nodes(snapshot)
     assert [node["text"] for node in scroll_roots] == [""]
     assert scroll_roots[0]["children"][0]["selected"] is True
+    assert scroll_roots[0]["children"][0]["sourceNodeId"] == "unique-home"
+    assert scroll_roots[0]["children"][0]["windowId"] == 1
+    assert scroll_roots[0]["children"][0]["_helperNodePath"] == [0]
+    assert len(scroll_roots[0]["children"][0]["_helperNodeDescriptorDigest"]) == 64
+    raw_home = snapshot["windows"][1]["root"]["children"][0]
+    descriptor = {key: raw_home.get(key) for key in (
+        "text", "contentDescription", "viewIdResourceName", "className", "packageName",
+        "sourceNodeId", "windowId", "boundsInScreen", "clickable", "effectiveClickable",
+        "enabled", "focusable", "focused", "inputFocused", "accessibilityFocused", "selected",
+        "scrollable", "isScrollable", "checkable", "checked", "visibleToUser",
+        "isVisibleToUser", "actions",
+    )}
+    assert scroll_roots[0]["children"][0]["_helperNodeDescriptorDigest"] == hashlib.sha256(
+        _exact_canonical_json(descriptor).encode("utf-8")
+    ).hexdigest()
+    assert scroll_roots[0]["children"][0]["_helperSourceSnapshotId"] == "helper-capture-1"
     assert [node["text"] for node in legacy_scroll_nodes(snapshot, include_all_windows=True)] == ["Dialog", ""]
+
+
+@pytest.mark.parametrize("label", ["AirCare", "상위 메뉴로 이동", "café", "😀", "A\x7fB"])
+def test_descriptor_digest_matches_helper_exact_canonical_for_ascii_and_unicode(label):
+    snapshot = _fixture_snapshot()
+    raw_node = snapshot["windows"][1]["root"]["children"][0]
+    raw_node["text"] = label
+
+    projected = legacy_scroll_nodes(snapshot)[0]["children"][0]
+    descriptor_fields = (
+        "text", "contentDescription", "viewIdResourceName", "className",
+        "packageName", "sourceNodeId", "windowId", "boundsInScreen",
+        "clickable", "effectiveClickable", "enabled", "focusable",
+        "focused", "inputFocused", "accessibilityFocused", "selected",
+        "scrollable", "isScrollable", "checkable", "checked",
+        "visibleToUser", "isVisibleToUser", "actions",
+    )
+    descriptor = {key: raw_node.get(key) for key in descriptor_fields}
+    expected = hashlib.sha256(_exact_canonical_json(descriptor).encode("utf-8")).hexdigest()
+
+    assert projected["_helperNodeDescriptorDigest"] == expected
+
+
+def test_exact_canonical_json_matches_helper_scalar_and_unicode_escaping():
+    assert _exact_canonical_json({"text": "AirCare", "enabled": True, "count": 2, "missing": None}) == (
+        '{"count":2,"enabled":true,"missing":null,"text":"AirCare"}'
+    )
+    assert _exact_canonical_json({"text": "상위 메뉴로 이동"}) == (
+        '{"text":"\\uc0c1\\uc704 \\uba54\\ub274\\ub85c \\uc774\\ub3d9"}'
+    )
+    assert _exact_canonical_json({"text": "😀"}) == '{"text":"\\ud83d\\ude00"}'
+    assert _exact_canonical_json({"text": "A\x7fB"}) == '{"text":"A\\u007fB"}'
+    with pytest.raises(ValueError, match="DESCRIPTOR_UNSUPPORTED_JSON_VALUE"):
+        _exact_canonical_json({"fraction": 1.25})
 
 
 @pytest.mark.parametrize(

@@ -19,6 +19,7 @@ from talkback_lib.constants import (
     ACTION_EVIDENCE_EVENTS,
     ACTION_PING,
     ACTION_RESOLVE_EXACT_NODE,
+    ACTION_NAVIGATION_ACTION,
     ACTION_SMART_NEXT,
     ACTION_FOCUS_IN_BOUNDS,
     ACTION_TARGET_FOCUS_COMMIT,
@@ -45,6 +46,11 @@ from talkback_lib.exact_node_protocol import (
 _DIAGNOSTIC_HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _DIAGNOSTIC_GIT = re.compile(r"^[0-9a-f]{40}$")
 _DIAGNOSTIC_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
+NAVIGATION_ACTIVATION_DIRECT_CLICK = "DIRECT_CLICK"
+NAVIGATION_ACTIVATION_EXACT_OWNER_FOCUS_THEN_CLICK = "EXACT_OWNER_FOCUS_THEN_CLICK"
+NAVIGATION_ACTIVATION_DIAGNOSTIC_AIRCARE_FRAME_LAYOUT_CHILD_CLICK = (
+    "DIAGNOSTIC_AIRCARE_FRAME_LAYOUT_CHILD_CLICK"
+)
 
 
 def _precheck_diagnostic_identity_projection(ping: Any, capabilities: Any) -> dict[str, Any]:
@@ -155,6 +161,40 @@ def _precheck_diagnostic_context(
         "expected_local_manifest": expected_manifest,
         "expected_schemas": expected_schemas,
     }
+
+def _validated_secondary_window_event_diagnostics(
+    value: Any, *, request_id: str, transaction_id: str, service_id: str,
+    window_id: int, package_name: str,
+) -> dict[str, Any] | None:
+    if not isinstance(value, dict) or value.get("evidence_role") != "SECONDARY_ONLY":
+        return None
+    if any(value.get(key) != expected for key, expected in (
+        ("request_id", request_id), ("transaction_id", transaction_id),
+        ("service_instance_id", service_id), ("connection_id", service_id),
+        ("owner_window_id", window_id),
+    )):
+        return None
+    start = value.get("action_dispatch_elapsed_realtime_ms")
+    deadline = value.get("dispatch_deadline_elapsed_realtime_ms")
+    events = value.get("events")
+    if (type(start) is not int or type(deadline) is not int or deadline < start or
+            not isinstance(events, list) or len(events) > 8 or
+            type(value.get("event_count")) is not int or value.get("event_count") != len(events)):
+        return None
+    for event in events:
+        if not isinstance(event, dict) or any(event.get(key) != expected for key, expected in (
+            ("request_id", request_id), ("transaction_id", transaction_id),
+            ("service_instance_id", service_id), ("connection_id", service_id),
+            ("owner_window_id", window_id), ("event_window_id", window_id),
+            ("event_package", package_name),
+        )):
+            return None
+        if (type(event.get("event_type")) is not int or event["event_type"] not in (32, 0x40000000) or
+                type(event.get("event_elapsed_realtime_ms")) is not int or
+                not start <= event["event_elapsed_realtime_ms"] <= deadline):
+            return None
+    return value
+
 
 class HelperBridge:
     BRIDGE_VERSION = "1.0.1"
@@ -324,6 +364,9 @@ class HelperBridge:
             acceptance_mode=acceptance_mode,
         ).to_dict()
         result["helper_service_instance_id"] = ping.get("helper_service_instance_id") if isinstance(ping, dict) else None
+        result["helper_capabilities"] = list(ping.get("capabilities") or []) if isinstance(ping, dict) else []
+        result["navigation_action_state"] = (dict(ping.get("navigation_action_state"))
+            if isinstance(ping, dict) and isinstance(ping.get("navigation_action_state"), dict) else None)
         result["capability_service_instance_id"] = capabilities.get("service_instance_id") if isinstance(capabilities, dict) else None
         result["capability_process_epoch"] = capabilities.get("process_epoch") if isinstance(capabilities, dict) else None
         result["capability_generation"] = capabilities.get("generation") if isinstance(capabilities, dict) else None
@@ -336,6 +379,324 @@ class HelperBridge:
             except Exception:
                 pass
         return result
+
+    def navigation_action_contract_for_scenario(
+        self,
+        dev: Any,
+        scenario_id: str,
+        *,
+        contract_id: str | None = None,
+        identity_check: dict[str, Any] | None = None,
+        repo_root: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Return one locally packaged, build-validated nav contract for a trusted runner scenario."""
+        scenario = str(scenario_id or "").strip()
+        check = identity_check or self.precheck_helper_build_identity(
+            dev=dev, wait_=3.0, repo_root=repo_root, acceptance_mode=True)
+        if not scenario or not helper_compatibility_allows_execution(check):
+            return {"eligible": False, "reason": "HELPER_IDENTITY_NOT_ACCEPTED", "identity_check": check}
+        state = check.get("navigation_action_state")
+        if ("navigation_action" not in (check.get("helper_capabilities") or []) or not isinstance(state, dict)
+                or state.get("supported") is not True or state.get("enabled") is not True
+                or state.get("ready") is not True or state.get("default_enabled") is not False
+                or state.get("visit_credit") is not False or state.get("c5_credit") is not False
+                or state.get("exact_action_gate_independent") is not True
+                or state.get("service_instance_id") != check.get("helper_service_instance_id")):
+            return {"eligible": False, "reason": "NAVIGATION_CAPABILITY_NOT_READY", "identity_check": check}
+        contracts = state.get("contracts")
+        if not isinstance(contracts, list):
+            return {"eligible": False, "reason": "NAVIGATION_CONTRACTS_INVALID", "identity_check": check}
+        requested_contract_id = str(contract_id or "").strip()
+        matches = [row for row in contracts if isinstance(row, dict) and
+                   isinstance(row.get("scenario_ids"), list) and scenario in row["scenario_ids"] and
+                   (not requested_contract_id or row.get("contract_id") == requested_contract_id)]
+        if len(matches) != 1:
+            return {"eligible": False,
+                    "reason": "NAVIGATION_CONTRACT_MISSING" if not matches else "NAVIGATION_CONTRACT_AMBIGUOUS",
+                    "identity_check": check}
+        contract = matches[0]
+        contract_id = contract.get("contract_id")
+        digest = contract.get("contract_digest")
+        if (not isinstance(contract_id, str) or not contract_id or
+                not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+            return {"eligible": False, "reason": "NAVIGATION_CONTRACT_INVALID", "identity_check": check}
+        return {"eligible": True, "reason": "READY", "scenario_id": scenario,
+                "contract_id": contract_id, "contract_digest": digest, "identity_check": check}
+
+    def dispatch_navigation_action(
+        self,
+        dev: Any,
+        *,
+        scenario_id: str,
+        transaction_id: str,
+        capture_session: dict[str, Any],
+        current_lease: dict[str, Any],
+        readiness: dict[str, Any],
+        activation_mode: str = NAVIGATION_ACTIVATION_DIRECT_CLICK,
+        wait_seconds: float = 8.0,
+    ) -> dict[str, Any]:
+        """Dispatch one nav request against the exact already-armed Helper capture lease."""
+        if readiness.get("eligible") is not True or readiness.get("scenario_id") != scenario_id:
+            return {"success": False, "status": "rejected", "reason": "NAVIGATION_CAPABILITY_NOT_READY"}
+        if activation_mode not in {NAVIGATION_ACTIVATION_DIRECT_CLICK,
+                                   NAVIGATION_ACTIVATION_EXACT_OWNER_FOCUS_THEN_CLICK,
+                                   NAVIGATION_ACTIVATION_DIAGNOSTIC_AIRCARE_FRAME_LAYOUT_CHILD_CLICK}:
+            return {"success": False, "status": "rejected", "reason": "NAVIGATION_ACTIVATION_MODE_NOT_ALLOWLISTED"}
+        armed = capture_session.get("armed") if isinstance(capture_session, dict) else None
+        current = current_lease.get("result") if isinstance(current_lease, dict) else None
+        if not isinstance(armed, dict) or not isinstance(current, dict) or current_lease.get("ok") is not True:
+            return {"success": False, "status": "rejected", "reason": "NAVIGATION_OWNER_LEASE_INVALID"}
+        if activation_mode == NAVIGATION_ACTIVATION_DIAGNOSTIC_AIRCARE_FRAME_LAYOUT_CHILD_CLICK and (
+                scenario_id != "life_air_care_plugin" or
+                readiness.get("contract_id") != "life_service_card_read_only_navigation" or
+                current.get("ownerPackageName") != "com.samsung.android.oneconnect"):
+            return {"success": False, "status": "rejected",
+                    "reason": "NAVIGATION_DIAGNOSTIC_MODE_SCOPE_MISMATCH"}
+        if armed.get("invocationUriBound") is not True or current.get("invocationUriBound") is not True:
+            return {"success": False, "status": "rejected", "reason": "NAVIGATION_INVOCATION_NOT_BOUND"}
+        fields = ("runId", "invocationId", "scenarioId", "captureId", "connectionId", "ownerLeaseId", "ownerWindowId",
+                  "ownerPackageName", "ownerPath", "ownerDescriptorDigest", "sourceSnapshotId", "helperSnapshotId",
+                  "baselineHierarchyDigest", "sourceCaptureRequestId", "sourceProcessEpoch", "sourceGeneration",
+                  "sourceServiceInstanceId", "sourceCaptureSequence", "sourceRootDigest", "sourceCandidateDigest",
+                  "sourceCaptureKey", "sourceConnectionEpoch", "sourceBootEpoch", "ownerSourceNodeId",
+                  "ownerSourceNodeIdStatus")
+        if any(current.get(key) != armed.get(key) for key in fields):
+            return {"success": False, "status": "rejected", "reason": "NAVIGATION_OWNER_LEASE_MISMATCH"}
+        source_node_id = current.get("ownerSourceNodeId")
+        source_node_id_status = current.get("ownerSourceNodeIdStatus")
+        source_node_identity_valid = (
+            source_node_id_status == "FIELD_PRESENT" and isinstance(source_node_id, str)
+            and bool(source_node_id.strip())
+        ) or (
+            source_node_id_status == "FIELD_ABSENT" and isinstance(source_node_id, str)
+            and not source_node_id.strip()
+        )
+        if not source_node_identity_valid:
+            return {"success": False, "status": "rejected", "reason": "NAVIGATION_OWNER_SOURCE_IDENTITY_INVALID"}
+        identity_check = readiness.get("identity_check")
+        identity_check = identity_check if isinstance(identity_check, dict) else {}
+        ping_lifecycle = identity_check.get("exact_action_state")
+        ping_lifecycle = ping_lifecycle if isinstance(ping_lifecycle, dict) else {}
+        expected_connection_epoch = (identity_check.get("navigation_connection_epoch")
+                                     or identity_check.get("helper_connection_epoch")
+                                     or identity_check.get("connection_epoch")
+                                     or ping_lifecycle.get("connection_epoch"))
+        expected_boot_epoch = identity_check.get("boot_epoch") or ping_lifecycle.get("boot_epoch")
+        if (not expected_connection_epoch or not expected_boot_epoch
+                or str(current.get("sourceConnectionEpoch")) != str(expected_connection_epoch)
+                or str(current.get("sourceBootEpoch")) != str(expected_boot_epoch)):
+            return {"success": False, "status": "rejected", "reason": "NAVIGATION_SOURCE_LIFECYCLE_IDENTITY_MISMATCH"}
+        owner_capture_id = str(capture_session.get("req_id") or "")
+        tx = str(transaction_id or "")
+        if (not owner_capture_id or current.get("scenarioId") != scenario_id or current.get("transactionId") != tx or
+                current.get("connectionId") != readiness.get("identity_check", {}).get("helper_service_instance_id") or
+                not isinstance(current.get("ownerPath"), list) or not current["ownerPath"]):
+            return {"success": False, "status": "rejected", "reason": "NAVIGATION_BINDING_INVALID"}
+        request_id = str(uuid.uuid4())
+        broadcast_stdout = ""
+        request = {
+            "request_id": request_id,
+            "action": "ACTION_CLICK",
+            "scenario_id": scenario_id,
+            "transaction_id": tx,
+            "owner_capture_request_id": owner_capture_id,
+            "owner_lease_id": current["ownerLeaseId"],
+            "run_id": current["runId"],
+            "invocation_id": current["invocationId"],
+            "service_instance_id": current["connectionId"],
+            "connection_id": current["connectionId"],
+            "window_id": current["ownerWindowId"],
+            "node_path": current["ownerPath"],
+            "descriptor_digest": current["ownerDescriptorDigest"],
+            "package_name": str(current.get("ownerPackageName") or ""),
+            "source_snapshot_id": current["sourceSnapshotId"],
+            "helper_snapshot_id": current["helperSnapshotId"],
+            "baseline_hierarchy_digest": current["baselineHierarchyDigest"],
+            "capture_id": current["captureId"],
+            "source_identity": {
+                "request_id": current["sourceCaptureRequestId"],
+                "process_epoch": current["sourceProcessEpoch"],
+                "generation": current["sourceGeneration"],
+                "service_instance_id": current["sourceServiceInstanceId"],
+                "capture_sequence": current["sourceCaptureSequence"],
+                "root_digest": current["sourceRootDigest"],
+                "candidate_digest": current["sourceCandidateDigest"],
+                "capture_key": current["sourceCaptureKey"],
+                "connection_epoch": current["sourceConnectionEpoch"],
+                "boot_epoch": current["sourceBootEpoch"],
+                "owner_source_node_id": current["ownerSourceNodeId"],
+                "owner_source_node_id_status": current["ownerSourceNodeIdStatus"],
+            },
+            "effect_contract_id": readiness["contract_id"],
+            "effect_contract_digest": readiness["contract_digest"],
+        }
+        if activation_mode != NAVIGATION_ACTIVATION_DIRECT_CLICK:
+            request["activation_mode"] = activation_mode
+        if not request["package_name"]:
+            return {"success": False, "status": "rejected", "reason": "NAVIGATION_TARGET_PACKAGE_MISSING"}
+        adb_shell_escape = getattr(self._client, "_escape_adb_string", None)
+        if not callable(adb_shell_escape):
+            return {"success": False, "status": "rejected", "reason": "NAVIGATION_ADB_SHELL_ESCAPE_UNAVAILABLE",
+                    "reqId": request_id}
+        broadcast_argv: list[str] = []
+        try:
+            self._client.clear_logcat(dev=dev)
+            broadcast_stdout = str(self._client._broadcast(dev, ACTION_NAVIGATION_ACTION, [
+                "--es", "reqId", request_id,
+                "--es", "navigationActionRequest", adb_shell_escape(canonical_json(request)),
+            ]) or "")
+            broadcast_argv = list(getattr(self._client, "_last_broadcast_command", []) or [])
+            result = self._client._read_log_result(dev, "NAVIGATION_ACTION_RESULT", request_id,
+                wait_seconds=max(0.1, min(float(wait_seconds), 15.0)), poll_interval_sec=0.05)
+        except Exception as error:
+            failure = {"success": False, "status": "transport_error",
+                       "reason": f"NAVIGATION_ACTION_TRANSPORT_ERROR:{type(error).__name__}", "reqId": request_id,
+                       "broadcast_stdout": " ".join(broadcast_stdout.split())[:240],
+                       "broadcast_argv": list(getattr(self._client, "_last_broadcast_command", []) or [])}
+            if isinstance(error, AdbCommandFailure):
+                failure.update(adb_failure_reason=error.reason, adb_returncode=error.returncode,
+                               adb_stderr=" ".join(error.stderr.split())[:240],
+                               adb_stdout=" ".join(error.stdout.split())[:240],
+                               broadcast_argv=list(error.command))
+            return failure
+        reader_miss = isinstance(result, dict) and result.get("reqId") == request_id and (
+            result.get("status") == "transport_error" or
+            (result.get("success") is False and not result.get("status") and
+             not result.get("failure_code") and not result.get("receipt") and "reason" in result)
+        )
+        if not isinstance(result, dict) or result.get("reqId") != request_id or reader_miss:
+            return {"success": False, "status": "transport_error", "reason": "NAVIGATION_ACTION_RESULT_MISSING",
+                    "reqId": request_id, "broadcast_stdout": " ".join(broadcast_stdout.split())[:240],
+                    "broadcast_argv": broadcast_argv,
+                    "response_keys": sorted(str(key) for key in result)[:16] if isinstance(result, dict) else [],
+                    "read_result_reason": str(result.get("reason") or "")[:160] if reader_miss else "",
+                    "read_result_status": str(result.get("status") or "") if reader_miss else ""}
+        receipt = result.get("receipt")
+        secondary_window_event_diagnostics = _validated_secondary_window_event_diagnostics(
+            result.get("secondary_window_event_diagnostics"), request_id=request_id, transaction_id=tx,
+            service_id=current["connectionId"], window_id=current["ownerWindowId"],
+            package_name=request["package_name"],
+        )
+        secondary_diagnostics_field = ({"secondary_window_event_diagnostics": secondary_window_event_diagnostics}
+                                       if secondary_window_event_diagnostics is not None else {})
+        if not isinstance(receipt, dict):
+            return {"success": False, "status": "protocol_error", "reason": "NAVIGATION_ACTION_RECEIPT_INVALID",
+                    "reqId": request_id, "raw_result": result,
+                    "broadcast_stdout": " ".join(broadcast_stdout.split())[:240],
+                    "broadcast_argv": broadcast_argv,
+                    "response_req_id": str(result.get("reqId") or ""),
+                    "response_status": str(result.get("status") or ""),
+                    "response_failure_code": str(result.get("failure_code") or ""),
+                    "response_keys": sorted(str(key) for key in result)[:16],
+                    "receipt_present": False}
+        expected = {
+            "request_id": request_id, "action": "ACTION_CLICK", "transaction_id": tx, "scenario_id": scenario_id,
+            "owner_capture_request_id": owner_capture_id, "owner_lease_id": current["ownerLeaseId"],
+            "run_id": current["runId"], "invocation_id": current["invocationId"],
+            "service_instance_id": current["connectionId"], "connection_id": current["connectionId"],
+            "window_id": current["ownerWindowId"], "source_capture_id": current["captureId"],
+            "helper_snapshot_id": current["helperSnapshotId"],
+            "source_identity": request["source_identity"],
+            "effect_contract_id": readiness["contract_id"], "effect_contract_digest": readiness["contract_digest"],
+        }
+        if activation_mode != NAVIGATION_ACTIVATION_DIRECT_CLICK:
+            expected["activation_mode"] = activation_mode
+        mismatch_fields = [key for key, value in expected.items() if receipt.get(key) != value]
+        if activation_mode == NAVIGATION_ACTIVATION_DIAGNOSTIC_AIRCARE_FRAME_LAYOUT_CHILD_CLICK:
+            diagnostic_target = receipt.get("diagnostic_target")
+            expected_target = {
+                "path": current["ownerPath"] + [0],
+                "class_name": "android.widget.FrameLayout",
+                "resource_id": "com.samsung.android.oneconnect:id/frameLayout",
+                "window_id": current["ownerWindowId"],
+                "source_snapshot_id": current["sourceSnapshotId"],
+                "helper_snapshot_id": current["helperSnapshotId"],
+                "baseline_hierarchy_digest": current["baselineHierarchyDigest"],
+                "parent_path": current["ownerPath"],
+            }
+            if not isinstance(diagnostic_target, dict):
+                mismatch_fields.append("diagnostic_target")
+            else:
+                mismatch_fields.extend(f"diagnostic_target.{key}" for key, value in expected_target.items()
+                                       if diagnostic_target.get(key) != value)
+            if receipt.get("status") != "DIAGNOSTIC_ONLY":
+                mismatch_fields.append("status")
+            if receipt.get("diagnostic_only") is not True:
+                mismatch_fields.append("diagnostic_only")
+            if receipt.get("verified_navigation") is not False:
+                mismatch_fields.append("verified_navigation")
+            if receipt.get("visit_authority") is not False:
+                mismatch_fields.append("visit_authority")
+            if receipt.get("c5_credit") is not False:
+                mismatch_fields.append("c5_credit")
+            if receipt.get("traversal_credit") is not False:
+                mismatch_fields.append("traversal_credit")
+            if receipt.get("activation_mode") != activation_mode:
+                mismatch_fields.append("activation_mode")
+            if receipt.get("diagnostic_action_dispatched") not in (True, False):
+                mismatch_fields.append("diagnostic_action_dispatched")
+            if receipt.get("action_call_count") not in (0, 1):
+                mismatch_fields.append("action_call_count")
+            diagnostic_event = receipt.get("diagnostic_click_event")
+            if receipt.get("diagnostic_action_dispatched") is True:
+                if isinstance(diagnostic_event, dict):
+                    event_expected = {
+                        "exact_target_match": True,
+                        "event_type": 1,
+                        "request_id": request_id,
+                        "transaction_id": tx,
+                        "service_instance_id": current["connectionId"],
+                        "connection_id": current["connectionId"],
+                        "window_id": current["ownerWindowId"],
+                    }
+                    mismatch_fields.extend(f"diagnostic_click_event.{key}"
+                                           for key, value in event_expected.items()
+                                           if diagnostic_event.get(key) != value)
+                elif not receipt.get("failure_code"):
+                    mismatch_fields.append("diagnostic_click_event")
+            if mismatch_fields:
+                return {"success": False, "status": "protocol_error",
+                        "reason": "NAVIGATION_DIAGNOSTIC_RECEIPT_INVALID", "reqId": request_id,
+                        "receipt": receipt, "receipt_mismatch_fields": mismatch_fields,
+                        "request": request, "broadcast_stdout": " ".join(broadcast_stdout.split())[:240],
+                        "broadcast_argv": broadcast_argv, **secondary_diagnostics_field}
+            return {"success": False, "status": "diagnostic_only",
+                    "reason": "DIAGNOSTIC_ONLY_NO_NAVIGATION_CREDIT", "reqId": request_id,
+                    "action_dispatched": receipt["diagnostic_action_dispatched"],
+                    "receipt": receipt, "request": request,
+                    "broadcast_stdout": " ".join(broadcast_stdout.split())[:240],
+                    "broadcast_argv": broadcast_argv, **secondary_diagnostics_field}
+        if receipt.get("status") != "VERIFIED_NAVIGATION":
+            mismatch_fields.append("status")
+        if receipt.get("verified_navigation") is not True:
+            mismatch_fields.append("verified_navigation")
+        if receipt.get("action_call_count") != 1:
+            mismatch_fields.append("action_call_count")
+        if receipt.get("visit_authority") is not False:
+            mismatch_fields.append("visit_authority")
+        if receipt.get("c5_credit") is not False:
+            mismatch_fields.append("c5_credit")
+        if mismatch_fields:
+            post_state_diagnostics = receipt.get("post_state_diagnostics", {})
+            if not isinstance(post_state_diagnostics, dict):
+                post_state_diagnostics = {}
+            return {"success": False, "status": "rejected", "reason": "NAVIGATION_ACTION_RECEIPT_UNVERIFIED",
+                    "reqId": request_id, "receipt": receipt,
+                    "receipt_mismatch_fields": mismatch_fields,
+                    "post_state_mismatch_fields": receipt.get("post_state_mismatch_fields", []),
+                    "post_state_diagnostics": post_state_diagnostics,
+                    "receipt_status": str(receipt.get("status") or ""),
+                    "receipt_failure_code": str(receipt.get("failure_code") or ""),
+                    "receipt_request_id": str(receipt.get("request_id") or ""),
+                    "receipt_action_call_count": receipt.get("action_call_count"),
+                    "receipt_owner_receipt_reason": str(receipt.get("owner_receipt_reason") or ""),
+                    "receipt_owner_click_count": receipt.get("owner_receipt_eligible_exact_click_count"),
+                    "broadcast_stdout": " ".join(broadcast_stdout.split())[:240],
+                    "broadcast_argv": broadcast_argv,
+                    **secondary_diagnostics_field}
+        return {"success": True, "status": "VERIFIED_NAVIGATION", "reqId": request_id, "receipt": receipt,
+                "request": request, "broadcast_stdout": " ".join(broadcast_stdout.split())[:240],
+                "broadcast_argv": broadcast_argv, **secondary_diagnostics_field}
 
     def resolve_exact_node_read_only(
         self,

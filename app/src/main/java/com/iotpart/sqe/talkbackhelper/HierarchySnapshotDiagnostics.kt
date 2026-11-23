@@ -29,8 +29,21 @@ internal class HierarchySnapshotTrace(
     private val monotonicClock: () -> Long = { SystemClock.elapsedRealtimeNanos() },
     private val failureSink: (Throwable) -> Unit = {},
 ) {
+    @Volatile private var observedFailureStage: String? = null
+    @Volatile private var observedFailureType: String? = null
+
+    fun failureDetails(): Pair<String?, String?> = observedFailureStage to observedFailureType
+
     fun mark(stage: String, fields: Map<String, Any?> = emptyMap()) {
         try {
+            if (stage == "ERROR_STAGE") {
+                (fields["failed_stage"] as? String)?.takeIf { it.matches(Regex("[A-Za-z0-9_]{1,64}")) }?.let {
+                    if (observedFailureStage == null) observedFailureStage = it
+                }
+                (fields["error_type"] as? String)?.takeIf { it.matches(Regex("[A-Za-z0-9_]{1,64}")) }?.let {
+                    if (observedFailureType == null) observedFailureType = it
+                }
+            }
             val now = monotonicClock()
             val record = JSONObject()
                 .put("timestamp_ms", System.currentTimeMillis())
@@ -109,6 +122,25 @@ internal object HierarchySnapshotDiagnostics {
             helperInputDigest = BuildIdentity.inputDigest,
         )
         return HierarchySnapshotTrace(context)
+    }
+
+    internal fun recordQueueState(
+        trace: HierarchySnapshotTrace,
+        eventQueueSnapshot: () -> Map<String, Any?>,
+        helperQueueSnapshot: () -> Map<String, Any?>,
+    ) {
+        val fields = linkedMapOf<String, Any?>()
+        try {
+            fields.putAll(eventQueueSnapshot())
+        } catch (_: Throwable) {
+            fields["event_worker_queue_status"] = "UNAVAILABLE"
+        }
+        try {
+            fields.putAll(helperQueueSnapshot())
+        } catch (_: Throwable) {
+            fields["helper_queue_status"] = "UNAVAILABLE"
+        }
+        trace.mark("WORK_QUEUE_STATE", fields)
     }
 
     const val EXTRA_RUN_ID = "hierarchyDiagnosticRunId"

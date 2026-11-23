@@ -2,9 +2,34 @@
 from copy import deepcopy
 from pathlib import Path
 import xml.etree.ElementTree as ET
+import pytest
 
+from tb_runner import entry_safety
 from tb_runner.entry_safety import (authorize_entry, classify_post_open,
     click_events, hierarchy_digest, resolve_navigation_owner, verify_actual_hit)
+
+_BASE_ENTRY_SAFETY_CONFIG = entry_safety.default_config
+
+
+@pytest.fixture(autouse=True)
+def explicit_read_only_effect_for_positive_harness_cases(monkeypatch):
+    def test_config():
+        config = deepcopy(_BASE_ENTRY_SAFETY_CONFIG())
+        config.setdefault("metadata_rules", []).append({
+            "match": {"resource_id": ".*", "context_kind": "plugin_entry"},
+            "effect": "read_only_navigation",
+        })
+        return config
+    monkeypatch.setattr(entry_safety, "default_config", test_config)
+
+
+def test_absent_configured_read_only_effect_is_not_granted_by_default(monkeypatch):
+    monkeypatch.setattr(entry_safety, "default_config", _BASE_ENTRY_SAFETY_CONFIG)
+    card = node("app:id/plain", "Example Service", "[20,100][1000,600]", clickable=True)
+    result = resolve_navigation_owner([card], card, "Example Service")
+    decision = authorize_entry(result, [card], scenario="example", matched_phrase="Example Service")
+    assert decision["authorized"] is False
+    assert decision["reason"] == "ENTRY_TARGET_RISK_OR_CONFIG_CONFLICT"
 
 
 def test_entry_click_capture_helper_action_is_registered_with_permission_gate():
@@ -25,6 +50,7 @@ def test_entry_click_capture_helper_action_is_registered_with_permission_gate():
 def node(rid, label, bounds, *, clickable=False, children=None, klass="android.view.ViewGroup", checkable=False):
     return dict(viewIdResourceName=rid, contentDescription=label, text="", className=klass,
                 boundsInScreen=bounds, clickable=clickable, enabled=True, checkable=checkable,
+                sourceNodeId=f"stable:{rid}" if rid else None, windowId=4,
                 children=children or [])
 
 
@@ -36,6 +62,28 @@ def mixed_card():
                 children=[header, child])
     card.update(role="button", actions=[16])
     return [card], card, header, child
+
+
+def current_focus_observation(*, request_id, transaction_id, capture_id, connection_id,
+                              click_event_id, dispatch_ms, click_captured_ms, focus_label="Destination",
+                              owner_lease=None):
+    observation = dict(
+        event_id="post-focus-event", request_id=request_id, transaction_id=transaction_id,
+        capture_id=capture_id, connection_id=connection_id, source_click_event_id=click_event_id,
+        dispatch_uptime_ms=dispatch_ms, source_click_captured_elapsed_realtime_ms=click_captured_ms,
+        captured_elapsed_realtime_ms=click_captured_ms + 100, current_capture_id="post-capture-id",
+        root_window_id=9, focus_node_id="focus-node", focus_window_id=9, accessibility_focused=True,
+        current_hierarchy=dict(sourceNodeId="focus-node", windowId=9, accessibilityFocused=True,
+                               text=focus_label, contentDescription="", children=[]),
+    )
+    if isinstance(owner_lease, dict):
+        for payload_key, observation_key in (
+            ("ownerLeaseId", "owner_lease_id"), ("runId", "run_id"),
+            ("invocationId", "invocation_id"), ("helperSnapshotId", "owner_helper_snapshot_id"),
+            ("ownerDescriptorDigest", "owner_descriptor_digest"),
+        ):
+            observation[observation_key] = owner_lease.get(payload_key)
+    return observation
 
 
 def nested_action_card():
@@ -140,10 +188,12 @@ def test_parent_center_cannot_inherit_navigation_authorization_for_security_chil
     permit = authorize_entry(resolve_navigation_owner(roots, card, "Example Service"), roots,
                              scenario="life_example_plugin", matched_phrase="Example Service")
     assert permit["point"] != (510, 350)
-    hit = {"1": dict(package="com.samsung.android.oneconnect", class_name="android.view.ViewGroup",
-                          text="[Armed, Stay]", bounds=(400, 300, 700, 540))}
-    result = verify_actual_hit(permit, {}, hit)
-    assert result["matched"] is False and result["reason"] == "ACTIVATED_TARGET_MISMATCH"
+    event = dict(event_id="click-event", package="com.samsung.android.oneconnect",
+                 transaction_id=permit["transaction_id"], source_node_id=child["sourceNodeId"],
+                 window_id=child["windowId"], class_name="android.view.ViewGroup",
+                 text="[Armed, Stay]", bounds=(400, 300, 700, 540))
+    result = verify_actual_hit(permit, {}, {"click-event": event}, roots=roots)
+    assert result["matched"] is False and result["reason"] == "ACTIVATED_SOURCE_AMBIGUOUS"
 
 
 def test_ambiguous_named_actions_fail_closed():
@@ -184,6 +234,49 @@ def test_plain_card_preserves_navigation_and_unknown_target_blocks():
                                scenario="example", matched_phrase="Example Service")["authorized"]
 
 
+def test_helper_hierarchy_does_not_invent_missing_xmlentry_target_identity():
+    from talkback_lib.hierarchy_snapshot import legacy_scroll_nodes
+
+    candidate = dict(
+        className="android.widget.RelativeLayout",
+        packageName="com.samsung.android.oneconnect",
+        viewIdResourceName="",
+        text="",
+        contentDescription="Air Care",
+        boundsInScreen={"left": 30, "top": 2054, "right": 1050, "bottom": 2558},
+        clickable=True,
+        enabled=True,
+        windowId=45518,
+        sourceNodeId=None,
+        children=[],
+    )
+    snapshot = {
+        "success": True,
+        "windows": [{
+            "id": 45518,
+            "active": True,
+            "focused": True,
+            "root": {
+                "className": "android.widget.FrameLayout",
+                "packageName": "com.samsung.android.oneconnect",
+                "boundsInScreen": {"left": 0, "top": 0, "right": 1080, "bottom": 2400},
+                "windowId": 45518,
+                "children": [candidate],
+            },
+        }],
+    }
+    roots = legacy_scroll_nodes(snapshot)
+    adapted_candidate = roots[0]["children"][0]
+
+    assert adapted_candidate["sourceNodeId"] is None
+    assert adapted_candidate["windowId"] == 45518
+    resolution = resolve_navigation_owner(roots, adapted_candidate, "Air Care")
+    assert resolution["ok"] is True
+    decision = authorize_entry(resolution, roots, scenario="life_air_care_plugin", matched_phrase="Air Care")
+    assert decision["authorized"] is False
+    assert decision["reason"] == "ENTRY_TARGET_STABLE_IDENTITY_UNAVAILABLE"
+
+
 def test_risky_and_configured_forbidden_entry_actions_are_blocked(monkeypatch):
     from tb_runner import entry_safety
     risky = node("app:id/delete", "Delete account", "[20,100][1000,600]", clickable=True)
@@ -197,7 +290,7 @@ def test_risky_and_configured_forbidden_entry_actions_are_blocked(monkeypatch):
     monkeypatch.setattr(entry_safety, "default_config", lambda: config)
     decision = authorize_entry(resolve_navigation_owner([forbidden], forbidden, "Example Service"), [forbidden],
                                scenario="example", matched_phrase="Example Service")
-    assert not decision["authorized"] and decision["classification"]["safety_class"] == "FORBIDDEN"
+    assert not decision["authorized"] and decision["reason"] == "ENTRY_TARGET_RISK_OR_CONFIG_CONFLICT"
 
 
 def test_hierarchy_change_or_target_change_invalidates_exact_permit():
@@ -222,11 +315,31 @@ def test_actual_click_bounds_and_semantics_match_exact_owner():
     roots, card, header, child = mixed_card()
     permit = authorize_entry(resolve_navigation_owner(roots, card, "Example Service"), roots,
                              scenario="example", matched_phrase="Example Service")
-    hit = {"1": dict(package="com.samsung.android.oneconnect", bounds=(20,120,1000,180),
-                          text="[Example Service]")}
-    assert verify_actual_hit(permit, {}, hit)["matched"]
-    hit["1"]["text"] = "[Armed Stay]"
-    assert not verify_actual_hit(permit, {}, hit)["matched"]
+    click = dict(
+        event_id="click-event", event_time="1100", event_ingestion_elapsed_realtime_ms=1100,
+        dispatch_uptime_ms=1000, package="com.samsung.android.oneconnect",
+        transaction_id=permit["transaction_id"], request_id="request-1", capture_id="capture-1",
+        connection_id="connection-1", source_node_id=header["sourceNodeId"], window_id=header["windowId"],
+    )
+    collection = dict(
+        req_id="request-1", transaction_id=permit["transaction_id"], capture_id="capture-1",
+        connection_id="connection-1", deadline_uptime_ms=2000,
+        post_action_observations=[current_focus_observation(
+            request_id="request-1", transaction_id=permit["transaction_id"], capture_id="capture-1",
+            connection_id="connection-1", click_event_id="click-event", dispatch_ms=1000,
+            click_captured_ms=1100)],
+    )
+    hit = verify_actual_hit(
+        permit, {}, {"click-event": click}, roots=roots, dispatch_uptime_ms=1000,
+        collection=collection, required_anchor_patterns={"anchor_text": "Destination"},
+    )
+    assert hit["matched"] is True
+    click["source_node_id"] = child["sourceNodeId"]
+    hit = verify_actual_hit(
+        permit, {}, {"click-event": click}, roots=roots, dispatch_uptime_ms=1000,
+        collection=collection, required_anchor_patterns={"anchor_text": "Destination"},
+    )
+    assert not hit["matched"] and hit["reason"] == "ACTIVATED_SOURCE_AMBIGUOUS"
 
 
 def test_logcat_click_parser_correlates_event_bounds():
@@ -305,6 +418,8 @@ def test_intermediate_and_same_activity_plugin_body_remain_distinct():
 def test_xml_entry_enforces_exact_owner_before_physical_tap(monkeypatch, tmp_path):
     from tb_runner import collection_flow, entry_safety
     roots, card, header, child = mixed_card()
+    header.update(_helperNodePath=[0], _helperNodeDescriptorDigest="d" * 64,
+                  _helperSourceSnapshotId="source-snapshot")
     wrapped = [node("", "", "[0,0][1,1]", children=roots)]
     # The real hierarchy loader supplies a root wrapper around service nodes.
     monkeypatch.setenv("TB_PHASE5B_CONTROLLED", "1")
@@ -320,25 +435,74 @@ def test_xml_entry_enforces_exact_owner_before_physical_tap(monkeypatch, tmp_pat
         def dump_tree(self, **_): return wrapped
         def tap_xy_adb(self, **kw): self.taps.append((kw["x"],kw["y"])); return True
     client = Client()
-    capture = dict(req_id="capture", armed={"ok": True}, talkback_baseline={})
-    event = dict(event_time="1500", package="com.samsung.android.oneconnect", class_name="android.view.ViewGroup",
-                 bounds=(20,120,1000,180), text="[Example Service]")
-    monkeypatch.setattr(entry_safety, "begin_transaction_click_capture", lambda *_a, **_k: capture)
+    capture_sessions = []
+    def begin_capture(_client, _dev, *, transaction_id, target_node, scenario_id):
+        assert target_node is header
+        armed = dict(ok=True, reqId="capture", captureReqId="capture",
+            requestedTransactionId=transaction_id, transactionId=transaction_id,
+            captureId="capture-id", connectionId="connection-1", runId="run-1",
+            invocationId="invocation-1", ownerLeaseId="lease-1", ownerWindowId=4,
+            ownerPath=[0], ownerDescriptorDigest="d" * 64,
+            sourceSnapshotId="source-snapshot", helperSnapshotId="helper-snapshot",
+            leaseDeadlineElapsedRealtimeMs=999999)
+        capture = dict(req_id="capture", transaction_id=transaction_id, capture_id="capture-id",
+                       connection_id="connection-1", armed=armed, talkback_baseline={})
+        capture_sessions.append(capture)
+        return capture
+    monkeypatch.setattr(entry_safety, "begin_transaction_click_capture", begin_capture)
+    monkeypatch.setattr(entry_safety, "validate_transaction_click_capture",
+                        lambda *_a, **_k: {"ok": True, "reason": "TARGET_CURRENT"})
     def dispatch(client, _dev, point):
         client.taps.append(tuple(point))
         return dict(executed=True, dispatch_uptime_ms=1000, dispatch_started_monotonic_ns=1_000_000_000)
     monkeypatch.setattr(entry_safety, "dispatch_authorized_entry_tap", dispatch)
     monkeypatch.setattr(entry_safety, "mark_transaction_click_dispatch", lambda *_a, **_k: {"ok": True})
-    monkeypatch.setattr(entry_safety, "collect_transaction_click_events", lambda *_a, **_k: dict(
-        ok=True, candidate_events=[event], deadline_uptime_ms=2000))
+    def collect(*_args, **kwargs):
+        capture = capture_sessions[0]
+        permit = kwargs["permit"]
+        request_id = capture["req_id"]
+        transaction_id = permit["transaction_id"]
+        click = dict(
+            event_id="click-event", event_time="1500", event_ingestion_elapsed_realtime_ms=1501,
+            event_time_elapsed_realtime_ms=1500,
+            dispatch_uptime_ms=1000, package="com.samsung.android.oneconnect",
+            transaction_id=transaction_id, request_id=request_id, capture_id=capture["capture_id"],
+            connection_id=capture["connection_id"], source_node_id=header["sourceNodeId"],
+            window_id=header["windowId"], bounds=(20,120,1000,180), text="[Example Service]",
+            owner_relation="EXACT_RETAINED_NODE_REFERENCE", owner_exact=True, owner_lease_id="lease-1",
+            owner_window_id=4, owner_helper_snapshot_id="helper-snapshot",
+            owner_descriptor_digest="d" * 64, run_id="run-1", invocation_id="invocation-1",
+        )
+        post = current_focus_observation(
+            request_id=request_id, transaction_id=transaction_id, capture_id=capture["capture_id"],
+            connection_id=capture["connection_id"], click_event_id="click-event",
+            dispatch_ms=1000, click_captured_ms=1501, owner_lease=capture["armed"],
+        )
+        return dict(ok=True, req_id=request_id, transaction_id=transaction_id,
+                    capture_id=capture["capture_id"], connection_id=capture["connection_id"],
+                    candidate_events=[click], post_action_observations=[post], deadline_uptime_ms=2000)
+    monkeypatch.setattr(entry_safety, "collect_transaction_click_events", collect)
     ok, reason = collection_flow._run_xml_scroll_search_tap(
-        client, "SERIAL", tab_cfg={"scenario_id": "life_example_plugin"},
+        client, "SERIAL", tab_cfg={"scenario_id": "life_example_plugin",
+                                   "anchor": {"text_regex": "Destination"}},
         target="Example Service", type_="card", max_scroll_search_steps=0,
         step_wait_seconds=.1, transition_fast_path=True)
     assert ok and reason == "xml_entry_success"
     assert client.taps == [(510,150)]
     audit = (tmp_path / "phase5c_entry_actions.jsonl").read_text(encoding="utf8")
-    assert audit.index("ENTRY_AUTHORIZATION") < audit.index("ENTRY_DISPATCH") < audit.index("ENTRY_ACTUAL_HIT")
+    assert audit.index("ENTRY_AUTHORIZATION") < audit.index("ENTRY_CLICK_CAPTURE_PRE_DISPATCH_VALIDATION") \
+        < audit.index("ENTRY_DISPATCH") < audit.index("ENTRY_ACTUAL_HIT")
+
+    client.taps.clear()
+    monkeypatch.setattr(entry_safety, "validate_transaction_click_capture",
+                        lambda *_a, **_k: {"ok": False, "reason": "ENTRY_CLICK_CAPTURE_TARGET_STALE"})
+    ok, reason = collection_flow._run_xml_scroll_search_tap(
+        client, "SERIAL", tab_cfg={"scenario_id": "life_example_plugin",
+                                   "anchor": {"text_regex": "Destination"}},
+        target="Example Service", type_="card", max_scroll_search_steps=0,
+        step_wait_seconds=.1, transition_fast_path=True)
+    assert not ok and "ENTRY_CLICK_CAPTURE_TARGET_STALE" in reason
+    assert client.taps == []
 
 
 def test_xml_entry_blocks_unproven_actual_hit_and_does_not_confirm(monkeypatch, tmp_path):
@@ -371,5 +535,5 @@ def test_xml_entry_blocks_unproven_actual_hit_and_does_not_confirm(monkeypatch, 
         client, "SERIAL", tab_cfg={"scenario_id": "life_example_plugin"},
         target="Example Service", type_="card", max_scroll_search_steps=0,
         step_wait_seconds=.1, transition_fast_path=True)
-    assert not ok and "CLICK_EVENT_MISSING_OR_AMBIGUOUS" in reason
-    assert client.taps == [(510,150)]
+    assert not ok and "ENTRY_TARGET_OBSERVATION_LEASE_MISMATCH" in reason
+    assert client.taps == []

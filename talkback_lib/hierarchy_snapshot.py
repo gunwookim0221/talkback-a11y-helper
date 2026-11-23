@@ -1,8 +1,70 @@
 """Normalization helpers for service-owned AccessibilityService hierarchy payloads."""
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 import xml.etree.ElementTree as ET
+
+
+def _exact_canonical_json(value: Any) -> str:
+    """Serialize JSON values using the Helper's exact-canonical.v1 rules."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        if not -(2**63) <= value < 2**63:
+            raise ValueError("HIERARCHY_SNAPSHOT:DESCRIPTOR_NUMBER_OUT_OF_RANGE")
+        return str(value)
+    if isinstance(value, str):
+        quoted = ['"']
+        index = 0
+        while index < len(value):
+            code = ord(value[index])
+            if code == 0x22:
+                quoted.append('\\"')
+            elif code == 0x5C:
+                quoted.append("\\\\")
+            elif code == 0x08:
+                quoted.append("\\b")
+            elif code == 0x0C:
+                quoted.append("\\f")
+            elif code == 0x0A:
+                quoted.append("\\n")
+            elif code == 0x0D:
+                quoted.append("\\r")
+            elif code == 0x09:
+                quoted.append("\\t")
+            elif 0xD800 <= code <= 0xDBFF:
+                if index + 1 >= len(value) or not 0xDC00 <= ord(value[index + 1]) <= 0xDFFF:
+                    raise ValueError("HIERARCHY_SNAPSHOT:DESCRIPTOR_INVALID_UNICODE")
+                quoted.extend((f"\\u{code:04x}", f"\\u{ord(value[index + 1]):04x}"))
+                index += 1
+            elif 0xDC00 <= code <= 0xDFFF:
+                raise ValueError("HIERARCHY_SNAPSHOT:DESCRIPTOR_INVALID_UNICODE")
+            elif code < 0x20 or code > 0x7E:
+                if code <= 0xFFFF:
+                    quoted.append(f"\\u{code:04x}")
+                else:
+                    scalar = code - 0x10000
+                    quoted.extend((f"\\u{0xD800 + (scalar >> 10):04x}", f"\\u{0xDC00 + (scalar & 0x3FF):04x}"))
+            else:
+                quoted.append(value[index])
+            index += 1
+        quoted.append('"')
+        return "".join(quoted)
+    if isinstance(value, list):
+        return "[" + ",".join(_exact_canonical_json(item) for item in value) + "]"
+    if isinstance(value, dict):
+        if any(not isinstance(key, str) for key in value):
+            raise ValueError("HIERARCHY_SNAPSHOT:DESCRIPTOR_NON_STRING_KEY")
+        # Java/Kotlin String ordering compares UTF-16 code units.
+        keys = sorted(value, key=lambda key: key.encode("utf-16-be", errors="surrogatepass"))
+        return "{" + ",".join(
+            _exact_canonical_json(key) + ":" + _exact_canonical_json(value[key]) for key in keys
+        ) + "}"
+    raise ValueError("HIERARCHY_SNAPSHOT:DESCRIPTOR_UNSUPPORTED_JSON_VALUE")
 
 
 def _service_window_roots(
@@ -117,23 +179,58 @@ def flatten_service_hierarchy(
 
 
 def legacy_scroll_nodes(
-    snapshot: dict[str, Any], *, include_all_windows: bool = False
+    snapshot: dict[str, Any], *, include_all_windows: bool = False,
+    validated_source_snapshot_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Adapt service nodes to the former scrolltouch XML parser's semantic shape."""
     from talkback_lib.utils import normalize_bounds
 
-    def convert(value: dict[str, Any]) -> dict[str, Any] | None:
+    identity = snapshot.get("identityMetadata") if isinstance(snapshot.get("identityMetadata"), dict) else {}
+    snapshot_identity = identity.get("snapshot") if isinstance(identity.get("snapshot"), dict) else {}
+    source_snapshot_id = str(
+        validated_source_snapshot_id
+        if isinstance(validated_source_snapshot_id, str) and validated_source_snapshot_id
+        else snapshot.get("snapshotId") or snapshot_identity.get("snapshot_id") or ""
+    )
+
+    def convert(value: dict[str, Any], path: tuple[int, ...]) -> dict[str, Any] | None:
         bounds = normalize_bounds(value)
-        children = [node for child in value.get("children") or [] if isinstance(child, dict)
-                    if (node := convert(child)) is not None]
+        children = []
+        for index, child in enumerate(value.get("children") or []):
+            if not isinstance(child, dict):
+                continue
+            child_index = child.get("childIndex", index)
+            try:
+                child_index = int(child_index)
+            except (TypeError, ValueError):
+                child_index = index
+            converted = convert(child, path + (child_index,))
+            if converted is not None:
+                children.append(converted)
         if not bounds and not children:
             return None
+        # Match the Helper's live-node descriptor projection exactly. The
+        # observation lease additionally binds this direct descriptor to the
+        # current window, snapshot ID, and physical child-index path.
+        descriptor_fields = (
+            "text", "contentDescription", "viewIdResourceName", "className",
+            "packageName", "sourceNodeId", "windowId", "boundsInScreen",
+            "clickable", "effectiveClickable", "enabled", "focusable",
+            "focused", "inputFocused", "accessibilityFocused", "selected",
+            "scrollable", "isScrollable", "checkable", "checked",
+            "visibleToUser", "isVisibleToUser", "actions",
+        )
+        descriptor = {key: value.get(key) for key in descriptor_fields}
+        descriptor_digest = hashlib.sha256(_exact_canonical_json(descriptor).encode("utf-8")).hexdigest()
         return {
             "text": str(value.get("text") or "").strip(),
             "contentDescription": str(value.get("contentDescription") or "").strip(),
             "viewIdResourceName": str(value.get("viewIdResourceName") or "").strip(),
             "className": str(value.get("className") or "").strip(),
             "packageName": str(value.get("packageName") or "").strip(),
+            "sourceNodeId": str(value.get("sourceNodeId") or "").strip() or None,
+            "_helperSourceNodeIdFieldPresent": "sourceNodeId" in value,
+            "windowId": value.get("windowId"),
             "clickable": bool(value.get("clickable")),
             "focusable": bool(value.get("focusable")),
             "checkable": bool(value.get("checkable")),
@@ -147,9 +244,12 @@ def legacy_scroll_nodes(
             "enabled": bool(value.get("enabled", True)),
             "boundsInScreen": bounds,
             "children": children,
+            "_helperNodePath": list(path),
+            "_helperNodeDescriptorDigest": descriptor_digest,
+            "_helperSourceSnapshotId": source_snapshot_id,
         }
     nodes = [node for _, _, root in _service_window_roots(snapshot, include_all_windows=include_all_windows)
-             if (node := convert(root)) is not None]
+             if (node := convert(root, ())) is not None]
     return nodes
 
 

@@ -26,6 +26,17 @@ import java.util.UUID
 class HierarchyPayloadTransferTest {
     @get:Rule val temporaryFolder = TemporaryFolder()
 
+    @Test
+    fun runtimeStoreLookupMustPreserveMatchedNullAndOnlyReportUnavailableForMissingStore() {
+        val availableStore = Any()
+
+        assertNull(HierarchyPayloadRuntime.captureMismatchReasonForStore(availableStore) { null })
+        assertEquals("SOURCE_ENVELOPE_MISMATCH",
+            HierarchyPayloadRuntime.captureMismatchReasonForStore(availableStore) { "SOURCE_ENVELOPE_MISMATCH" })
+        assertEquals("SOURCE_STORE_UNAVAILABLE",
+            HierarchyPayloadRuntime.captureMismatchReasonForStore<Any>(null) { "must_not_run" })
+    }
+
     private val requestId = "0123456789abcdef0123456789abcdef"
     private val clientNonce = "abcdef0123456789abcdef0123456789"
     private val initialQueryNonce = "11111111111111111111111111111111"
@@ -44,13 +55,15 @@ class HierarchyPayloadTransferTest {
         val handle: HierarchyPayloadStore.RequestHandle,
         val response: JSONObject,
         val payload: ByteArray,
+        val advanceClock: (Long) -> Unit,
     )
 
     private fun beginAndPublish(payload: ByteArray? = null): Ready {
+        var now = 100L
         val store = HierarchyPayloadStore(
             temporaryFolder.newFolder(),
             UUID.randomUUID().toString(),
-            elapsedRealtimeMs = { 100L },
+            elapsedRealtimeMs = { now },
             helperIdentity = helperIdentity,
         )
         store.serviceConnected(serviceId)
@@ -63,12 +76,123 @@ class HierarchyPayloadTransferTest {
         assertNotNull(sequence)
         val actualPayload = payload ?: samplePayload(store.processEpoch, handle.generation, sequence!!)
         val ready = store.publish(handle, actualPayload)
-        return Ready(store, handle, ready, actualPayload)
+        return Ready(store, handle, ready, actualPayload) { now = it }
+    }
+
+    private fun sourceCaptureKey(payloadBytes: ByteArray): String {
+        val payload = JSONObject(payloadBytes.toString(StandardCharsets.UTF_8))
+        val envelope = payload.getJSONObject("captureEnvelope")
+        val rootIndex = Regex("^windows\\[(0|[1-9][0-9]*)]\\.root$")
+            .matchEntire(envelope.getString("root_ref"))!!.groupValues[1].toInt()
+        val root = payload.getJSONArray("windows").getJSONObject(rootIndex).getJSONObject("root")
+        val bounds = root.optJSONObject("boundsInScreen")
+        val rootBounds = if (bounds != null && listOf("l", "t", "r", "b").all { bounds.opt(it) is Number }) {
+            JSONArray().put(bounds.getInt("l")).put(bounds.getInt("t")).put(bounds.getInt("r")).put(bounds.getInt("b"))
+        } else JSONObject.NULL
+        return CaptureCanonicalJson.sha256(JSONObject()
+            .put("schema_version", envelope.opt("schema_version") ?: JSONObject.NULL)
+            .put("canonicalization", envelope.opt("canonicalization") ?: JSONObject.NULL)
+            .put("request_id", envelope.opt("request_id") ?: JSONObject.NULL)
+            .put("process_epoch", envelope.opt("process_epoch") ?: JSONObject.NULL)
+            .put("generation", envelope.opt("generation") ?: JSONObject.NULL)
+            .put("service_instance_id", envelope.opt("service_instance_id") ?: JSONObject.NULL)
+            .put("capture_sequence", envelope.opt("capture_sequence") ?: JSONObject.NULL)
+            .put("root_ref", envelope.opt("root_ref") ?: JSONObject.NULL)
+            .put("root_digest", envelope.opt("root_digest") ?: JSONObject.NULL)
+            .put("candidate_digest", envelope.opt("candidate_digest") ?: JSONObject.NULL)
+            .put("hierarchy_package_name", root.opt("packageName") ?: JSONObject.NULL)
+            .put("hierarchy_window_id", root.opt("windowId") ?: JSONObject.NULL)
+            .put("hierarchy_root_class_name", root.opt("className") ?: JSONObject.NULL)
+            .put("hierarchy_root_source_node_id", root.opt("sourceNodeId") ?: JSONObject.NULL)
+            .put("hierarchy_root_bounds", rootBounds))
+    }
+
+    @Test
+    fun sourceAuthorityMustMatchLatestReadyCaptureAndExactPayloadIdentity() {
+        val ready = beginAndPublish()
+        val envelope = JSONObject(ready.payload.toString(StandardCharsets.UTF_8)).getJSONObject("captureEnvelope")
+        val captureKey = sourceCaptureKey(ready.payload)
+        val sequence = ready.response.getLong("capture_sequence")
+        val ack = ready.store.acknowledge(requestId, clientNonce, "8".repeat(32),
+            ready.response.getString("payload_sha256"), ready.store.processEpoch, ready.handle.generation)
+        assertEquals("ACKED", ack.getString("status"))
+        assertNull(ready.store.resolveReadyFile(Uri.parse(ready.response.getString("payload_uri"))))
+        val diagnostics = ready.store.sourceCaptureIdentityForDiagnostics()
+        assertEquals(ready.store.processEpoch, diagnostics["processEpoch"])
+        assertEquals(serviceId, diagnostics["serviceInstanceId"])
+        assertEquals(ready.handle.generation, diagnostics["generation"])
+        assertEquals(sequence, diagnostics["captureSequence"])
+        assertEquals(requestId, diagnostics["latestReadyCaptureRequestId"])
+        assertEquals(sequence, diagnostics["latestReadyCaptureSequence"])
+        assertEquals(captureKey, diagnostics["latestReadyCaptureKey"])
+        assertFalse(diagnostics.keys.any { it.contains("payload", ignoreCase = true) })
+        assertNull(ready.store.currentReadyCaptureMismatchReason(
+            requestId, ready.store.processEpoch, ready.handle.generation, serviceId, sequence,
+            envelope.getString("root_digest"), envelope.getString("candidate_digest"), captureKey,
+            1, "com.samsung.android.oneconnect",
+        ))
+        assertTrue(ready.store.matchesCurrentReadyCapture(
+            requestId, ready.store.processEpoch, ready.handle.generation, serviceId, sequence,
+            envelope.getString("root_digest"), envelope.getString("candidate_digest"), captureKey,
+            1, "com.samsung.android.oneconnect",
+        ))
+        assertFalse(ready.store.matchesCurrentReadyCapture(
+            "fedcba9876543210fedcba9876543210", ready.store.processEpoch, ready.handle.generation, serviceId,
+            sequence, envelope.getString("root_digest"), envelope.getString("candidate_digest"), captureKey,
+            1, "com.samsung.android.oneconnect",
+        ))
+        assertFalse(ready.store.matchesCurrentReadyCapture(
+            requestId, ready.store.processEpoch, ready.handle.generation, serviceId, sequence,
+            "a".repeat(64), envelope.getString("candidate_digest"), captureKey,
+            1, "com.samsung.android.oneconnect",
+        ))
+        assertEquals("SOURCE_ENVELOPE_MISMATCH", ready.store.currentReadyCaptureMismatchReason(
+            requestId, ready.store.processEpoch, ready.handle.generation, serviceId, sequence,
+            "a".repeat(64), envelope.getString("candidate_digest"), captureKey,
+            1, "com.samsung.android.oneconnect",
+        ))
+        assertFalse(ready.store.matchesCurrentReadyCapture(
+            requestId, ready.store.processEpoch, ready.handle.generation, serviceId, sequence + 1,
+            envelope.getString("root_digest"), envelope.getString("candidate_digest"), captureKey,
+            1, "com.samsung.android.oneconnect",
+        ))
+        assertFalse(ready.store.matchesCurrentReadyCapture(
+            requestId, ready.store.processEpoch, ready.handle.generation, serviceId, sequence,
+            envelope.getString("root_digest"), envelope.getString("candidate_digest"), captureKey,
+            2, "com.samsung.android.oneconnect",
+        ))
+        assertFalse(ready.store.matchesCurrentReadyCapture(
+            requestId, ready.store.processEpoch, ready.handle.generation, serviceId, sequence,
+            envelope.getString("root_digest"), envelope.getString("candidate_digest"), captureKey,
+            1, "com.example.other",
+        ))
+
+        ready.advanceClock(2_601L)
+        assertEquals("SOURCE_CAPTURE_EXPIRED", ready.store.currentReadyCaptureMismatchReason(
+            requestId, ready.store.processEpoch, ready.handle.generation, serviceId, sequence,
+            envelope.getString("root_digest"), envelope.getString("candidate_digest"), captureKey,
+            1, "com.samsung.android.oneconnect",
+        ))
+
+        ready.advanceClock(2_000L)
+        ready.store.workerFinished(ready.handle)
+        val newerId = "1123456789abcdef0123456789abcdef"
+        val accepted = ready.store.begin(newerId, "22222222222222222222222222222222",
+            "33333333333333333333333333333333", buildId, gitCommit,
+            helperIdentity.getString("input_digest"), helperIdentity.getString("source_state"), serviceId)
+        assertEquals("ACCEPTED", accepted.getString("status"))
+        assertFalse(ready.store.matchesCurrentReadyCapture(
+            requestId, ready.store.processEpoch, ready.handle.generation, serviceId, sequence,
+            envelope.getString("root_digest"), envelope.getString("candidate_digest"), captureKey,
+            1, "com.samsung.android.oneconnect",
+        ))
     }
 
     private fun samplePayload(processEpoch: String, generation: Long, captureSequence: Long): ByteArray {
         val node = JSONObject()
             .put("text", "안녕하세요 🌿\nline")
+            .put("packageName", "com.samsung.android.oneconnect")
+            .put("className", "android.widget.FrameLayout")
             .put("windowId", 1)
             .put("screenReaderFocusable", false)
             .put("rangeInfoPresent", false)
@@ -113,6 +237,7 @@ class HierarchyPayloadTransferTest {
             .put("rootCaptureId", rootCaptureId)
             .put("candidates", JSONArray().put(candidate))
         val candidateDigest = CaptureCanonicalJson.sha256(candidates)
+        candidates.put("candidate_digest", candidateDigest)
         val captureEnvelope = JSONObject()
             .put("schema_version", HierarchyPayloadActions.CAPTURE_ENVELOPE_SCHEMA)
             .put("canonicalization", CaptureCanonicalJson.VERSION)
@@ -189,6 +314,29 @@ class HierarchyPayloadTransferTest {
         assertEquals("FAILED", result.getString("status"))
         assertEquals("CAPTURE_SEQUENCE_MISSING", result.getString("error_code"))
         assertFalse(result.getBoolean("payload_complete"))
+    }
+
+    @Test
+    fun failedCaptureDiagnosticsRemainBoundedAndDoNotGrantPayloadAuthority() {
+        val store = HierarchyPayloadStore(
+            temporaryFolder.newFolder(), UUID.randomUUID().toString(),
+            elapsedRealtimeMs = { 100L }, helperIdentity = helperIdentity,
+        )
+        store.serviceConnected(serviceId)
+        val accepted = store.begin(requestId, clientNonce, initialQueryNonce, buildId, gitCommit,
+            helperIdentity.getString("input_digest"), helperIdentity.getString("source_state"), serviceId)
+        val handle = HierarchyPayloadStore.RequestHandle(requestId, clientNonce, accepted.getLong("generation"))
+        assertTrue(store.markCollecting(handle))
+
+        val failed = store.fail(handle, "COLLECTION_FAILED", "ROOT_ACQUISITION", "IllegalStateException")
+
+        assertEquals("FAILED", failed.getString("status"))
+        assertEquals("COLLECTION_FAILED", failed.getString("error_code"))
+        assertEquals("ROOT_ACQUISITION", failed.getString("error_stage"))
+        assertEquals("IllegalStateException", failed.getString("error_type"))
+        assertFalse(failed.getBoolean("payload_complete"))
+        assertTrue(failed.isNull("payload_uri"))
+        assertTrue(failed.isNull("payload_sha256"))
     }
 
     @Test

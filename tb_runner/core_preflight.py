@@ -63,12 +63,16 @@ def wake_screen(
     sleep_fn: Callable[[float], None] = time.sleep,
     settle_seconds: float = 0.75,
 ) -> dict[str, object]:
-    ok, output = adb_runner(adb_path, serial, "shell", "input", "keyevent", "KEYCODE_WAKEUP", timeout=8.0)
-    if ok:
-        sleep_fn(max(0.0, settle_seconds))
+    state = inspect_preflight_interaction_state(serial=serial, adb_path=adb_path, adb_runner=adb_runner)
+    if state["safe"] is True:
+        return _step_result(
+            "PASS", "Display already interactive; wake input skipped", action_attempted=False,
+            awake=True, display_interactive=True,
+        )
     return _step_result(
-        "PASS" if ok else "FAIL",
-        "Wake keyevent sent; screen settle completed" if ok else f"Wake keyevent failed: {output or 'unknown error'}",
+        "FAIL", f"Read-only interaction gate failed ({state['reason']}); wake input not attempted",
+        action_attempted=False, awake=state.get("awake"),
+        display_interactive=state.get("display_interactive"), precondition_reason=state["reason"],
     )
 
 
@@ -81,52 +85,19 @@ def unlock_swipe(
     max_attempts: int = 3,
     settle_seconds: float = 0.6,
 ) -> dict[str, object]:
-    coordinates = _resolve_unlock_swipe_coordinates(serial=serial, adb_path=adb_path, adb_runner=adb_runner)
-    attempts: list[dict[str, object]] = []
-    last_keyguard_active: bool | None = None
-    for attempt in range(1, max(1, max_attempts) + 1):
-        swipe_ok, swipe_output = adb_runner(
-            adb_path,
-            serial,
-            "shell",
-            "input",
-            "swipe",
-            *(str(value) for value in coordinates),
-            timeout=8.0,
+    state = inspect_preflight_interaction_state(serial=serial, adb_path=adb_path, adb_runner=adb_runner)
+    if state["safe"] is True:
+        return _step_result(
+            "PASS", "Keyguard clear and no blocking SystemUI overlay; unlock input skipped",
+            action_attempted=False, keyguard_active=False, input_restricted=False,
+            systemui_overlay_clear=True,
         )
-        if swipe_ok:
-            sleep_fn(max(0.0, settle_seconds))
-        keyguard_active = _read_keyguard_active(serial=serial, adb_path=adb_path, adb_runner=adb_runner)
-        last_keyguard_active = keyguard_active
-        attempts.append(
-            {
-                "attempt": attempt,
-                "swipe_sent": swipe_ok,
-                "keyguard_active": keyguard_active,
-                "message": swipe_output,
-            }
-        )
-        if swipe_ok and keyguard_active is False:
-            return _step_result(
-                "PASS",
-                f"Swipe command sent; keyguard not active after {attempt} attempt(s)",
-                attempts=attempts,
-                coordinates=coordinates,
-                keyguard_active=False,
-            )
-
-    if last_keyguard_active is True:
-        message = "Swipe retry completed; secure lockscreen may still be active"
-    elif last_keyguard_active is None:
-        message = "Swipe retry completed; secure lock state not verified"
-    else:
-        message = "Unlock swipe retry completed with command errors"
     return _step_result(
-        "WARN",
-        message,
-        attempts=attempts,
-        coordinates=coordinates,
-        keyguard_active=last_keyguard_active,
+        "FAIL", f"Read-only interaction gate failed ({state['reason']}); unlock swipe not attempted",
+        action_attempted=False, keyguard_active=state.get("keyguard_active"),
+        input_restricted=state.get("input_restricted"),
+        systemui_overlay_clear=state.get("systemui_overlay_clear"),
+        precondition_reason=state["reason"],
     )
 
 
@@ -450,6 +421,45 @@ def run_preflight(
         )
         return _early_failure("device_connected_failed", device_connected, _not_run(), _not_run(), _not_run())
 
+    interaction_state = inspect_preflight_interaction_state(
+        serial=serial, adb_path=adb_path, adb_runner=adb_runner,
+    )
+    log_fn(
+        "[PREFLIGHT][interaction_state] "
+        f"safe={str(interaction_state['safe']).lower()} "
+        f"reason='{interaction_state['reason']}'"
+    )
+    if interaction_state["safe"] is not True:
+        screen_awake = _step_result(
+            "FAIL", "Interactive unlocked state not proven; wake input not attempted",
+            action_attempted=False, awake=interaction_state.get("awake"),
+            display_interactive=interaction_state.get("display_interactive"),
+        )
+        unlock_status = _step_result(
+            "FAIL", "Unlocked state and unobstructed display not proven; swipe not attempted",
+            action_attempted=False, keyguard_active=interaction_state.get("keyguard_active"),
+            input_restricted=interaction_state.get("input_restricted"),
+            systemui_overlay_clear=interaction_state.get("systemui_overlay_clear"),
+        )
+        log_fn(_format_step_log("wake_screen", screen_awake))
+        log_fn(_format_step_log("unlock_swipe", unlock_status))
+        return _early_failure(
+            "device_interaction_precondition_failed", device_connected,
+            screen_awake, unlock_status, _not_run(),
+        )
+
+    screen_awake = _step_result(
+        "PASS", "Display already interactive; wake input skipped", action_attempted=False,
+        awake=True, display_interactive=True,
+    )
+    unlock_status = _step_result(
+        "PASS", "Keyguard clear and no blocking SystemUI overlay; unlock input skipped",
+        action_attempted=False, keyguard_active=False, input_restricted=False,
+        systemui_overlay_clear=True,
+    )
+    log_fn(_format_step_log("wake_screen", screen_awake))
+    log_fn(_format_step_log("unlock_swipe", unlock_status))
+
     # Seed before any app transition. Frontend preflight may have captured an
     # even earlier PID; never overwrite it with a process that already restarted.
     preflight_pid = os.environ.get("TB_TALKBACK_PREFLIGHT_PID", "").strip()
@@ -458,20 +468,6 @@ def run_preflight(
         preflight_pid = pid_output.strip() if pid_ok and pid_output.strip().isdigit() else ""
     client._preflight_talkback_pid = preflight_pid or None
     log_fn(f"[PREFLIGHT][talkback_pid] pid='{preflight_pid}' available={str(bool(preflight_pid)).lower()}")
-
-    log_fn("[PREFLIGHT] wake_screen start")
-    screen_awake = wake_screen(serial=serial, adb_path=adb_path, adb_runner=adb_runner, sleep_fn=sleep_fn)
-    log_fn(_format_step_log("wake_screen", screen_awake))
-    if screen_awake["status"] == "FAIL":
-        _log_readiness_diagnostic(
-            log_fn, stage="wake_screen", result=screen_awake,
-            readiness_result="wake_screen_failed",
-        )
-        return _early_failure("wake_screen_failed", device_connected, screen_awake, _not_run(), _not_run())
-
-    log_fn("[PREFLIGHT] unlock_swipe start")
-    unlock_status = unlock_swipe(serial=serial, adb_path=adb_path, adb_runner=adb_runner, sleep_fn=sleep_fn)
-    log_fn(_format_step_log("unlock_swipe", unlock_status))
 
     log_fn("[PREFLIGHT] app_foreground start")
     app_foreground = ensure_smartthings_foreground(
@@ -1250,6 +1246,19 @@ def _extract_foreground_package(output: str) -> str | None:
         r"topResumedActivity=.*?\s([a-zA-Z0-9_.]+)/",
         r"ResumedActivity:.*?\s([a-zA-Z0-9_.]+)/",
     ]
+    display_zero = re.search(
+        r"(?ms)^\s*Display:\s*mDisplayId=0\b(?P<body>.*?)(?=^\s*Display:\s*mDisplayId=\d+\b|\Z)",
+        output,
+    )
+    if display_zero:
+        display_output = display_zero.group("body")
+        for pattern in patterns:
+            match = re.search(pattern, display_output)
+            if match:
+                return match.group(1)
+        # Do not promote an inactive display's focus when display 0 is present
+        # but its own current foreground could not be read.
+        return None
     for pattern in patterns:
         match = re.search(pattern, output)
         if match:
@@ -1259,7 +1268,7 @@ def _extract_foreground_package(output: str) -> str | None:
 
 def _secure_lockscreen_active(output: str) -> bool | None:
     match = re.search(
-        r"(?:isStatusBarKeyguard|mShowingLockscreen|mShowing)\s*=\s*(true|false|1|0)",
+        r"(?:isStatusBarKeyguard|mShowingLockscreen|mShowing|showing)\s*=\s*(true|false|1|0)",
         output,
         re.IGNORECASE,
     )
@@ -1276,6 +1285,113 @@ def _read_keyguard_active(
 ) -> bool | None:
     ok, output = adb_runner(adb_path, serial, "shell", "dumpsys", "window", "policy", timeout=8.0)
     return _secure_lockscreen_active(output) if ok else None
+
+
+def inspect_preflight_interaction_state(
+    *,
+    serial: str | None,
+    adb_path: str = DEFAULT_ADB_PATH,
+    adb_runner: Callable[..., tuple[bool, str]] = run_adb_text,
+) -> dict[str, object]:
+    """Read current power, keyguard, and overlay state before any wake/unlock input."""
+    queries = {
+        "power": ("shell", "dumpsys", "power"),
+        "display": ("shell", "dumpsys", "display"),
+        "policy": ("shell", "dumpsys", "window", "policy"),
+        "windows": ("shell", "dumpsys", "window", "windows"),
+    }
+    outputs: dict[str, str] = {}
+    failed: list[str] = []
+    for name, args in queries.items():
+        ok, output = adb_runner(adb_path, serial, *args, timeout=8.0)
+        outputs[name] = output if ok else ""
+        if not ok:
+            failed.append(name)
+
+    power_text = outputs["power"]
+    awake_match = re.search(r"^\s*mWakefulness\s*=\s*(Awake|Asleep|Dozing|Dreaming)\s*$",
+                            power_text, re.MULTILINE | re.IGNORECASE)
+    awake: bool | None = None if awake_match is None else awake_match.group(1).lower() == "awake"
+
+    display_text = outputs["display"]
+    viewport_rows = re.findall(r"DisplayViewport\{([^}]*)\}", display_text)
+    display_zero_active: bool | None = None
+    for row in viewport_rows:
+        display_id = re.search(r"\bdisplayId\s*=\s*(\d+)\b", row)
+        if display_id and display_id.group(1) == "0":
+            valid = re.search(r"\bvalid\s*=\s*(true|false)\b", row, re.IGNORECASE)
+            active = re.search(r"\bisActive\s*=\s*(true|false)\b", row, re.IGNORECASE)
+            if valid is None or active is None:
+                display_zero_active = None
+            else:
+                display_zero_active = valid.group(1).lower() == "true" and active.group(1).lower() == "true"
+            break
+    display_state_match = re.search(r"^\s*Display State\s*=\s*(ON|OFF)\s*$",
+                                    display_text, re.MULTILINE | re.IGNORECASE)
+    display_on: bool | None = None if display_state_match is None else display_state_match.group(1).lower() == "on"
+    if awake is False or display_zero_active is False or display_on is False:
+        display_interactive: bool | None = False
+    elif awake is True and display_zero_active is True and display_on is True:
+        display_interactive = True
+    else:
+        display_interactive = None
+
+    keyguard_active = _secure_lockscreen_active(outputs["policy"]) if outputs["policy"] else None
+    restricted_match = re.search(r"^\s*inputRestricted\s*=\s*(true|false)\s*$",
+                                 outputs["policy"], re.MULTILINE | re.IGNORECASE)
+    input_restricted: bool | None = (
+        None if restricted_match is None else restricted_match.group(1).lower() == "true"
+    )
+    systemui_overlay_clear = _systemui_overlay_clear(outputs["windows"]) if outputs["windows"] else None
+
+    if failed:
+        reason = "read_only_state_query_failed:" + ",".join(failed)
+    elif keyguard_active is True or input_restricted is True:
+        reason = "keyguard_locked_or_restricted"
+    elif display_interactive is False:
+        reason = "display_not_interactive"
+    elif systemui_overlay_clear is False:
+        reason = "blocking_systemui_overlay"
+    elif (display_interactive is None or keyguard_active is None or input_restricted is None
+          or systemui_overlay_clear is None):
+        reason = "read_only_state_unknown"
+    else:
+        reason = "already_interactive_unlocked_clear"
+    safe = reason == "already_interactive_unlocked_clear"
+    return {
+        "safe": safe,
+        "reason": reason,
+        "awake": awake,
+        "display_interactive": display_interactive,
+        "keyguard_active": keyguard_active,
+        "input_restricted": input_restricted,
+        "systemui_overlay_clear": systemui_overlay_clear,
+    }
+
+
+def _systemui_overlay_clear(windows_output: str) -> bool | None:
+    """Return whether display 0 has no visible blocking SystemUI window."""
+    blocks = re.split(r"(?=^\s*Window #\d+ Window\{)", windows_output, flags=re.MULTILINE)
+    for block in blocks:
+        if "package=com.android.systemui" not in block:
+            continue
+        display_match = re.search(r"\bmDisplayId\s*=\s*(\d+)\b", block)
+        if display_match is None:
+            return None
+        if display_match.group(1) != "0":
+            continue
+        header = block.splitlines()[0] if block.splitlines() else ""
+        if re.search(r"\b(?:StatusBar|NavigationBar|GestureNavBar)\w*\b", header):
+            continue
+        on_screen = re.search(r"^\s*isOnScreen\s*=\s*(true|false)\s*$", block,
+                              re.MULTILINE | re.IGNORECASE)
+        visible = re.search(r"^\s*isVisible\s*=\s*(true|false)\s*$", block,
+                            re.MULTILINE | re.IGNORECASE)
+        if on_screen is None or visible is None:
+            return None
+        if on_screen.group(1).lower() == "true" or visible.group(1).lower() == "true":
+            return False
+    return True
 
 
 def _resolve_unlock_swipe_coordinates(

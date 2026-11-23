@@ -70,6 +70,7 @@ def _expected_identity():
         "helper_service_instance_id": SERVICE_ID,
         "helper_input_digest": INPUT_DIGEST,
         "build_variant": "debug",
+        "installed_metadata": {"source_state": "CLEAN"},
     }
 
 

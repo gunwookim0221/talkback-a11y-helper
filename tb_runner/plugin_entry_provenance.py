@@ -246,9 +246,12 @@ def evidence_invocation_identity(client: Any, scenario_id: str = "") -> dict[str
     active_tx = _scalar_text(getattr(client, "_active_evidence_scenario_tx_id", ""))
     expected_scenario = _scalar_text(scenario_id or active_scenario)
     run_id = _scalar_text(getattr(runtime, "run_id", None))
+    runtime_scenario = _scalar_text(getattr(runtime, "_scenario_id", ""))
+    runtime_tx = _scalar_text(getattr(runtime, "_scenario_tx_id", ""))
     if (getattr(runtime, "is_enabled", False) is not True
             or not expected_scenario or active_scenario != expected_scenario
-            or not run_id or not active_tx):
+            or not run_id or not active_tx
+            or runtime_scenario != expected_scenario or runtime_tx != active_tx):
         return {"evidence_run_id": "", "scenario_tx_id": "", "invocation_id": ""}
     return {"evidence_run_id": run_id, "scenario_tx_id": active_tx,
             "invocation_id": active_tx}

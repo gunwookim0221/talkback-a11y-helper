@@ -6,8 +6,9 @@ from __future__ import annotations
 import subprocess
 import threading
 import os
+import time
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from talkback_lib.constants import DEFAULT_TIMEOUT_SECONDS
@@ -16,13 +17,15 @@ from talkback_lib.constants import DEFAULT_TIMEOUT_SECONDS
 class AdbCommandFailure(RuntimeError):
     """Delivery failure for commands that require an explicit transport verdict."""
 
-    def __init__(self, reason: str, command: list[str], timeout: float, *, stdout: str = "", stderr: str = ""):
+    def __init__(self, reason: str, command: list[str], timeout: float, *, stdout: str = "", stderr: str = "",
+                 returncode: int | None = None):
         super().__init__(reason)
         self.reason = reason
         self.command = command
         self.timeout = timeout
         self.stdout = stdout
         self.stderr = stderr
+        self.returncode = returncode
 
 
 @dataclass(frozen=True)
@@ -31,6 +34,7 @@ class AdbBinaryCommandResult:
     stderr: bytes
     stderr_truncated: bool
     returncode: int
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
 class AdbBinaryCommandFailure(RuntimeError):
@@ -46,6 +50,7 @@ class AdbBinaryCommandFailure(RuntimeError):
         stderr: bytes = b"",
         stderr_truncated: bool = False,
         returncode: int | None = None,
+        diagnostics: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(reason)
         self.reason = reason
@@ -55,6 +60,7 @@ class AdbBinaryCommandFailure(RuntimeError):
         self.stderr = stderr
         self.stderr_truncated = stderr_truncated
         self.returncode = returncode
+        self.diagnostics = dict(diagnostics or {})
 
 
 class AdbDevice:
@@ -62,6 +68,10 @@ class AdbDevice:
         self.adb_path = adb_path
         self._resolve_serial = resolve_serial
         self.command_guard = None
+        self._binary_subprocess_metrics_lock = threading.Lock()
+        self._binary_subprocess_started_count = 0
+        self._binary_subprocess_completed_count = 0
+        self._binary_subprocess_active_count = 0
         from talkback_lib.exploration_evidence_clock import EvidenceClock, NativeDispatchReceiptStore
         self.shadow_evidence_clock = (EvidenceClock() if os.environ.get("TB_STATE_GRAPH_MODE", "").strip().upper() == "SHADOW" else None)
         self.native_dispatch_receipts = NativeDispatchReceiptStore()
@@ -73,6 +83,27 @@ class AdbDevice:
         clock = getattr(self, "shadow_evidence_clock", None)
         if clock is not None:
             clock.dispatch(args)
+
+    def _update_binary_subprocess_metrics(self, *, started: int = 0, completed: int = 0, active: int = 0) -> None:
+        """Maintain observational process counts; callers must not rely on them for decisions."""
+        try:
+            with self._binary_subprocess_metrics_lock:
+                self._binary_subprocess_started_count += started
+                self._binary_subprocess_completed_count += completed
+                self._binary_subprocess_active_count += active
+        except Exception:
+            pass
+
+    def _binary_subprocess_metrics_snapshot(self) -> dict[str, int]:
+        try:
+            with self._binary_subprocess_metrics_lock:
+                return {
+                    "subprocess_started_total": self._binary_subprocess_started_count,
+                    "subprocess_completed_total": self._binary_subprocess_completed_count,
+                    "subprocess_active_count": self._binary_subprocess_active_count,
+                }
+        except Exception:
+            return {}
 
     @staticmethod
     def _effective_timeout(args: list[str], timeout: float | None) -> float:
@@ -130,7 +161,8 @@ class AdbDevice:
             if stderr:
                 print(f"[ERROR] stderr: {stderr}")
             if raise_on_failure:
-                raise AdbCommandFailure("adb_command_failed", cmd, effective_timeout, stdout=proc.stdout or "", stderr=stderr)
+                raise AdbCommandFailure("adb_command_failed", cmd, effective_timeout, stdout=proc.stdout or "",
+                                         stderr=stderr, returncode=proc.returncode)
             return ""
         return proc.stdout.strip()
 
@@ -144,6 +176,7 @@ class AdbDevice:
         max_stderr_bytes: int = 64 * 1024,
     ) -> AdbBinaryCommandResult:
         """Read bounded stdout bytes without newline or character conversion."""
+        started_monotonic = time.monotonic()
         if self.command_guard is not None:
             self.command_guard(args)
         serial = self._resolve_serial(dev)
@@ -168,17 +201,24 @@ class AdbDevice:
         except OSError as exc:
             raise AdbBinaryCommandFailure("adb_execution_failed", command, timeout, stderr=str(exc).encode("utf-8", errors="replace")) from exc
 
+        self._update_binary_subprocess_metrics(started=1, active=1)
+        subprocess_metrics_at_start = self._binary_subprocess_metrics_snapshot()
+
         stdout = bytearray()
         stderr = bytearray()
+        stdout_bytes_seen = 0
+        stderr_bytes_seen = 0
         overflow = threading.Event()
         stderr_truncated = threading.Event()
 
         def drain_stdout() -> None:
+            nonlocal stdout_bytes_seen
             assert proc.stdout is not None
             while True:
                 chunk = proc.stdout.read(16 * 1024)
                 if not chunk:
                     return
+                stdout_bytes_seen += len(chunk)
                 remaining = max_stdout_bytes - len(stdout)
                 if remaining > 0:
                     stdout.extend(chunk[:remaining])
@@ -190,11 +230,13 @@ class AdbDevice:
                         pass
 
         def drain_stderr() -> None:
+            nonlocal stderr_bytes_seen
             assert proc.stderr is not None
             while True:
                 chunk = proc.stderr.read(16 * 1024)
                 if not chunk:
                     return
+                stderr_bytes_seen += len(chunk)
                 remaining = max_stderr_bytes - len(stderr)
                 if remaining > 0:
                     stderr.extend(chunk[:remaining])
@@ -206,42 +248,73 @@ class AdbDevice:
         stdout_thread.start()
         stderr_thread.start()
         timed_out = False
+        wait_completed = False
+        stdout_joined = False
+        stderr_joined = False
+        process_reaped = False
         try:
             proc.wait(timeout=timeout)
+            wait_completed = True
+            process_reaped = getattr(proc, "returncode", None) is not None
         except subprocess.TimeoutExpired:
             timed_out = True
             proc.kill()
             proc.wait()
+            wait_completed = True
+            process_reaped = getattr(proc, "returncode", None) is not None
         finally:
             stdout_thread.join(timeout=2.0)
             stderr_thread.join(timeout=2.0)
+            stdout_joined = not stdout_thread.is_alive()
+            stderr_joined = not stderr_thread.is_alive()
             if proc.stdout:
                 proc.stdout.close()
             if proc.stderr:
                 proc.stderr.close()
+            self._update_binary_subprocess_metrics(
+                completed=1 if wait_completed and process_reaped else 0,
+                active=-1,
+            )
+        diagnostics = {
+            "adb_elapsed_ms": round((time.monotonic() - started_monotonic) * 1000.0, 3),
+            "adb_timeout_ms": round(float(timeout) * 1000.0, 3),
+            "adb_timed_out": timed_out,
+            "adb_exit_code": proc.returncode,
+            "adb_process_reaped": process_reaped,
+            "adb_stdout_bytes_received": stdout_bytes_seen,
+            "adb_stdout_bytes_buffered": len(stdout),
+            "adb_stderr_bytes_received": stderr_bytes_seen,
+            "adb_stderr_bytes_buffered": len(stderr),
+            "adb_stderr_truncated": stderr_truncated.is_set(),
+            "adb_stdout_reader_joined": stdout_joined,
+            "adb_stderr_reader_joined": stderr_joined,
+            "adb_reader_threads_alive": int(stdout_thread.is_alive()) + int(stderr_thread.is_alive()),
+            "subprocess_active_count_at_start": subprocess_metrics_at_start.get("subprocess_active_count"),
+            **self._binary_subprocess_metrics_snapshot(),
+        }
         if timed_out:
             raise AdbBinaryCommandFailure(
                 "adb_command_timeout", command, timeout, stdout=bytes(stdout), stderr=bytes(stderr),
-                stderr_truncated=stderr_truncated.is_set(), returncode=proc.returncode,
+                stderr_truncated=stderr_truncated.is_set(), returncode=proc.returncode, diagnostics=diagnostics,
             )
         if overflow.is_set():
             raise AdbBinaryCommandFailure(
                 "stdout_limit_exceeded", command, timeout, stdout=bytes(stdout), stderr=bytes(stderr),
-                stderr_truncated=stderr_truncated.is_set(), returncode=proc.returncode,
+                stderr_truncated=stderr_truncated.is_set(), returncode=proc.returncode, diagnostics=diagnostics,
             )
         if stdout_thread.is_alive() or stderr_thread.is_alive():
             raise AdbBinaryCommandFailure(
                 "pipe_drain_incomplete", command, timeout, stdout=bytes(stdout), stderr=bytes(stderr),
-                stderr_truncated=stderr_truncated.is_set(), returncode=proc.returncode,
+                stderr_truncated=stderr_truncated.is_set(), returncode=proc.returncode, diagnostics=diagnostics,
             )
         if proc.returncode != 0:
             raise AdbBinaryCommandFailure(
                 "adb_command_failed", command, timeout, stdout=bytes(stdout), stderr=bytes(stderr),
-                stderr_truncated=stderr_truncated.is_set(), returncode=proc.returncode,
+                stderr_truncated=stderr_truncated.is_set(), returncode=proc.returncode, diagnostics=diagnostics,
             )
         return AdbBinaryCommandResult(
             stdout=bytes(stdout), stderr=bytes(stderr), stderr_truncated=stderr_truncated.is_set(),
-            returncode=proc.returncode,
+            returncode=proc.returncode, diagnostics=diagnostics,
         )
 
     def _clear_logcat_best_effort(self, dev: Any = None, timeout: float = 1.5) -> str:
