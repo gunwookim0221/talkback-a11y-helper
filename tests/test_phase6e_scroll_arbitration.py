@@ -162,3 +162,87 @@ def test_fallback_owner_must_be_unique_in_current_hierarchy(second_container, ex
     owner = phase6e_current_scroll_owner(source, source["_exploration_observation"])
     assert owner["status"] == expected
     assert bool(owner["identity"]) is (not second_container)
+
+
+def test_local_scroll_fallback_keeps_capability_paired_with_current_owner():
+    from tb_runner import local_tab_logic
+    from tb_runner.scroll_reliability import _verified_scroll_target
+    from tb_runner.state_graph import phase6e_current_scroll_owner
+
+    source = _phase6e_capture(sequence=10)
+    # The Helper metadata reports scroll opportunity without a path-bearing
+    # container; the sealed hierarchy remains the only owner authority.
+    source["capability"]["container"] = None
+    from tb_runner.scroll_reliability import viewport
+    source["viewport"] = viewport(source["nodes"], "home_main", source["capability"]["container"])
+    observation = local_tab_logic._local_scroll_observation_from_snapshot(
+        source, source["_exploration_observation"], 23)
+    assert observation is not None
+    assert observation["nodes"] is source["nodes"]
+    assert observation["capability"] is source["capability"]
+    assert observation["viewport"] is source["viewport"]
+    assert observation["step_index"] == 23
+
+    owner = phase6e_current_scroll_owner(source, source["_exploration_observation"])
+    assert owner["status"] == "RESOLVED"
+    assert owner["path"] == "0.1"
+    target, reason = _verified_scroll_target(observation, owner)
+    assert reason == ""
+    assert target == {"path": "0.1", "bounds": "0,100,900,800", "axis": "VERTICAL"}
+
+
+def test_flat_hierarchy_scroll_path_maps_to_helper_root_relative_indices():
+    from tb_runner.state_graph import _phase6e_scroll_action_path
+
+    assert _phase6e_scroll_action_path({
+        "stable_node_path": "0.0.0.7.2", "windowIndex": 0,
+    }) == "0.0.7.2"
+    assert _phase6e_scroll_action_path({
+        "stable_node_path": "1.0.0.7.2", "windowIndex": 1,
+    }) is None
+    assert _phase6e_scroll_action_path({
+        "stable_node_path": "0.2.0.7.2", "windowIndex": 0,
+    }) is None
+
+
+def test_current_declared_container_path_is_translated_before_scroll_dispatch():
+    from tb_runner.state_graph import phase6e_current_scroll_owner
+
+    source = _phase6e_capture(sequence=10)
+    stable_path = next(node["stable_node_path"] for node in source["nodes"] if node.get("scrollable"))
+    assert stable_path == "0.0.1"
+    owner = phase6e_current_scroll_owner(source, source["_exploration_observation"])
+
+    assert owner["status"] == "RESOLVED"
+    assert owner["path"] == "0.1"
+
+
+@pytest.mark.parametrize("condition", ["stale", "ambiguous", "unpaired"])
+def test_local_scroll_fallback_never_dispatches_without_unique_current_owner(condition):
+    from tb_runner import local_tab_logic
+    from tb_runner.scroll_reliability import _verified_scroll_target
+    from tb_runner.state_graph import phase6e_current_scroll_owner
+
+    source = _phase6e_capture(sequence=10, second_container=condition == "ambiguous")
+    if condition == "ambiguous":
+        source["capability"]["container"] = None
+    from tb_runner.scroll_reliability import viewport
+    source["viewport"] = viewport(source["nodes"], "home_main", source["capability"]["container"])
+    marker = source["_exploration_observation"]
+    if condition == "stale":
+        marker = {**marker, "observation_sequence": marker["observation_sequence"] + 1}
+    elif condition == "unpaired":
+        marker = {}
+    observation = local_tab_logic._local_scroll_observation_from_snapshot(
+        source, source["_exploration_observation"], 23)
+    assert observation is not None
+    if condition == "unpaired":
+        assert local_tab_logic._local_scroll_observation_from_snapshot(source, {}, 23) is None
+    owner = phase6e_current_scroll_owner(source, marker)
+    if condition == "ambiguous":
+        assert owner["status"] == "OWNER_AMBIGUOUS"
+    else:
+        assert owner["status"] == "SOURCE_CAPTURE_UNVERIFIED"
+    target, reason = _verified_scroll_target(observation, owner)
+    assert target is None
+    assert reason == "scroll_owner_unresolved"

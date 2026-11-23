@@ -373,6 +373,22 @@ def _phase6e_capture_is_current(raw: Any, expected_marker: Any = None) -> bool:
     )
 
 
+def _phase6e_scroll_action_path(node: Any) -> str | None:
+    """Convert the active-window flat path to the Helper root-relative path."""
+    if not isinstance(node, Mapping):
+        return None
+    stable_path = str(node.get("stable_node_path") or "").strip()
+    parts = stable_path.split(".")
+    if (node.get("windowIndex") != 0 or len(parts) < 2
+            or parts[0] != "0" or parts[1] != "0"
+            or any(not part.isdigit() for part in parts)):
+        return None
+    # flatten_service_hierarchy prefixes the active root with window index 0
+    # and root index 0. performScroll starts at rootInActiveWindow and consumes
+    # the first 0 as its root sentinel, so omit only the flattened root index.
+    return ".".join((parts[0], *parts[2:]))
+
+
 def _phase6e_scroll_owner(raw: Mapping[str, Any], transition: Mapping[str, Any], *, pre_dispatch: bool = False) -> dict[str, Any]:
     """Resolve a scroll target from this capture's hierarchy, never from focus or RID alone."""
     from tb_runner.scroll_reliability import scroll_axis
@@ -396,7 +412,7 @@ def _phase6e_scroll_owner(raw: Mapping[str, Any], transition: Mapping[str, Any],
         axis, _axis_source = scroll_axis(node)
         if axis not in {"VERTICAL", "BIDIRECTIONAL"}:
             continue
-        path = str(node.get("stable_node_path") or node.get("path") or "").strip()
+        path = _phase6e_scroll_action_path(node)
         bounds = normalized_bounds(node.get("boundsInScreen", node.get("bounds")))
         # A scrollable class or resource-id by itself cannot bind an owner.
         if not path or not bounds:
@@ -484,8 +500,25 @@ def phase6e_current_scroll_owner(raw: Any, marker: Any) -> dict[str, Any]:
     target = target if isinstance(target, Mapping) else {}
     action_target = {"mode": "ACCESSIBILITY_FALLBACK"}
     if target.get("path"):
-        action_target = {"mode": "EXPLICIT_CONTAINER", "container_path": str(target["path"]),
-                         "container_bounds": target.get("boundsInScreen")}
+        from tb_runner.traversal_reliability import normalized_bounds
+
+        target_path = str(target.get("path") or "").strip()
+        target_bounds = normalized_bounds(target.get("boundsInScreen", target.get("bounds")))
+        nodes = raw.get("nodes") if isinstance(raw.get("nodes"), list) else []
+        exact_matches = [
+            node for node in nodes if isinstance(node, Mapping)
+            and target_path in {
+                str(node.get("stable_node_path") or "").strip(),
+                str(_phase6e_scroll_action_path(node) or "").strip(),
+            }
+            and normalized_bounds(node.get("boundsInScreen", node.get("bounds"))) == target_bounds
+        ]
+        helper_path = _phase6e_scroll_action_path(exact_matches[0]) if len(exact_matches) == 1 else None
+        action_target = {
+            "mode": "EXPLICIT_CONTAINER",
+            "container_path": helper_path or target_path,
+            "container_bounds": target_bounds or target.get("boundsInScreen"),
+        }
     return _phase6e_scroll_owner(raw, {"action_target": action_target}, pre_dispatch=True)
 
 

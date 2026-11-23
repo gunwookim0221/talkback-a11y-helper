@@ -461,8 +461,12 @@ def _phase6e_capture(*, sequence, changed=False, second_container=False, focus=F
 def _phase6e_transition(source, *, request_id="scroll-1", result_request_id=None,
                         target_path=None, target_bounds=None, changed=True,
                         boundary=False, action_epoch=1):
+    from tb_runner.state_graph import _phase6e_scroll_action_path
+
+    requested_path = target_path or "0.1"
     owner = next((item for item in source["nodes"]
-                  if item.get("scrollable") is True and item.get("stable_node_path") == (target_path or "0.0.1")), None)
+                  if item.get("scrollable") is True
+                  and _phase6e_scroll_action_path(item) == requested_path), None)
     if target_bounds is None and owner is not None:
         target_bounds = owner["boundsInScreen"]
     return {
@@ -475,12 +479,12 @@ def _phase6e_transition(source, *, request_id="scroll-1", result_request_id=None
         "viewport_end": boundary,
         "capability_after": {"can_scroll_forward": False if boundary else True,
                               "contradictory": False},
-        "action_target": {"mode": "EXPLICIT_CONTAINER", "container_path": target_path or "0.0.1",
+        "action_target": {"mode": "EXPLICIT_CONTAINER", "container_path": requested_path,
                           "container_bounds": target_bounds},
         "action_result": {"reqId": result_request_id or request_id,
                           "action": "SCROLL_FORWARD", "success": True,
                           "actionAttempted": True, "explicitTarget": True,
-                          "scrollContainerPath": target_path or "0.0.1"},
+                          "scrollContainerPath": requested_path},
     }
 
 
@@ -575,8 +579,8 @@ def test_filtered_scroll_is_followed_by_separate_actual_focus_visit():
 
 def test_phase6e_resolves_explicit_current_scroll_owner_across_multiple_containers():
     identities = set()
-    for path, bounds in (("0.0.1", "[0,100][900,800]"),
-                         ("0.0.2", "[0,200][900,700]")):
+    for path, bounds in (("0.1", "[0,100][900,800]"),
+                         ("0.2", "[0,200][900,700]")):
         source = _phase6e_capture(sequence=10, second_container=True)
         result = _phase6e_capture(sequence=11, changed=True, second_container=True,
                                   focus=True, action_epoch=1, request_id="scroll-1")
@@ -595,8 +599,8 @@ def test_phase6e_resolves_explicit_current_scroll_owner_across_multiple_containe
 
 @pytest.mark.parametrize("target_path,target_bounds,result_path,expected", [
     ("missing", "[0,100][900,800]", "missing", "OWNER_NOT_IN_CURRENT_HIERARCHY"),
-    ("0.0.1", "[1,100][900,800]", "0.0.1", "OWNER_TARGET_MISMATCH"),
-    (None, "[0,100][900,800]", "0.0.1", "OWNER_TARGET_MISMATCH"),
+    ("0.1", "[1,100][900,800]", "0.1", "OWNER_TARGET_MISMATCH"),
+    (None, "[0,100][900,800]", "0.1", "OWNER_TARGET_MISMATCH"),
 ])
 def test_phase6e_rejects_stale_or_mismatched_owner(target_path, target_bounds, result_path, expected):
     source = _phase6e_capture(sequence=10, omit_owner=(target_path == "missing"))

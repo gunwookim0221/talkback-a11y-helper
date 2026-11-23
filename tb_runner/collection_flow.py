@@ -1100,6 +1100,8 @@ def _resolve_scrolltouch_debug_flags(tab_cfg: dict[str, Any]) -> tuple[bool, boo
 
 
 def _sync_local_tab_logic_dependencies() -> None:
+    from tb_runner.state_graph import phase6e_current_scroll_owner
+
     local_tab_logic.LOCAL_TAB_ACTIVE_TTL_STEPS = LOCAL_TAB_ACTIVE_TTL_STEPS
     local_tab_logic._TRANSITION_FAST_ACTION_WAIT_SECONDS = _TRANSITION_FAST_ACTION_WAIT_SECONDS
     local_tab_logic.COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION = COLLECTION_FLOW_SCROLL_DECISION_DEBUG_VERSION
@@ -1134,6 +1136,8 @@ def _sync_local_tab_logic_dependencies() -> None:
     local_tab_logic._apply_cta_node_to_row = _apply_cta_node_to_row
     local_tab_logic._build_scroll_fallback_signature = _build_scroll_fallback_signature
     local_tab_logic._describe_scrollable_content_phase = _describe_scrollable_content_phase
+    local_tab_logic._capture_phase6d3a_production_observation = _capture_phase6d3a_production_observation
+    local_tab_logic._phase6e_current_scroll_owner = phase6e_current_scroll_owner
 
 def _focus_realign_state(state: Any) -> Any:
     if hasattr(state, "focus_realign_state"):

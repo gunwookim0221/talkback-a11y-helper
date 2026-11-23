@@ -3688,6 +3688,37 @@ def _maybe_reprioritize_persistent_bottom_strip_row(
                 updated_row[key] = selected_candidate.get(key)
     return updated_row
 
+def _local_scroll_observation_from_snapshot(
+    snapshot: Any,
+    marker: Any,
+    step_idx: int,
+) -> dict[str, Any] | None:
+    """Keep scroll opportunity data bound to its sealed hierarchy capture."""
+    if not isinstance(snapshot, dict):
+        return None
+    envelope = snapshot.get("production_observation_envelope")
+    observed_marker = snapshot.get("_exploration_observation")
+    if (snapshot.get("production_observation_current") is not True
+            or not isinstance(envelope, dict)
+            or envelope.get("capture_complete") is not True
+            or not isinstance(marker, dict) or not marker
+            or marker != observed_marker
+            or marker != envelope.get("observation")):
+        return None
+    nodes = snapshot.get("nodes")
+    capability = snapshot.get("capability")
+    viewport = snapshot.get("viewport")
+    if not isinstance(nodes, list) or not isinstance(capability, dict) or not isinstance(viewport, dict):
+        return None
+    return {
+        "nodes": nodes,
+        "capability": capability,
+        "viewport": viewport,
+        "step_index": step_idx,
+        "evidence": "local_scroll_evaluation",
+    }
+
+
 def _maybe_select_next_local_tab(
     *,
     client: A11yAdbClient,
@@ -3701,6 +3732,8 @@ def _maybe_select_next_local_tab(
     _maybe_commit_pending_local_tab_progression(state, row)
     local_tab_signature = str(state.current_local_tab_signature or "").strip()
     dump_tree_fn = getattr(client, "dump_tree", None)
+    current_scroll_snapshot = None
+    current_scroll_marker = None
     content_candidates: list[dict[str, Any]] = []
     chrome_excluded: list[str] = []
     container_promoted: list[str] = []
@@ -3708,7 +3741,20 @@ def _maybe_select_next_local_tab(
     current_bottom_strip_candidates: list[dict[str, Any]] = []
     if callable(dump_tree_fn):
         try:
-            nodes = dump_with_capabilities(client, dev)
+            capture_current = globals().get("_capture_phase6d3a_production_observation")
+            if callable(capture_current):
+                try:
+                    current_scroll_snapshot = capture_current(
+                        client=client, dev=dev, row=row, allow_scroll_gate=True)
+                except Exception:
+                    current_scroll_snapshot = None
+                if isinstance(current_scroll_snapshot, dict):
+                    nodes = list(current_scroll_snapshot.get("nodes") or [])
+                    current_scroll_marker = row.get("_exploration_observation")
+                else:
+                    nodes = dump_with_capabilities(client, dev)
+            else:
+                nodes = dump_with_capabilities(client, dev)
             content_candidates, current_bottom_strip_candidates, candidate_groups_meta = _collect_step_candidate_priority_groups(
                 nodes,
                 scenario_id=scenario_id,
@@ -3915,8 +3961,11 @@ def _maybe_select_next_local_tab(
         scrollable, scrollable_nodes, content_area_bounds = _describe_scrollable_content_phase(nodes)
     else:
         scrollable = False
-    observation = capture(client, dev, scenario_id, nodes=nodes if 'nodes' in locals() else [],
-                          step_index=step_idx, evidence="local_scroll_evaluation")
+    observation = _local_scroll_observation_from_snapshot(
+        current_scroll_snapshot, current_scroll_marker, step_idx)
+    if observation is None:
+        observation = capture(client, dev, scenario_id, nodes=nodes if 'nodes' in locals() else [],
+                              step_index=step_idx, evidence="local_scroll_evaluation")
     scroll_capability = observation["capability"]
     row["scroll_capability"] = scroll_capability["status"]
     row["scroll_capability_source"] = scroll_capability["source"]
@@ -4055,7 +4104,14 @@ def _maybe_select_next_local_tab(
             scroll_state.recent_scroll_fallback_signatures = attempted_signatures
             log("[STEP][scroll_fallback] reason='viewport_exhausted_before_local_tab' attempt=1")
         verified, refreshed = verified_scroll(client, dev, scenario_id, step_idx,
-            before=observation, output_base_dir=getattr(client, "_scroll_output_base_dir", ""))
+            before=observation, output_base_dir=getattr(client, "_scroll_output_base_dir", ""),
+            resolved_owner=(
+                globals()["_phase6e_current_scroll_owner"](
+                    current_scroll_snapshot, current_scroll_marker)
+                if isinstance(current_scroll_snapshot, dict) and isinstance(current_scroll_marker, dict)
+                and callable(globals().get("_phase6e_current_scroll_owner"))
+                else {"status": "SOURCE_CAPTURE_UNVERIFIED", "identity": None}
+            ))
         row["scroll_transition"] = verified
         row["scroll_status"] = verified["status"]
         row["scroll_termination_reason"] = verified["termination_reason"]

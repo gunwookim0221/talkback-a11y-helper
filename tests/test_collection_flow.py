@@ -2,6 +2,7 @@ import sys
 import json
 import re
 from collections import deque
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,6 +22,45 @@ except ImportError:
 from tb_runner import collection_flow
 from tb_runner.evidence import EvidenceRuntime
 from tb_runner.scenario_config import TAB_CONFIGS
+
+
+def _install_local_tab_scroll_snapshot(monkeypatch, client, nodes, *, moved=True):
+    from tb_runner import state_graph
+
+    captured_nodes = client.dump_tree(dev="SERIAL")
+    assert captured_nodes == nodes
+    snapshot = {"nodes": deepcopy(captured_nodes), "production_observation_current": True}
+    marker = {"capture_complete": True, "observation_sequence": 7}
+    client.last_dump_metadata = {"canScrollDown": True}
+    client.last_scroll_capabilities = []
+    client._scroll_transitions = []
+
+    def capture_current(*, client, row, **_kwargs):
+        row["_exploration_observation"] = marker
+        return snapshot
+
+    def resolve_owner(raw, source_marker):
+        assert raw is snapshot
+        assert source_marker is marker
+        return {
+            "status": "RESOLVED", "identity": "scroll_owner_fixture",
+            "path": "0.0.1", "bounds": "0,200,1080,1900", "axis": "VERTICAL",
+            "state": {"scrollable": True, "visible": True, "enabled": True},
+        }
+
+    def verified_scroll(client, dev, scenario_id, step_idx, *, before, output_base_dir, resolved_owner):
+        _ = (dev, scenario_id, step_idx, before, output_base_dir)
+        assert resolved_owner["status"] == "RESOLVED"
+        client.scroll_calls.append("down")
+        transition = {"status": "SCROLL_MOVED" if moved else "SCROLL_NO_CHANGE",
+                      "termination_reason": "" if moved else "scroll_unverified",
+                      "new_count": 1 if moved else 0, "viewport_end": False}
+        client._scroll_transitions.append(transition)
+        return transition, {"nodes": client.dump_tree(dev="SERIAL")}
+
+    monkeypatch.setattr(collection_flow, "_capture_phase6d3a_production_observation", capture_current)
+    monkeypatch.setattr(state_graph, "phase6e_current_scroll_owner", resolve_owner)
+    monkeypatch.setattr(collection_flow.scroll_reliability, "verified_scroll", verified_scroll)
 
 
 @pytest.fixture
@@ -5742,6 +5782,7 @@ def test_maybe_select_next_local_tab_attempts_scroll_fallback_before_local_tab(m
             {"text": "Device usage", "contentDescription": "", "viewIdResourceName": "com.example:id/device_usage_card", "className": "android.widget.FrameLayout", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "40,420,1040,760", "children": []},
         ],
     ]
+    _install_local_tab_scroll_snapshot(monkeypatch, client, client.dump_tree_sequence[0])
     state = SimpleNamespace(
         current_local_tab_signature="com.example:id/activity_button||com.example:id/location_button",
         current_local_tab_active_rid="com.example:id/activity_button",
@@ -5795,6 +5836,7 @@ def test_maybe_select_next_local_tab_only_advances_after_scroll_fallback_finds_n
             {"viewIdResourceName": "com.example:id/content_recycler", "className": "androidx.recyclerview.widget.RecyclerView", "scrollable": True, "visibleToUser": True, "boundsInScreen": "0,200,1080,1900", "children": []},
         ],
     ]
+    _install_local_tab_scroll_snapshot(monkeypatch, client, client.dump_tree_sequence[0], moved=False)
     state = SimpleNamespace(
         current_local_tab_signature="com.example:id/activity_button||com.example:id/location_button",
         current_local_tab_active_rid="com.example:id/activity_button",
@@ -5952,6 +5994,7 @@ def test_maybe_select_next_local_tab_allows_one_last_scroll_when_bottom_strip_bl
             {"text": "Device usage", "viewIdResourceName": "com.example:id/device_usage_card", "className": "android.widget.FrameLayout", "clickable": True, "focusable": True, "effectiveClickable": True, "visibleToUser": True, "boundsInScreen": "40,420,1040,760", "children": []},
         ],
     ]
+    _install_local_tab_scroll_snapshot(monkeypatch, client, client.dump_tree_sequence[0])
     state = _last_scroll_local_tab_state(existing_signature)
 
     advanced = collection_flow._maybe_select_next_local_tab(
